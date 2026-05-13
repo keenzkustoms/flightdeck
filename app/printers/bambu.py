@@ -78,15 +78,14 @@ class BambuPrinter:
 
 
 def _map_state(raw) -> str:
-    if raw is None:
-        return "offline"
-    s = str(raw).lower()
-    if "print" in s:
-        return "printing"
-    if "pause" in s:
-        return "paused"
-    if "idle" in s or "finish" in s or "standby" in s:
-        return "idle"
-    if "error" in s or "fail" in s:
-        return "error"
-    return "idle"
+    import bambulabs_api as bl
+    _map = {
+        bl.GcodeState.RUNNING: "printing",
+        bl.GcodeState.PREPARE: "printing",
+        bl.GcodeState.PAUSE:   "paused",
+        bl.GcodeState.FINISH:  "idle",
+        bl.GcodeState.IDLE:    "idle",
+        bl.GcodeState.FAILED:  "error",
+        bl.GcodeState.UNKNOWN: "offline",
+    }
+    return _map.get(raw, "offline")
