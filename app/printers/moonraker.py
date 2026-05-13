@@ -1,7 +1,25 @@
 from __future__ import annotations
+import logging
+from dataclasses import dataclass
+from typing import Optional
+
 import httpx
+
 from ..models import PrinterStatus, JobStatus, TempReading
 from datetime import datetime
+
+log = logging.getLogger(__name__)
+
+_preview_cache: dict[str, tuple[str, "MoonrakerPreview"]] = {}  # filename -> (url, preview)
+
+
+@dataclass
+class MoonrakerPreview:
+    image_png: bytes
+    estimated_total_seconds: Optional[int]
+    filament_weight_g: Optional[float]
+    filament_type: Optional[str]
+    layer_height_mm: Optional[float]
 
 _OBJECTS = "print_stats&heater_bed&extruder&display_status&fan"
 
@@ -54,3 +72,56 @@ async def fetch(id: str, name: str, base_url: str) -> PrinterStatus:
         id=id, name=name, kind="moonraker", state=state,
         temps=temps, job=job, updated_at=datetime.utcnow(),
     )
+
+
+async def fetch_preview(base_url: str, filename: str) -> Optional[MoonrakerPreview]:
+    """Fetch slicer thumbnail + metadata for the given gcode filename."""
+    global _preview_cache
+    if filename in _preview_cache:
+        return _preview_cache[filename][1]
+
+    base_url = base_url.rstrip("/")
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            meta_resp = await client.get(
+                f"{base_url}/server/files/metadata", params={"filename": filename}
+            )
+            meta_resp.raise_for_status()
+            meta = meta_resp.json()["result"]
+
+            thumbnails = meta.get("thumbnails") or []
+            best = _pick_thumbnail(thumbnails)
+            image_png = b""
+            if best:
+                img_resp = await client.get(
+                    f"{base_url}/server/files/gcodes/{best['relative_path']}"
+                )
+                img_resp.raise_for_status()
+                image_png = img_resp.content
+
+    except Exception as exc:
+        log.warning("Moonraker preview fetch failed for %s: %s", filename, exc)
+        return None
+
+    preview = MoonrakerPreview(
+        image_png=image_png,
+        estimated_total_seconds=meta.get("estimated_time"),
+        filament_weight_g=meta.get("filament_weight_total"),
+        filament_type=None,
+        layer_height_mm=meta.get("layer_height"),
+    )
+    _preview_cache[filename] = (filename, preview)
+    return preview
+
+
+def invalidate_preview_cache(filename: str) -> None:
+    _preview_cache.pop(filename, None)
+
+
+def _pick_thumbnail(thumbnails: list) -> Optional[dict]:
+    """Return the largest thumbnail with both dimensions ≤ 200px."""
+    candidates = [
+        t for t in thumbnails
+        if t.get("width", 0) <= 200 and t.get("height", 0) <= 200
+    ]
+    return max(candidates, key=lambda t: t["width"] * t["height"], default=None)

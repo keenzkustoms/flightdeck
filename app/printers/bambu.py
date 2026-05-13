@@ -17,9 +17,12 @@ class BambuPrinter:
     def __init__(self, id: str, name: str, ip: str, access_code: str, serial: str):
         self.id = id
         self.name = name
+        self._ip = ip
+        self._access_code = access_code
         self._printer = bl.Printer(ip_address=ip, access_code=access_code, serial=serial)
         self._lock = threading.Lock()
         self._connected = False
+        self._preview_cache: tuple[str, object] | None = None  # (subtask_name, BambuPreview)
 
     def start(self) -> None:
         self._printer.connect()
@@ -75,6 +78,25 @@ class BambuPrinter:
         except Exception as exc:
             return PrinterStatus(id=self.id, name=self.name, kind="bambu",
                                  state="error", error=str(exc))
+
+
+    def get_preview(self):
+        """Return cached BambuPreview, fetching via FTP if the job changed."""
+        if not self._connected:
+            return None
+        subtask = self._printer.subtask_name()
+        if not subtask:
+            return None
+        if self._preview_cache and self._preview_cache[0] == subtask:
+            return self._preview_cache[1]
+        try:
+            from .bambu_ftp import fetch_bambu_preview
+            preview = fetch_bambu_preview(self._ip, self._access_code, subtask)
+            self._preview_cache = (subtask, preview)
+            return preview
+        except Exception as exc:
+            log.warning("FTP preview failed for %s: %s", self.name, exc)
+            return None
 
 
 def _map_state(raw) -> str:

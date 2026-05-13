@@ -1,7 +1,20 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Literal, Optional
 from datetime import datetime
+
+from pydantic import BaseModel
+
+
+class PrintPreview(BaseModel):
+    image_url: Optional[str] = None
+    image_type: Literal["static", "mjpeg", "webrtc"] = "static"
+    filename: str
+    estimated_total_seconds: Optional[int] = None
+    elapsed_seconds: Optional[int] = None
+    layer_height_mm: Optional[float] = None
+    filament_weight_g: Optional[float] = None
+    filament_type: Optional[str] = None
 
 
 @dataclass

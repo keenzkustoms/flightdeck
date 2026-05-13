@@ -5,10 +5,11 @@ from dataclasses import asdict
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
 
 from .config import settings
+from .models import PrintPreview
 from .printers import moonraker
 from .printers.bambu import BambuPrinter
 
@@ -80,5 +81,68 @@ async def get_printer(printer_id: str):
         if p.id == printer_id:
             status = await asyncio.to_thread(p.status)
             return asdict(status)
+
+    raise HTTPException(status_code=404, detail="printer not found")
+
+
+@app.get("/api/printers/{printer_id}/preview", response_model=PrintPreview)
+async def get_printer_preview(printer_id: str):
+    # Voron / Moonraker
+    if printer_id == "voron" and settings.moonraker_url:
+        status = await moonraker.fetch("voron", settings.moonraker_name, settings.moonraker_url)
+        if not status.job:
+            raise HTTPException(status_code=404, detail="no active job")
+        preview = await moonraker.fetch_preview(settings.moonraker_url, status.job.filename)
+        if preview is None:
+            raise HTTPException(status_code=404, detail="preview unavailable")
+        elapsed = int(status.job.progress * (preview.estimated_total_seconds or 0))
+        return PrintPreview(
+            image_url=f"/api/printers/{printer_id}/thumbnail" if preview.image_png else None,
+            filename=status.job.filename,
+            estimated_total_seconds=preview.estimated_total_seconds,
+            elapsed_seconds=elapsed,
+            layer_height_mm=preview.layer_height_mm,
+            filament_weight_g=preview.filament_weight_g,
+            filament_type=preview.filament_type,
+        )
+
+    # Bambu
+    for p in _bambu:
+        if p.id == printer_id:
+            status = await asyncio.to_thread(p.status)
+            if not status.job:
+                raise HTTPException(status_code=404, detail="no active job")
+            preview = await asyncio.to_thread(p.get_preview)
+            if preview is None:
+                raise HTTPException(status_code=404, detail="preview unavailable")
+            elapsed = int(status.job.progress * (preview.estimated_total_seconds or 0))
+            return PrintPreview(
+                image_url=f"/api/printers/{printer_id}/thumbnail",
+                filename=status.job.filename,
+                estimated_total_seconds=preview.estimated_total_seconds,
+                elapsed_seconds=elapsed,
+                filament_weight_g=preview.filament_weight_g,
+                filament_type=preview.filament_type,
+            )
+
+    raise HTTPException(status_code=404, detail="printer not found")
+
+
+@app.get("/api/printers/{printer_id}/thumbnail")
+async def get_printer_thumbnail(printer_id: str):
+    if printer_id == "voron" and settings.moonraker_url:
+        status = await moonraker.fetch("voron", settings.moonraker_name, settings.moonraker_url)
+        if status.job:
+            preview = await moonraker.fetch_preview(settings.moonraker_url, status.job.filename)
+            if preview and preview.image_png:
+                return Response(content=preview.image_png, media_type="image/png")
+        raise HTTPException(status_code=404, detail="no thumbnail")
+
+    for p in _bambu:
+        if p.id == printer_id:
+            preview = await asyncio.to_thread(p.get_preview)
+            if preview and preview.image_png:
+                return Response(content=preview.image_png, media_type="image/png")
+            raise HTTPException(status_code=404, detail="no thumbnail")
 
     raise HTTPException(status_code=404, detail="printer not found")
