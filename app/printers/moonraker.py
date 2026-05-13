@@ -62,10 +62,13 @@ async def fetch(id: str, name: str, base_url: str) -> PrinterStatus:
         eta = None
         if progress > 0.01:
             eta = int(duration / progress - duration)
+        info = ps.get("info", {}) or {}
         job = JobStatus(
             filename=ps["filename"],
             progress=progress,
             eta_seconds=eta,
+            layer_current=info.get("current_layer"),
+            layer_total=info.get("total_layer"),
         )
 
     return PrinterStatus(
