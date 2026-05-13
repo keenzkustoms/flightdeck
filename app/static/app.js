@@ -2,6 +2,37 @@ import { computePosition, flip, offset, arrow } from
   'https://cdn.jsdelivr.net/npm/@floating-ui/dom@1.6.3/+esm';
 
 const POLL_MS = 5000;
+
+// ── Printer icons ──────────────────────────────────────────────────────────
+
+const ICONS = {
+  voron: `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <polygon points="12,2 21,7 21,17 12,22 3,17 3,7"
+             fill="none" stroke="currentColor" stroke-width="1.5"
+             stroke-linejoin="round"/>
+    <path d="M8 8 L7 16 L10 16 L11 8 Z" fill="currentColor"/>
+    <path d="M14 8 L13 16 L16 16 L17 8 Z" fill="currentColor"/>
+  </svg>`,
+
+  bambu: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1.6" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg">
+    <path d="M5 3 L19 3 L19 19 L5 19 Z"/>
+    <path d="M5 3 L12 8 L19 3"/>
+    <path d="M12 8 L12 19"/>
+  </svg>`,
+
+  generic: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1.5" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg">
+    <rect x="3" y="8" width="18" height="13" rx="1"/>
+    <path d="M7 8 V5 H17 V8"/>
+    <circle cx="17" cy="14" r="1.5" fill="currentColor" stroke="none"/>
+    <rect x="7" y="13" width="6" height="4" rx="0.5"/>
+  </svg>`,
+};
+
+function getIcon(key) {
+  return ICONS[key] ?? ICONS.generic;
+}
 const HOVER_DELAY_MS = 200;
 const LONG_PRESS_MS = 400;
 
@@ -209,7 +240,13 @@ function renderCard(p) {
   return `
     <div class="card"${tabAttr}${dataAttr}>
       <div class="card-header">
-        <span class="printer-name">${p.name}</span>
+        <div class="printer-identity">
+          <div class="printer-icon">${getIcon(p.icon)}</div>
+          <div class="printer-names">
+            <span class="printer-model">${p.model_name}</span>
+            <span class="printer-custom">${p.custom_name}</span>
+          </div>
+        </div>
         <span class="badge badge-${p.state}">${badgeLabel}</span>
       </div>
       ${temps ? `<div class="temps">${temps}</div>` : ''}

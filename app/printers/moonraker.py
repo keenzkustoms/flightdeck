@@ -28,7 +28,7 @@ class MoonrakerPreview:
     layer_height_mm: Optional[float]
 
 
-async def fetch(id: str, name: str, base_url: str) -> PrinterStatus:
+async def fetch(id: str, model_name: str, custom_name: str, icon: str, base_url: str) -> PrinterStatus:
     base_url = base_url.rstrip("/")
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
@@ -36,7 +36,8 @@ async def fetch(id: str, name: str, base_url: str) -> PrinterStatus:
             resp.raise_for_status()
             data = resp.json()["result"]["status"]
     except Exception as exc:
-        return PrinterStatus(id=id, name=name, kind="moonraker", state="offline", error=str(exc))
+        return PrinterStatus(id=id, model_name=model_name, custom_name=custom_name,
+                             icon=icon, kind="moonraker", state="offline", error=str(exc))
 
     ps = data.get("print_stats", {})
     raw_state = ps.get("state", "standby")
@@ -70,8 +71,9 @@ async def fetch(id: str, name: str, base_url: str) -> PrinterStatus:
     state = _resolve_state(id, raw_state, prev_raw, job)
 
     return PrinterStatus(
-        id=id, name=name, kind="moonraker", state=state,
-        temps=temps, job=job, updated_at=datetime.utcnow(),
+        id=id, model_name=model_name, custom_name=custom_name, icon=icon,
+        kind="moonraker", state=state, temps=temps, job=job,
+        updated_at=datetime.utcnow(),
     )
 
 

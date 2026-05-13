@@ -18,9 +18,12 @@ class BambuPrinter:
     """Wraps a bambulabs_api.Printer with persistent MQTT connection.
     Status reads are non-blocking; state transitions persist to SQLite."""
 
-    def __init__(self, id: str, name: str, ip: str, access_code: str, serial: str):
+    def __init__(self, id: str, model_name: str, custom_name: str, icon: str,
+                 ip: str, access_code: str, serial: str):
         self.id = id
-        self.name = name
+        self.model_name = model_name
+        self.custom_name = custom_name
+        self.icon = icon
         self._ip = ip
         self._access_code = access_code
         self._printer = bl.Printer(ip_address=ip, access_code=access_code, serial=serial)
@@ -34,7 +37,7 @@ class BambuPrinter:
     def start(self) -> None:
         self._printer.connect()
         self._connected = True
-        log.info("Bambu MQTT connected: %s", self.name)
+        log.info("Bambu MQTT connected: %s", self.model_name)
 
     def stop(self) -> None:
         try:
@@ -45,8 +48,9 @@ class BambuPrinter:
 
     def status(self) -> PrinterStatus:
         if not self._connected:
-            return PrinterStatus(id=self.id, name=self.name, kind="bambu", state="offline",
-                                 error="not connected")
+            return PrinterStatus(id=self.id, model_name=self.model_name,
+                                 custom_name=self.custom_name, icon=self.icon,
+                                 kind="bambu", state="offline", error="not connected")
         try:
             raw_state = self._printer.get_state()
             substage_raw = self._printer.get_current_state()
@@ -80,13 +84,15 @@ class BambuPrinter:
             state = self._resolve_state(raw_state, job)
 
             return PrinterStatus(
-                id=self.id, name=self.name, kind="bambu", state=state,
+                id=self.id, model_name=self.model_name, custom_name=self.custom_name,
+                icon=self.icon, kind="bambu", state=state,
                 temps=temps, job=job, substage=substage,
                 updated_at=datetime.utcnow(),
             )
         except Exception as exc:
-            return PrinterStatus(id=self.id, name=self.name, kind="bambu",
-                                 state="error", error=str(exc))
+            return PrinterStatus(id=self.id, model_name=self.model_name,
+                                 custom_name=self.custom_name, icon=self.icon,
+                                 kind="bambu", state="error", error=str(exc))
 
     def _resolve_state(self, raw: bl.GcodeState, job: Optional[JobStatus]) -> str:
         now = datetime.now(timezone.utc)
@@ -149,5 +155,5 @@ class BambuPrinter:
             self._preview_cache = (subtask, preview)
             return preview
         except Exception as exc:
-            log.warning("FTP preview failed for %s: %s", self.name, exc)
+            log.warning("FTP preview failed for %s: %s", self.model_name, exc)
             return None

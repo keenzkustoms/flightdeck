@@ -35,7 +35,9 @@ class JobStatus:
 @dataclass
 class PrinterStatus:
     id: str
-    name: str
+    model_name: str          # from printers.yaml — leads the card header
+    custom_name: str         # from printers.yaml — subtitle
+    icon: str                # icon key: "voron" | "bambu" | "generic"
     kind: str                # "moonraker" | "bambu"
     state: str               # "printing" | "idle" | "paused" | "finished" | "error" | "offline"
     temps: dict[str, TempReading] = field(default_factory=dict)

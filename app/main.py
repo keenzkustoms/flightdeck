@@ -9,37 +9,44 @@ from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from . import db
-from .config import settings
 from .models import PrintPreview
+from .printer_config import BambuConnection, MoonrakerConnection, load
 from .printers import moonraker
 from .printers.bambu import BambuPrinter
 
-# -- Bambu instances (only created if config is present) --
 _bambu: list[BambuPrinter] = []
+_moonraker: list[tuple[str, str, str, str, str]] = []  # (id, model_name, custom_name, icon, url)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     db.init()
-    if settings.bambu_x1c_ip and settings.bambu_x1c_access_code and settings.bambu_x1c_serial:
-        p = BambuPrinter("x1c", settings.bambu_x1c_name,
-                         settings.bambu_x1c_ip, settings.bambu_x1c_access_code,
-                         settings.bambu_x1c_serial)
-        await asyncio.to_thread(p.start)
-        _bambu.append(p)
+    cfg = load()
 
-    if settings.bambu_h2d_ip and settings.bambu_h2d_access_code and settings.bambu_h2d_serial:
-        p = BambuPrinter("h2d", settings.bambu_h2d_name,
-                         settings.bambu_h2d_ip, settings.bambu_h2d_access_code,
-                         settings.bambu_h2d_serial)
-        await asyncio.to_thread(p.start)
-        _bambu.append(p)
+    for entry in cfg.printers:
+        conn = entry.connection
+        if isinstance(conn, MoonrakerConnection):
+            _moonraker.append((entry.id, entry.model_name, entry.custom_name,
+                               entry.icon_key(), conn.url))
+        elif isinstance(conn, BambuConnection):
+            p = BambuPrinter(
+                id=entry.id,
+                model_name=entry.model_name,
+                custom_name=entry.custom_name,
+                icon=entry.icon_key(),
+                ip=conn.host,
+                access_code=conn.access_code,
+                serial=conn.serial,
+            )
+            await asyncio.to_thread(p.start)
+            _bambu.append(p)
 
     yield
 
     for p in _bambu:
         await asyncio.to_thread(p.stop)
     _bambu.clear()
+    _moonraker.clear()
 
 
 _STATIC = Path(__file__).parent / "static"
@@ -62,8 +69,8 @@ def healthz():
 async def get_printers():
     results = []
 
-    if settings.moonraker_url:
-        status = await moonraker.fetch("voron", settings.moonraker_name, settings.moonraker_url)
+    for (id, model_name, custom_name, icon, url) in _moonraker:
+        status = await moonraker.fetch(id, model_name, custom_name, icon, url)
         results.append(asdict(status))
 
     for p in _bambu:
@@ -75,40 +82,38 @@ async def get_printers():
 
 @app.get("/api/printers/{printer_id}")
 async def get_printer(printer_id: str):
-    if printer_id == "voron" and settings.moonraker_url:
-        status = await moonraker.fetch("voron", settings.moonraker_name, settings.moonraker_url)
-        return asdict(status)
+    for (id, model_name, custom_name, icon, url) in _moonraker:
+        if id == printer_id:
+            return asdict(await moonraker.fetch(id, model_name, custom_name, icon, url))
 
     for p in _bambu:
         if p.id == printer_id:
-            status = await asyncio.to_thread(p.status)
-            return asdict(status)
+            return asdict(await asyncio.to_thread(p.status))
 
     raise HTTPException(status_code=404, detail="printer not found")
 
 
 @app.get("/api/printers/{printer_id}/preview", response_model=PrintPreview)
 async def get_printer_preview(printer_id: str):
-    # Voron / Moonraker
-    if printer_id == "voron" and settings.moonraker_url:
-        status = await moonraker.fetch("voron", settings.moonraker_name, settings.moonraker_url)
-        if not status.job:
-            raise HTTPException(status_code=404, detail="no active job")
-        preview = await moonraker.fetch_preview(settings.moonraker_url, status.job.filename)
-        if preview is None:
-            raise HTTPException(status_code=404, detail="preview unavailable")
-        elapsed = int(status.job.progress * (preview.estimated_total_seconds or 0))
-        return PrintPreview(
-            image_url=f"/api/printers/{printer_id}/thumbnail" if preview.image_png else None,
-            filename=status.job.filename,
-            estimated_total_seconds=preview.estimated_total_seconds,
-            elapsed_seconds=elapsed,
-            layer_height_mm=preview.layer_height_mm,
-            filament_weight_g=preview.filament_weight_g,
-            filament_type=preview.filament_type,
-        )
+    for (id, model_name, custom_name, icon, url) in _moonraker:
+        if id == printer_id:
+            status = await moonraker.fetch(id, model_name, custom_name, icon, url)
+            if not status.job:
+                raise HTTPException(status_code=404, detail="no active job")
+            preview = await moonraker.fetch_preview(url, status.job.filename)
+            if preview is None:
+                raise HTTPException(status_code=404, detail="preview unavailable")
+            elapsed = int(status.job.progress * (preview.estimated_total_seconds or 0))
+            return PrintPreview(
+                image_url=f"/api/printers/{printer_id}/thumbnail" if preview.image_png else None,
+                filename=status.job.filename,
+                estimated_total_seconds=preview.estimated_total_seconds,
+                elapsed_seconds=elapsed,
+                layer_height_mm=preview.layer_height_mm,
+                filament_weight_g=preview.filament_weight_g,
+                filament_type=preview.filament_type,
+            )
 
-    # Bambu
     for p in _bambu:
         if p.id == printer_id:
             status = await asyncio.to_thread(p.status)
@@ -132,13 +137,14 @@ async def get_printer_preview(printer_id: str):
 
 @app.get("/api/printers/{printer_id}/thumbnail")
 async def get_printer_thumbnail(printer_id: str):
-    if printer_id == "voron" and settings.moonraker_url:
-        status = await moonraker.fetch("voron", settings.moonraker_name, settings.moonraker_url)
-        if status.job:
-            preview = await moonraker.fetch_preview(settings.moonraker_url, status.job.filename)
-            if preview and preview.image_png:
-                return Response(content=preview.image_png, media_type="image/png")
-        raise HTTPException(status_code=404, detail="no thumbnail")
+    for (id, model_name, custom_name, icon, url) in _moonraker:
+        if id == printer_id:
+            status = await moonraker.fetch(id, model_name, custom_name, icon, url)
+            if status.job:
+                preview = await moonraker.fetch_preview(url, status.job.filename)
+                if preview and preview.image_png:
+                    return Response(content=preview.image_png, media_type="image/png")
+            raise HTTPException(status_code=404, detail="no thumbnail")
 
     for p in _bambu:
         if p.id == printer_id:

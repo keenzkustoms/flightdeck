@@ -1,0 +1,29 @@
+printers:
+  - id: greyhound
+    model_name: "Voron"
+    custom_name: "Greyhound Elite V2"
+    icon: "voron"
+    connection:
+      type: "moonraker"
+      host: "192.168.4.215"
+      port: 7125
+
+  - id: x1c
+    model_name: "X1C"
+    custom_name: "Greyhound Ludicrous"
+    icon: "bambu"
+    connection:
+      type: "bambu"
+      host: "192.168.4.43"
+      access_code: "3fb9f0b9"
+      serial: "00M00A282504250"
+
+  - id: h2d
+    model_name: "H2D"
+    custom_name: "BigBoy"
+    icon: "bambu"
+    connection:
+      type: "bambu"
+      host: "192.168.4.206"
+      access_code: "2b4c361e"
+      serial: "0948BB5B2800439"
