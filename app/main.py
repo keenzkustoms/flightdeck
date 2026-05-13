@@ -2,9 +2,11 @@ from __future__ import annotations
 import asyncio
 from contextlib import asynccontextmanager
 from dataclasses import asdict
-from typing import Optional
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 
 from .config import settings
 from .printers import moonraker
@@ -37,7 +39,15 @@ async def lifespan(app: FastAPI):
     _bambu.clear()
 
 
+_STATIC = Path(__file__).parent / "static"
+
 app = FastAPI(title="Flightdeck", lifespan=lifespan)
+app.mount("/static", StaticFiles(directory=_STATIC), name="static")
+
+
+@app.get("/", include_in_schema=False)
+def index():
+    return FileResponse(_STATIC / "index.html")
 
 
 @app.get("/healthz")
