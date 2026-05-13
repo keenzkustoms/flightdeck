@@ -77,11 +77,12 @@ h1 {
   border-radius: 9999px;
 }
 
-.badge-printing { background: #1d4ed8; color: #bfdbfe; }
-.badge-idle     { background: #14532d; color: #bbf7d0; }
-.badge-paused   { background: #78350f; color: #fde68a; }
-.badge-error    { background: #7f1d1d; color: #fecaca; }
-.badge-offline  { background: #374151; color: #d1d5db; }
+.badge-printing  { background: #1d4ed8; color: #bfdbfe; }
+.badge-idle      { background: #14532d; color: #bbf7d0; }
+.badge-finished  { background: transparent; color: #4ade80; border: 1px solid #4ade80; }
+.badge-paused    { background: #78350f; color: #fde68a; }
+.badge-error     { background: #7f1d1d; color: #fecaca; }
+.badge-offline   { background: #374151; color: #d1d5db; }
 
 .temps {
   display: flex;

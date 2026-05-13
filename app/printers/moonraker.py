@@ -1,16 +1,22 @@
 from __future__ import annotations
 import logging
 from dataclasses import dataclass
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 import httpx
 
+from .. import db
 from ..models import PrinterStatus, JobStatus, TempReading
-from datetime import datetime
 
 log = logging.getLogger(__name__)
 
-_preview_cache: dict[str, tuple[str, "MoonrakerPreview"]] = {}  # filename -> (url, preview)
+_preview_cache: dict[str, tuple[str, "MoonrakerPreview"]] = {}
+_prev_raw_state: dict[str, str] = {}  # printer_id -> last raw Klipper state
+
+FINISHED_TTL = timedelta(minutes=30)
+
+_OBJECTS = "print_stats&heater_bed&extruder&display_status&fan"
 
 
 @dataclass
@@ -20,17 +26,6 @@ class MoonrakerPreview:
     filament_weight_g: Optional[float]
     filament_type: Optional[str]
     layer_height_mm: Optional[float]
-
-_OBJECTS = "print_stats&heater_bed&extruder&display_status&fan"
-
-_STATE_MAP = {
-    "printing": "printing",
-    "paused": "paused",
-    "standby": "idle",
-    "complete": "idle",
-    "error": "error",
-    "cancelled": "idle",
-}
 
 
 async def fetch(id: str, name: str, base_url: str) -> PrinterStatus:
@@ -45,7 +40,8 @@ async def fetch(id: str, name: str, base_url: str) -> PrinterStatus:
 
     ps = data.get("print_stats", {})
     raw_state = ps.get("state", "standby")
-    state = _STATE_MAP.get(raw_state, "idle")
+    prev_raw = _prev_raw_state.get(id)
+    _prev_raw_state[id] = raw_state
 
     temps: dict[str, TempReading] = {}
     if "extruder" in data:
@@ -71,10 +67,65 @@ async def fetch(id: str, name: str, base_url: str) -> PrinterStatus:
             layer_total=info.get("total_layer"),
         )
 
+    state = _resolve_state(id, raw_state, prev_raw, job)
+
     return PrinterStatus(
         id=id, name=name, kind="moonraker", state=state,
         temps=temps, job=job, updated_at=datetime.utcnow(),
     )
+
+
+def _resolve_state(
+    printer_id: str,
+    raw: str,
+    prev_raw: Optional[str],
+    job: Optional[JobStatus],
+) -> str:
+    now = datetime.now(timezone.utc)
+
+    if raw == "complete":
+        finished_at = db.get_finished_at(printer_id)
+        if finished_at is None:
+            finished_at = now
+            db.set_finished_at(printer_id, finished_at)
+            if job:
+                db.log_print(printer_id, job.filename, finished_at=finished_at)
+        if (now - finished_at.replace(tzinfo=timezone.utc)) > FINISHED_TTL:
+            db.clear_finished_at(printer_id)
+            return "idle"
+        return "finished"
+
+    if raw == "cancelled":
+        if job:
+            db.log_print(printer_id, job.filename, cancelled=True,
+                         cancelled_at_pct=job.progress)
+        db.clear_finished_at(printer_id)
+        return "idle"
+
+    if raw == "printing":
+        db.clear_finished_at(printer_id)
+        return "printing"
+
+    if raw == "paused":
+        return "paused"
+
+    if raw == "error":
+        db.clear_finished_at(printer_id)
+        return "error"
+
+    # standby — check for recent finish (startup hydration)
+    if raw == "standby":
+        if prev_raw == "complete":
+            # Transitioned out of complete → already handled above
+            pass
+        finished_at = db.get_finished_at(printer_id)
+        if finished_at is not None:
+            if (now - finished_at.replace(tzinfo=timezone.utc)) <= FINISHED_TTL:
+                return "finished"
+            db.clear_finished_at(printer_id)
+        return "idle"
+
+    return "idle"
 
 
 async def fetch_preview(base_url: str, filename: str) -> Optional[MoonrakerPreview]:

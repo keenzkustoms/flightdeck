@@ -1,18 +1,22 @@
 from __future__ import annotations
-import asyncio
 import logging
 import threading
+from datetime import datetime, timezone, timedelta
 from typing import Optional
+
 import bambulabs_api as bl
+
+from .. import db
 from ..models import PrinterStatus, JobStatus, TempReading
-from datetime import datetime
 
 log = logging.getLogger(__name__)
 
+FINISHED_TTL = timedelta(minutes=30)
+
 
 class BambuPrinter:
-    """Wraps a bambulabs_api.Printer, maintaining a persistent MQTT connection.
-    Status is cached in memory; reads are non-blocking."""
+    """Wraps a bambulabs_api.Printer with persistent MQTT connection.
+    Status reads are non-blocking; state transitions persist to SQLite."""
 
     def __init__(self, id: str, name: str, ip: str, access_code: str, serial: str):
         self.id = id
@@ -22,7 +26,10 @@ class BambuPrinter:
         self._printer = bl.Printer(ip_address=ip, access_code=access_code, serial=serial)
         self._lock = threading.Lock()
         self._connected = False
-        self._preview_cache: tuple[str, object] | None = None  # (subtask_name, BambuPreview)
+        self._preview_cache: tuple[str, object] | None = None
+        # Tracks whether we've seen FINISH this session — used to distinguish
+        # "plate cleared after finish" (IDLE) from "IDLE on startup with recent finish in DB".
+        self._seen_finish_this_session = False
 
     def start(self) -> None:
         self._printer.connect()
@@ -42,7 +49,8 @@ class BambuPrinter:
                                  error="not connected")
         try:
             raw_state = self._printer.get_state()
-            state = _map_state(raw_state)
+            substage_raw = self._printer.get_current_state()
+            substage = substage_raw.value if substage_raw is not None else None
 
             temps: dict[str, TempReading] = {}
             nozzle = self._printer.get_nozzle_temperature()
@@ -61,24 +69,70 @@ class BambuPrinter:
             if filename and pct is not None:
                 remaining = self._printer.get_time()
                 eta = int(remaining * 60) if remaining is not None else None
-                layer_cur = self._printer.current_layer_num()
-                layer_tot = self._printer.total_layer_num()
                 job = JobStatus(
                     filename=filename,
                     progress=float(pct) / 100.0,
                     eta_seconds=eta,
-                    layer_current=layer_cur,
-                    layer_total=layer_tot,
+                    layer_current=self._printer.current_layer_num(),
+                    layer_total=self._printer.total_layer_num(),
                 )
+
+            state = self._resolve_state(raw_state, job)
 
             return PrinterStatus(
                 id=self.id, name=self.name, kind="bambu", state=state,
-                temps=temps, job=job, updated_at=datetime.utcnow(),
+                temps=temps, job=job, substage=substage,
+                updated_at=datetime.utcnow(),
             )
         except Exception as exc:
             return PrinterStatus(id=self.id, name=self.name, kind="bambu",
                                  state="error", error=str(exc))
 
+    def _resolve_state(self, raw: bl.GcodeState, job: Optional[JobStatus]) -> str:
+        now = datetime.now(timezone.utc)
+
+        if raw == bl.GcodeState.FINISH:
+            self._seen_finish_this_session = True
+            finished_at = db.get_finished_at(self.id)
+            if finished_at is None:
+                finished_at = now
+                db.set_finished_at(self.id, finished_at)
+            if (now - finished_at.replace(tzinfo=timezone.utc)) > FINISHED_TTL:
+                db.clear_finished_at(self.id)
+                return "idle"
+            return "finished"
+
+        if raw == bl.GcodeState.IDLE:
+            if self._seen_finish_this_session:
+                # Plate was cleared — go to idle immediately
+                db.clear_finished_at(self.id)
+                self._seen_finish_this_session = False
+                return "idle"
+            # Server just started: check DB for recent finish
+            finished_at = db.get_finished_at(self.id)
+            if finished_at is not None:
+                if (now - finished_at.replace(tzinfo=timezone.utc)) <= FINISHED_TTL:
+                    return "finished"
+                db.clear_finished_at(self.id)
+            return "idle"
+
+        if raw in (bl.GcodeState.RUNNING, bl.GcodeState.PREPARE):
+            # New print started — clear any stale finish record
+            db.clear_finished_at(self.id)
+            self._seen_finish_this_session = False
+            return "printing"
+
+        if raw == bl.GcodeState.PAUSE:
+            return "paused"
+
+        if raw == bl.GcodeState.FAILED:
+            db.clear_finished_at(self.id)
+            if job:
+                db.log_print(self.id, job.filename, cancelled=True,
+                             cancelled_at_pct=job.progress)
+            return "error"
+
+        return "offline"  # UNKNOWN or anything unexpected
 
     def get_preview(self):
         """Return cached BambuPreview, fetching via FTP if the job changed."""
@@ -97,17 +151,3 @@ class BambuPrinter:
         except Exception as exc:
             log.warning("FTP preview failed for %s: %s", self.name, exc)
             return None
-
-
-def _map_state(raw) -> str:
-    import bambulabs_api as bl
-    _map = {
-        bl.GcodeState.RUNNING: "printing",
-        bl.GcodeState.PREPARE: "printing",
-        bl.GcodeState.PAUSE:   "paused",
-        bl.GcodeState.FINISH:  "idle",
-        bl.GcodeState.IDLE:    "idle",
-        bl.GcodeState.FAILED:  "error",
-        bl.GcodeState.UNKNOWN: "offline",
-    }
-    return _map.get(raw, "offline")

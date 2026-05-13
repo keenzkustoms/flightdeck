@@ -8,6 +8,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
+from . import db
 from .config import settings
 from .models import PrintPreview
 from .printers import moonraker
@@ -19,6 +20,7 @@ _bambu: list[BambuPrinter] = []
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    db.init()
     if settings.bambu_x1c_ip and settings.bambu_x1c_access_code and settings.bambu_x1c_serial:
         p = BambuPrinter("x1c", settings.bambu_x1c_name,
                          settings.bambu_x1c_ip, settings.bambu_x1c_access_code,

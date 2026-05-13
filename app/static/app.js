@@ -160,22 +160,36 @@ function renderTemp(label, reading) {
 const TEMP_LABELS = { hotend: 'Hotend', bed: 'Bed', chamber: 'Chamber' };
 
 function renderCard(p) {
-  const isPrinting = p.state === 'printing' || p.state === 'paused';
-  const tabAttr = isPrinting ? ' tabindex="0"' : '';
-  const dataAttr = isPrinting ? ` data-printer-id="${p.id}"` : '';
+  const isActive = p.state === 'printing' || p.state === 'paused' || p.state === 'finished';
+  const tabAttr = isActive ? ' tabindex="0"' : '';
+  const dataAttr = isActive ? ` data-printer-id="${p.id}"` : '';
 
   const temps = Object.entries(p.temps || {})
     .map(([k, r]) => renderTemp(TEMP_LABELS[k] ?? k, r))
     .join('');
 
-  let job = '';
-  if (p.job) {
+  let body = '';
+
+  if (p.state === 'finished' && p.job) {
+    const filename = p.job.filename.replace(/.*\//, '');
+    const hotend = p.temps?.hotend?.actual ?? 0;
+    const cooling = hotend > 50
+      ? `<div class="job-meta"><span>Hotend cooling · ${hotend.toFixed(0)}°</span></div>`
+      : '';
+    body = `
+      <div class="job">
+        <div class="job-filename" title="${p.job.filename}">${filename}</div>
+        <div class="job-meta"><span>Print complete</span><span>Layer ${p.job.layer_current ?? '—'}/${p.job.layer_total ?? '—'}</span></div>
+        ${cooling}
+      </div>`;
+
+  } else if (p.job) {
     const pct = (p.job.progress * 100).toFixed(0);
     const filename = p.job.filename.replace(/.*\//, '');
     const layers = p.job.layer_current != null && p.job.layer_total != null
       ? `Layer ${p.job.layer_current}/${p.job.layer_total}`
       : '';
-    job = `
+    body = `
       <div class="job">
         <div class="job-filename" title="${p.job.filename}">${filename}</div>
         <div class="progress-bar">
@@ -190,15 +204,16 @@ function renderCard(p) {
   }
 
   const error = p.error ? `<div class="error-msg">${p.error}</div>` : '';
+  const badgeLabel = p.state === 'finished' ? 'complete' : p.state;
 
   return `
     <div class="card"${tabAttr}${dataAttr}>
       <div class="card-header">
         <span class="printer-name">${p.name}</span>
-        <span class="badge badge-${p.state}">${p.state}</span>
+        <span class="badge badge-${p.state}">${badgeLabel}</span>
       </div>
       ${temps ? `<div class="temps">${temps}</div>` : ''}
-      ${job}
+      ${body}
       ${error}
     </div>`;
 }

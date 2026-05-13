@@ -37,8 +37,9 @@ class PrinterStatus:
     id: str
     name: str
     kind: str                # "moonraker" | "bambu"
-    state: str               # "printing" | "idle" | "paused" | "error" | "offline"
+    state: str               # "printing" | "idle" | "paused" | "finished" | "error" | "offline"
     temps: dict[str, TempReading] = field(default_factory=dict)
     job: Optional[JobStatus] = None
+    substage: Optional[int] = None   # Bambu stg_cur (PrintStatus enum value); None when unused
     error: Optional[str] = None
     updated_at: datetime = field(default_factory=datetime.utcnow)
