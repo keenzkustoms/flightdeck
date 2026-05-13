@@ -83,11 +83,18 @@ class BambuPrinter:
 
             state = self._resolve_state(raw_state, job)
 
+            idle_info: dict[str, str] = {}
+            if state == "idle":
+                last = db.get_last_print(self.id)
+                if last:
+                    from ..printers.moonraker import _fmt_last_print
+                    idle_info["Last print"] = _fmt_last_print(last)
+
             return PrinterStatus(
                 id=self.id, model_name=self.model_name, custom_name=self.custom_name,
                 icon=self.icon, kind="bambu", state=state,
                 temps=temps, job=job, substage=substage,
-                updated_at=datetime.utcnow(),
+                idle_info=idle_info, updated_at=datetime.utcnow(),
             )
         except Exception as exc:
             return PrinterStatus(id=self.id, model_name=self.model_name,

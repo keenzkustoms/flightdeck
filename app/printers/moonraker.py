@@ -16,7 +16,7 @@ _prev_raw_state: dict[str, str] = {}  # printer_id -> last raw Klipper state
 
 FINISHED_TTL = timedelta(minutes=30)
 
-_OBJECTS = "print_stats&heater_bed&extruder&display_status&fan"
+_OBJECTS = "print_stats&heater_bed&extruder&display_status&fan&toolhead&mmu_machine&mmu"
 
 
 @dataclass
@@ -70,10 +70,24 @@ async def fetch(id: str, model_name: str, custom_name: str, icon: str, base_url:
 
     state = _resolve_state(id, raw_state, prev_raw, job)
 
+    idle_info: dict[str, str] = {}
+    if state == "idle":
+        last = db.get_last_print(id)
+        if last:
+            idle_info["Last print"] = _fmt_last_print(last)
+
+        th = data.get("toolhead", {})
+        if th:
+            idle_info["Toolhead"] = _fmt_toolhead(th)
+
+        mmu = data.get("mmu", {})
+        if mmu:
+            idle_info["MMU"] = _fmt_mmu(mmu)
+
     return PrinterStatus(
         id=id, model_name=model_name, custom_name=custom_name, icon=icon,
         kind="moonraker", state=state, temps=temps, job=job,
-        updated_at=datetime.utcnow(),
+        idle_info=idle_info, updated_at=datetime.utcnow(),
     )
 
 
@@ -172,6 +186,48 @@ async def fetch_preview(base_url: str, filename: str) -> Optional[MoonrakerPrevi
 
 def invalidate_preview_cache(filename: str) -> None:
     _preview_cache.pop(filename, None)
+
+
+def _fmt_last_print(row: dict) -> str:
+    parts = []
+    if row.get("filament_type"):
+        parts.append(row["filament_type"])
+    if row.get("started_at") and row.get("finished_at"):
+        from datetime import datetime
+        try:
+            s = datetime.fromisoformat(row["started_at"])
+            f = datetime.fromisoformat(row["finished_at"])
+            secs = int((f - s).total_seconds())
+            h, m = secs // 3600, (secs % 3600) // 60
+            parts.append(f"{h}h {m}m" if h else f"{m}m")
+        except Exception:
+            pass
+    return " · ".join(parts) if parts else row.get("filename", "").split("/")[-1]
+
+
+def _fmt_toolhead(th: dict) -> str:
+    homed = th.get("homed_axes", "")
+    pos = th.get("position", [0, 0, 0])
+    if set("xyz") <= set(homed):
+        x, y, z = pos[0], pos[1], pos[2]
+        return f"homed · X{x:.0f} Y{y:.0f} Z{z:.1f}"
+    if homed:
+        return f"partially homed ({homed.upper()})"
+    return "not homed"
+
+
+def _fmt_mmu(mmu: dict) -> str:
+    gate = mmu.get("gate", 0)
+    gate_status = mmu.get("gate_status", [])
+    num_gates = mmu.get("num_gates", len(gate_status))
+    ready = sum(1 for s in gate_status if s == 1)
+    filament = mmu.get("active_filament", {})
+    parts = [f"Gate {gate}"]
+    mat = filament.get("material")
+    if mat:
+        parts.append(mat)
+    parts.append(f"{ready}/{num_gates} loaded")
+    return " · ".join(parts)
 
 
 def _pick_thumbnail(thumbnails: list) -> Optional[dict]:

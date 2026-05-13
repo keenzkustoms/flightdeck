@@ -62,40 +62,47 @@ async function showPreview(card) {
   activeCard = card;
   const id = card.dataset.printerId;
 
+  let data = null;
   try {
-    const data = await fetch(`/api/printers/${id}/preview`).then(r => {
-      if (!r.ok) throw new Error(r.status);
-      return r.json();
-    });
+    const resp = await fetch(`/api/printers/${id}/preview`);
+    if (resp.ok) data = await resp.json();
+  } catch { /* network error — render with no data */ }
 
+  if (data) {
     const filename = data.filename.replace(/.*\//, '');
     const totalTime = formatTime(data.estimated_total_seconds);
-    const layerH = data.layer_height_mm ? `${data.layer_height_mm}mm` : '—';
+    const layerH = data.layer_height_mm ? `${data.layer_height_mm}mm` : null;
     const filament = [
-      data.filament_weight_g ? `${data.filament_weight_g.toFixed(0)}g` : null,
+      data.filament_weight_g ? `~${data.filament_weight_g.toFixed(0)}g` : null,
       data.filament_type,
-    ].filter(Boolean).join(' ');
+    ].filter(Boolean).join(' · ');
 
     const imgHtml = data.image_url
       ? `<img src="${data.image_url}" alt="print preview">`
-      : `<div class="popover-placeholder">⬛</div>`;
+      : `<div class="popover-placeholder">□</div>`;
+
+    const metaRight = [layerH ? `Layer ${layerH}` : null, `Total ${totalTime}`]
+      .filter(Boolean).join(' · ');
 
     popover.innerHTML = `
       ${imgHtml}
       <div class="popover-body">
         <div class="popover-filename">${filename}</div>
-        <div class="popover-details">
-          <span>Total ${totalTime}</span>
-          <span>Layer ${layerH}</span>
-        </div>
+        <div class="popover-details"><span>${metaRight}</span></div>
         ${filament ? `<div class="popover-filament">${filament}</div>` : ''}
       </div>`;
-    popover.appendChild(arrowEl);
-
-  } catch {
-    popover.innerHTML = `<div class="popover-body"><div class="popover-filename">Preview unavailable</div></div>`;
-    popover.appendChild(arrowEl);
+  } else {
+    // §6 fallback: show placeholder icon + whatever we already know from card data
+    const card_p = activeCard?._printerData;
+    const filename = card_p?.job?.filename?.replace(/.*\//, '') ?? '';
+    popover.innerHTML = `
+      <div class="popover-placeholder">□</div>
+      <div class="popover-body">
+        ${filename ? `<div class="popover-filename">${filename}</div>` : ''}
+        <div class="popover-details"><span>Preview unavailable</span></div>
+      </div>`;
   }
+  popover.appendChild(arrowEl);
 
   popover.classList.add('visible');
   await reposition(card);
@@ -234,6 +241,16 @@ function renderCard(p) {
       </div>`;
   }
 
+  const idleEntries = Object.entries(p.idle_info || {});
+  const idleRows = idleEntries.length > 0 && p.state === 'idle' ? `
+    <div class="idle-info">
+      ${idleEntries.map(([k, v]) => `
+        <div class="idle-row">
+          <span class="idle-label">${k}</span>
+          <span class="idle-value">${v}</span>
+        </div>`).join('')}
+    </div>` : '';
+
   const error = p.error ? `<div class="error-msg">${p.error}</div>` : '';
   const badgeLabel = p.state === 'finished' ? 'complete' : p.state;
 
@@ -251,6 +268,7 @@ function renderCard(p) {
       </div>
       ${temps ? `<div class="temps">${temps}</div>` : ''}
       ${body}
+      ${idleRows}
       ${error}
     </div>`;
 }
@@ -263,10 +281,20 @@ async function refresh() {
     const grid = document.getElementById('printer-grid');
     grid.innerHTML = printers.map(renderCard).join('');
 
-    grid.querySelectorAll('[data-printer-id]').forEach(attachCardEvents);
+    grid.querySelectorAll('[data-printer-id]').forEach(card => {
+      const p = printers.find(x => x.id === card.dataset.printerId);
+      if (p) card._printerData = p;
+      attachCardEvents(card);
+    });
 
     document.getElementById('refresh-time').textContent =
       `Updated ${new Date().toLocaleTimeString()}`;
+
+    const active = printers.filter(p => p.state === 'printing' || p.state === 'paused').length;
+    const idle = printers.filter(p => p.state === 'idle' || p.state === 'finished').length;
+    document.getElementById('dash-footer').innerHTML =
+      `<span>flightdeck · 192.168.4.127</span>` +
+      `<span>${printers.length} printers · ${active} active · ${idle} idle</span>`;
   } catch (e) {
     console.error('fetch failed', e);
   }

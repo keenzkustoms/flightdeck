@@ -72,6 +72,17 @@ def clear_finished_at(printer_id: str) -> None:
         )
 
 
+def get_last_print(printer_id: str) -> Optional[dict]:
+    with _conn() as conn:
+        row = conn.execute(
+            """SELECT filename, started_at, finished_at, filament_type, filament_weight_g
+               FROM print_history WHERE printer_id = ? AND cancelled = 0
+               ORDER BY id DESC LIMIT 1""",
+            (printer_id,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
 def log_print(
     printer_id: str,
     filename: str,

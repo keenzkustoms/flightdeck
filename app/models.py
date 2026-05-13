@@ -43,5 +43,6 @@ class PrinterStatus:
     temps: dict[str, TempReading] = field(default_factory=dict)
     job: Optional[JobStatus] = None
     substage: Optional[int] = None   # Bambu stg_cur (PrintStatus enum value); None when unused
+    idle_info: dict[str, str] = field(default_factory=dict)  # shown on idle cards, ordered
     error: Optional[str] = None
     updated_at: datetime = field(default_factory=datetime.utcnow)
