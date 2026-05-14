@@ -12,7 +12,8 @@ from ..models import PrinterStatus, JobStatus, TempReading
 log = logging.getLogger(__name__)
 
 _preview_cache: dict[str, tuple[str, "MoonrakerPreview"]] = {}
-_prev_raw_state: dict[str, str] = {}  # printer_id -> last raw Klipper state
+_prev_raw_state: dict[str, str] = {}   # printer_id → last raw Klipper state
+_active_job_key: dict[str, str] = {}   # printer_id → job_key for the running print
 
 FINISHED_TTL = timedelta(minutes=30)
 
@@ -68,12 +69,14 @@ async def fetch(id: str, model_name: str, custom_name: str, icon: str, base_url:
             layer_total=info.get("total_layer"),
         )
 
-    state = _resolve_state(id, raw_state, prev_raw, job)
+    error_message = ps.get("message") or None
+    state = _resolve_state(id, raw_state, prev_raw, job, error_message)
 
     idle_info: dict[str, str] = {}
     if state == "idle":
         last = db.get_last_print(id)
         if last:
+            from .bambu import _fmt_last_print
             idle_info["Last print"] = _fmt_last_print(last)
 
         th = data.get("toolhead", {})
@@ -84,10 +87,11 @@ async def fetch(id: str, model_name: str, custom_name: str, icon: str, base_url:
         if mmu:
             idle_info["MMU"] = _fmt_mmu(mmu)
 
+    now = datetime.utcnow()
     return PrinterStatus(
         id=id, model_name=model_name, custom_name=custom_name, icon=icon,
         kind="moonraker", state=state, temps=temps, job=job,
-        idle_info=idle_info, updated_at=datetime.utcnow(),
+        idle_info=idle_info, last_seen=now, updated_at=now,
     )
 
 
@@ -96,51 +100,82 @@ def _resolve_state(
     raw: str,
     prev_raw: Optional[str],
     job: Optional[JobStatus],
+    error_message: Optional[str] = None,
 ) -> str:
     now = datetime.now(timezone.utc)
 
+    if raw == "printing":
+        db.clear_finished_at(printer_id)
+        if printer_id not in _active_job_key:
+            filename = job.filename if job else ""
+            # On backend restart mid-print: reuse existing open row rather than
+            # creating a duplicate with a different timestamp key
+            existing = db.get_open_print_key(printer_id, filename)
+            if existing:
+                job_key = existing
+            else:
+                job_key = f"{filename}@{int(now.timestamp())}"
+                db.on_print_started(
+                    printer_id, job_key, filename,
+                    layers_total=job.layer_total if job else None,
+                )
+            _active_job_key[printer_id] = job_key
+        return "printing"
+
     if raw == "complete":
+        job_key = _active_job_key.pop(printer_id, None)
         finished_at = db.get_finished_at(printer_id)
         if finished_at is None:
             finished_at = now
             db.set_finished_at(printer_id, finished_at)
-            if job:
-                db.log_print(printer_id, job.filename, finished_at=finished_at)
+            if job_key:
+                db.on_print_finished(
+                    printer_id, job_key,
+                    layers_completed=job.layer_current if job else None,
+                )
         if (now - finished_at.replace(tzinfo=timezone.utc)) > FINISHED_TTL:
             db.clear_finished_at(printer_id)
             return "idle"
         return "finished"
 
     if raw == "cancelled":
-        if job:
-            db.log_print(printer_id, job.filename, cancelled=True,
-                         cancelled_at_pct=job.progress)
+        job_key = _active_job_key.pop(printer_id, None)
+        if job_key:
+            db.on_print_ended(
+                printer_id, job_key,
+                final_state="CANCELLED",
+                layers_completed=job.layer_current if job else None,
+            )
         db.clear_finished_at(printer_id)
         return "idle"
-
-    if raw == "printing":
-        db.clear_finished_at(printer_id)
-        return "printing"
 
     if raw == "paused":
         return "paused"
 
     if raw == "error":
+        job_key = _active_job_key.pop(printer_id, None)
+        if job_key:
+            db.on_print_ended(
+                printer_id, job_key,
+                final_state="ERROR",
+                layers_completed=job.layer_current if job else None,
+                error_message=error_message or "Unknown error",
+            )
         db.clear_finished_at(printer_id)
         return "error"
 
     # standby — check for recent finish (startup hydration)
-    if raw == "standby":
-        if prev_raw == "complete":
-            # Transitioned out of complete → already handled above
-            pass
-        finished_at = db.get_finished_at(printer_id)
-        if finished_at is not None:
-            if (now - finished_at.replace(tzinfo=timezone.utc)) <= FINISHED_TTL:
-                return "finished"
-            db.clear_finished_at(printer_id)
-        return "idle"
+    if printer_id in _active_job_key:
+        # Printer went standby while we had an active key (restart → printer also reset)
+        job_key = _active_job_key.pop(printer_id)
+        db.on_print_ended(printer_id, job_key, final_state="ERROR",
+                          error_message="Connection lost mid-print")
 
+    finished_at = db.get_finished_at(printer_id)
+    if finished_at is not None:
+        if (now - finished_at.replace(tzinfo=timezone.utc)) <= FINISHED_TTL:
+            return "finished"
+        db.clear_finished_at(printer_id)
     return "idle"
 
 
@@ -186,23 +221,6 @@ async def fetch_preview(base_url: str, filename: str) -> Optional[MoonrakerPrevi
 
 def invalidate_preview_cache(filename: str) -> None:
     _preview_cache.pop(filename, None)
-
-
-def _fmt_last_print(row: dict) -> str:
-    parts = []
-    if row.get("filament_type"):
-        parts.append(row["filament_type"])
-    if row.get("started_at") and row.get("finished_at"):
-        from datetime import datetime
-        try:
-            s = datetime.fromisoformat(row["started_at"])
-            f = datetime.fromisoformat(row["finished_at"])
-            secs = int((f - s).total_seconds())
-            h, m = secs // 3600, (secs % 3600) // 60
-            parts.append(f"{h}h {m}m" if h else f"{m}m")
-        except Exception:
-            pass
-    return " · ".join(parts) if parts else row.get("filename", "").split("/")[-1]
 
 
 def _fmt_toolhead(th: dict) -> str:

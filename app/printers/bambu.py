@@ -30,9 +30,8 @@ class BambuPrinter:
         self._lock = threading.Lock()
         self._connected = False
         self._preview_cache: tuple[str, object] | None = None
-        # Tracks whether we've seen FINISH this session — used to distinguish
-        # "plate cleared after finish" (IDLE) from "IDLE on startup with recent finish in DB".
         self._seen_finish_this_session = False
+        self._current_job_key: Optional[str] = None
 
     def start(self) -> None:
         self._printer.connect()
@@ -70,6 +69,7 @@ class BambuPrinter:
             job = None
             filename = self._printer.get_file_name()
             pct = self._printer.get_percentage()
+            subtask = self._printer.subtask_name() or None
             if filename and pct is not None:
                 remaining = self._printer.get_time()
                 eta = int(remaining * 60) if remaining is not None else None
@@ -79,33 +79,42 @@ class BambuPrinter:
                     eta_seconds=eta,
                     layer_current=self._printer.current_layer_num(),
                     layer_total=self._printer.total_layer_num(),
+                    subtask_name=subtask,
                 )
 
-            state = self._resolve_state(raw_state, job)
+            state = self._resolve_state(raw_state, job, subtask)
 
             idle_info: dict[str, str] = {}
             if state == "idle":
                 last = db.get_last_print(self.id)
                 if last:
-                    from ..printers.moonraker import _fmt_last_print
                     idle_info["Last print"] = _fmt_last_print(last)
 
+            now = datetime.utcnow()
+            self._last_seen = now
             return PrinterStatus(
                 id=self.id, model_name=self.model_name, custom_name=self.custom_name,
                 icon=self.icon, kind="bambu", state=state,
                 temps=temps, job=job, substage=substage,
-                idle_info=idle_info, updated_at=datetime.utcnow(),
+                idle_info=idle_info, last_seen=now, updated_at=now,
             )
         except Exception as exc:
             return PrinterStatus(id=self.id, model_name=self.model_name,
                                  custom_name=self.custom_name, icon=self.icon,
                                  kind="bambu", state="error", error=str(exc))
 
-    def _resolve_state(self, raw: bl.GcodeState, job: Optional[JobStatus]) -> str:
+    def _resolve_state(self, raw: bl.GcodeState, job: Optional[JobStatus],
+                       subtask: Optional[str]) -> str:
         now = datetime.now(timezone.utc)
 
         if raw == bl.GcodeState.FINISH:
             self._seen_finish_this_session = True
+            if self._current_job_key:
+                db.on_print_finished(
+                    self.id, self._current_job_key,
+                    layers_completed=job.layer_current if job else None,
+                )
+                self._current_job_key = None
             finished_at = db.get_finished_at(self.id)
             if finished_at is None:
                 finished_at = now
@@ -117,11 +126,20 @@ class BambuPrinter:
 
         if raw == bl.GcodeState.IDLE:
             if self._seen_finish_this_session:
-                # Plate was cleared — go to idle immediately
                 db.clear_finished_at(self.id)
                 self._seen_finish_this_session = False
+                self._current_job_key = None
                 return "idle"
-            # Server just started: check DB for recent finish
+            # Close any open row — covers both in-session interrupts and restart-then-IDLE
+            job_key = self._current_job_key or self._make_job_key(subtask)
+            if job_key:
+                db.on_print_ended(
+                    self.id, job_key,
+                    final_state="ERROR",
+                    layers_completed=job.layer_current if job else None,
+                    error_message="Connection lost mid-print",
+                )
+            self._current_job_key = None
             finished_at = db.get_finished_at(self.id)
             if finished_at is not None:
                 if (now - finished_at.replace(tzinfo=timezone.utc)) <= FINISHED_TTL:
@@ -130,9 +148,17 @@ class BambuPrinter:
             return "idle"
 
         if raw in (bl.GcodeState.RUNNING, bl.GcodeState.PREPARE):
-            # New print started — clear any stale finish record
             db.clear_finished_at(self.id)
             self._seen_finish_this_session = False
+            if self._current_job_key is None:
+                self._current_job_key = self._make_job_key(subtask)
+                db.on_print_started(
+                    self.id,
+                    self._current_job_key,
+                    job.filename if job else "",
+                    subtask_name=subtask,
+                    layers_total=job.layer_total if job else None,
+                )
             return "printing"
 
         if raw == bl.GcodeState.PAUSE:
@@ -140,12 +166,31 @@ class BambuPrinter:
 
         if raw == bl.GcodeState.FAILED:
             db.clear_finished_at(self.id)
-            if job:
-                db.log_print(self.id, job.filename, cancelled=True,
-                             cancelled_at_pct=job.progress)
+            # Use current key if we have it; fall back to reconstructing from MQTT
+            # (covers the case where service restarted and printer was already FAILED)
+            job_key = self._current_job_key or self._make_job_key(subtask)
+            if job_key:
+                err_code = self._printer.mqtt_dump().get("print", {}).get("print_error", 0)
+                err_msg = f"Error code {err_code}" if err_code else "Unknown error"
+                db.on_print_ended(
+                    self.id, job_key,
+                    final_state="ERROR",
+                    layers_completed=job.layer_current if job else None,
+                    error_message=err_msg,
+                )
+            self._current_job_key = None
             return "error"
 
         return "offline"  # UNKNOWN or anything unexpected
+
+    def _make_job_key(self, subtask: Optional[str]) -> str:
+        dump = self._printer.mqtt_dump().get("print", {})
+        task_id = dump.get("task_id") or dump.get("subtask_id")
+        if task_id:
+            return str(task_id)
+        if subtask:
+            return subtask
+        return f"bambu@{int(datetime.utcnow().timestamp())}"
 
     def get_preview(self):
         """Return cached BambuPreview, fetching via FTP if the job changed."""
@@ -164,3 +209,27 @@ class BambuPrinter:
         except Exception as exc:
             log.warning("FTP preview failed for %s: %s", self.model_name, exc)
             return None
+
+
+def _fmt_last_print(row: dict) -> str:
+    """Format the last print row for display in the idle card."""
+    name = row.get("subtask_name") or (row.get("filename") or "").split("/")[-1]
+    state = row.get("final_state", "")
+    layers_done = row.get("layers_completed")
+    layers_total = row.get("layers_total")
+    dur = row.get("duration_seconds")
+
+    pct_str = ""
+    if layers_done is not None and layers_total:
+        pct_str = f" at {int(layers_done / layers_total * 100)}%"
+
+    if state == "FINISHED":
+        if dur:
+            h, m = dur // 3600, (dur % 3600) // 60
+            return f"{name} · {h}h {m}m" if h else f"{name} · {m}m"
+        return name
+    if state == "CANCELLED":
+        return f"{name} · cancelled{pct_str}"
+    if state == "ERROR":
+        return f"{name} · failed{pct_str}"
+    return name

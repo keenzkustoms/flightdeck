@@ -1,8 +1,6 @@
 import { computePosition, flip, offset, arrow } from
   'https://cdn.jsdelivr.net/npm/@floating-ui/dom@1.6.3/+esm';
 
-const POLL_MS = 5000;
-
 // ── Printer icons ──────────────────────────────────────────────────────────
 
 const ICONS = {
@@ -33,6 +31,7 @@ const ICONS = {
 function getIcon(key) {
   return ICONS[key] ?? ICONS.generic;
 }
+
 const HOVER_DELAY_MS = 200;
 const LONG_PRESS_MS = 400;
 
@@ -77,9 +76,14 @@ async function showPreview(card) {
       data.filament_type,
     ].filter(Boolean).join(' · ');
 
-    const imgHtml = data.image_url
-      ? `<img src="${data.image_url}" alt="print preview">`
-      : `<div class="popover-placeholder">□</div>`;
+    let imgHtml;
+    if (data.image_type === 'mjpeg' && data.image_url) {
+      imgHtml = `<img id="popover-stream" src="${data.image_url}" alt="live feed">`;
+    } else if (data.image_url) {
+      imgHtml = `<img src="${data.image_url}" alt="print preview">`;
+    } else {
+      imgHtml = `<div class="popover-placeholder">□</div>`;
+    }
 
     const metaRight = [layerH ? `Layer ${layerH}` : null, `Total ${totalTime}`]
       .filter(Boolean).join(' · ');
@@ -91,8 +95,29 @@ async function showPreview(card) {
         <div class="popover-details"><span>${metaRight}</span></div>
         ${filament ? `<div class="popover-filament">${filament}</div>` : ''}
       </div>`;
+
+    // Wire fallback for MJPEG: 2.5s timeout then drop to static thumbnail or placeholder
+    if (data.image_type === 'mjpeg') {
+      const streamImg = popover.querySelector('#popover-stream');
+      if (streamImg) {
+        const fallback = data.fallback_thumbnail_url;
+        const applyFallback = () => {
+          if (fallback) {
+            streamImg.removeAttribute('id');
+            streamImg.src = fallback;
+          } else {
+            streamImg.replaceWith(
+              Object.assign(document.createElement('div'),
+                { className: 'popover-placeholder', textContent: '□' })
+            );
+          }
+        };
+        const timeout = setTimeout(applyFallback, 2500);
+        streamImg.onload = () => clearTimeout(timeout);
+        streamImg.onerror = () => { clearTimeout(timeout); applyFallback(); };
+      }
+    }
   } else {
-    // §6 fallback: show placeholder icon + whatever we already know from card data
     const card_p = activeCard?._printerData;
     const filename = card_p?.job?.filename?.replace(/.*\//, '') ?? '';
     popover.innerHTML = `
@@ -138,7 +163,6 @@ function hidePreview() {
 // ── Event wiring ───────────────────────────────────────────────────────────
 
 function attachCardEvents(card) {
-  // Desktop hover with intent delay
   card.addEventListener('mouseenter', () => {
     hoverTimer = setTimeout(() => showPreview(card), HOVER_DELAY_MS);
   });
@@ -147,7 +171,6 @@ function attachCardEvents(card) {
     hidePreview();
   });
 
-  // Mobile long-press
   card.addEventListener('touchstart', e => {
     longPressTimer = setTimeout(() => {
       e.preventDefault();
@@ -157,7 +180,6 @@ function attachCardEvents(card) {
   card.addEventListener('touchend', () => clearTimeout(longPressTimer));
   card.addEventListener('touchmove', () => clearTimeout(longPressTimer));
 
-  // Keyboard toggle
   card.addEventListener('keydown', e => {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
@@ -167,12 +189,34 @@ function attachCardEvents(card) {
   });
 }
 
-// Dismiss on outside click
 document.addEventListener('click', e => {
   if (activeCard && !activeCard.contains(e.target) && !popover.contains(e.target)) {
     hidePreview();
   }
 });
+
+// ── Connection dot helpers ─────────────────────────────────────────────────
+
+function parseUtcDate(str) {
+  if (!str) return null;
+  if (!str.endsWith('Z') && !str.match(/[+-]\d{2}:\d{2}$/)) str += 'Z';
+  return new Date(str);
+}
+
+function connDot(lastSeen) {
+  const d = parseUtcDate(lastSeen);
+  let cls = 'red';
+  let label = 'No signal';
+  let age = 'never';
+  if (d) {
+    const ageSec = (Date.now() - d.getTime()) / 1000;
+    age = `${Math.round(ageSec)}s ago`;
+    if (ageSec < 10) { cls = 'green'; label = 'Connected'; }
+    else if (ageSec < 30) { cls = 'amber'; label = 'Degraded'; }
+    else { cls = 'red'; label = 'No signal'; }
+  }
+  return `<div class="conn-dot conn-${cls}" title="${label} · last update ${age}"></div>`;
+}
 
 // ── Card rendering ─────────────────────────────────────────────────────────
 
@@ -197,6 +241,14 @@ function renderTemp(label, reading) {
 
 const TEMP_LABELS = { hotend: 'Hotend', bed: 'Bed', chamber: 'Chamber' };
 
+function jobDisplayName(job) {
+  const raw = job.filename || '';
+  const subtask = (job.subtask_name || '').trim();
+  // Prefer subtask_name when it's meaningful and different from the filename
+  if (subtask && subtask !== raw) return subtask;
+  return raw.replace(/.*\//, '');
+}
+
 function renderCard(p) {
   const isActive = p.state === 'printing' || p.state === 'paused' || p.state === 'finished';
   const tabAttr = isActive ? ' tabindex="0"' : '';
@@ -209,27 +261,27 @@ function renderCard(p) {
   let body = '';
 
   if (p.state === 'finished' && p.job) {
-    const filename = p.job.filename.replace(/.*\//, '');
+    const displayName = jobDisplayName(p.job);
     const hotend = p.temps?.hotend?.actual ?? 0;
     const cooling = hotend > 50
       ? `<div class="job-meta"><span>Hotend cooling · ${hotend.toFixed(0)}°</span></div>`
       : '';
     body = `
       <div class="job">
-        <div class="job-filename" title="${p.job.filename}">${filename}</div>
+        <div class="job-filename" title="${p.job.filename}">${displayName}</div>
         <div class="job-meta"><span>Print complete</span><span>Layer ${p.job.layer_current ?? '—'}/${p.job.layer_total ?? '—'}</span></div>
         ${cooling}
       </div>`;
 
   } else if (p.job) {
     const pct = (p.job.progress * 100).toFixed(0);
-    const filename = p.job.filename.replace(/.*\//, '');
+    const displayName = jobDisplayName(p.job);
     const layers = p.job.layer_current != null && p.job.layer_total != null
       ? `Layer ${p.job.layer_current}/${p.job.layer_total}`
       : '';
     body = `
       <div class="job">
-        <div class="job-filename" title="${p.job.filename}">${filename}</div>
+        <div class="job-filename" title="${p.job.filename}">${displayName}</div>
         <div class="progress-bar">
           <div class="progress-fill" style="width:${pct}%"></div>
         </div>
@@ -259,6 +311,7 @@ function renderCard(p) {
       <div class="card-header">
         <div class="printer-identity">
           <div class="printer-icon">${getIcon(p.icon)}</div>
+          ${connDot(p.last_seen)}
           <div class="printer-names">
             <span class="printer-model">${p.model_name}</span>
             <span class="printer-custom">${p.custom_name}</span>
@@ -273,32 +326,101 @@ function renderCard(p) {
     </div>`;
 }
 
-// ── Poll loop ──────────────────────────────────────────────────────────────
+// ── Header status pill ─────────────────────────────────────────────────────
 
-async function refresh() {
-  try {
-    const printers = await fetch('/api/printers').then(r => r.json());
-    const grid = document.getElementById('printer-grid');
-    grid.innerHTML = printers.map(renderCard).join('');
-
-    grid.querySelectorAll('[data-printer-id]').forEach(card => {
-      const p = printers.find(x => x.id === card.dataset.printerId);
-      if (p) card._printerData = p;
-      attachCardEvents(card);
-    });
-
-    document.getElementById('refresh-time').textContent =
-      `Updated ${new Date().toLocaleTimeString()}`;
-
-    const active = printers.filter(p => p.state === 'printing' || p.state === 'paused').length;
-    const idle = printers.filter(p => p.state === 'idle' || p.state === 'finished').length;
-    document.getElementById('dash-footer').innerHTML =
-      `<span>flightdeck · 192.168.4.127</span>` +
-      `<span>${printers.length} printers · ${active} active · ${idle} idle</span>`;
-  } catch (e) {
-    console.error('fetch failed', e);
+function updateStatusPill(printers) {
+  const pill = document.getElementById('status-pill');
+  if (!pill || !printers.length) return;
+  const faults = printers.filter(p => p.state === 'error' || p.state === 'offline').length;
+  const warnings = printers.filter(p => p.state === 'paused').length;
+  if (faults > 0) {
+    pill.className = 'status-pill pill-error';
+    pill.textContent = `${faults} fault${faults > 1 ? 's' : ''}`;
+  } else if (warnings > 0) {
+    pill.className = 'status-pill pill-warn';
+    pill.textContent = `${warnings} warning${warnings > 1 ? 's' : ''}`;
+  } else {
+    pill.className = 'status-pill pill-ok';
+    pill.textContent = 'All systems nominal';
   }
 }
 
-refresh();
-setInterval(refresh, POLL_MS);
+// ── Live indicator ─────────────────────────────────────────────────────────
+
+function setLiveIndicator(connected) {
+  const dot = document.getElementById('live-dot');
+  const text = document.getElementById('live-text');
+  if (!dot || !text) return;
+  if (connected) {
+    dot.className = 'live-dot live-ok';
+    text.textContent = 'Live';
+  } else {
+    dot.className = 'live-dot live-err';
+    text.textContent = 'Reconnecting…';
+  }
+}
+
+// Clock — updates every second independent of data
+setInterval(() => {
+  document.getElementById('refresh-time').textContent = new Date().toLocaleTimeString();
+}, 1000);
+document.getElementById('refresh-time').textContent = new Date().toLocaleTimeString();
+
+// ── Dashboard update ───────────────────────────────────────────────────────
+
+function updateDashboard(printers) {
+  const grid = document.getElementById('printer-grid');
+  grid.innerHTML = printers.map(renderCard).join('');
+
+  grid.querySelectorAll('[data-printer-id]').forEach(card => {
+    const p = printers.find(x => x.id === card.dataset.printerId);
+    if (p) card._printerData = p;
+    attachCardEvents(card);
+  });
+
+  updateStatusPill(printers);
+
+  const active = printers.filter(p => p.state === 'printing' || p.state === 'paused').length;
+  const idle = printers.filter(p => p.state === 'idle' || p.state === 'finished').length;
+  document.getElementById('dash-footer').innerHTML =
+    `<span>flightdeck · 192.168.4.127</span>` +
+    `<span>${printers.length} printers · ${active} active · ${idle} idle</span>`;
+}
+
+// ── WebSocket client ───────────────────────────────────────────────────────
+
+let ws = null;
+let reconnectDelay = 1000;
+
+function connectWS() {
+  if (ws) {
+    ws.onclose = ws.onerror = null;
+    ws.close();
+  }
+
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  ws = new WebSocket(`${proto}//${location.host}/ws`);
+
+  ws.onopen = () => {
+    reconnectDelay = 1000;
+    setLiveIndicator(true);
+  };
+
+  ws.onmessage = evt => {
+    try {
+      updateDashboard(JSON.parse(evt.data));
+    } catch (e) {
+      console.error('ws parse error', e);
+    }
+  };
+
+  ws.onclose = ws.onerror = () => {
+    setLiveIndicator(false);
+    setTimeout(() => {
+      reconnectDelay = Math.min(reconnectDelay * 1.5, 30000);
+      connectWS();
+    }, reconnectDelay);
+  };
+}
+
+connectWS();

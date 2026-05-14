@@ -33,12 +33,30 @@ Connection = Annotated[
 ]
 
 
+class MjpegDirectCamera(BaseModel):
+    type: Literal["mjpeg_direct"]
+    stream_url: str
+    snapshot_url: Optional[str] = None
+
+
+class BambuRtspCamera(BaseModel):
+    type: Literal["bambu_rtsp"]
+    # stream_url served via /api/camera/{printer_id}/stream proxy
+
+
+Camera = Annotated[
+    Union[MjpegDirectCamera, BambuRtspCamera],
+    Field(discriminator="type"),
+]
+
+
 class PrinterEntry(BaseModel):
     id: str
     model_name: str
     custom_name: str
     icon: str = "generic"
     connection: Connection
+    camera: Optional[Camera] = None
 
     # Future expansion fields — optional so old configs stay valid
     park_position: Optional[str] = None

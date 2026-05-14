@@ -9,7 +9,14 @@
 <body>
   <header>
     <h1>Flightdeck</h1>
-    <span id="refresh-time"></span>
+    <div class="header-right">
+      <span id="status-pill" class="status-pill"></span>
+      <div id="live-indicator">
+        <div class="live-dot" id="live-dot"></div>
+        <span id="live-text">Connecting…</span>
+      </div>
+      <span id="refresh-time"></span>
+    </div>
   </header>
   <main id="printer-grid"></main>
   <footer id="dash-footer"></footer>

@@ -9,6 +9,7 @@ from pydantic import BaseModel
 class PrintPreview(BaseModel):
     image_url: Optional[str] = None
     image_type: Literal["static", "mjpeg", "webrtc"] = "static"
+    fallback_thumbnail_url: Optional[str] = None  # static thumb when image_type is mjpeg
     filename: str
     estimated_total_seconds: Optional[int] = None
     elapsed_seconds: Optional[int] = None
@@ -30,6 +31,7 @@ class JobStatus:
     eta_seconds: Optional[int] = None
     layer_current: Optional[int] = None
     layer_total: Optional[int] = None
+    subtask_name: Optional[str] = None   # Bambu project name; None for Moonraker
 
 
 @dataclass
@@ -43,6 +45,7 @@ class PrinterStatus:
     temps: dict[str, TempReading] = field(default_factory=dict)
     job: Optional[JobStatus] = None
     substage: Optional[int] = None   # Bambu stg_cur (PrintStatus enum value); None when unused
-    idle_info: dict[str, str] = field(default_factory=dict)  # shown on idle cards, ordered
+    idle_info: dict[str, str] = field(default_factory=dict)
     error: Optional[str] = None
+    last_seen: Optional[datetime] = None  # last successful data from printer link
     updated_at: datetime = field(default_factory=datetime.utcnow)

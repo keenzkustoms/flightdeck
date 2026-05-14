@@ -28,6 +28,12 @@ header {
   border-bottom: 1px solid var(--border);
 }
 
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
 h1 {
   font-size: 1rem;
   font-weight: 700;
@@ -295,6 +301,62 @@ h1 {
   border: 0.5px solid var(--border);
   transform: rotate(45deg);
   pointer-events: none;
+}
+
+/* ── Connection dot ── */
+.conn-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  align-self: center;
+  margin-top: 1px;
+}
+.conn-green { background: #22c55e; }
+.conn-amber { background: #f59e0b; }
+.conn-red   { background: #ef4444; }
+
+/* ── Status pill (header aggregate) ── */
+.status-pill {
+  font-size: 0.65rem;
+  font-weight: 600;
+  padding: 0.2rem 0.6rem;
+  border-radius: 9999px;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+.pill-ok    { background: #14532d; color: #bbf7d0; }
+.pill-warn  { background: #78350f; color: #fde68a; }
+.pill-error { background: #7f1d1d; color: #fecaca; }
+
+/* ── Live indicator ── */
+#live-indicator {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+
+.live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #22c55e;
+}
+
+.live-dot.live-ok {
+  animation: pulse-live 2s ease-in-out infinite;
+}
+
+.live-dot.live-err {
+  background: #ef4444;
+  animation: none;
+}
+
+@keyframes pulse-live {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.25; }
 }
 
 .card[tabindex] {

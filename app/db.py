@@ -18,18 +18,36 @@ def init() -> None:
                 printer_id   TEXT PRIMARY KEY,
                 finished_at  TEXT
             );
-            CREATE TABLE IF NOT EXISTS print_history (
-                id                INTEGER PRIMARY KEY AUTOINCREMENT,
-                printer_id        TEXT NOT NULL,
-                filename          TEXT NOT NULL,
-                started_at        TEXT,
-                finished_at       TEXT,
-                cancelled         INTEGER NOT NULL DEFAULT 0,
-                cancelled_at_pct  REAL,
-                filament_type     TEXT,
-                filament_weight_g REAL
+
+            CREATE TABLE IF NOT EXISTS prints (
+                id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+                printer_id         TEXT NOT NULL,
+                job_key            TEXT NOT NULL,
+                filename           TEXT NOT NULL,
+                subtask_name       TEXT,
+                started_at         TIMESTAMP NOT NULL,
+                ended_at           TIMESTAMP,
+                duration_seconds   INTEGER,
+                final_state        TEXT,
+                error_message      TEXT,
+                layers_total       INTEGER,
+                layers_completed   INTEGER,
+                filament_grams     REAL,
+                material           TEXT,
+                created_at         TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
+
+            CREATE INDEX IF NOT EXISTS idx_prints_printer_started
+                ON prints(printer_id, started_at DESC);
+
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_prints_job_key
+                ON prints(printer_id, job_key);
+
+            DROP TABLE IF EXISTS print_history;
         """)
+    # Clean up prints that started >24 h ago but never got a final_state
+    # (backend crash during a print that has since ended)
+    _close_stale_orphans()
 
 
 @contextmanager
@@ -42,6 +60,22 @@ def _conn():
     finally:
         conn.close()
 
+
+def _close_stale_orphans() -> None:
+    with _conn() as conn:
+        n = conn.execute(
+            """UPDATE prints
+               SET ended_at = CURRENT_TIMESTAMP,
+                   final_state = 'ERROR',
+                   error_message = 'Abandoned (Flightdeck restarted)'
+               WHERE final_state IS NULL
+                 AND started_at < datetime('now', '-24 hours')""",
+        ).rowcount
+    if n:
+        log.info("Closed %d stale print row(s) as ERROR", n)
+
+
+# ── printer_state (FINISHED TTL) ──────────────────────────────────────────
 
 def get_finished_at(printer_id: str) -> Optional[datetime]:
     with _conn() as conn:
@@ -72,42 +106,101 @@ def clear_finished_at(printer_id: str) -> None:
         )
 
 
+# ── prints lifecycle ───────────────────────────────────────────────────────
+
+def on_print_started(
+    printer_id: str,
+    job_key: str,
+    filename: str,
+    *,
+    subtask_name: Optional[str] = None,
+    started_at: Optional[datetime] = None,
+    layers_total: Optional[int] = None,
+    material: Optional[str] = None,
+) -> None:
+    ts = (started_at or datetime.utcnow()).isoformat()
+    with _conn() as conn:
+        conn.execute(
+            """INSERT INTO prints
+               (printer_id, job_key, filename, subtask_name, started_at, layers_total, material)
+               VALUES (?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(printer_id, job_key) DO NOTHING""",
+            (printer_id, job_key, filename, subtask_name, ts, layers_total, material),
+        )
+    log.info("print started: %s key=%s file=%s", printer_id, job_key, filename)
+
+
+def on_print_finished(
+    printer_id: str,
+    job_key: str,
+    *,
+    ended_at: Optional[datetime] = None,
+    layers_completed: Optional[int] = None,
+    filament_grams: Optional[float] = None,
+) -> None:
+    now = (ended_at or datetime.utcnow()).isoformat()
+    with _conn() as conn:
+        conn.execute(
+            """UPDATE prints
+               SET ended_at         = ?,
+                   duration_seconds = CAST(
+                       (julianday(?) - julianday(started_at)) * 86400 AS INTEGER),
+                   final_state      = 'FINISHED',
+                   layers_completed = COALESCE(?, layers_completed),
+                   filament_grams   = COALESCE(?, filament_grams)
+               WHERE printer_id = ? AND job_key = ? AND final_state IS NULL""",
+            (now, now, layers_completed, filament_grams, printer_id, job_key),
+        )
+    log.info("print finished: %s key=%s", printer_id, job_key)
+
+
+def on_print_ended(
+    printer_id: str,
+    job_key: str,
+    *,
+    final_state: str,           # 'CANCELLED' | 'ERROR'
+    ended_at: Optional[datetime] = None,
+    layers_completed: Optional[int] = None,
+    error_message: Optional[str] = None,
+) -> None:
+    now = (ended_at or datetime.utcnow()).isoformat()
+    with _conn() as conn:
+        conn.execute(
+            """UPDATE prints
+               SET ended_at         = ?,
+                   duration_seconds = CAST(
+                       (julianday(?) - julianday(started_at)) * 86400 AS INTEGER),
+                   final_state      = ?,
+                   layers_completed = COALESCE(?, layers_completed),
+                   error_message    = COALESCE(?, error_message)
+               WHERE printer_id = ? AND job_key = ? AND final_state IS NULL""",
+            (now, now, final_state, layers_completed, error_message, printer_id, job_key),
+        )
+    log.info("print ended %s: %s key=%s", final_state, printer_id, job_key)
+
+
+# ── queries ────────────────────────────────────────────────────────────────
+
+def get_open_print_key(printer_id: str, filename: str) -> Optional[str]:
+    """Return the job_key of any open (final_state IS NULL) row for this printer/filename."""
+    with _conn() as conn:
+        row = conn.execute(
+            """SELECT job_key FROM prints
+               WHERE printer_id = ? AND filename = ? AND final_state IS NULL
+               ORDER BY started_at DESC LIMIT 1""",
+            (printer_id, filename),
+        ).fetchone()
+    return row["job_key"] if row else None
+
+
 def get_last_print(printer_id: str) -> Optional[dict]:
     with _conn() as conn:
         row = conn.execute(
-            """SELECT filename, started_at, finished_at, filament_type, filament_weight_g
-               FROM print_history WHERE printer_id = ? AND cancelled = 0
-               ORDER BY id DESC LIMIT 1""",
+            """SELECT filename, subtask_name, duration_seconds, final_state,
+                      layers_completed, layers_total
+               FROM prints
+               WHERE printer_id = ? AND final_state IS NOT NULL
+               ORDER BY started_at DESC LIMIT 1""",
             (printer_id,),
         ).fetchone()
     return dict(row) if row else None
-
-
-def log_print(
-    printer_id: str,
-    filename: str,
-    *,
-    started_at: Optional[datetime] = None,
-    finished_at: Optional[datetime] = None,
-    cancelled: bool = False,
-    cancelled_at_pct: Optional[float] = None,
-    filament_type: Optional[str] = None,
-    filament_weight_g: Optional[float] = None,
-) -> None:
-    with _conn() as conn:
-        conn.execute(
-            """INSERT INTO print_history
-               (printer_id, filename, started_at, finished_at,
-                cancelled, cancelled_at_pct, filament_type, filament_weight_g)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                printer_id, filename,
-                started_at.isoformat() if started_at else None,
-                finished_at.isoformat() if finished_at else None,
-                1 if cancelled else 0,
-                cancelled_at_pct,
-                filament_type,
-                filament_weight_g,
-            ),
-        )
-    log.info("print_history: %s %s cancelled=%s", printer_id, filename, cancelled)
