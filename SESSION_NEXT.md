@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 15 May 2026 (evening)_
+_Last updated 15 May 2026 (night)_
 
 ## Current state
 
@@ -95,25 +95,29 @@ All 10 steps from TIER2_SPEC.md shipped, plus four bonus items.
 | Issue | Severity | Notes |
 |---|---|---|
 | Slow service shutdown | Done | 5s timeout on `asyncio.to_thread(p.stop)` in lifespan teardown — service now stops cleanly. |
-| Notifications require HTTPS | Low | Bell button visible but inert on HTTP. Tailscale free plan doesn't support TLS certs. Options: mkcert (LAN only), upgrade Tailscale plan, or ntfy.sh for push. |
+| Browser notifications (HTTPS) | Low | Bell button visible but inert on HTTP. Tailscale free plan doesn't support TLS certs. ntfy.sh now handles push — browser notifs are a nice-to-have. |
 | UFW | Done | Enabled; rules: ssh, 8000/tcp (flightdeck), tailscale0 interface. |
 
 ---
 
-## Fixed this session (15 May evening)
+## Fixed/shipped this session (15 May night)
 
-Three mobile camera/popover bugs found by real-device QA:
-
+**Mobile camera/popover bugs** (real-device QA):
 1. **MJPEG stream leak** — navigating away on mobile left the camera `<img>` connection open, exhausting the browser's connection pool and killing subsequent feeds. Fixed by explicitly clearing `img.src` (and marking `data-stopped`) in the router, plus restoring the stream on return to the same printer.
 2. **Stuck preview popover** — browser back button bypasses click handlers so `hidePreview()` was never called, leaving the hover popover floating over the detail view. Fixed by calling `hidePreview()` at the top of every `router()` invocation.
 3. **Async race in showPreview** — if a long-press triggered a preview fetch and the user navigated before it completed, the fetch resolved *after* `hidePreview()` and put the popover back up (~5s visible until next WS tick called `router()`). Fixed with a stale-check guard `if (activeCard !== card) return` after the fetch.
+
+**Infrastructure:**
+- GitHub remote created — https://github.com/Kidabah/flightdeck
+- UFW enabled — rules: ssh, 8000/tcp, tailscale0
+- Slow shutdown fixed — 5s timeout on Bambu MQTT stop
+- **ntfy.sh push notifications** — server-side transition detection; fires on print finished/error/paused even when browser is closed. Topic: `flightdeck-c1f2849dcb` (subscribe in ntfy app)
 
 ---
 
 ## Next session priorities
 
-1. **ntfy.sh push notifications** — free, works over HTTP, phone alerts when away from dashboard
-2. **Tier 3** — TBD
+1. **Tier 3** — TBD (suggestions: OrcaSlicer upload, filament tracking, multi-user, HTTPS via mkcert)
 
 ---
 
