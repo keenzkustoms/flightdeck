@@ -14,10 +14,12 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+import httpx
+
 from . import db
 from .camera import BambuCameraProxy
 from .models import PrintPreview
-from .printer_config import BambuConnection, BambuRtspCamera, MjpegDirectCamera, MoonrakerConnection, load
+from .printer_config import BambuConnection, BambuRtspCamera, MjpegDirectCamera, MoonrakerConnection, NtfyConfig, load
 from .printers import moonraker
 from .printers.bambu import BambuPrinter
 
@@ -28,6 +30,8 @@ _presets: dict[str, dict] = {}  # printer_id → temperature_presets dict
 _cam_proxies: dict[str, BambuCameraProxy] = {}  # printer_id → live RTSP proxy
 _ws_clients: set[WebSocket] = set()
 _broadcast_task: asyncio.Task | None = None
+_ntfy: NtfyConfig | None = None
+_prev_states: dict[str, str] = {}  # printer_id → last known state
 
 
 def _dt_default(obj):
@@ -49,6 +53,45 @@ async def _gather_all() -> list[dict]:
     return results
 
 
+async def _send_ntfy(title: str, message: str, tags: list[str], priority: int = 3) -> None:
+    if not _ntfy:
+        return
+    try:
+        async with httpx.AsyncClient() as client:
+            await client.post(
+                f"{_ntfy.url}/{_ntfy.topic}",
+                json={"title": title, "message": message, "tags": tags, "priority": priority},
+                timeout=5,
+            )
+    except Exception as exc:
+        log.warning("ntfy send failed: %s", exc)
+
+
+def _check_transitions(data: list[dict]) -> None:
+    for p in data:
+        pid = p["id"]
+        curr = p["state"]
+        prev = _prev_states.get(pid)
+        _prev_states[pid] = curr
+        if prev is None or prev == curr:
+            continue
+        name = p.get("custom_name") or p.get("id")
+        job = p.get("job") or {}
+        fname = (job.get("filename") or "").rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+        sub = job.get("subtask_name", "").strip()
+        label = sub if sub and sub != fname else fname
+
+        if prev == "printing" and curr == "finished":
+            msg = f"{name}" + (f" · {label}" if label else "")
+            asyncio.create_task(_send_ntfy("Print complete ✓", msg, ["white_check_mark"]))
+        elif curr == "error":
+            msg = f"{name}" + (f" · {label}" if label else "")
+            asyncio.create_task(_send_ntfy("Print error ⚠", msg, ["warning"], priority=4))
+        elif prev == "printing" and curr == "paused":
+            msg = f"{name}" + (f" · {label}" if label else "")
+            asyncio.create_task(_send_ntfy("Print paused ⏸", msg, ["double_vertical_bar"]))
+
+
 async def _broadcast_loop():
     while True:
         await asyncio.sleep(5)
@@ -56,6 +99,7 @@ async def _broadcast_loop():
             continue
         try:
             data = await _gather_all()
+            _check_transitions(data)
             msg = json.dumps(data, default=_dt_default)
             dead: set[WebSocket] = set()
             for ws in list(_ws_clients):
@@ -70,9 +114,10 @@ async def _broadcast_loop():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _broadcast_task
+    global _broadcast_task, _ntfy
     db.init()
     cfg = load()
+    _ntfy = cfg.ntfy
 
     for entry in cfg.printers:
         conn = entry.connection
@@ -99,6 +144,13 @@ async def lifespan(app: FastAPI):
                     f":322/streaming/live/1"
                 )
                 _cam_proxies[entry.id] = BambuCameraProxy(rtsp_url, entry.id)
+
+    # Seed prev states so startup doesn't fire spurious notifications
+    try:
+        for p in await _gather_all():
+            _prev_states[p["id"]] = p["state"]
+    except Exception:
+        pass
 
     _broadcast_task = asyncio.create_task(_broadcast_loop())
 

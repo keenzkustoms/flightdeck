@@ -68,8 +68,14 @@ class PrinterEntry(BaseModel):
         return self.icon if self.icon in VALID_ICONS else "generic"
 
 
+class NtfyConfig(BaseModel):
+    topic: str
+    url: str = "https://ntfy.sh"
+
+
 class PrintersConfig(BaseModel):
     printers: list[PrinterEntry]
+    ntfy: Optional[NtfyConfig] = None
 
 
 def load() -> PrintersConfig:

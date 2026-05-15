@@ -1,3 +1,6 @@
+ntfy:
+  topic: "flightdeck-c1f2849dcb"
+
 printers:
   - id: greyhound
     model_name: "Voron"
