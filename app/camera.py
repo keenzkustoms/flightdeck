@@ -1,11 +1,13 @@
 from __future__ import annotations
 import asyncio
 import logging
+import time
 from typing import Optional
 
 log = logging.getLogger(__name__)
 
-_IDLE_TIMEOUT = 60   # seconds before killing ffmpeg after last client leaves
+_IDLE_TIMEOUT  = 60   # seconds before killing ffmpeg after last client leaves
+_STALE_TIMEOUT = 15   # seconds without a new frame before declaring stream dead
 _FRAME_START = b"\xff\xd8"
 _FRAME_END   = b"\xff\xd9"
 
@@ -24,7 +26,9 @@ class BambuCameraProxy:
         self._id = printer_id
         self._proc: Optional[asyncio.subprocess.Process] = None
         self._reader: Optional[asyncio.Task] = None
+        self._watchdog_task: Optional[asyncio.Task] = None
         self._latest: Optional[bytes] = None
+        self._last_frame_at: float = 0.0
         self._clients: int = 0
         self._idle_task: Optional[asyncio.Task] = None
 
@@ -34,6 +38,7 @@ class BambuCameraProxy:
         if self._proc and self._proc.returncode is None:
             return
         self._latest = None
+        self._last_frame_at = 0.0
         self._proc = await asyncio.create_subprocess_exec(
             "ffmpeg",
             "-loglevel", "error",
@@ -46,9 +51,14 @@ class BambuCameraProxy:
             stderr=asyncio.subprocess.DEVNULL,
         )
         self._reader = asyncio.create_task(self._read_frames())
+        if not self._watchdog_task or self._watchdog_task.done():
+            self._watchdog_task = asyncio.create_task(self._watchdog())
         log.info("camera ffmpeg started: %s", self._id)
 
     async def stop(self) -> None:
+        if self._watchdog_task:
+            self._watchdog_task.cancel()
+            self._watchdog_task = None
         if self._reader:
             self._reader.cancel()
             self._reader = None
@@ -67,10 +77,24 @@ class BambuCameraProxy:
         if self._clients == 0:
             await self.stop()
 
+    async def _watchdog(self) -> None:
+        """Kill a frozen-but-alive ffmpeg if no frames arrive for _STALE_TIMEOUT seconds."""
+        while True:
+            await asyncio.sleep(10)
+            if self._clients == 0 or self._last_frame_at == 0.0:
+                continue
+            if (time.monotonic() - self._last_frame_at) > _STALE_TIMEOUT:
+                log.warning("camera stale (%ds no frames), restarting: %s", _STALE_TIMEOUT, self._id)
+                if self._proc:
+                    try:
+                        self._proc.kill()
+                    except Exception:
+                        pass
+
     # ── frame reader ───────────────────────────────────────────────────────
 
     async def _read_frames(self) -> None:
-        """Continuously read stdout and extract JPEG frames."""
+        """Continuously read stdout and extract JPEG frames. Auto-restarts on exit if clients remain."""
         buf = b""
         while self._proc and self._proc.returncode is None:
             try:
@@ -88,9 +112,17 @@ class BambuCameraProxy:
                         buf = buf[s:]
                         break
                     self._latest = buf[s : e + 2]
+                    self._last_frame_at = time.monotonic()
                     buf = buf[e + 2 :]
             except Exception:
                 break
+
+        # ffmpeg exited — restart if clients are still watching
+        if self._clients > 0:
+            log.warning("camera stream dropped, restarting in 3s: %s", self._id)
+            await asyncio.sleep(3)
+            self._proc = None
+            await self._start()
 
     # ── streaming ──────────────────────────────────────────────────────────
 

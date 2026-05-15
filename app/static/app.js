@@ -47,6 +47,151 @@ const _objectsCache = {};       // printer_id → { supported, objects }
 const _historyYear = {};        // printer_id → selected year (int)
 const _dayPrintsCache = {};     // `${printerId}:${dateStr}` → prints[]
 let _camerasFull = false;       // true once cameras grid has been fully rendered
+let _camZoom = 0;               // 0=normal, 1=wide, 2=fullscreen
+
+// ── Toast notifications ────────────────────────────────────────────────────
+
+const _toastContainer = document.createElement('div');
+_toastContainer.id = 'toast-container';
+document.body.appendChild(_toastContainer);
+
+function showToast(message, sub, type = 'info') {
+  const t = document.createElement('div');
+  t.className = `toast toast-${type}`;
+  t.innerHTML = `<span class="toast-msg">${message}</span>${sub ? `<span class="toast-sub">${sub}</span>` : ''}`;
+  _toastContainer.appendChild(t);
+  requestAnimationFrame(() => t.classList.add('toast-in'));
+  const remove = () => {
+    t.classList.remove('toast-in');
+    t.addEventListener('transitionend', () => t.remove(), { once: true });
+  };
+  const timer = setTimeout(remove, 5000);
+  t.addEventListener('click', () => { clearTimeout(timer); remove(); });
+}
+
+// ── Temperature modal ─────────────────────────────────────────────────────
+
+const _tempModal = (() => {
+  let _composed = '';
+  let _printerId = null;
+  let _heater = null;
+  let _max = 300;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'temp-modal-overlay';
+  overlay.setAttribute('hidden', '');
+  overlay.innerHTML = `
+    <div class="temp-modal" role="dialog" aria-modal="true">
+      <div class="temp-modal-header">
+        <span class="temp-modal-title" id="tm-title">HOTEND</span>
+        <button class="temp-modal-close" id="tm-close">✕</button>
+      </div>
+      <div class="temp-modal-display">
+        <span class="temp-modal-current">Current <strong id="tm-current">—°</strong></span>
+        <span class="temp-modal-arrow">→</span>
+        <span class="temp-modal-composed" id="tm-composed">___</span>
+      </div>
+      <div class="temp-modal-presets" id="tm-presets"></div>
+      <div class="temp-keypad">
+        ${[1,2,3,4,5,6,7,8,9,'⌫',0,'✓'].map(k =>
+          `<button class="temp-key${k==='⌫'?' temp-key-back':k==='✓'?' temp-key-confirm':''}" data-key="${k}">${k}</button>`
+        ).join('')}
+      </div>
+      <div class="temp-modal-warning" id="tm-warning" hidden>That's hot — double-check before confirming</div>
+      <div class="temp-modal-range" id="tm-range">Range: 0–300°C</div>
+    </div>`;
+  document.body.appendChild(overlay);
+
+  function close() {
+    overlay.setAttribute('hidden', '');
+    _composed = '';
+    _printerId = null;
+    _heater = null;
+  }
+
+  function updateDisplay() {
+    overlay.querySelector('#tm-composed').textContent = _composed || '___';
+    const val = parseInt(_composed, 10);
+    const hot = _composed && !isNaN(val) && (
+      (_heater === 'bed' ? val > 120 : val > 280)
+    );
+    const w = overlay.querySelector('#tm-warning');
+    if (hot) w.removeAttribute('hidden'); else w.setAttribute('hidden', '');
+  }
+
+  function handleKey(key) {
+    if (key === '✓') { doConfirm(); return; }
+    if (key === '⌫') {
+      _composed = _composed.slice(0, -1);
+    } else {
+      if (_composed.length >= 3) return;
+      _composed += String(key);
+    }
+    overlay.querySelectorAll('.temp-preset-btn').forEach(b => b.classList.remove('preset-active'));
+    updateDisplay();
+  }
+
+  function doConfirm() {
+    if (!_composed) return;
+    const val = parseInt(_composed, 10);
+    if (isNaN(val)) return;
+    const clamped = Math.max(0, Math.min(_max, val));
+    if (clamped !== val) {
+      _composed = String(clamped);
+      const el = overlay.querySelector('#tm-composed');
+      el.classList.add('composed-clamp');
+      el.textContent = _composed;
+      setTimeout(() => el.classList.remove('composed-clamp'), 500);
+      return;
+    }
+    sendTempSet(_printerId, _heater, clamped);
+    close();
+  }
+
+  overlay.addEventListener('click', e => {
+    if (e.target === overlay) { close(); return; }
+    const keyBtn = e.target.closest('[data-key]');
+    if (keyBtn) { handleKey(keyBtn.dataset.key); return; }
+    const presetBtn = e.target.closest('[data-value]');
+    if (presetBtn) {
+      _composed = presetBtn.dataset.value;
+      overlay.querySelectorAll('.temp-preset-btn').forEach(b => b.classList.remove('preset-active'));
+      presetBtn.classList.add('preset-active');
+      updateDisplay();
+    }
+  });
+
+  overlay.querySelector('#tm-close').addEventListener('click', close);
+
+  // Physical keyboard — digits, backspace, enter while modal is open
+  document.addEventListener('keydown', e => {
+    if (!isOpen()) return;
+    if (e.key >= '0' && e.key <= '9') { e.preventDefault(); handleKey(e.key); }
+    else if (e.key === 'Backspace')    { e.preventDefault(); handleKey('⌫'); }
+    else if (e.key === 'Enter')        { e.preventDefault(); doConfirm(); }
+  });
+
+  function open({ printerId, heater, label, current, target, presets = [], max = 300 }) {
+    _printerId = printerId;
+    _heater = heater;
+    _max = max;
+    _composed = target > 0 ? String(Math.round(target)) : '';
+    overlay.querySelector('#tm-title').textContent = label.toUpperCase();
+    overlay.querySelector('#tm-current').textContent = `${Math.round(current)}°`;
+    overlay.querySelector('#tm-range').textContent = `Range: 0–${max}°C`;
+    const allPresets = [{ label: 'Off', value: 0 }, ...presets];
+    overlay.querySelector('#tm-presets').innerHTML = allPresets
+      .map(p => `<button class="temp-preset-btn" data-value="${p.value}">${p.label}</button>`)
+      .join('');
+    overlay.querySelector('#tm-warning').setAttribute('hidden', '');
+    updateDisplay();
+    overlay.removeAttribute('hidden');
+  }
+
+  function isOpen() { return !overlay.hasAttribute('hidden'); }
+
+  return { open, close, isOpen };
+})();
 
 // ── Popover singleton ──────────────────────────────────────────────────────
 
@@ -239,6 +384,22 @@ document.addEventListener('click', e => {
   if (activeCard && !activeCard.contains(e.target) && !popover.contains(e.target)) {
     hidePreview();
   }
+});
+
+document.addEventListener('fullscreenchange', () => {
+  if (!document.fullscreenElement && _camZoom === 2) {
+    _camZoom = 0;
+    document.querySelector('.detail-body')?.classList.remove('cam-wide');
+  }
+});
+
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  if (_tempModal.isOpen()) { _tempModal.close(); return; }
+  if (_camZoom !== 1) return;
+  // ESC in wide mode (state 1) — browser handles ESC for fullscreen (state 2)
+  _camZoom = 0;
+  document.querySelector('.detail-body')?.classList.remove('cam-wide');
 });
 
 // ── Connection dot helpers ─────────────────────────────────────────────────
@@ -512,38 +673,23 @@ document.getElementById('view-printer').addEventListener('click', e => {
     return;
   }
 
-  // Click target value → inline input
+  // Click target value → temp modal
   const targetSpan = e.target.closest('[data-temp-edit]');
   if (targetSpan) {
     const heater = targetSpan.dataset.tempEdit;
     const id = targetSpan.dataset.printerId;
-    const current = parseInt(targetSpan.textContent, 10) || 0;
-
-    const input = document.createElement('input');
-    input.type = 'number';
-    input.className = 'temp-inline-input';
-    input.value = current;
-    input.min = 0;
-    input.max = 350;
-    targetSpan.replaceWith(input);
-    input.focus();
-    input.select();
-
-    let committed = false;
-    const commit = () => {
-      if (committed) return;
-      committed = true;
-      sendTempSet(id, heater, parseInt(input.value, 10) || 0);
-    };
-    input.addEventListener('blur', commit);
-    input.addEventListener('keydown', ev => {
-      if (ev.key === 'Enter') { input.blur(); }
-      if (ev.key === 'Escape') {
-        committed = true; // suppress blur commit
-        const p = _latestPrinters.find(x => x.id === id);
-        const tempsEl = document.querySelector('#detail-temps');
-        if (tempsEl && p) tempsEl.innerHTML = _detailTempsPanel(p);
-      }
+    const p = _latestPrinters.find(x => x.id === id);
+    if (!p) return;
+    const r = p.temps?.[heater];
+    if (!r) return;
+    _tempModal.open({
+      printerId: id,
+      heater,
+      label: _TEMP_LABELS[heater] ?? heater,
+      current: r.actual,
+      target: _getDisplayTarget(id, heater, r.target),
+      presets: p.temperature_presets?.[heater] ?? [],
+      max: 300,
     });
   }
 });
@@ -660,7 +806,7 @@ function _detailTempsPanel(p) {
 
     return `<div class="temp-ctrl-row">
       <span class="temp-row-label">${label}</span>
-      <div class="temp-readings">
+      <div class="temp-readings" data-temp-edit="${k}" data-printer-id="${p.id}" style="cursor:pointer">
         <span class="temp-actual">${actual}°</span>
         ${targetHtml}
       </div>
@@ -1132,9 +1278,39 @@ async function renderPrinterDetail(id, subtab = 'live') {
         </div>
       </div>`;
 
-    // Fullscreen on camera click
-    const img = el.querySelector('#detail-cam-img');
-    if (img) img.addEventListener('click', () => img.requestFullscreen?.());
+    // Click cycles — desktop: normal→wide→fullscreen→normal; mobile: normal↔fullscreen
+    _camZoom = 0;
+    const hero = el.querySelector('.camera-hero');
+    if (hero) {
+      hero.addEventListener('click', () => {
+        const body = hero.closest('.detail-body');
+        if (!body) return;
+        const isMobile = window.innerWidth <= 900;
+        if (isMobile) {
+          if (_camZoom === 0) {
+            _camZoom = 2;
+            hero.requestFullscreen?.().catch(() => { _camZoom = 0; });
+          } else {
+            _camZoom = 0;
+            if (document.fullscreenElement) document.exitFullscreen?.();
+          }
+        } else {
+          _camZoom = (_camZoom + 1) % 3;
+          if (_camZoom === 0) {
+            body.classList.remove('cam-wide');
+            if (document.fullscreenElement) {
+              document.exitFullscreen?.();
+              location.hash = '#/cameras';
+            }
+          } else if (_camZoom === 1) {
+            body.classList.add('cam-wide');
+          } else {
+            body.classList.remove('cam-wide');
+            hero.requestFullscreen?.().catch(() => { _camZoom = 1; body.classList.add('cam-wide'); });
+          }
+        }
+      });
+    }
 
     if (p.state === 'printing' || p.state === 'paused') refreshObjectsPanel(id);
   } else {
@@ -1217,6 +1393,78 @@ async function renderCamerasView() {
   _camerasFull = true;
 }
 
+// ── Tab title ─────────────────────────────────────────────────────────────
+
+function updateTitle(printers) {
+  const errors   = printers.filter(p => p.state === 'error');
+  const printing = printers.filter(p => p.state === 'printing');
+  const paused   = printers.filter(p => p.state === 'paused');
+  if (errors.length) {
+    document.title = `⚠ ERROR · Flightdeck`;
+  } else if (printing.length === 1) {
+    const pct = Math.round((printing[0].job?.progress ?? 0) * 100);
+    document.title = `${pct}% · ${printing[0].custom_name ?? 'Flightdeck'}`;
+  } else if (printing.length > 1) {
+    document.title = `${printing.length} printing · Flightdeck`;
+  } else if (paused.length) {
+    document.title = `⏸ Paused · Flightdeck`;
+  } else {
+    document.title = 'Flightdeck';
+  }
+}
+
+// ── Print notifications ────────────────────────────────────────────────────
+
+const _prevStates = {};
+let _notifSeeded = false;
+
+function _detectTransitions(printers) {
+  if (!_notifSeeded) {
+    printers.forEach(p => { _prevStates[p.id] = p.state; });
+    _notifSeeded = true;
+    return;
+  }
+  if (Notification.permission !== 'granted') return;
+  printers.forEach(p => {
+    const prev = _prevStates[p.id];
+    _prevStates[p.id] = p.state;
+    if (prev === p.state) return;
+    if (p.state === 'finished' && prev === 'printing') {
+      showToast('Print complete', p.custom_name, 'success');
+      if (Notification.permission === 'granted')
+        new Notification('Print complete ✓', { body: p.custom_name });
+    } else if (p.state === 'error') {
+      showToast('Print error — check printer', p.custom_name, 'error');
+      if (Notification.permission === 'granted')
+        new Notification('Print error ⚠', { body: p.custom_name });
+    }
+  });
+}
+
+function initNotifBtn() {
+  const btn = document.getElementById('notif-btn');
+  if (!btn) return;
+  if (!('Notification' in window) || !window.isSecureContext) {
+    btn.classList.add('notif-off');
+    btn.title = 'Notifications require HTTPS — access the app via https:// to enable';
+    return;
+  }
+  const update = () => {
+    const perm = Notification.permission;
+    btn.classList.toggle('notif-on', perm === 'granted');
+    btn.classList.toggle('notif-off', perm === 'denied');
+    btn.title = perm === 'granted' ? 'Notifications on'
+              : perm === 'denied'  ? 'Notifications blocked — check browser settings'
+              : 'Enable print notifications';
+  };
+  update();
+  btn.addEventListener('click', async () => {
+    if (Notification.permission === 'granted') return;
+    await Notification.requestPermission();
+    update();
+  });
+}
+
 // ── Dashboard update ───────────────────────────────────────────────────────
 
 function updateDashboard(printers) {
@@ -1228,6 +1476,8 @@ function updateDashboard(printers) {
     }
   }
 
+  _detectTransitions(printers);
+  updateTitle(printers);
   _latestPrinters = printers;
   if (!_tabsBuilt) buildTabs(printers);
   else router();
@@ -1294,5 +1544,6 @@ function connectWS() {
 }
 
 connectWS();
+initNotifBtn();
 window.addEventListener('hashchange', router);
 router();

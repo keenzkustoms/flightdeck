@@ -24,6 +24,7 @@ from .printers.bambu import BambuPrinter
 _bambu: list[BambuPrinter] = []
 _moonraker: list[tuple[str, str, str, str, str]] = []  # (id, model_name, custom_name, icon, url)
 _cameras: dict = {}          # printer_id → Camera config
+_presets: dict[str, dict] = {}  # printer_id → temperature_presets dict
 _cam_proxies: dict[str, BambuCameraProxy] = {}  # printer_id → live RTSP proxy
 _ws_clients: set[WebSocket] = set()
 _broadcast_task: asyncio.Task | None = None
@@ -39,9 +40,11 @@ async def _gather_all() -> list[dict]:
     results = []
     for (id, model_name, custom_name, icon, url) in _moonraker:
         status = await moonraker.fetch(id, model_name, custom_name, icon, url)
+        status.temperature_presets = _presets.get(id, {})
         results.append(asdict(status))
     for p in _bambu:
         status = await asyncio.to_thread(p.status)
+        status.temperature_presets = _presets.get(p.id, {})
         results.append(asdict(status))
     return results
 
@@ -74,6 +77,7 @@ async def lifespan(app: FastAPI):
     for entry in cfg.printers:
         conn = entry.connection
         _cameras[entry.id] = entry.camera
+        _presets[entry.id] = entry.temperature_presets or {}
         if isinstance(conn, MoonrakerConnection):
             _moonraker.append((entry.id, entry.model_name, entry.custom_name,
                                entry.icon_key(), conn.url))

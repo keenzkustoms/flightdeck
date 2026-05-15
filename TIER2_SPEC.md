@@ -379,7 +379,7 @@ Data source: Happy Hare exposes state via Moonraker's `printer.objects.query` en
 
 Renders only when MMU is enabled and has loaded gates. Hidden otherwise.
 
-**Status as of Tier 2 completion:** AMS display is shipped. MMU display is the next implementation item.
+**Status as of Tier 2 completion:** AMS display shipped. MMU display shipped.
 
 ---
 
@@ -418,9 +418,10 @@ These live in `TIER2_BACKLOG.md` or future tier specs.
 8. ✅ **History sub-tab — heatmap.** Year-based grid, 4-tier green intensity, year navigation, summary line.
 9. ✅ **History sub-tab — day detail.** Day panel with print list on cell click.
 10. ✅ **History sub-tab — print detail.** Full print info card with back navigation; instant (cached).
-11. ✅ **AMS display panel** (bonus). Slot colours, material type, active-slot indicator; Bambu Live tab. _Cosmetic bug: AMS HT shows as "AMS 129" — fix pending._
+11. ✅ **AMS display panel** (bonus). Slot colours, material type, active-slot indicator; Bambu Live tab. AMS HT unit (ID 128) labelled correctly via `_AMS_LABELS` lookup.
 12. ✅ **Two-column Live layout** (bonus). Camera fills left, sidebar right; no scrolling on desktop.
 13. ✅ **MMU display panel** (bonus). Happy Hare gate state for the Voron via `mmu` Moonraker object. Gate colours, material, active gate indicator. Vendor label from `mmu_machine.unit_0.name` ("BTT VVD"). RRGGBBAA colour normalisation.
+14. ✅ **Camera click-cycle** (bonus). Desktop: normal → wide (sidebar hides, blue outline affordance) → fullscreen → normal. Mobile (≤900px): toggle normal ↔ fullscreen, skipping wide. ESC returns to normal from any state.
 
 ---
 

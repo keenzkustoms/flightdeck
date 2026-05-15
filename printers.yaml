@@ -11,6 +11,17 @@ printers:
       type: "mjpeg_direct"
       stream_url: "http://192.168.4.215/webcam/?action=stream"
       snapshot_url: "http://192.168.4.215/webcam/?action=snapshot"
+    temperature_presets:
+      hotend:
+        - { label: "PLA",  value: 220 }
+        - { label: "PETG", value: 245 }
+        - { label: "ASA",  value: 255 }
+        - { label: "ABS",  value: 250 }
+      bed:
+        - { label: "PLA",  value: 65 }
+        - { label: "PETG", value: 80 }
+        - { label: "ASA",  value: 110 }
+        - { label: "ABS",  value: 100 }
 
   - id: x1c
     model_name: "X1C"
@@ -23,6 +34,17 @@ printers:
       serial: "00M00A282504250"
     camera:
       type: "bambu_rtsp"
+    temperature_presets:
+      hotend:
+        - { label: "PLA",  value: 220 }
+        - { label: "PETG", value: 245 }
+        - { label: "ASA",  value: 255 }
+        - { label: "ABS",  value: 250 }
+      bed:
+        - { label: "PLA",  value: 65 }
+        - { label: "PETG", value: 80 }
+        - { label: "ASA",  value: 100 }
+        - { label: "ABS",  value: 100 }
 
   - id: h2d
     model_name: "H2D"
@@ -35,3 +57,14 @@ printers:
       serial: "0948BB5B2800439"
     camera:
       type: "bambu_rtsp"
+    temperature_presets:
+      hotend:
+        - { label: "PLA",  value: 220 }
+        - { label: "PETG", value: 245 }
+        - { label: "ASA",  value: 255 }
+        - { label: "ABS",  value: 250 }
+      bed:
+        - { label: "PLA",  value: 65 }
+        - { label: "PETG", value: 80 }
+        - { label: "ASA",  value: 110 }
+        - { label: "ABS",  value: 100 }

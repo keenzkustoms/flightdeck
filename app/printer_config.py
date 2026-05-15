@@ -58,6 +58,8 @@ class PrinterEntry(BaseModel):
     connection: Connection
     camera: Optional[Camera] = None
 
+    temperature_presets: Optional[dict] = None   # {hotend: [{label, value}], bed: [...]}
+
     # Future expansion fields — optional so old configs stay valid
     park_position: Optional[str] = None
     alert_thresholds: Optional[dict] = None

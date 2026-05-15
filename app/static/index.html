@@ -4,13 +4,14 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Flightdeck</title>
-  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/style.css?v=7">
 </head>
 <body>
   <header>
     <a class="wordmark" href="#/">FLIGHTDECK</a>
     <nav id="tab-strip"></nav>
     <div class="header-right">
+      <button id="notif-btn" class="notif-btn" title="Enable print notifications">🔔</button>
       <span id="status-pill" class="status-pill"></span>
       <div id="live-indicator">
         <div class="live-dot" id="live-dot"></div>
@@ -32,6 +33,6 @@
   <section id="view-cameras" class="view" hidden>
     <div id="cameras-grid"></div>
   </section>
-  <script type="module" src="/static/app.js"></script>
+  <script type="module" src="/static/app.js?v=7"></script>
 </body>
 </html>

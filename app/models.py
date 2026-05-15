@@ -48,6 +48,7 @@ class PrinterStatus:
     idle_info: dict[str, str] = field(default_factory=dict)
     ams: list = field(default_factory=list)  # list of AMS unit dicts; empty for non-Bambu
     mmu: list = field(default_factory=list)  # list of MMU unit dicts; empty for non-HH
+    temperature_presets: dict = field(default_factory=dict)  # {hotend: [{label, value}], bed: [...]}
     error: Optional[str] = None
     last_seen: Optional[datetime] = None  # last successful data from printer link
     updated_at: datetime = field(default_factory=datetime.utcnow)
