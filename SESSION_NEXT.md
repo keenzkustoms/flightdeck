@@ -96,7 +96,7 @@ All 10 steps from TIER2_SPEC.md shipped, plus four bonus items.
 |---|---|---|
 | Slow service shutdown | Low | uvicorn takes ~90s to stop (SIGKILL); Bambu MQTT disconnect hanging in lifespan teardown. Add `asyncio.wait_for(..., timeout=5)` around `asyncio.to_thread(p.stop)`. |
 | Notifications require HTTPS | Low | Bell button visible but inert on HTTP. Tailscale free plan doesn't support TLS certs. Options: mkcert (LAN only), upgrade Tailscale plan, or ntfy.sh for push. |
-| UFW | Low | Installed but not enabled. |
+| UFW | Done | Enabled; rules: ssh, 8000/tcp (flightdeck), tailscale0 interface. |
 
 ---
 
@@ -114,8 +114,7 @@ Three mobile camera/popover bugs found by real-device QA:
 
 1. **Slow shutdown fix** — `asyncio.wait_for(..., timeout=5)` around Bambu stop in lifespan teardown
 2. **ntfy.sh push notifications** — free, works over HTTP, phone alerts when away from dashboard
-3. **UFW** — enable firewall
-4. **Tier 3** — TBD
+3. **Tier 3** — TBD
 
 ---
 
