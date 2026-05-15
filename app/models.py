@@ -46,6 +46,8 @@ class PrinterStatus:
     job: Optional[JobStatus] = None
     substage: Optional[int] = None   # Bambu stg_cur (PrintStatus enum value); None when unused
     idle_info: dict[str, str] = field(default_factory=dict)
+    ams: list = field(default_factory=list)  # list of AMS unit dicts; empty for non-Bambu
+    mmu: list = field(default_factory=list)  # list of MMU unit dicts; empty for non-HH
     error: Optional[str] = None
     last_seen: Optional[datetime] = None  # last successful data from printer link
     updated_at: datetime = field(default_factory=datetime.utcnow)

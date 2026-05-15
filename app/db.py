@@ -193,6 +193,52 @@ def get_open_print_key(printer_id: str, filename: str) -> Optional[str]:
     return row["job_key"] if row else None
 
 
+def get_history_calendar(printer_id: str, year: int) -> dict:
+    """Per-day print counts for a calendar year, plus year summary (FINISHED only)."""
+    y0, y1 = f"{year}-01-01", f"{year + 1}-01-01"
+    with _conn() as conn:
+        day_rows = conn.execute(
+            """SELECT date(started_at) AS day,
+                      COUNT(*)                                                    AS total,
+                      SUM(CASE WHEN final_state = 'FINISHED'  THEN 1 ELSE 0 END) AS finished,
+                      SUM(CASE WHEN final_state = 'CANCELLED' THEN 1 ELSE 0 END) AS cancelled,
+                      SUM(CASE WHEN final_state = 'ERROR'     THEN 1 ELSE 0 END) AS errors
+               FROM prints
+               WHERE printer_id = ? AND final_state IS NOT NULL
+                 AND started_at >= ? AND started_at < ?
+               GROUP BY day ORDER BY day""",
+            (printer_id, y0, y1),
+        ).fetchall()
+        sum_row = conn.execute(
+            """SELECT COUNT(*)             AS prints,
+                      SUM(duration_seconds) AS seconds,
+                      SUM(filament_grams)   AS grams
+               FROM prints
+               WHERE printer_id = ? AND final_state = 'FINISHED'
+                 AND started_at >= ? AND started_at < ?""",
+            (printer_id, y0, y1),
+        ).fetchone()
+    return {
+        "days": [dict(r) for r in day_rows],
+        "summary": dict(sum_row) if sum_row else {},
+    }
+
+
+def get_prints_for_day(printer_id: str, date_str: str) -> list[dict]:
+    """All prints (any state) whose started_at is on the given UTC date (YYYY-MM-DD)."""
+    with _conn() as conn:
+        rows = conn.execute(
+            """SELECT id, filename, subtask_name, started_at, ended_at,
+                      duration_seconds, final_state, error_message,
+                      layers_total, layers_completed, filament_grams, material
+               FROM prints
+               WHERE printer_id = ? AND date(started_at) = ?
+               ORDER BY started_at""",
+            (printer_id, date_str),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
 def get_last_print(printer_id: str) -> Optional[dict]:
     with _conn() as conn:
         row = conn.execute(

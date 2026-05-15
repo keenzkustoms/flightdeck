@@ -59,10 +59,17 @@ class BambuPrinter:
             nozzle = self._printer.get_nozzle_temperature()
             bed = self._printer.get_bed_temperature()
             chamber = self._printer.get_chamber_temperature()
+            mc = self._printer.mqtt_client
             if nozzle is not None:
-                temps["hotend"] = TempReading(actual=float(nozzle), target=0.0)
+                temps["hotend"] = TempReading(
+                    actual=float(nozzle),
+                    target=float(mc.get_nozzle_temperature_target()),
+                )
             if bed is not None:
-                temps["bed"] = TempReading(actual=float(bed), target=0.0)
+                temps["bed"] = TempReading(
+                    actual=float(bed),
+                    target=float(mc.get_bed_temperature_target()),
+                )
             if chamber is not None:
                 temps["chamber"] = TempReading(actual=float(chamber), target=0.0)
 
@@ -90,13 +97,18 @@ class BambuPrinter:
                 if last:
                     idle_info["Last print"] = _fmt_last_print(last)
 
+            try:
+                ams = _parse_ams(self._printer.mqtt_dump().get("print", {}))
+            except Exception:
+                ams = []
+
             now = datetime.utcnow()
             self._last_seen = now
             return PrinterStatus(
                 id=self.id, model_name=self.model_name, custom_name=self.custom_name,
                 icon=self.icon, kind="bambu", state=state,
                 temps=temps, job=job, substage=substage,
-                idle_info=idle_info, last_seen=now, updated_at=now,
+                idle_info=idle_info, ams=ams, last_seen=now, updated_at=now,
             )
         except Exception as exc:
             return PrinterStatus(id=self.id, model_name=self.model_name,
@@ -192,6 +204,26 @@ class BambuPrinter:
             return subtask
         return f"bambu@{int(datetime.utcnow().timestamp())}"
 
+    # ── Controls ───────────────────────────────────────────────────────────
+
+    def pause(self) -> None:
+        self._printer.pause_print()
+
+    def resume(self) -> None:
+        self._printer.resume_print()
+
+    def cancel(self) -> None:
+        self._printer.stop_print()
+
+    def estop(self) -> None:
+        self._printer.stop_print()  # Bambu MQTT has no dedicated e-stop
+
+    def set_temp(self, heater: str, target: int) -> None:
+        if heater == "hotend":
+            self._printer.set_nozzle_temperature(target)
+        elif heater == "bed":
+            self._printer.set_bed_temperature(target)
+
     def get_preview(self):
         """Return cached BambuPreview, fetching via FTP if the job changed."""
         if not self._connected:
@@ -209,6 +241,47 @@ class BambuPrinter:
         except Exception as exc:
             log.warning("FTP preview failed for %s: %s", self.model_name, exc)
             return None
+
+
+def _parse_ams(dump: dict) -> list[dict]:
+    """Parse AMS data from mqtt_dump()['print']. Returns JSON-serialisable list."""
+    ams_raw = dump.get("ams", {})
+    if not ams_raw or ams_raw.get("ams_exist_bits", "0") == "0":
+        return []
+
+    tray_now = int(ams_raw.get("tray_now", 255))
+    _AMS_LABELS = {128: "AMS HT"}
+    result = []
+
+    for unit_data in ams_raw.get("ams", []):
+        unit_id = int(unit_data.get("id", 0))
+        slots = []
+        for tray_data in unit_data.get("tray", []):
+            tray_id = int(tray_data.get("id", 0))
+            tray_type = tray_data.get("tray_type", "")
+            empty = not tray_type
+
+            hex_c = tray_data.get("tray_color", "")
+            if len(hex_c) >= 6 and hex_c.upper() not in ("00000000", ""):
+                color = f"#{hex_c[:6].upper()}"
+            else:
+                color = ""
+
+            active = (not empty) and (tray_now == unit_id * 4 + tray_id)
+
+            slots.append({
+                "idx": tray_id,
+                "type": tray_type,
+                "color": color,
+                "brand": tray_data.get("tray_sub_brands", ""),
+                "active": active,
+                "empty": empty,
+            })
+
+        if slots:
+            result.append({"unit": unit_id, "label": _AMS_LABELS.get(unit_id, f"AMS {unit_id + 1}"), "slots": slots})
+
+    return result
 
 
 def _fmt_last_print(row: dict) -> str:

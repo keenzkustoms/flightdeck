@@ -8,7 +8,8 @@
 </head>
 <body>
   <header>
-    <h1>Flightdeck</h1>
+    <a class="wordmark" href="#/">FLIGHTDECK</a>
+    <nav id="tab-strip"></nav>
     <div class="header-right">
       <span id="status-pill" class="status-pill"></span>
       <div id="live-indicator">
@@ -18,8 +19,19 @@
       <span id="refresh-time"></span>
     </div>
   </header>
-  <main id="printer-grid"></main>
-  <footer id="dash-footer"></footer>
+
+  <section id="view-dashboard" class="view">
+    <main id="printer-grid"></main>
+    <footer id="dash-footer"></footer>
+  </section>
+
+  <section id="view-printer" class="view" hidden>
+    <div id="printer-detail"></div>
+  </section>
+
+  <section id="view-cameras" class="view" hidden>
+    <div id="cameras-grid"></div>
+  </section>
   <script type="module" src="/static/app.js"></script>
 </body>
 </html>

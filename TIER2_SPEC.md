@@ -353,6 +353,36 @@ Don't add a separate "confirming…" overlay — trust the existing state machin
 
 ---
 
+## Bonus additions (display-only, added during Tier 2 implementation)
+
+These weren't in the original scope but were cheap to add since the data already flowed through the backend. Both are **display-only** — no controls.
+
+### Two-column Live layout
+
+On desktop (>900px): camera fills the left column at full viewport height; controls, temps, print details, AMS/objects stack in a 320px right sidebar. No scrolling required. On mobile (<900px) reverts to single-column with a fixed 16:9 camera.
+
+### AMS material display (Bambu printers)
+
+A panel on the Live sub-tab (in the right sidebar, below temps). Shows the AMS unit(s) attached to each Bambu printer: slot colour, material type, and which slot is currently active.
+
+Data source: `mqtt_dump()["print"]["ams"]` — parsed directly from the MQTT stream already being consumed. No new network calls.
+
+Renders only when at least one slot has material loaded. Hidden when AMS is empty or absent.
+
+**Known cosmetic issue:** AMS HT (High Temperature variant on H2D) has MQTT unit ID 128; the label renders as "AMS 129" instead of "AMS HT". Fix: special-case unit IDs ≥ 128 in the label.
+
+### MMU gate display (Voron — Happy Hare)
+
+A panel equivalent to the AMS display, but for the Voron's multi-material unit managed by Happy Hare via Moonraker.
+
+Data source: Happy Hare exposes state via Moonraker's `printer.objects.query` endpoint — specifically the `mmu` object which includes gate colours, materials, filament presence, and the current selector position.
+
+Renders only when MMU is enabled and has loaded gates. Hidden otherwise.
+
+**Status as of Tier 2 completion:** AMS display is shipped. MMU display is the next implementation item.
+
+---
+
 ## What is NOT in Tier 2
 
 Captured here for completeness. Anything you reach for in Tier 2 and don't find, check whether it's deliberately deferred:
@@ -362,8 +392,8 @@ Captured here for completeness. Anything you reach for in Tier 2 and don't find,
 - File upload / queue management
 - Macro buttons (per-printer specific, not unified across types)
 - Mesh bed levelling visualisation
-- AMS slot management UI
-- MMU controls
+- **AMS slot management UI** (load/unload/swap — controls, not display; Bambu Handy handles this)
+- **MMU controls** (load/eject/recover — controls, not display; Happy Hare's own UI handles this)
 - Settings / config editing
 - Slicer integration / file ingestion
 - Multi-user access controls
@@ -378,20 +408,19 @@ These live in `TIER2_BACKLOG.md` or future tier specs.
 
 ## Implementation order
 
-1. **Bambu Network mode audit and command test** — precondition. Don't proceed until this is done.
-2. **Top-level tab navigation** — printer tabs + All Cameras tab. Stub out the destinations with placeholder content first; get routing working.
-3. **Per-printer page Live tab — read-only.** Render camera, temps, print details. No buttons yet. Confirm the data plumbing works at the new scale.
-4. **Per-printer page Live tab — controls.** Add Pause / Resume / Cancel / E-Stop with confirmation modals. Implement command-sending for both printer types. Test on a non-critical print or a deliberately-started test print.
-5. **Per-printer page Live tab — temperature controls.** Nudge controls + direct input.
-6. **Object exclusion panel.** Render when applicable, wire the EXCLUDE_OBJECT commands.
-7. **All Cameras view.** Grid of streams, overlays, tap-to-drill.
-8. **History sub-tab — heatmap.** Year view, summary line, navigation.
-9. **History sub-tab — day detail.** Modal/panel with day's prints.
-10. **History sub-tab — print detail.** Full info per print.
-
-Each step should ship to the dashboard and be usable before moving to the next. Don't batch 3-10 into one big PR.
-
-Show me the result of step 1 (Bambu audit) before doing step 2. Show me a working step 3 (read-only Live tab for one printer) before adding controls in step 4.
+1. ✅ **Bambu Network mode audit and command test** — LAN mode confirmed on both Bambus; RTSP on port 322; MQTT commands working.
+2. ✅ **Top-level tab navigation** — printer tabs + All Cameras tab, client-side hash routing.
+3. ✅ **Per-printer page Live tab — read-only.** Camera, temps, print details.
+4. ✅ **Per-printer page Live tab — controls.** Pause / Resume / Cancel / E-Stop with confirmation modals for Cancel and E-Stop.
+5. ✅ **Per-printer page Live tab — temperature controls.** Nudge buttons + inline edit.
+6. ✅ **Object exclusion panel.** Renders when multi-object print active; confirmation modal before exclusion.
+7. ✅ **All Cameras view.** Grid of live streams; tap-to-drill to printer.
+8. ✅ **History sub-tab — heatmap.** Year-based grid, 4-tier green intensity, year navigation, summary line.
+9. ✅ **History sub-tab — day detail.** Day panel with print list on cell click.
+10. ✅ **History sub-tab — print detail.** Full print info card with back navigation; instant (cached).
+11. ✅ **AMS display panel** (bonus). Slot colours, material type, active-slot indicator; Bambu Live tab. _Cosmetic bug: AMS HT shows as "AMS 129" — fix pending._
+12. ✅ **Two-column Live layout** (bonus). Camera fills left, sidebar right; no scrolling on desktop.
+13. ✅ **MMU display panel** (bonus). Happy Hare gate state for the Voron via `mmu` Moonraker object. Gate colours, material, active gate indicator. Vendor label from `mmu_machine.unit_0.name` ("BTT VVD"). RRGGBBAA colour normalisation.
 
 ---
 

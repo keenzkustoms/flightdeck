@@ -87,11 +87,17 @@ async def fetch(id: str, model_name: str, custom_name: str, icon: str, base_url:
         if mmu:
             idle_info["MMU"] = _fmt_mmu(mmu)
 
+    mmu_panel = _parse_mmu(
+        data.get("mmu", {}),
+        data.get("mmu_machine", {}),
+        {},
+    )
+
     now = datetime.utcnow()
     return PrinterStatus(
         id=id, model_name=model_name, custom_name=custom_name, icon=icon,
         kind="moonraker", state=state, temps=temps, job=job,
-        idle_info=idle_info, last_seen=now, updated_at=now,
+        idle_info=idle_info, mmu=mmu_panel, last_seen=now, updated_at=now,
     )
 
 
@@ -179,6 +185,39 @@ def _resolve_state(
     return "idle"
 
 
+_CONTROL_PATHS = {
+    "pause":  "/printer/print/pause",
+    "resume": "/printer/print/resume",
+    "cancel": "/printer/print/cancel",
+    "estop":  "/printer/emergency_stop",
+}
+
+
+_HEATER_NAMES = {"hotend": "extruder", "bed": "heater_bed"}
+
+
+async def set_temp(base_url: str, heater: str, target: int) -> None:
+    name = _HEATER_NAMES.get(heater)
+    if not name:
+        return
+    gcode = f"SET_HEATER_TEMPERATURE HEATER={name} TARGET={target}"
+    async with httpx.AsyncClient(timeout=5.0) as client:
+        resp = await client.post(
+            f"{base_url.rstrip('/')}/printer/gcode/script",
+            json={"script": gcode},
+        )
+        resp.raise_for_status()
+
+
+async def control(base_url: str, action: str) -> None:
+    path = _CONTROL_PATHS.get(action)
+    if not path:
+        raise ValueError(f"unknown action: {action}")
+    async with httpx.AsyncClient(timeout=5.0) as client:
+        resp = await client.post(f"{base_url.rstrip('/')}{path}")
+        resp.raise_for_status()
+
+
 async def fetch_preview(base_url: str, filename: str) -> Optional[MoonrakerPreview]:
     """Fetch slicer thumbnail + metadata for the given gcode filename."""
     global _preview_cache
@@ -248,6 +287,60 @@ def _fmt_mmu(mmu: dict) -> str:
     return " · ".join(parts)
 
 
+def _parse_mmu(mmu: dict, mmu_machine: dict, _gate_map: dict) -> list:
+    """Parse Happy Hare MMU state into a gate list for the UI panel.
+
+    Gate arrays live directly on the mmu object (not mmu_gate_map).
+    Colors are RRGGBBAA hex — only the first 6 chars are used.
+    Vendor comes from mmu_machine["unit_0"]["name"].
+    """
+    if not mmu.get("enabled"):
+        return []
+
+    num_gates = int(mmu.get("num_gates", 0))
+    if not num_gates:
+        return []
+
+    current_gate = int(mmu.get("gate", -1))
+
+    statuses       = mmu.get("gate_status", [])
+    materials      = mmu.get("gate_material", [])
+    colors         = mmu.get("gate_color", [])
+    filament_names = mmu.get("gate_filament_name", [])
+
+    def _at(lst, i, default=""):
+        try:
+            return lst[i]
+        except (IndexError, TypeError):
+            return default
+
+    def _norm_color(raw: str) -> str:
+        # RRGGBBAA → take first 6 hex chars; skip black/transparent
+        h = (raw or "").lstrip("#")[:6].upper()
+        return f"#{h}" if h and h not in ("000000", "FFFFFF") else ""
+
+    gates = []
+    for i in range(num_gates):
+        status = _at(statuses, i, 0)  # 0=empty, 1=available, 2=buffered
+        empty = (status == 0)
+        gates.append({
+            "idx": i,
+            "material": _at(materials, i, ""),
+            "color": _norm_color(_at(colors, i, "")),
+            "filament_name": _at(filament_names, i, ""),
+            "status": status,
+            "active": (i == current_gate) and not empty,
+            "empty": empty,
+        })
+
+    if not any(not g["empty"] for g in gates):
+        return []
+
+    unit0 = mmu_machine.get("unit_0", {})
+    vendor = unit0.get("name") or unit0.get("vendor") or "MMU"
+    return [{"vendor": vendor, "num_gates": num_gates, "current_gate": current_gate, "gates": gates}]
+
+
 def _pick_thumbnail(thumbnails: list) -> Optional[dict]:
     """Return the largest thumbnail with both dimensions ≤ 200px."""
     candidates = [
@@ -255,3 +348,49 @@ def _pick_thumbnail(thumbnails: list) -> Optional[dict]:
         if t.get("width", 0) <= 200 and t.get("height", 0) <= 200
     ]
     return max(candidates, key=lambda t: t["width"] * t["height"], default=None)
+
+
+async def fetch_objects(base_url: str) -> dict:
+    """Return exclude_object state: {supported, objects: [{name, state}]}."""
+    base_url = base_url.rstrip("/")
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{base_url}/printer/objects/query?exclude_object")
+            resp.raise_for_status()
+            data = resp.json()["result"]["status"].get("exclude_object")
+    except Exception as exc:
+        log.warning("fetch_objects failed: %s", exc)
+        return {"supported": False, "objects": []}
+
+    if not data:
+        return {"supported": False, "objects": []}
+
+    raw_objects = data.get("objects") or []
+    current = data.get("current_object")
+    excluded_set = set(data.get("excluded_objects") or [])
+
+    result = []
+    for obj in raw_objects:
+        name = obj if isinstance(obj, str) else obj.get("name", "")
+        if not name:
+            continue
+        if name in excluded_set:
+            state = "excluded"
+        elif name == current:
+            state = "current"
+        else:
+            state = "printing"
+        result.append({"name": name, "state": state})
+
+    return {"supported": True, "objects": result}
+
+
+async def exclude_object(base_url: str, name: str) -> None:
+    """Send EXCLUDE_OBJECT NAME=<name> gcode to Moonraker."""
+    gcode = f"EXCLUDE_OBJECT NAME={name}"
+    async with httpx.AsyncClient(timeout=5.0) as client:
+        resp = await client.post(
+            f"{base_url.rstrip('/')}/printer/gcode/script",
+            json={"script": gcode},
+        )
+        resp.raise_for_status()

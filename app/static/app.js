@@ -35,6 +35,19 @@ function getIcon(key) {
 const HOVER_DELAY_MS = 200;
 const LONG_PRESS_MS = 400;
 
+let _latestPrinters = [];
+let _tabsBuilt = false;
+const _cameraUrlCache = {};     // printer_id → url string or null
+let _renderedDetailId = null;
+let _renderedDetailSubtab = null;
+let _renderedDetailOk = false;
+const _pendingControls = {};    // printer_id → { action, fromState }
+const _tempOptimistic = {};     // `${id}:${heater}` → { sentTarget, expiresAt }
+const _objectsCache = {};       // printer_id → { supported, objects }
+const _historyYear = {};        // printer_id → selected year (int)
+const _dayPrintsCache = {};     // `${printerId}:${dateStr}` → prints[]
+let _camerasFull = false;       // true once cameras grid has been fully rendered
+
 // ── Popover singleton ──────────────────────────────────────────────────────
 
 const popover = document.createElement('div');
@@ -44,6 +57,34 @@ const arrowEl = document.createElement('div');
 arrowEl.id = 'popover-arrow';
 popover.appendChild(arrowEl);
 document.body.appendChild(popover);
+
+// ── Confirmation modal ─────────────────────────────────────────────────────
+
+const _modal = (() => {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay hidden';
+  overlay.innerHTML = `
+    <div class="modal-box">
+      <div class="modal-message" id="modal-msg"></div>
+      <div class="modal-actions">
+        <button class="modal-btn" id="modal-no">Cancel</button>
+        <button class="modal-btn modal-btn-danger" id="modal-yes">Confirm</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.classList.add('hidden'); });
+  overlay.querySelector('#modal-no').addEventListener('click', () => overlay.classList.add('hidden'));
+  return {
+    show(message, onConfirm) {
+      overlay.querySelector('#modal-msg').textContent = message;
+      overlay.querySelector('#modal-yes').onclick = () => {
+        overlay.classList.add('hidden');
+        onConfirm();
+      };
+      overlay.classList.remove('hidden');
+    },
+  };
+})();
 
 let activeCard = null;
 let hoverTimer = null;
@@ -58,6 +99,8 @@ function formatTime(seconds) {
 
 async function showPreview(card) {
   if (activeCard === card) return;
+  const state = card._printerData?.state;
+  if (!state || state === 'idle' || state === 'offline') return;
   activeCard = card;
   const id = card.dataset.printerId;
 
@@ -180,10 +223,13 @@ function attachCardEvents(card) {
   card.addEventListener('touchend', () => clearTimeout(longPressTimer));
   card.addEventListener('touchmove', () => clearTimeout(longPressTimer));
 
+  card.addEventListener('click', () => {
+    location.hash = `#/printer/${card.dataset.printerId}`;
+  });
   card.addEventListener('keydown', e => {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
-      activeCard === card ? hidePreview() : showPreview(card);
+      location.hash = `#/printer/${card.dataset.printerId}`;
     }
     if (e.key === 'Escape') hidePreview();
   });
@@ -250,9 +296,8 @@ function jobDisplayName(job) {
 }
 
 function renderCard(p) {
-  const isActive = p.state === 'printing' || p.state === 'paused' || p.state === 'finished';
-  const tabAttr = isActive ? ' tabindex="0"' : '';
-  const dataAttr = isActive ? ` data-printer-id="${p.id}"` : '';
+  const tabAttr = ' tabindex="0"';
+  const dataAttr = ` data-printer-id="${p.id}"`;
 
   const temps = Object.entries(p.temps || {})
     .map(([k, r]) => renderTemp(TEMP_LABELS[k] ?? k, r))
@@ -366,9 +411,834 @@ setInterval(() => {
 }, 1000);
 document.getElementById('refresh-time').textContent = new Date().toLocaleTimeString();
 
+// ── Print controls ────────────────────────────────────────────────────────
+
+function _canDo(state, action) {
+  switch (action) {
+    case 'pause':  return state === 'printing';
+    case 'resume': return state === 'paused';
+    case 'cancel': return state === 'printing' || state === 'paused';
+    case 'estop':  return state !== 'offline';
+    default: return false;
+  }
+}
+
+function _detailControls(id, p) {
+  const pending = _pendingControls[id];
+
+  function btn(action, label, cls = '') {
+    const canDo = _canDo(p.state, action);
+    const isPending = pending?.action === action;
+    const disabled = !canDo || (pending && !isPending) ? ' disabled' : '';
+    const loadingCls = isPending ? ' ctrl-loading' : '';
+    return `<button class="ctrl-btn ${cls}${loadingCls}" data-action="${action}" data-printer-id="${id}"${disabled}>${isPending ? '…' : label}</button>`;
+  }
+
+  return `
+    <div class="controls-primary">
+      ${btn('pause', 'Pause')}
+      ${btn('resume', 'Resume')}
+      ${btn('cancel', 'Cancel')}
+    </div>
+    <div class="controls-destructive">
+      ${btn('estop', '⚠ E-Stop', 'ctrl-btn-estop')}
+    </div>`;
+}
+
+function _updateControlsWidget(id) {
+  const p = _latestPrinters.find(x => x.id === id);
+  const el = document.querySelector('.detail-controls-wrap');
+  if (el && p) el.innerHTML = _detailControls(id, p);
+}
+
+async function sendControl(id, action) {
+  const p = _latestPrinters.find(x => x.id === id);
+  if (!p) return;
+
+  _pendingControls[id] = { action, fromState: p.state };
+  _updateControlsWidget(id);
+
+  // Auto-clear after 10s if no WS confirmation arrives
+  setTimeout(() => {
+    if (_pendingControls[id]?.action === action) {
+      delete _pendingControls[id];
+      _updateControlsWidget(id);
+    }
+  }, 10000);
+
+  try {
+    const resp = await fetch(`/api/printers/${id}/control`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action }),
+    });
+    if (!resp.ok) {
+      delete _pendingControls[id];
+      _updateControlsWidget(id);
+    }
+  } catch {
+    delete _pendingControls[id];
+    _updateControlsWidget(id);
+  }
+}
+
+// Delegated handler — wired once at startup
+document.getElementById('view-printer').addEventListener('click', e => {
+  const btn = e.target.closest('[data-action]');
+  if (!btn || btn.disabled) return;
+  const { action, printerId: id } = btn.dataset;
+  if (!id) return;
+
+  const CONFIRM = {
+    cancel: 'Cancel the print? This will stop the print immediately and discard progress.',
+    estop:  'Emergency stop? The printer will halt all motion and require a manual reset to continue.',
+  };
+
+  if (CONFIRM[action]) {
+    _modal.show(CONFIRM[action], () => sendControl(id, action));
+  } else {
+    sendControl(id, action);
+  }
+});
+
+// Delegated handler for temp nudge + inline edit
+document.getElementById('view-printer').addEventListener('click', e => {
+  // Nudge buttons
+  const tempBtn = e.target.closest('[data-temp-action]');
+  if (tempBtn) {
+    const { tempAction, heater, printerId: id, target } = tempBtn.dataset;
+    const current = parseInt(target, 10) || 0;
+    sendTempSet(id, heater, tempAction === 'dec' ? Math.max(0, current - 5) : current + 5);
+    return;
+  }
+
+  // Click target value → inline input
+  const targetSpan = e.target.closest('[data-temp-edit]');
+  if (targetSpan) {
+    const heater = targetSpan.dataset.tempEdit;
+    const id = targetSpan.dataset.printerId;
+    const current = parseInt(targetSpan.textContent, 10) || 0;
+
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.className = 'temp-inline-input';
+    input.value = current;
+    input.min = 0;
+    input.max = 350;
+    targetSpan.replaceWith(input);
+    input.focus();
+    input.select();
+
+    let committed = false;
+    const commit = () => {
+      if (committed) return;
+      committed = true;
+      sendTempSet(id, heater, parseInt(input.value, 10) || 0);
+    };
+    input.addEventListener('blur', commit);
+    input.addEventListener('keydown', ev => {
+      if (ev.key === 'Enter') { input.blur(); }
+      if (ev.key === 'Escape') {
+        committed = true; // suppress blur commit
+        const p = _latestPrinters.find(x => x.id === id);
+        const tempsEl = document.querySelector('#detail-temps');
+        if (tempsEl && p) tempsEl.innerHTML = _detailTempsPanel(p);
+      }
+    });
+  }
+});
+
+// ── Routing ────────────────────────────────────────────────────────────────
+
+function parseRoute() {
+  const hash = location.hash || '#/';
+  const printerMatch = hash.match(/^#\/printer\/([^/]+)(?:\/(history))?/);
+  if (printerMatch) return { view: 'printer', id: printerMatch[1], subtab: printerMatch[2] || 'live' };
+  if (hash === '#/cameras') return { view: 'cameras' };
+  return { view: 'dashboard' };
+}
+
+function router() {
+  const route = parseRoute();
+  document.getElementById('view-dashboard').hidden = route.view !== 'dashboard';
+  document.getElementById('view-printer').hidden   = route.view !== 'printer';
+  document.getElementById('view-cameras').hidden   = route.view !== 'cameras';
+
+  document.querySelectorAll('#tab-strip .tab').forEach(tab => {
+    const href = tab.getAttribute('href');
+    tab.classList.toggle('active',
+      (route.view === 'printer'  && href === `#/printer/${route.id}`) ||
+      (route.view === 'cameras'  && href === '#/cameras')
+    );
+  });
+
+  if (route.view !== 'cameras') _camerasFull = false;
+  if (route.view === 'printer') renderPrinterDetail(route.id, route.subtab);
+  if (route.view === 'cameras') renderCamerasView();
+}
+
+function buildTabs(printers) {
+  const nav = document.getElementById('tab-strip');
+  nav.innerHTML = [
+    ...printers.map(p => `<a class="tab" href="#/printer/${p.id}">${p.model_name}</a>`),
+    `<a class="tab" href="#/cameras">All Cameras</a>`,
+  ].join('');
+  _tabsBuilt = true;
+  router();
+}
+
+// ── Printer detail helpers ─────────────────────────────────────────────────
+
+function _detailSubTabs(id, active) {
+  return `<div class="detail-sub-tabs">
+    <a class="sub-tab ${active === 'live' ? 'active' : ''}" href="#/printer/${id}">Live</a>
+    <a class="sub-tab ${active === 'history' ? 'active' : ''}" href="#/printer/${id}/history">History</a>
+  </div>`;
+}
+
+function _detailPrintPanel(p) {
+  const title = `<div class="detail-panel-title">Print Details</div>`;
+
+  if (!p.job || (p.state === 'idle' || p.state === 'offline')) {
+    const entries = Object.entries(p.idle_info || {});
+    if (!entries.length) return title + `<div class="detail-row"><span class="detail-label">—</span></div>`;
+    return `<div class="detail-panel-title">Last Print</div>` +
+      entries.map(([k, v]) => `
+        <div class="detail-row">
+          <span class="detail-label">${k}</span>
+          <span class="detail-value">${v}</span>
+        </div>`).join('');
+  }
+
+  const job = p.job;
+  const name = jobDisplayName(job);
+  const pct = (job.progress * 100).toFixed(0);
+  const layers = job.layer_current != null && job.layer_total != null
+    ? `${job.layer_current} / ${job.layer_total}` : '—';
+
+  return title +
+    `<div class="detail-row"><span class="detail-label">File</span><span class="detail-value">${name}</span></div>` +
+    `<div class="detail-progress-bar"><div class="detail-progress-fill" style="width:${pct}%"></div></div>` +
+    `<div class="detail-row"><span class="detail-label">Progress</span><span class="detail-value">${pct}%</span></div>` +
+    `<div class="detail-row"><span class="detail-label">Layer</span><span class="detail-value">${layers}</span></div>` +
+    `<div class="detail-row"><span class="detail-label">ETA</span><span class="detail-value">${formatEta(job.eta_seconds)}</span></div>`;
+}
+
+const _TEMP_CTRL_HEATERS = new Set(['hotend', 'bed']);
+const _TEMP_LABELS = { hotend: 'Hotend', bed: 'Bed', chamber: 'Chamber' };
+
+function _getDisplayTarget(id, heater, wsTarget) {
+  const key = `${id}:${heater}`;
+  const opt = _tempOptimistic[key];
+  if (!opt || Date.now() >= opt.expiresAt) { delete _tempOptimistic[key]; return wsTarget; }
+  if (Math.abs(wsTarget - opt.sentTarget) <= 1) { delete _tempOptimistic[key]; return wsTarget; }
+  return opt.sentTarget;
+}
+
+function _detailTempsPanel(p) {
+  const entries = Object.entries(p.temps || {});
+  const title = `<div class="detail-panel-title">Temperatures</div>`;
+  if (!entries.length) return title + `<div class="detail-row"><span class="detail-label">—</span></div>`;
+
+  const rows = entries.map(([k, r]) => {
+    const label = _TEMP_LABELS[k] ?? k;
+    const actual = r.actual.toFixed(0);
+    const target = _getDisplayTarget(p.id, k, r.target);
+    const hasCtrl = _TEMP_CTRL_HEATERS.has(k);
+
+    if (!hasCtrl) {
+      return `<div class="temp-ctrl-row">
+        <span class="temp-row-label">${label}</span>
+        <div class="temp-readings"><span class="temp-actual">${actual}°</span></div>
+      </div>`;
+    }
+
+    const targetHtml = target > 0
+      ? `<span class="temp-sep">/</span>
+         <span class="temp-target-val" data-temp-edit="${k}" data-printer-id="${p.id}">${Math.round(target)}°</span>`
+      : `<span class="temp-sep" style="font-size:0.75rem">off</span>`;
+
+    return `<div class="temp-ctrl-row">
+      <span class="temp-row-label">${label}</span>
+      <div class="temp-readings">
+        <span class="temp-actual">${actual}°</span>
+        ${targetHtml}
+      </div>
+      <div class="temp-nudge">
+        <button class="temp-btn" data-temp-action="dec" data-heater="${k}" data-printer-id="${p.id}" data-target="${Math.round(target)}">−</button>
+        <button class="temp-btn" data-temp-action="inc" data-heater="${k}" data-printer-id="${p.id}" data-target="${Math.round(target)}">+</button>
+      </div>
+    </div>`;
+  }).join('');
+
+  return title + `<div class="temp-rows">${rows}</div>`;
+}
+
+async function sendTempSet(id, heater, target) {
+  const clampedTarget = Math.max(0, Math.min(350, Math.round(target)));
+  _tempOptimistic[`${id}:${heater}`] = { sentTarget: clampedTarget, expiresAt: Date.now() + 12000 };
+
+  // Optimistic re-render of just the temps panel
+  const p = _latestPrinters.find(x => x.id === id);
+  const tempsEl = document.querySelector('#detail-temps');
+  if (tempsEl && p) tempsEl.innerHTML = _detailTempsPanel(p);
+
+  try {
+    await fetch(`/api/printers/${id}/set-temp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ heater, target: clampedTarget }),
+    });
+  } catch {
+    delete _tempOptimistic[`${id}:${heater}`];
+  }
+}
+
+// ── AMS panel ─────────────────────────────────────────────────────────────
+
+function _detailAmsPanel(p) {
+  if (!p.ams?.length) return '';
+  const hasLoaded = p.ams.some(u => u.slots.some(s => !s.empty));
+  if (!hasLoaded) return '';
+
+  const title = `<div class="detail-panel-title">AMS</div>`;
+  const units = p.ams.map(unit => {
+    const slots = unit.slots.map(slot => {
+      const style = (!slot.empty && slot.color) ? `style="background:${slot.color}"` : '';
+      const activeCls = slot.active ? ' ams-active' : '';
+      const emptyCls  = slot.empty  ? ' ams-empty'  : '';
+      const tip = slot.empty
+        ? `Slot ${slot.idx + 1}: empty`
+        : [slot.type, slot.brand].filter(Boolean).join(' · ');
+      return `<div class="ams-slot-wrap">
+        <div class="ams-slot${activeCls}${emptyCls}" ${style} title="${tip}"></div>
+        <span class="ams-slot-type">${slot.empty ? '' : slot.type}</span>
+      </div>`;
+    }).join('');
+    return `<div class="ams-unit">
+      <span class="ams-unit-lbl">${unit.label ?? 'AMS ' + (unit.unit + 1)}</span>
+      <div class="ams-slots">${slots}</div>
+    </div>`;
+  }).join('');
+
+  return `<div class="detail-panel">${title}<div class="ams-units">${units}</div></div>`;
+}
+
+// ── MMU panel ─────────────────────────────────────────────────────────────
+
+function _detailMmuPanel(p) {
+  if (!p.mmu?.length) return '';
+  const unit = p.mmu[0];
+  if (!unit.gates?.length) return '';
+
+  const title = `<div class="detail-panel-title">${unit.vendor || 'MMU'} · ${unit.num_gates} gates</div>`;
+
+  const slots = unit.gates.map(gate => {
+    const style = (!gate.empty && gate.color) ? `style="background:${gate.color}"` : '';
+    const activeCls = gate.active ? ' ams-active' : '';
+    const emptyCls  = gate.empty  ? ' ams-empty'  : '';
+    const bufferedCls = (!gate.empty && gate.status === 2) ? ' mmu-buffered' : '';
+    const tip = gate.empty
+      ? `T${gate.idx}: empty`
+      : [gate.filament_name || gate.material, gate.status === 2 ? 'buffered' : 'available']
+          .filter(Boolean).join(' · ');
+    return `<div class="ams-slot-wrap">
+      <div class="ams-slot${activeCls}${emptyCls}${bufferedCls}" ${style} title="${tip}"></div>
+      <span class="ams-slot-type">${gate.empty ? '' : (gate.material || '')}</span>
+    </div>`;
+  }).join('');
+
+  return `<div class="detail-panel">${title}<div class="ams-slots">${slots}</div></div>`;
+}
+
+// ── Object exclusion panel ────────────────────────────────────────────────
+
+function _detailObjectsPanel(id, objects) {
+  if (!objects || objects.length < 2) return '';
+  const title = `<div class="detail-panel-title">Print Objects</div>`;
+  const rows = objects.map(obj => {
+    const isExcluded = obj.state === 'excluded';
+    const isCurrent = obj.state === 'current';
+    const shortName = obj.name.replace(/.*[/\\]/, '');
+    const safeName = obj.name.replace(/"/g, '&quot;');
+    const stateHtml = isCurrent
+      ? `<span class="obj-state obj-state-current">▶</span>`
+      : isExcluded
+        ? `<span class="obj-state obj-state-excluded">✗</span>`
+        : '';
+    return `<div class="obj-row${isExcluded ? ' obj-row-excluded' : ''}">
+      <label class="obj-label">
+        <input type="checkbox" class="obj-check"
+          data-obj-name="${safeName}" data-printer-id="${id}"
+          ${isExcluded ? 'checked disabled' : ''}>
+        <span class="obj-name" title="${safeName}">${shortName}</span>
+      </label>
+      ${stateHtml}
+    </div>`;
+  }).join('');
+  return `<div class="detail-panel">${title}<div class="obj-list">${rows}</div></div>`;
+}
+
+async function refreshObjectsPanel(id) {
+  try {
+    const r = await fetch(`/api/printers/${id}/objects`);
+    if (!r.ok) return;
+    _objectsCache[id] = await r.json();
+  } catch { return; }
+
+  const el = document.querySelector('#detail-objects');
+  if (!el) return;
+  const data = _objectsCache[id];
+  el.innerHTML = (data?.supported && data.objects?.length > 1)
+    ? _detailObjectsPanel(id, data.objects)
+    : '';
+}
+
+async function sendExcludeObject(id, name) {
+  try {
+    await fetch(`/api/printers/${id}/exclude-object`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    });
+    await refreshObjectsPanel(id);
+  } catch {}
+}
+
+// Delegated click for object exclusion checkboxes
+document.getElementById('view-printer').addEventListener('click', e => {
+  const cb = e.target.closest('.obj-check');
+  if (!cb || cb.disabled) return;
+  e.preventDefault();
+  const name = cb.dataset.objName;
+  const id = cb.dataset.printerId;
+  if (!name || !id) return;
+  const shortName = name.replace(/.*[/\\]/, '');
+  _modal.show(
+    `Exclude "${shortName}" from this print? The printer will skip this object.`,
+    () => sendExcludeObject(id, name)
+  );
+});
+
+// ── History tab ───────────────────────────────────────────────────────────
+
+function _heatColor(total) {
+  if (!total) return null;              // transparent + border via .heat-empty
+  if (total >= 5) return 'rgba(34,197,94,1)';
+  if (total >= 3) return 'rgba(34,197,94,0.55)';
+  return 'rgba(34,197,94,0.25)';
+}
+
+function _historyYearNav(year, currentYear) {
+  const nextDisabled = year >= currentYear;
+  return `<div class="heat-year-nav">
+    <button class="heat-year-btn" data-year-prev>&lsaquo; ${year - 1}</button>
+    <span class="heat-year-current">${year}</span>
+    <button class="heat-year-btn" data-year-next${nextDisabled ? ' disabled' : ''}>${year + 1} &rsaquo;</button>
+  </div>`;
+}
+
+function _historySummaryLine(summary) {
+  const prints = summary.prints || 0;
+  if (!prints) return `<div class="heat-summary">No finished prints recorded</div>`;
+  const hours = summary.seconds ? (summary.seconds / 3600).toFixed(1) : '0';
+  const kg = summary.grams ? (summary.grams / 1000).toFixed(2) : null;
+  const parts = [`${prints} print${prints !== 1 ? 's' : ''}`, `${hours}h`];
+  if (kg) parts.push(`${kg}kg filament`);
+  return `<div class="heat-summary">${parts.join(' · ')}</div>`;
+}
+
+function _historyHeatmap(printerId, dayData, year) {
+  const byDate = {};
+  for (const d of dayData) byDate[d.day] = d;
+
+  const jan1 = new Date(Date.UTC(year, 0, 1));
+  const jan1dow = jan1.getUTCDay();
+  const daysToMon = jan1dow === 0 ? 6 : jan1dow - 1;
+  const gridStart = new Date(jan1);
+  gridStart.setUTCDate(jan1.getUTCDate() - daysToMon);
+
+  const dec31 = new Date(Date.UTC(year, 11, 31));
+  const dec31dow = dec31.getUTCDay();
+  const daysToSun = dec31dow === 0 ? 0 : 7 - dec31dow;
+  const gridEnd = new Date(dec31);
+  gridEnd.setUTCDate(dec31.getUTCDate() + daysToSun);
+
+  const numWeeks = Math.ceil(((gridEnd - gridStart) / 86400000 + 1) / 7);
+  const todayUTC = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate()));
+
+  const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  let lastMonth = -1;
+  const monthLabels = [];
+  const cellsHtml = [];
+
+  for (let w = 0; w < numWeeks; w++) {
+    const weekMon = new Date(gridStart);
+    weekMon.setUTCDate(gridStart.getUTCDate() + w * 7);
+    const m = weekMon.getUTCMonth();
+    const wYear = weekMon.getUTCFullYear();
+    monthLabels.push(m !== lastMonth && wYear === year ? MONTHS[m] : '');
+    lastMonth = m;
+
+    for (let d = 0; d < 7; d++) {
+      const cell = new Date(gridStart);
+      cell.setUTCDate(gridStart.getUTCDate() + w * 7 + d);
+      const dateStr = cell.toISOString().slice(0, 10);
+      const data = byDate[dateStr] || {};
+      const total = data.total || 0;
+      const isFuture = cell > todayUTC;
+      const isOut = cell.getUTCFullYear() !== year;
+      const color = _heatColor(total);
+      const cls = ['heat-cell',
+        color === null ? 'heat-empty' : '',
+        isFuture ? 'heat-future' : '',
+        isOut ? 'heat-out' : '',
+      ].filter(Boolean).join(' ');
+      const tip = total
+        ? `${dateStr}: ${total} print${total !== 1 ? 's' : ''} (${data.finished || 0} finished)`
+        : dateStr;
+      cellsHtml.push(
+        `<div class="${cls}" data-date="${dateStr}"${color ? ` style="background:${color}"` : ''} title="${tip}"></div>`
+      );
+    }
+  }
+
+  const DAY_LABELS = ['Mon','','Wed','','Fri','','Sun'];
+  return `<div class="history-section">
+    <div class="heat-wrap">
+      <div class="heat-months">${monthLabels.map(m => `<span class="heat-month">${m}</span>`).join('')}</div>
+      <div class="heat-body">
+        <div class="heat-days">${DAY_LABELS.map(l => `<span class="heat-day-label">${l}</span>`).join('')}</div>
+        <div class="heat-grid" id="heat-grid-${printerId}">${cellsHtml.join('')}</div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function _printBadge(state) {
+  const cls = state === 'FINISHED' ? 'idle' : state === 'CANCELLED' ? 'paused' : state === 'ERROR' ? 'error' : 'printing';
+  const label = state === 'FINISHED' ? 'done' : state === 'CANCELLED' ? 'cancelled' : state === 'ERROR' ? 'failed' : 'running';
+  return { cls, label };
+}
+
+function _printRowHtml(print, idx, dateStr) {
+  const raw = print.subtask_name || print.filename.replace(/.*[/\\]/, '');
+  const name = raw.replace(/\.gcode$/i, '');
+  const state = print.final_state || 'running';
+  const { cls, label } = _printBadge(state);
+
+  const dur = print.duration_seconds ? formatTime(print.duration_seconds) : '—';
+  const ts = print.started_at + (print.started_at.endsWith('Z') ? '' : 'Z');
+  const time = new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const layers = (print.layers_completed != null && print.layers_total)
+    ? ` · ${print.layers_completed}/${print.layers_total}L` : '';
+
+  return `<div class="print-row" data-print-idx="${idx}" data-date="${dateStr}">
+    <div class="print-name" title="${print.filename}">${name}</div>
+    <span class="badge badge-${cls}" style="font-size:0.6rem;padding:0.15rem 0.5rem">${label}</span>
+    <span class="print-meta">${time}</span>
+    <span class="print-meta">${dur}${layers}</span>
+  </div>`;
+}
+
+function _showPrintDetail(printerId, dateStr, print) {
+  const el = document.getElementById('history-day-detail');
+  if (!el) return;
+
+  const raw = print.subtask_name || print.filename.replace(/.*[/\\]/, '');
+  const name = raw.replace(/\.gcode$/i, '');
+  const state = print.final_state || 'running';
+  const { cls, label } = _printBadge(state);
+
+  const fmtTs = ts => {
+    if (!ts) return '—';
+    return new Date(ts.endsWith('Z') ? ts : ts + 'Z')
+      .toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  };
+
+  const d = new Date(dateStr + 'T00:00:00Z');
+  const dateLabel = d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' });
+
+  const rows = [];
+  rows.push(`<div class="detail-row"><span class="detail-label">Started</span><span class="detail-value">${fmtTs(print.started_at)}</span></div>`);
+  if (print.ended_at) rows.push(`<div class="detail-row"><span class="detail-label">Ended</span><span class="detail-value">${fmtTs(print.ended_at)}</span></div>`);
+  if (print.duration_seconds) rows.push(`<div class="detail-row"><span class="detail-label">Duration</span><span class="detail-value">${formatTime(print.duration_seconds)}</span></div>`);
+  if (print.layers_completed != null || print.layers_total != null) {
+    rows.push(`<div class="detail-row"><span class="detail-label">Layers</span><span class="detail-value">${print.layers_completed ?? '—'} / ${print.layers_total ?? '—'}</span></div>`);
+  }
+  if (print.filament_grams != null) {
+    const mat = print.material ? ` · ${print.material}` : '';
+    rows.push(`<div class="detail-row"><span class="detail-label">Filament</span><span class="detail-value">${print.filament_grams.toFixed(1)}g${mat}</span></div>`);
+  }
+
+  const errorHtml = print.error_message
+    ? `<div class="print-detail-error">${print.error_message}</div>`
+    : '';
+
+  el.innerHTML = `<div class="history-day-panel">
+    <div class="print-detail-nav">
+      <button class="print-detail-back" data-back-date="${dateStr}">&larr; ${dateLabel}</button>
+    </div>
+    <div class="print-detail-header">
+      <span class="print-detail-name" title="${print.filename}">${name}</span>
+      <span class="badge badge-${cls}" style="font-size:0.6rem;padding:0.15rem 0.5rem">${label}</span>
+    </div>
+    ${errorHtml}
+    <div>${rows.join('')}</div>
+  </div>`;
+}
+
+function _renderDayList(printerId, dateStr, prints, el) {
+  const d = new Date(dateStr + 'T00:00:00Z');
+  const header = d.toLocaleDateString([], { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC' });
+  if (!prints.length) {
+    el.innerHTML = `<div class="history-day-panel"><div class="history-day-header">${header}</div><div class="print-empty">No prints recorded.</div></div>`;
+    return;
+  }
+  el.innerHTML = `<div class="history-day-panel"><div class="history-day-header">${header}</div>${prints.map((p, i) => _printRowHtml(p, i, dateStr)).join('')}</div>`;
+}
+
+async function _loadDayDetail(printerId, dateStr) {
+  const el = document.getElementById('history-day-detail');
+  if (!el) return;
+
+  const key = `${printerId}:${dateStr}`;
+  if (_dayPrintsCache[key]) {
+    _renderDayList(printerId, dateStr, _dayPrintsCache[key], el);
+    return;
+  }
+
+  el.innerHTML = `<div class="history-day-loading">…</div>`;
+  let prints = [];
+  try {
+    const r = await fetch(`/api/printers/${printerId}/history/day/${dateStr}`);
+    if (r.ok) prints = await r.json();
+  } catch {}
+
+  _dayPrintsCache[key] = prints;
+  _renderDayList(printerId, dateStr, prints, el);
+}
+
+async function _renderHistoryBody(printerId) {
+  const el = document.getElementById('history-body');
+  if (!el) return;
+
+  if (!_historyYear[printerId]) _historyYear[printerId] = new Date().getUTCFullYear();
+  const year = _historyYear[printerId];
+  const currentYear = new Date().getUTCFullYear();
+
+  let data = { days: [], summary: {} };
+  try {
+    const r = await fetch(`/api/printers/${printerId}/history/calendar?year=${year}`);
+    if (r.ok) data = await r.json();
+  } catch {}
+
+  el.innerHTML =
+    _historyYearNav(year, currentYear) +
+    _historySummaryLine(data.summary) +
+    _historyHeatmap(printerId, data.days, year) +
+    `<div id="history-day-detail"></div>`;
+
+  el.querySelector('[data-year-prev]')?.addEventListener('click', () => {
+    _historyYear[printerId] = year - 1;
+    _renderHistoryBody(printerId);
+  });
+  el.querySelector('[data-year-next]')?.addEventListener('click', () => {
+    _historyYear[printerId] = year + 1;
+    _renderHistoryBody(printerId);
+  });
+
+  el.querySelector(`#heat-grid-${printerId}`)?.addEventListener('click', e => {
+    const cell = e.target.closest('.heat-cell');
+    if (!cell || cell.classList.contains('heat-future') || cell.classList.contains('heat-out')) return;
+    el.querySelectorAll('.heat-cell.selected').forEach(c => c.classList.remove('selected'));
+    cell.classList.add('selected');
+    _loadDayDetail(printerId, cell.dataset.date);
+  });
+
+  // Print row → detail; back button → day list
+  el.addEventListener('click', e => {
+    const back = e.target.closest('[data-back-date]');
+    if (back) { _loadDayDetail(printerId, back.dataset.backDate); return; }
+    const row = e.target.closest('.print-row[data-print-idx]');
+    if (row) {
+      const key = `${printerId}:${row.dataset.date}`;
+      const prints = _dayPrintsCache[key];
+      if (prints) _showPrintDetail(printerId, row.dataset.date, prints[parseInt(row.dataset.printIdx, 10)]);
+    }
+  });
+}
+
+async function renderPrinterDetail(id, subtab = 'live') {
+  const el = document.getElementById('printer-detail');
+  const p = _latestPrinters.find(x => x.id === id);
+
+  const needsFullRender =
+    _renderedDetailId !== id ||
+    _renderedDetailSubtab !== subtab ||
+    !_renderedDetailOk;
+
+  _renderedDetailId = id;
+  _renderedDetailSubtab = subtab;
+
+  if (!p) {
+    _renderedDetailOk = false;
+    el.innerHTML = `<div class="detail-placeholder">Connecting…</div>`;
+    return;
+  }
+
+  _renderedDetailOk = true;
+
+  if (subtab === 'history') {
+    if (needsFullRender) {
+      el.innerHTML = _detailSubTabs(id, 'history') +
+        `<div class="history-body" id="history-body">
+          <div class="detail-placeholder" style="min-height:40vh">Loading…</div>
+        </div>`;
+      _renderHistoryBody(id);
+    }
+    return;
+  }
+
+  // Live tab — fetch camera URL once
+  if (_cameraUrlCache[id] === undefined) {
+    try {
+      const r = await fetch(`/api/printers/${id}/camera`);
+      _cameraUrlCache[id] = r.ok ? (await r.json()).url : null;
+    } catch { _cameraUrlCache[id] = null; }
+  }
+
+  if (needsFullRender) {
+    const camUrl = _cameraUrlCache[id];
+    const camHtml = (camUrl && p.state !== 'offline')
+      ? `<img id="detail-cam-img" src="${camUrl}" alt="Live camera">`
+      : `<div class="camera-hero-offline">${p.state === 'offline' ? 'Printer offline' : 'No camera configured'}</div>`;
+
+    el.innerHTML =
+      _detailSubTabs(id, 'live') +
+      `<div class="detail-body">
+        <div class="detail-left">
+          <div class="camera-hero">${camHtml}</div>
+        </div>
+        <div class="detail-right">
+          <div class="detail-controls detail-controls-wrap">${_detailControls(id, p)}</div>
+          <div class="detail-panels">
+            <div class="detail-panel" id="detail-print">${_detailPrintPanel(p)}</div>
+            <div class="detail-panel" id="detail-temps">${_detailTempsPanel(p)}</div>
+          </div>
+          <div id="detail-ams">${_detailAmsPanel(p)}</div>
+          <div id="detail-mmu">${_detailMmuPanel(p)}</div>
+          <div id="detail-objects"></div>
+        </div>
+      </div>`;
+
+    // Fullscreen on camera click
+    const img = el.querySelector('#detail-cam-img');
+    if (img) img.addEventListener('click', () => img.requestFullscreen?.());
+
+    if (p.state === 'printing' || p.state === 'paused') refreshObjectsPanel(id);
+  } else {
+    const ctrlEl = el.querySelector('.detail-controls-wrap');
+    if (ctrlEl) ctrlEl.innerHTML = _detailControls(id, p);
+    const printEl = el.querySelector('#detail-print');
+    if (printEl) printEl.innerHTML = _detailPrintPanel(p);
+    const tempsEl = el.querySelector('#detail-temps');
+    if (tempsEl) tempsEl.innerHTML = _detailTempsPanel(p);
+    const amsEl = el.querySelector('#detail-ams');
+    if (amsEl) amsEl.innerHTML = _detailAmsPanel(p);
+    const mmuEl = el.querySelector('#detail-mmu');
+    if (mmuEl) mmuEl.innerHTML = _detailMmuPanel(p);
+  }
+}
+
+// ── Cameras grid ──────────────────────────────────────────────────────────
+
+function _camHeaderInner(p) {
+  const badgeLabel = p.state === 'finished' ? 'complete' : p.state;
+  return `<div class="printer-identity">
+    <div class="printer-icon">${getIcon(p.icon)}</div>
+    ${connDot(p.last_seen)}
+    <div class="printer-names">
+      <span class="printer-model">${p.model_name}</span>
+      <span class="printer-custom">${p.custom_name}</span>
+    </div>
+  </div>
+  <span class="badge badge-${p.state}">${badgeLabel}</span>`;
+}
+
+function _camTileHtml(p) {
+  const camUrl = _cameraUrlCache[p.id];
+  const feed = (camUrl && p.state !== 'offline')
+    ? `<img src="${camUrl}" alt="${p.custom_name}">`
+    : `<div class="cam-tile-offline">${p.state === 'offline' ? 'Offline' : 'No camera'}</div>`;
+  return `<div class="cam-tile" data-printer-id="${p.id}" tabindex="0">
+    <div class="cam-tile-header">${_camHeaderInner(p)}</div>
+    <div class="cam-tile-feed">${feed}</div>
+  </div>`;
+}
+
+async function renderCamerasView() {
+  const el = document.getElementById('cameras-grid');
+
+  if (_camerasFull) {
+    _latestPrinters.forEach(p => {
+      const header = el.querySelector(`.cam-tile[data-printer-id="${p.id}"] .cam-tile-header`);
+      if (header) header.innerHTML = _camHeaderInner(p);
+    });
+    return;
+  }
+
+  if (!_latestPrinters.length) {
+    el.innerHTML = `<div class="detail-placeholder">Connecting…</div>`;
+    return;
+  }
+
+  await Promise.all(_latestPrinters.map(async p => {
+    if (_cameraUrlCache[p.id] === undefined) {
+      try {
+        const r = await fetch(`/api/printers/${p.id}/camera`);
+        _cameraUrlCache[p.id] = r.ok ? (await r.json()).url : null;
+      } catch { _cameraUrlCache[p.id] = null; }
+    }
+  }));
+
+  el.innerHTML = _latestPrinters.map(_camTileHtml).join('');
+
+  el.querySelectorAll('.cam-tile[data-printer-id]').forEach(tile => {
+    tile.addEventListener('click', () => location.hash = `#/printer/${tile.dataset.printerId}`);
+    tile.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        location.hash = `#/printer/${tile.dataset.printerId}`;
+      }
+    });
+  });
+
+  _camerasFull = true;
+}
+
 // ── Dashboard update ───────────────────────────────────────────────────────
 
 function updateDashboard(printers) {
+  // Clear pending controls when the printer's state has changed
+  for (const id of Object.keys(_pendingControls)) {
+    const p = printers.find(x => x.id === id);
+    if (p && p.state !== _pendingControls[id].fromState) {
+      delete _pendingControls[id];
+    }
+  }
+
+  _latestPrinters = printers;
+  if (!_tabsBuilt) buildTabs(printers);
+  else router();
+
+  // Refresh object exclusion panel on every tick when on live tab and printing
+  const _route = parseRoute();
+  if (_route.view === 'printer' && _route.subtab !== 'history') {
+    const _rp = printers.find(x => x.id === _route.id);
+    if (_rp?.state === 'printing' || _rp?.state === 'paused') refreshObjectsPanel(_route.id);
+  }
+
   const grid = document.getElementById('printer-grid');
   grid.innerHTML = printers.map(renderCard).join('');
 
@@ -424,3 +1294,5 @@ function connectWS() {
 }
 
 connectWS();
+window.addEventListener('hashchange', router);
+router();

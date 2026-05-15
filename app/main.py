@@ -12,6 +12,7 @@ log = logging.getLogger(__name__)
 from fastapi import FastAPI, HTTPException, WebSocket
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
 from . import db
 from .camera import BambuCameraProxy
@@ -258,6 +259,76 @@ def _camera_active(status) -> bool:
     return False
 
 
+_VALID_ACTIONS = {"pause", "resume", "cancel", "estop"}
+
+
+class ControlRequest(BaseModel):
+    action: str
+
+
+class SetTempRequest(BaseModel):
+    heater: str
+    target: int
+
+
+@app.post("/api/printers/{printer_id}/set-temp")
+async def set_printer_temp(printer_id: str, req: SetTempRequest):
+    if req.heater not in ("hotend", "bed", "chamber"):
+        raise HTTPException(status_code=400, detail="invalid heater")
+    if not (0 <= req.target <= 350):
+        raise HTTPException(status_code=400, detail="target out of range (0-350)")
+
+    for (id, model_name, custom_name, icon, url) in _moonraker:
+        if id == printer_id:
+            try:
+                await moonraker.set_temp(url, req.heater, req.target)
+            except Exception as exc:
+                raise HTTPException(status_code=502, detail=str(exc))
+            return {"ok": True}
+
+    for p in _bambu:
+        if p.id == printer_id:
+            await asyncio.to_thread(p.set_temp, req.heater, req.target)
+            return {"ok": True}
+
+    raise HTTPException(status_code=404, detail="printer not found")
+
+
+@app.post("/api/printers/{printer_id}/control")
+async def control_printer(printer_id: str, req: ControlRequest):
+    if req.action not in _VALID_ACTIONS:
+        raise HTTPException(status_code=400, detail="invalid action")
+
+    for (id, model_name, custom_name, icon, url) in _moonraker:
+        if id == printer_id:
+            try:
+                await moonraker.control(url, req.action)
+            except Exception as exc:
+                raise HTTPException(status_code=502, detail=str(exc))
+            return {"ok": True}
+
+    for p in _bambu:
+        if p.id == printer_id:
+            fn = getattr(p, req.action)
+            await asyncio.to_thread(fn)
+            return {"ok": True}
+
+    raise HTTPException(status_code=404, detail="printer not found")
+
+
+@app.get("/api/printers/{printer_id}/camera")
+async def get_printer_camera(printer_id: str):
+    """Return camera stream URL for the given printer, regardless of print state."""
+    camera = _cameras.get(printer_id)
+    if camera is None:
+        raise HTTPException(status_code=404, detail="no camera configured")
+    if isinstance(camera, MjpegDirectCamera):
+        return {"url": camera.stream_url, "type": "mjpeg"}
+    if isinstance(camera, BambuRtspCamera):
+        return {"url": f"/api/camera/{printer_id}/stream", "type": "mjpeg"}
+    raise HTTPException(status_code=404, detail="unknown camera type")
+
+
 @app.get("/api/camera/{printer_id}/stream")
 async def camera_stream(printer_id: str):
     proxy = _cam_proxies.get(printer_id)
@@ -268,6 +339,61 @@ async def camera_stream(printer_id: str):
         media_type="multipart/x-mixed-replace; boundary=frame",
         headers={"Cache-Control": "no-cache, no-store"},
     )
+
+
+@app.get("/api/printers/{printer_id}/history/calendar")
+async def get_history_calendar(printer_id: str, year: int | None = None):
+    from datetime import datetime as _dt
+    _assert_printer(printer_id)
+    if year is None:
+        year = _dt.utcnow().year
+    return db.get_history_calendar(printer_id, year)
+
+
+@app.get("/api/printers/{printer_id}/history/day/{date}")
+async def get_history_day(printer_id: str, date: str):
+    import re
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date):
+        raise HTTPException(status_code=400, detail="date must be YYYY-MM-DD")
+    _assert_printer(printer_id)
+    return db.get_prints_for_day(printer_id, date)
+
+
+def _assert_printer(printer_id: str) -> None:
+    for (id, *_) in _moonraker:
+        if id == printer_id:
+            return
+    for p in _bambu:
+        if p.id == printer_id:
+            return
+    raise HTTPException(status_code=404, detail="printer not found")
+
+
+class ExcludeObjectRequest(BaseModel):
+    name: str
+
+
+@app.get("/api/printers/{printer_id}/objects")
+async def get_printer_objects(printer_id: str):
+    for (id, model_name, custom_name, icon, url) in _moonraker:
+        if id == printer_id:
+            return await moonraker.fetch_objects(url)
+    for p in _bambu:
+        if p.id == printer_id:
+            return {"supported": False, "objects": []}
+    raise HTTPException(status_code=404, detail="printer not found")
+
+
+@app.post("/api/printers/{printer_id}/exclude-object")
+async def post_exclude_object(printer_id: str, req: ExcludeObjectRequest):
+    for (id, model_name, custom_name, icon, url) in _moonraker:
+        if id == printer_id:
+            try:
+                await moonraker.exclude_object(url, req.name)
+            except Exception as exc:
+                raise HTTPException(status_code=502, detail=str(exc))
+            return {"ok": True}
+    raise HTTPException(status_code=400, detail="object exclusion not supported for this printer")
 
 
 @app.get("/api/printers/{printer_id}/thumbnail")
