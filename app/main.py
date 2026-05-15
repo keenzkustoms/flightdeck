@@ -110,7 +110,10 @@ async def lifespan(app: FastAPI):
         await proxy.stop()
     _cam_proxies.clear()
     for p in _bambu:
-        await asyncio.to_thread(p.stop)
+        try:
+            await asyncio.wait_for(asyncio.to_thread(p.stop), timeout=5)
+        except asyncio.TimeoutError:
+            pass
     _bambu.clear()
     _moonraker.clear()
 
