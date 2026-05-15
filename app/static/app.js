@@ -91,11 +91,13 @@ const _tempModal = (() => {
         <span class="temp-modal-arrow">→</span>
         <span class="temp-modal-composed" id="tm-composed">___</span>
       </div>
-      <div class="temp-modal-presets" id="tm-presets"></div>
-      <div class="temp-keypad">
-        ${[1,2,3,4,5,6,7,8,9,'⌫',0,'✓'].map(k =>
-          `<button class="temp-key${k==='⌫'?' temp-key-back':k==='✓'?' temp-key-confirm':''}" data-key="${k}">${k}</button>`
-        ).join('')}
+      <div class="temp-modal-body">
+        <div class="temp-keypad">
+          ${[1,2,3,4,5,6,7,8,9,'⌫',0,'✓'].map(k =>
+            `<button class="temp-key${k==='⌫'?' temp-key-back':k==='✓'?' temp-key-confirm':''}" data-key="${k}">${k}</button>`
+          ).join('')}
+        </div>
+        <div class="temp-modal-presets" id="tm-presets"></div>
       </div>
       <div class="temp-modal-warning" id="tm-warning" hidden>That's hot — double-check before confirming</div>
       <div class="temp-modal-range" id="tm-range">Range: 0–300°C</div>
@@ -1283,6 +1285,7 @@ async function renderPrinterDetail(id, subtab = 'live') {
     const hero = el.querySelector('.camera-hero');
     if (hero) {
       hero.addEventListener('click', () => {
+        if (_tempModal.isOpen()) { _tempModal.close(); return; }
         const body = hero.closest('.detail-body');
         if (!body) return;
         const isMobile = window.innerWidth <= 900;

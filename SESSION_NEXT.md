@@ -61,7 +61,7 @@ All 10 steps from TIER2_SPEC.md shipped, plus four bonus items.
 - **Camera click-cycle** — desktop: normal → wide (sidebar hidden, blue outline affordance) → fullscreen → All Cameras view; mobile: tap → fullscreen → tap → normal; ESC returns to normal from any state
 - **Print controls** — Pause / Resume / Cancel / E-Stop; optimistic UI; confirmation modals on Cancel and E-Stop
 - **Temperature controls** — per-heater actual/target display; ±5° nudge buttons; click reading → numeric modal
-- **Temperature modal** — numeric keypad, material presets (Off / PLA / PETG / ASA / ABS per printer from printers.yaml), current→target display, hot-value warning (>280° hotend / >120° bed), range clamping with amber flash; physical keyboard on desktop (type numbers, Enter confirm, Escape cancel); compact left-anchored popup on mobile
+- **Temperature modal** — numeric keypad with presets running vertically down the right side (Off / PLA / PETG / ASA / ABS per printer from printers.yaml), current→target display, hot-value warning (>280° hotend / >120° bed), range clamping with amber flash; physical keyboard on desktop (type numbers, Enter confirm, Escape cancel); compact left-anchored popup on mobile; floats over right panel on desktop so camera stays visible
 - **Print details panel** — filename/subtask_name, progress bar, layer count, ETA; shows last print info when idle
 - **Object exclusion panel** — renders for Moonraker printers when multi-object print active; confirmation modal before exclusion; disabled for Bambu
 - **AMS display panel** — per-slot colour swatches, material type, active-slot indicator; Bambu Live tab only; AMS HT unit (ID 128) labelled correctly
