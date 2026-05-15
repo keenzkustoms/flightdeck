@@ -257,6 +257,9 @@ async function showPreview(card) {
     if (resp.ok) data = await resp.json();
   } catch { /* network error — render with no data */ }
 
+  // Navigation may have called hidePreview() while the fetch was in-flight — bail out.
+  if (activeCard !== card) return;
+
   if (data) {
     const filename = data.filename.replace(/.*\//, '');
     const totalTime = formatTime(data.estimated_total_seconds);
@@ -708,6 +711,21 @@ function parseRoute() {
 
 function router() {
   const route = parseRoute();
+
+  // Dismiss any lingering hover popover — browser back button bypasses click handlers.
+  hidePreview();
+
+  // Abort MJPEG streams when leaving their view — mobile browsers don't close
+  // orphaned <img> connections automatically, which exhausts connection pool slots.
+  if (route.view !== 'printer') {
+    const img = document.querySelector('#detail-cam-img');
+    if (img) { img.src = ''; img.dataset.stopped = '1'; }
+  }
+  if (route.view !== 'cameras') {
+    document.querySelectorAll('#cameras-grid img').forEach(img => { img.src = ''; });
+    _camerasFull = false;
+  }
+
   document.getElementById('view-dashboard').hidden = route.view !== 'dashboard';
   document.getElementById('view-printer').hidden   = route.view !== 'printer';
   document.getElementById('view-cameras').hidden   = route.view !== 'cameras';
@@ -720,7 +738,6 @@ function router() {
     );
   });
 
-  if (route.view !== 'cameras') _camerasFull = false;
   if (route.view === 'printer') renderPrinterDetail(route.id, route.subtab);
   if (route.view === 'cameras') renderCamerasView();
 }
@@ -1257,6 +1274,9 @@ async function renderPrinterDetail(id, subtab = 'live') {
   }
 
   if (needsFullRender) {
+    const existingImg = el.querySelector('#detail-cam-img');
+    if (existingImg) existingImg.src = '';
+
     const camUrl = _cameraUrlCache[id];
     const camHtml = (camUrl && p.state !== 'offline')
       ? `<img id="detail-cam-img" src="${camUrl}" alt="Live camera">`
@@ -1317,6 +1337,14 @@ async function renderPrinterDetail(id, subtab = 'live') {
 
     if (p.state === 'printing' || p.state === 'paused') refreshObjectsPanel(id);
   } else {
+    // Restore camera stream if it was stopped when navigating away and back.
+    const camImg = el.querySelector('#detail-cam-img');
+    const camUrl = _cameraUrlCache[id];
+    if (camImg?.dataset.stopped && camUrl && p.state !== 'offline') {
+      delete camImg.dataset.stopped;
+      camImg.src = camUrl;
+    }
+
     const ctrlEl = el.querySelector('.detail-controls-wrap');
     if (ctrlEl) ctrlEl.innerHTML = _detailControls(id, p);
     const printEl = el.querySelector('#detail-print');
