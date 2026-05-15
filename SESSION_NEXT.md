@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 15 May 2026_
+_Last updated 15 May 2026 (evening)_
 
 ## Current state
 
@@ -96,20 +96,26 @@ All 10 steps from TIER2_SPEC.md shipped, plus four bonus items.
 |---|---|---|
 | Slow service shutdown | Low | uvicorn takes ~90s to stop (SIGKILL); Bambu MQTT disconnect hanging in lifespan teardown. Add `asyncio.wait_for(..., timeout=5)` around `asyncio.to_thread(p.stop)`. |
 | Notifications require HTTPS | Low | Bell button visible but inert on HTTP. Tailscale free plan doesn't support TLS certs. Options: mkcert (LAN only), upgrade Tailscale plan, or ntfy.sh for push. |
-| Git remote | Low | Still local-only, deliberately deferred. |
 | UFW | Low | Installed but not enabled. |
+
+---
+
+## Fixed this session (15 May evening)
+
+Three mobile camera/popover bugs found by real-device QA:
+
+1. **MJPEG stream leak** — navigating away on mobile left the camera `<img>` connection open, exhausting the browser's connection pool and killing subsequent feeds. Fixed by explicitly clearing `img.src` (and marking `data-stopped`) in the router, plus restoring the stream on return to the same printer.
+2. **Stuck preview popover** — browser back button bypasses click handlers so `hidePreview()` was never called, leaving the hover popover floating over the detail view. Fixed by calling `hidePreview()` at the top of every `router()` invocation.
+3. **Async race in showPreview** — if a long-press triggered a preview fetch and the user navigated before it completed, the fetch resolved *after* `hidePreview()` and put the popover back up (~5s visible until next WS tick called `router()`). Fixed with a stale-check guard `if (activeCard !== card) return` after the fetch.
 
 ---
 
 ## Next session priorities
 
-No outstanding items from today. Possible next directions:
-
 1. **Slow shutdown fix** — `asyncio.wait_for(..., timeout=5)` around Bambu stop in lifespan teardown
 2. **ntfy.sh push notifications** — free, works over HTTP, phone alerts when away from dashboard
-3. **Git remote** — push to GitHub for backup
-4. **UFW** — enable firewall
-5. **Tier 3** — TBD
+3. **UFW** — enable firewall
+4. **Tier 3** — TBD
 
 ---
 
