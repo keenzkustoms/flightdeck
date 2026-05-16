@@ -5,6 +5,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 import bambulabs_api as bl
+from bambulabs_api.mqtt_client import PrinterMQTTClient
 
 from .. import db
 from ..models import PrinterStatus, JobStatus, TempReading
@@ -13,6 +14,29 @@ log = logging.getLogger(__name__)
 
 FINISHED_TTL = timedelta(minutes=30)
 _BAMBU_PREVIEW_FAILED = object()  # sentinel: FTP failed, don't retry until job changes
+
+
+class _SequencedMQTTClient(PrinterMQTTClient):
+    """Injects an incrementing sequence_id into every command payload.
+
+    Firmware >= 1.08 silently drops commands that lack this field.
+    The base class name-mangles __publish_command to
+    _PrinterMQTTClient__publish_command; defining that literal name here
+    intercepts all base-class calls via MRO before they reach the original.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._seq = 0
+
+    # Intercepts every self.__publish_command(...) call made by the base class.
+    def _PrinterMQTTClient__publish_command(self, payload: dict) -> bool:
+        self._seq += 1
+        seq = str(self._seq)
+        for v in payload.values():
+            if isinstance(v, dict):
+                v['sequence_id'] = seq
+        return super()._PrinterMQTTClient__publish_command(payload)
 
 
 class BambuPrinter:
@@ -28,6 +52,7 @@ class BambuPrinter:
         self._ip = ip
         self._access_code = access_code
         self._printer = bl.Printer(ip_address=ip, access_code=access_code, serial=serial)
+        self._printer.mqtt_client = _SequencedMQTTClient(ip, access_code, serial)
         self._lock = threading.Lock()
         self._connected = False
         self._preview_cache: tuple[str, object] | None = None

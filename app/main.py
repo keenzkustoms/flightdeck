@@ -33,6 +33,7 @@ _ws_clients: set[WebSocket] = set()
 _broadcast_task: asyncio.Task | None = None
 _ntfy: NtfyConfig | None = None
 _prev_states: dict[str, str] = {}  # printer_id → last known state
+_last_seen_cache: dict[str, datetime] = {}  # printer_id → last successful contact
 
 
 def _dt_default(obj):
@@ -46,12 +47,21 @@ async def _gather_all() -> list[dict]:
     for (id, model_name, custom_name, icon, url) in _moonraker:
         status = await moonraker.fetch(id, model_name, custom_name, icon, url)
         status.temperature_presets = _presets.get(id, {})
+        _update_last_seen(status)
         results.append(asdict(status))
     for p in _bambu:
         status = await asyncio.to_thread(p.status)
         status.temperature_presets = _presets.get(p.id, {})
+        _update_last_seen(status)
         results.append(asdict(status))
     return results
+
+
+def _update_last_seen(status) -> None:
+    if status.last_seen is not None:
+        _last_seen_cache[status.id] = status.last_seen
+    elif status.state == "offline" and status.id in _last_seen_cache:
+        status.last_seen = _last_seen_cache[status.id]
 
 
 async def _send_ntfy(title: str, message: str, tags: list[str], priority: int = 3) -> None:
@@ -332,7 +342,7 @@ def _camera_active(status) -> bool:
     return False
 
 
-_VALID_ACTIONS = {"pause", "resume", "cancel", "estop"}
+_VALID_ACTIONS = {"pause", "resume", "cancel", "estop", "firmware_restart"}
 
 
 class ControlRequest(BaseModel):
@@ -382,6 +392,8 @@ async def control_printer(printer_id: str, req: ControlRequest):
 
     for p in _bambu:
         if p.id == printer_id:
+            if req.action == "firmware_restart":
+                raise HTTPException(status_code=422, detail="firmware_restart not supported for this printer")
             fn = getattr(p, req.action)
             await asyncio.to_thread(fn)
             return {"ok": True}

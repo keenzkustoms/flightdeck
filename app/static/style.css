@@ -188,6 +188,7 @@ header {
 .badge-finished  { background: transparent; color: #4ade80; border: 1px solid #4ade80; }
 .badge-paused    { background: #78350f; color: #fde68a; }
 .badge-error     { background: #7f1d1d; color: #fecaca; }
+.badge-estop     { background: #7f1d1d; color: #fca5a5; border: 1px solid #b91c1c; }
 .badge-offline   { background: #374151; color: #d1d5db; }
 
 .temps {
@@ -258,6 +259,20 @@ header {
 .error-msg {
   font-size: 0.8rem;
   color: var(--error);
+}
+
+.offline-last-seen {
+  font-size: 0.8rem;
+  color: var(--text-tertiary, #6b7280);
+  padding-top: 0.75rem;
+  border-top: 0.5px solid var(--border);
+}
+
+.estop-body {
+  font-size: 0.8rem;
+  color: #fca5a5;
+  padding-top: 0.75rem;
+  border-top: 0.5px solid var(--border);
 }
 
 /* ── Idle info rows ── */
@@ -692,6 +707,13 @@ header {
 }
 
 .ctrl-btn-estop:hover:not(:disabled) { background: rgba(153,27,27,0.7); }
+
+.ctrl-btn-firmware-restart {
+  background: rgba(120,80,0,0.35);
+  border-color: #b45309;
+  color: #fcd34d;
+}
+.ctrl-btn-firmware-restart:hover:not(:disabled) { background: rgba(146,96,0,0.55); }
 
 /* ── Temperature modal ── */
 .temp-modal-overlay {

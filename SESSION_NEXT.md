@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 16 May 2026 (morning)_
+_Last updated 17 May 2026_
 
 ## Current state
 
@@ -21,7 +21,7 @@ Service running at `http://flightdeck.local:8000` · `http://192.168.4.127:8000`
 - **Bambu H2D (BigBoy)** — same as X1C; both Bambus on **LAN mode**
 
 ### State machine
-- States: `PRINTING` / `IDLE` / `PAUSED` / `FINISHED` / `ERROR` / `OFFLINE`
+- States: `PRINTING` / `IDLE` / `PAUSED` / `FINISHED` / `ERROR` / `OFFLINE` / `ESTOP`
 - FINISHED persists 30 min post-completion, survives restart via SQLite hydration
 - Connection health dots (green/amber/red) per card
 
@@ -100,6 +100,19 @@ All 10 steps from TIER2_SPEC.md shipped, plus four bonus items.
 
 ---
 
+## Fixed/shipped this session (17 May)
+
+**Estop / firmware restart flow (Voron):**
+1. **ESTOP state detection** — Moonraker returns `print_stats.state = "standby"` even when Klipper is in shutdown. Added a `/printer/info` check on every Moonraker poll; if `klippy_state == "shutdown"` the printer transitions to a new `estop` state.
+2. **Firmware Restart button** — amber button appears in the destructive controls section when printer is in `estop` or `error` state; Moonraker only (gated by `p.kind === 'moonraker'`). Requires confirm dialog. Sends `POST /printer/firmware_restart` to Moonraker.
+3. **ESTOP card body** — card shows "Emergency stop active — firmware restart required" in muted red when in estop state; badge shows ESTOP in red.
+4. **Offline card already correct** — "All connection attempts failed" text was already replaced with "Last seen HH:MM" in a prior session; confirmed no regression.
+
+**Bambu MQTT sequence_id fix (uncommitted from prior session):**
+5. **Commands silently dropped on firmware ≥ 1.08** — Bambu firmware requires a `sequence_id` field in every MQTT command payload; base class didn't inject it. Added `_SequencedMQTTClient` subclass that intercepts `__publish_command` via name-mangling MRO and injects an incrementing `sequence_id`.
+
+---
+
 ## Fixed/shipped this session (16 May morning)
 
 **ntfy push notifications:**
@@ -122,8 +135,8 @@ All 10 steps from TIER2_SPEC.md shipped, plus four bonus items.
 
 ## Next session priorities
 
-1. **Tier 3** — TBD (suggestions: OrcaSlicer upload, filament tracking, multi-user, HTTPS via mkcert)
-2. **Voron thumbnail** — confirm slicer has embedded thumbnails enabled; test end-to-end when Voron is printing
+1. **Voron thumbnail** — confirm slicer has embedded thumbnails enabled; test end-to-end when Voron is printing
+2. **Tier 3** — TBD (suggestions: OrcaSlicer upload, filament tracking, multi-user, HTTPS via mkcert)
 
 ---
 

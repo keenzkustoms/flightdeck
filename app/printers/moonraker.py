@@ -37,11 +37,37 @@ async def fetch(id: str, model_name: str, custom_name: str, icon: str, base_url:
             resp.raise_for_status()
             data = resp.json()["result"]["status"]
     except Exception as exc:
+        # Objects query failed — check if Moonraker is up but Klipper is in shutdown.
+        try:
+            async with httpx.AsyncClient(timeout=3.0) as client:
+                info_resp = await client.get(f"{base_url}/printer/info")
+                if info_resp.status_code == 200:
+                    klippy_state = info_resp.json().get("result", {}).get("state", "")
+                    if klippy_state == "shutdown":
+                        now = datetime.utcnow()
+                        return PrinterStatus(id=id, model_name=model_name, custom_name=custom_name,
+                                             icon=icon, kind="moonraker", state="estop",
+                                             last_seen=now, updated_at=now)
+        except Exception:
+            pass
         return PrinterStatus(id=id, model_name=model_name, custom_name=custom_name,
                              icon=icon, kind="moonraker", state="offline", error=str(exc))
 
     ps = data.get("print_stats", {})
     raw_state = ps.get("state", "standby")
+
+    # Moonraker returns print_stats.state = "standby" even when Klipper is in shutdown.
+    # Always check /printer/info to catch the estop/shutdown condition.
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            info_resp = await client.get(f"{base_url}/printer/info")
+            if info_resp.status_code == 200:
+                klippy_state = info_resp.json().get("result", {}).get("state", "")
+                if klippy_state == "shutdown":
+                    raw_state = "shutdown"
+    except Exception:
+        pass
+
     prev_raw = _prev_raw_state.get(id)
     _prev_raw_state[id] = raw_state
 
@@ -158,6 +184,9 @@ def _resolve_state(
     if raw == "paused":
         return "paused"
 
+    if raw == "shutdown":
+        return "estop"
+
     if raw == "error":
         job_key = _active_job_key.pop(printer_id, None)
         if job_key:
@@ -186,10 +215,11 @@ def _resolve_state(
 
 
 _CONTROL_PATHS = {
-    "pause":  "/printer/print/pause",
-    "resume": "/printer/print/resume",
-    "cancel": "/printer/print/cancel",
-    "estop":  "/printer/emergency_stop",
+    "pause":            "/printer/print/pause",
+    "resume":           "/printer/print/resume",
+    "cancel":           "/printer/print/cancel",
+    "estop":            "/printer/emergency_stop",
+    "firmware_restart": "/printer/firmware_restart",
 }
 
 

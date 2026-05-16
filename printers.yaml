@@ -1,73 +1,95 @@
 ntfy:
-  topic: "flightdeck-c1f2849dcb"
-
+  topic: flightdeck-c1f2849dcb
+  url: https://ntfy.sh
 printers:
-  - id: greyhound
-    model_name: "Voron"
-    custom_name: "Greyhound Elite V2"
-    icon: "voron"
-    connection:
-      type: "moonraker"
-      host: "192.168.4.215"
-      port: 7125
-    camera:
-      type: "mjpeg_direct"
-      stream_url: "http://192.168.4.215/webcam/?action=stream"
-      snapshot_url: "http://192.168.4.215/webcam/?action=snapshot"
-    temperature_presets:
-      hotend:
-        - { label: "PLA",  value: 220 }
-        - { label: "PETG", value: 245 }
-        - { label: "ASA",  value: 255 }
-        - { label: "ABS",  value: 250 }
-      bed:
-        - { label: "PLA",  value: 65 }
-        - { label: "PETG", value: 80 }
-        - { label: "ASA",  value: 110 }
-        - { label: "ABS",  value: 100 }
-
-  - id: x1c
-    model_name: "X1C"
-    custom_name: "Greyhound Ludicrous"
-    icon: "bambu"
-    connection:
-      type: "bambu"
-      host: "192.168.4.43"
-      access_code: "3fb9f0b9"
-      serial: "00M00A282504250"
-    camera:
-      type: "bambu_rtsp"
-    temperature_presets:
-      hotend:
-        - { label: "PLA",  value: 220 }
-        - { label: "PETG", value: 245 }
-        - { label: "ASA",  value: 255 }
-        - { label: "ABS",  value: 250 }
-      bed:
-        - { label: "PLA",  value: 65 }
-        - { label: "PETG", value: 80 }
-        - { label: "ASA",  value: 100 }
-        - { label: "ABS",  value: 100 }
-
-  - id: h2d
-    model_name: "H2D"
-    custom_name: "BigBoy"
-    icon: "bambu"
-    connection:
-      type: "bambu"
-      host: "192.168.4.206"
-      access_code: "2b4c361e"
-      serial: "0948BB5B2800439"
-    camera:
-      type: "bambu_rtsp"
-    temperature_presets:
-      hotend:
-        - { label: "PLA",  value: 220 }
-        - { label: "PETG", value: 245 }
-        - { label: "ASA",  value: 255 }
-        - { label: "ABS",  value: 250 }
-      bed:
-        - { label: "PLA",  value: 65 }
-        - { label: "PETG", value: 80 }
-        - { label: "ASA",  value: 110 }
-        - { label: "ABS",  value: 100 }
+- id: greyhound
+  model_name: Voron
+  custom_name: Greyhound Elite V2
+  icon: voron
+  connection:
+    type: moonraker
+    host: 192.168.4.215
+    port: 7125
+  camera:
+    type: mjpeg_direct
+    stream_url: http://192.168.4.215/webcam/?action=stream
+    snapshot_url: http://192.168.4.215/webcam/?action=snapshot
+  temperature_presets:
+    hotend:
+    - label: PLA
+      value: 220
+    - label: PETG
+      value: 245
+    - label: ASA
+      value: 255
+    - label: ABS
+      value: 250
+    bed:
+    - label: PLA
+      value: 65
+    - label: PETG
+      value: 80
+    - label: ASA
+      value: 110
+    - label: ABS
+      value: 100
+- id: x1c
+  model_name: X1C
+  custom_name: Greyhound Ludicrous
+  icon: bambu
+  connection:
+    type: bambu
+    host: 192.168.4.43
+    access_code: 3fb9f0b9
+    serial: 00M00A282504250
+  camera:
+    type: bambu_rtsp
+  temperature_presets:
+    hotend:
+    - label: PLA
+      value: 220
+    - label: PETG
+      value: 245
+    - label: ASA
+      value: 255
+    - label: ABS
+      value: 250
+    bed:
+    - label: PLA
+      value: 65
+    - label: PETG
+      value: 80
+    - label: ASA
+      value: 100
+    - label: ABS
+      value: 100
+- id: h2d
+  model_name: H2D
+  custom_name: BigBoy
+  icon: bambu
+  connection:
+    type: bambu
+    host: 192.168.4.206
+    access_code: 2b4c361e
+    serial: 0948BB5B2800439
+  camera:
+    type: bambu_rtsp
+  temperature_presets:
+    hotend:
+    - label: PLA
+      value: 220
+    - label: PETG
+      value: 245
+    - label: ASA
+      value: 255
+    - label: ABS
+      value: 250
+    bed:
+    - label: PLA
+      value: 65
+    - label: PETG
+      value: 80
+    - label: ASA
+      value: 110
+    - label: ABS
+      value: 100

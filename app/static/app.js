@@ -265,6 +265,17 @@ function parseUtcDate(str) {
   return new Date(str);
 }
 
+function fmtLastSeen(lastSeen) {
+  const d = parseUtcDate(lastSeen);
+  if (!d) return 'Never connected';
+  const now = new Date();
+  const isToday = d.toDateString() === now.toDateString();
+  const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  if (isToday) return `Last seen ${time}`;
+  const date = d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  return `Last seen ${date}, ${time}`;
+}
+
 function connDot(lastSeen) {
   const d = parseUtcDate(lastSeen);
   let cls = 'red';
@@ -354,6 +365,14 @@ function renderCard(p) {
       </div>`;
   }
 
+  if (p.state === 'offline') {
+    body = `<div class="offline-last-seen">${fmtLastSeen(p.last_seen)}</div>`;
+  }
+
+  if (p.state === 'estop') {
+    body = `<div class="estop-body">Emergency stop active — firmware restart required</div>`;
+  }
+
   const idleEntries = Object.entries(p.idle_info || {});
   const idleRows = idleEntries.length > 0 && p.state === 'idle' ? `
     <div class="idle-info">
@@ -364,7 +383,7 @@ function renderCard(p) {
         </div>`).join('')}
     </div>` : '';
 
-  const error = p.error ? `<div class="error-msg">${p.error}</div>` : '';
+  const error = p.state !== 'offline' && p.error ? `<div class="error-msg">${p.error}</div>` : '';
   const badgeLabel = p.state === 'finished' ? 'complete' : p.state;
 
   return `
@@ -392,8 +411,8 @@ function renderCard(p) {
 function updateStatusPill(printers) {
   const pill = document.getElementById('status-pill');
   if (!pill || !printers.length) return;
-  const faults = printers.filter(p => p.state === 'error' || p.state === 'offline').length;
-  const warnings = printers.filter(p => p.state === 'paused').length;
+  const faults   = printers.filter(p => p.state === 'error').length;
+  const warnings = printers.filter(p => p.state === 'paused' || p.state === 'offline').length;
   if (faults > 0) {
     pill.className = 'status-pill pill-error';
     pill.textContent = `${faults} fault${faults > 1 ? 's' : ''}`;
@@ -431,10 +450,11 @@ document.getElementById('refresh-time').textContent = new Date().toLocaleTimeStr
 
 function _canDo(state, action) {
   switch (action) {
-    case 'pause':  return state === 'printing';
-    case 'resume': return state === 'paused';
-    case 'cancel': return state === 'printing' || state === 'paused';
-    case 'estop':  return state !== 'offline';
+    case 'pause':            return state === 'printing';
+    case 'resume':           return state === 'paused';
+    case 'cancel':           return state === 'printing' || state === 'paused';
+    case 'estop':            return state !== 'offline';
+    case 'firmware_restart': return state === 'estop' || state === 'error';
     default: return false;
   }
 }
@@ -450,6 +470,10 @@ function _detailControls(id, p) {
     return `<button class="ctrl-btn ${cls}${loadingCls}" data-action="${action}" data-printer-id="${id}"${disabled}>${isPending ? '…' : label}</button>`;
   }
 
+  const firmwareRestartBtn = p.kind === 'moonraker'
+    ? btn('firmware_restart', 'Firmware Restart', 'ctrl-btn-firmware-restart')
+    : '';
+
   return `
     <div class="controls-primary">
       ${btn('pause', 'Pause')}
@@ -458,6 +482,7 @@ function _detailControls(id, p) {
     </div>
     <div class="controls-destructive">
       ${btn('estop', '⚠ E-Stop', 'ctrl-btn-estop')}
+      ${firmwareRestartBtn}
     </div>`;
 }
 
@@ -506,8 +531,9 @@ document.getElementById('view-printer').addEventListener('click', e => {
   if (!id) return;
 
   const CONFIRM = {
-    cancel: 'Cancel the print? This will stop the print immediately and discard progress.',
-    estop:  'Emergency stop? The printer will halt all motion and require a manual reset to continue.',
+    cancel:           'Cancel the print? This will stop the print immediately and discard progress.',
+    estop:            'Emergency stop? The printer will halt all motion and require a manual reset to continue.',
+    firmware_restart: 'Restart printer firmware? Klipper will reinitialise and the printer will need to home before printing.',
   };
 
   if (CONFIRM[action]) {
