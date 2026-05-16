@@ -60,7 +60,12 @@ async def _send_ntfy(title: str, message: str, tags: list[str], priority: int = 
         async with httpx.AsyncClient() as client:
             await client.post(
                 f"{_ntfy.url}/{_ntfy.topic}",
-                json={"title": title, "message": message, "tags": tags, "priority": priority},
+                content=message.encode(),
+                headers={
+                    "Title": title,
+                    "Tags": ",".join(tags),
+                    "Priority": str(priority),
+                },
                 timeout=5,
             )
     except Exception as exc:
