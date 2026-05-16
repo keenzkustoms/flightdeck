@@ -1204,7 +1204,11 @@ async function renderPrinterDetail(id, subtab = 'live') {
     const ctrlEl = el.querySelector('.detail-controls-wrap');
     if (ctrlEl) ctrlEl.innerHTML = _detailControls(id, p);
     const printEl = el.querySelector('#detail-print');
-    if (printEl) printEl.innerHTML = _detailPrintPanel(p);
+    if (printEl) {
+      const thumbCollapsed = !!printEl.querySelector('.detail-thumb.collapsed');
+      printEl.innerHTML = _detailPrintPanel(p);
+      if (thumbCollapsed) printEl.querySelector('.detail-thumb')?.classList.add('collapsed');
+    }
     const tempsEl = el.querySelector('#detail-temps');
     if (tempsEl) tempsEl.innerHTML = _detailTempsPanel(p);
     const amsEl = el.querySelector('#detail-ams');
