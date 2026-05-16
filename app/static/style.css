@@ -314,25 +314,20 @@ header {
   object-fit: contain;
 }
 
-/* ── Thumbnail lightbox ── */
-#thumb-lightbox {
-  display: none;
-  position: fixed;
-  inset: 0;
-  z-index: 200;
-  background: rgba(0,0,0,0.88);
+.detail-thumb.collapsed {
+  height: 2rem;
+  display: flex;
   align-items: center;
   justify-content: center;
-  cursor: pointer;
 }
-#thumb-lightbox.visible {
-  display: flex;
+.detail-thumb.collapsed img {
+  display: none;
 }
-#thumb-lightbox img {
-  max-width: 90vw;
-  max-height: 90vh;
-  object-fit: contain;
-  border-radius: 0.5rem;
+.detail-thumb.collapsed::after {
+  content: '▸ preview';
+  font-size: 0.65rem;
+  color: var(--muted);
+  letter-spacing: 0.05em;
 }
 
 /* ── Connection dot ── */

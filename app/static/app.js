@@ -225,20 +225,6 @@ function formatTime(seconds) {
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
 }
 
-// ── Thumbnail lightbox ─────────────────────────────────────────────────────
-
-const _thumbLightbox = (() => {
-  const overlay = document.createElement('div');
-  overlay.id = 'thumb-lightbox';
-  const img = document.createElement('img');
-  img.alt = 'Print thumbnail';
-  overlay.appendChild(img);
-  document.body.appendChild(overlay);
-  overlay.addEventListener('click', () => overlay.classList.remove('visible'));
-  return {
-    show(src) { img.src = src; overlay.classList.add('visible'); },
-  };
-})();
 
 // ── Event wiring ───────────────────────────────────────────────────────────
 
@@ -851,8 +837,8 @@ document.getElementById('view-printer').addEventListener('click', e => {
 });
 
 document.getElementById('view-printer').addEventListener('click', e => {
-  const thumb = e.target.closest('.detail-thumb-img');
-  if (thumb) _thumbLightbox.show(thumb.src);
+  const thumb = e.target.closest('.detail-thumb');
+  if (thumb) thumb.classList.toggle('collapsed');
 });
 
 // ── History tab ───────────────────────────────────────────────────────────
