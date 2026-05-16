@@ -372,12 +372,8 @@ def _parse_mmu(mmu: dict, mmu_machine: dict, _gate_map: dict) -> list:
 
 
 def _pick_thumbnail(thumbnails: list) -> Optional[dict]:
-    """Return the largest thumbnail with both dimensions ≤ 200px."""
-    candidates = [
-        t for t in thumbnails
-        if t.get("width", 0) <= 200 and t.get("height", 0) <= 200
-    ]
-    return max(candidates, key=lambda t: t["width"] * t["height"], default=None)
+    """Return the largest available thumbnail."""
+    return max(thumbnails, key=lambda t: t.get("width", 0) * t.get("height", 0), default=None)
 
 
 async def fetch_objects(base_url: str) -> dict:
