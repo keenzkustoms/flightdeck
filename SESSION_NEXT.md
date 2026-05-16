@@ -97,6 +97,7 @@ All 10 steps from TIER2_SPEC.md shipped, plus four bonus items.
 | Browser notifications (HTTPS) | Low | Bell button visible but inert on HTTP. Tailscale free plan doesn't support TLS certs. ntfy.sh now handles push — browser notifs are a nice-to-have. |
 | UFW | Done | Enabled; rules: ssh, 8000/tcp (flightdeck), tailscale0 interface. |
 | Voron slicer thumbnail | Low | Thumbnail shows in Print Details when printing, but only if gcode was sliced with embedded thumbnails (PrusaSlicer/OrcaSlicer thumbnail option must be enabled). Not yet confirmed working end-to-end. |
+| Estop → firmware restart | Done | Full loop confirmed: idle → ESTOP badge on estop → firmware restart button → printer reinitialises → idle. |
 
 ---
 
