@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Flightdeck</title>
-  <link rel="stylesheet" href="/static/style.css?v=16">
+  <link rel="stylesheet" href="/static/style.css?v=18">
 </head>
 <body>
   <header>
@@ -33,6 +33,13 @@
   <section id="view-cameras" class="view" hidden>
     <div id="cameras-grid"></div>
   </section>
-  <script type="module" src="/static/app.js?v=16"></script>
+
+  <section id="view-settings" class="view" hidden>
+    <div class="settings-body" id="settings-body">
+      <div class="detail-placeholder">Loading…</div>
+    </div>
+  </section>
+
+  <script type="module" src="/static/app.js?v=18"></script>
 </body>
 </html>

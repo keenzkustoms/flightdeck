@@ -82,3 +82,18 @@ def load() -> PrintersConfig:
     with open(CONFIG_PATH) as f:
         data = yaml.safe_load(f)
     return PrintersConfig.model_validate(data)
+
+
+def save(config: PrintersConfig) -> None:
+    import os
+    data: dict = {}
+    if config.ntfy:
+        data["ntfy"] = {"topic": config.ntfy.topic, "url": config.ntfy.url}
+    data["printers"] = [
+        e.model_dump(mode="json", exclude_none=True)
+        for e in config.printers
+    ]
+    tmp = CONFIG_PATH.with_suffix(".yaml.tmp")
+    with open(tmp, "w") as f:
+        yaml.dump(data, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+    os.replace(tmp, CONFIG_PATH)

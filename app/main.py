@@ -2,6 +2,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from datetime import datetime
@@ -19,7 +20,7 @@ import httpx
 from . import db
 from .camera import BambuCameraProxy
 from .models import PrintPreview
-from .printer_config import BambuConnection, BambuRtspCamera, MjpegDirectCamera, MoonrakerConnection, NtfyConfig, load
+from .printer_config import BambuConnection, BambuRtspCamera, MjpegDirectCamera, MoonrakerConnection, NtfyConfig, PrinterEntry, load, save
 from .printers import moonraker
 from .printers.bambu import BambuPrinter
 
@@ -454,6 +455,87 @@ async def get_printer_objects(printer_id: str):
         if p.id == printer_id:
             return {"supported": False, "objects": []}
     raise HTTPException(status_code=404, detail="printer not found")
+
+
+@app.get("/api/config/printers")
+async def get_config_printers():
+    cfg = load()
+    return [e.model_dump(mode="json", exclude_none=True) for e in cfg.printers]
+
+
+@app.post("/api/config/printers", status_code=201)
+async def add_printer(entry: PrinterEntry):
+    if not re.match(r"^[a-z][a-z0-9_-]*$", entry.id):
+        raise HTTPException(status_code=422, detail="id must be lowercase letters/digits/underscores/hyphens, starting with a letter")
+
+    all_ids = [id for (id, *_) in _moonraker] + [p.id for p in _bambu]
+    if entry.id in all_ids:
+        raise HTTPException(status_code=409, detail=f"printer id '{entry.id}' already exists")
+
+    conn = entry.connection
+    _cameras[entry.id] = entry.camera
+    _presets[entry.id] = entry.temperature_presets or {}
+
+    if isinstance(conn, MoonrakerConnection):
+        _moonraker.append((entry.id, entry.model_name, entry.custom_name, entry.icon_key(), conn.url))
+    elif isinstance(conn, BambuConnection):
+        p = BambuPrinter(
+            id=entry.id,
+            model_name=entry.model_name,
+            custom_name=entry.custom_name,
+            icon=entry.icon_key(),
+            ip=conn.host,
+            access_code=conn.access_code,
+            serial=conn.serial,
+        )
+        await asyncio.to_thread(p.start)
+        _bambu.append(p)
+        if isinstance(entry.camera, BambuRtspCamera):
+            rtsp_url = f"rtsps://bblp:{conn.access_code}@{conn.host}:322/streaming/live/1"
+            _cam_proxies[entry.id] = BambuCameraProxy(rtsp_url, entry.id)
+
+    cfg = load()
+    cfg.printers.append(entry)
+    save(cfg)
+
+    return {"ok": True}
+
+
+@app.delete("/api/config/printers/{printer_id}")
+async def remove_printer(printer_id: str):
+    found = False
+
+    for item in list(_moonraker):
+        if item[0] == printer_id:
+            _moonraker.remove(item)
+            found = True
+            break
+
+    for p in list(_bambu):
+        if p.id == printer_id:
+            _bambu.remove(p)
+            try:
+                await asyncio.wait_for(asyncio.to_thread(p.stop), timeout=5)
+            except asyncio.TimeoutError:
+                pass
+            proxy = _cam_proxies.pop(printer_id, None)
+            if proxy:
+                await proxy.stop()
+            found = True
+            break
+
+    if not found:
+        raise HTTPException(status_code=404, detail="printer not found")
+
+    _cameras.pop(printer_id, None)
+    _presets.pop(printer_id, None)
+    _prev_states.pop(printer_id, None)
+
+    cfg = load()
+    cfg.printers = [e for e in cfg.printers if e.id != printer_id]
+    save(cfg)
+
+    return {"ok": True}
 
 
 @app.post("/api/printers/{printer_id}/exclude-object")

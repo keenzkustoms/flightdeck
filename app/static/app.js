@@ -43,6 +43,7 @@ const _historyYear = {};        // printer_id → selected year (int)
 const _dayPrintsCache = {};     // `${printerId}:${dateStr}` → prints[]
 let _camerasFull = false;       // true once cameras grid has been fully rendered
 let _camZoom = 0;               // 0=normal, 1=wide, 2=fullscreen
+let _onSettings = false;        // true while settings view is active
 
 // ── Toast notifications ────────────────────────────────────────────────────
 
@@ -555,6 +556,7 @@ function parseRoute() {
   const printerMatch = hash.match(/^#\/printer\/([^/]+)(?:\/(history))?/);
   if (printerMatch) return { view: 'printer', id: printerMatch[1], subtab: printerMatch[2] || 'live' };
   if (hash === '#/cameras') return { view: 'cameras' };
+  if (hash === '#/settings') return { view: 'settings' };
   return { view: 'dashboard' };
 }
 
@@ -572,20 +574,26 @@ function router() {
     _camerasFull = false;
   }
 
+  const wasOnSettings = _onSettings;
+  _onSettings = route.view === 'settings';
+
   document.getElementById('view-dashboard').hidden = route.view !== 'dashboard';
   document.getElementById('view-printer').hidden   = route.view !== 'printer';
   document.getElementById('view-cameras').hidden   = route.view !== 'cameras';
+  document.getElementById('view-settings').hidden  = route.view !== 'settings';
 
   document.querySelectorAll('#tab-strip .tab').forEach(tab => {
     const href = tab.getAttribute('href');
     tab.classList.toggle('active',
       (route.view === 'printer'  && href === `#/printer/${route.id}`) ||
-      (route.view === 'cameras'  && href === '#/cameras')
+      (route.view === 'cameras'  && href === '#/cameras') ||
+      (route.view === 'settings' && href === '#/settings')
     );
   });
 
   if (route.view === 'printer') renderPrinterDetail(route.id, route.subtab);
   if (route.view === 'cameras') renderCamerasView();
+  if (route.view === 'settings' && !wasOnSettings) renderSettingsView();
 }
 
 function buildTabs(printers) {
@@ -593,6 +601,7 @@ function buildTabs(printers) {
   nav.innerHTML = [
     ...printers.map(p => `<a class="tab" href="#/printer/${p.id}">${p.model_name}</a>`),
     `<a class="tab" href="#/cameras">All Cameras</a>`,
+    `<a class="tab" href="#/settings">Settings</a>`,
   ].join('');
   _tabsBuilt = true;
   router();
@@ -1432,6 +1441,453 @@ function connectWS() {
       connectWS();
     }, reconnectDelay);
   };
+}
+
+// ── Settings view ─────────────────────────────────────────────────────────
+
+// Apply saved appearance on load
+(function () {
+  const accent = localStorage.getItem('fd_accent');
+  if (accent) document.documentElement.style.setProperty('--printing', accent);
+})();
+
+let _settingsCategory = 'printers';
+
+const _SETTINGS_CATEGORIES = [
+  { id: 'printers',   label: 'Printers'   },
+  { id: 'appearance', label: 'Appearance' },
+];
+
+async function refreshPrinters() {
+  try {
+    const r = await fetch('/api/printers');
+    if (!r.ok) return;
+    const printers = await r.json();
+    _latestPrinters = printers;
+    _tabsBuilt = false;
+    buildTabs(printers);
+  } catch {}
+}
+
+// ── Printers category ──────────────────────────────────────────────────────
+
+const _DEFAULT_PRESETS = [
+  { label: 'PLA',  hotend: 220, bed: 65  },
+  { label: 'PETG', hotend: 245, bed: 80  },
+  { label: 'ABS',  hotend: 250, bed: 100 },
+  { label: 'ASA',  hotend: 255, bed: 110 },
+];
+
+function _printersCategoryHtml(printers) {
+  const list = printers.length
+    ? printers.map(p => {
+        const connInfo = p.connection?.type === 'moonraker'
+          ? `moonraker · ${p.connection.host}:${p.connection.port ?? 7125}`
+          : `bambu · ${p.connection?.host ?? ''}`;
+        return `<div class="settings-printer-row">
+          <div class="printer-identity">
+            <div class="printer-icon">${getIcon(p.icon ?? 'generic')}</div>
+            <div class="printer-names">
+              <span class="printer-model">${p.model_name}</span>
+              <span class="printer-custom">${p.custom_name}</span>
+            </div>
+          </div>
+          <div class="settings-printer-meta">
+            <span class="settings-printer-type">${connInfo}</span>
+            <button class="settings-delete-btn"
+              data-delete-id="${p.id}"
+              data-delete-name="${p.custom_name}">Remove</button>
+          </div>
+        </div>`;
+      }).join('')
+    : `<div class="settings-empty">No printers configured.</div>`;
+
+  const presetRows = _DEFAULT_PRESETS.map(p => `
+    <tr class="preset-row">
+      <td class="preset-material">${p.label}</td>
+      <td><input type="number" class="settings-input preset-hotend"
+          data-material="${p.label}" min="0" max="350" value="${p.hotend}"></td>
+      <td><input type="number" class="settings-input preset-bed"
+          data-material="${p.label}" min="0" max="150" value="${p.bed}"></td>
+    </tr>`).join('');
+
+  return `
+    <div class="settings-section">
+      <div class="settings-section-title">Printers</div>
+      <div class="settings-printer-list">${list}</div>
+    </div>
+
+    <div class="settings-section">
+      <div class="settings-section-title">Add Printer</div>
+      <form id="settings-add-form" class="settings-form" novalidate>
+
+        <div class="settings-form-row">
+          <label class="settings-label">Connection Type</label>
+          <div class="settings-type-toggle">
+            <button type="button" class="type-btn type-btn-active" data-conn-type="moonraker">Moonraker</button>
+            <button type="button" class="type-btn" data-conn-type="bambu">Bambu</button>
+          </div>
+        </div>
+
+        <div class="settings-form-row">
+          <label class="settings-label" for="p-id">
+            ID <span class="settings-hint">(e.g. sovol_sv08)</span>
+          </label>
+          <input class="settings-input" id="p-id" type="text"
+            placeholder="my_printer" autocomplete="off" required>
+        </div>
+
+        <div class="settings-form-row">
+          <label class="settings-label" for="p-model">Model Name</label>
+          <input class="settings-input" id="p-model" type="text"
+            placeholder="Sovol SV08" required>
+        </div>
+
+        <div class="settings-form-row">
+          <label class="settings-label" for="p-custom">Custom Name</label>
+          <input class="settings-input" id="p-custom" type="text"
+            placeholder="Workshop Beast" required>
+        </div>
+
+        <div class="settings-form-row">
+          <label class="settings-label">Icon</label>
+          <div class="settings-icon-select">
+            <label class="icon-option">
+              <input type="radio" name="icon" value="generic" checked> Generic
+            </label>
+            <label class="icon-option">
+              <input type="radio" name="icon" value="voron"> Voron
+            </label>
+            <label class="icon-option">
+              <input type="radio" name="icon" value="bambu"> Bambu
+            </label>
+          </div>
+        </div>
+
+        <div class="settings-form-group" id="moonraker-fields">
+          <div class="settings-form-row">
+            <label class="settings-label" for="p-host">Host / IP</label>
+            <input class="settings-input" id="p-host" type="text"
+              placeholder="192.168.1.100" autocomplete="off">
+          </div>
+          <div class="settings-form-row">
+            <label class="settings-label" for="p-port">Port</label>
+            <input class="settings-input" id="p-port" type="number"
+              value="7125" min="1" max="65535" style="max-width:7rem">
+          </div>
+          <div class="settings-form-row">
+            <label class="settings-label" for="p-cam-type">Camera</label>
+            <select class="settings-input" id="p-cam-type" style="max-width:14rem">
+              <option value="none">None</option>
+              <option value="mjpeg_direct">MJPEG stream</option>
+            </select>
+          </div>
+          <div class="settings-form-group" id="mjpeg-fields" hidden>
+            <div class="settings-form-row">
+              <label class="settings-label" for="p-stream-url">Stream URL</label>
+              <input class="settings-input" id="p-stream-url" type="text"
+                placeholder="http://192.168.1.100/webcam/?action=stream">
+            </div>
+            <div class="settings-form-row">
+              <label class="settings-label" for="p-snap-url">
+                Snapshot URL <span class="settings-hint">(optional)</span>
+              </label>
+              <input class="settings-input" id="p-snap-url" type="text"
+                placeholder="http://192.168.1.100/webcam/?action=snapshot">
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-form-group" id="bambu-fields" hidden>
+          <div class="settings-form-row">
+            <label class="settings-label" for="p-bambu-host">Host / IP</label>
+            <input class="settings-input" id="p-bambu-host" type="text"
+              placeholder="192.168.1.101" autocomplete="off">
+          </div>
+          <div class="settings-form-row">
+            <label class="settings-label" for="p-access-code">Access Code</label>
+            <input class="settings-input" id="p-access-code" type="text"
+              placeholder="12345678" autocomplete="off">
+          </div>
+          <div class="settings-form-row">
+            <label class="settings-label" for="p-serial">Serial Number</label>
+            <input class="settings-input" id="p-serial" type="text"
+              placeholder="01P00A123456789" autocomplete="off">
+          </div>
+          <div class="settings-form-row">
+            <label class="settings-label">Camera</label>
+            <label class="icon-option">
+              <input type="checkbox" id="p-bambu-cam" checked>
+              RTSP stream (requires LAN mode)
+            </label>
+          </div>
+        </div>
+
+        <div class="settings-form-row">
+          <label class="settings-label">Temp Presets</label>
+          <table class="preset-table">
+            <thead>
+              <tr>
+                <th>Material</th>
+                <th>Hotend (°C)</th>
+                <th>Bed (°C)</th>
+              </tr>
+            </thead>
+            <tbody>${presetRows}</tbody>
+          </table>
+        </div>
+
+        <div class="settings-form-row settings-form-actions">
+          <span class="settings-error" id="settings-form-error" hidden></span>
+          <button type="submit" class="ctrl-btn">Add Printer</button>
+        </div>
+
+      </form>
+    </div>`;
+}
+
+function _attachPrintersEvents(el) {
+  let connType = 'moonraker';
+
+  el.querySelectorAll('[data-conn-type]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      connType = btn.dataset.connType;
+      el.querySelectorAll('[data-conn-type]').forEach(b =>
+        b.classList.toggle('type-btn-active', b === btn)
+      );
+      el.querySelector('#moonraker-fields').hidden = connType !== 'moonraker';
+      el.querySelector('#bambu-fields').hidden     = connType !== 'bambu';
+      if (connType === 'bambu') {
+        el.querySelector('input[name="icon"][value="bambu"]').checked = true;
+      }
+    });
+  });
+
+  el.querySelector('#p-cam-type')?.addEventListener('change', e => {
+    el.querySelector('#mjpeg-fields').hidden = e.target.value !== 'mjpeg_direct';
+  });
+
+  el.querySelectorAll('[data-delete-id]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id   = btn.dataset.deleteId;
+      const name = btn.dataset.deleteName;
+      _modal.show(
+        `Remove "${name}" from Flightdeck? This takes effect immediately.`,
+        () => _deletePrinter(id)
+      );
+    });
+  });
+
+  el.querySelector('#settings-add-form')?.addEventListener('submit', async e => {
+    e.preventDefault();
+    await _submitAddPrinter(el, connType);
+  });
+}
+
+function _collectFormData(el, connType) {
+  const v = id => el.querySelector(`#${id}`)?.value.trim() ?? '';
+  const icon = el.querySelector('input[name="icon"]:checked')?.value ?? 'generic';
+
+  const hotend = [];
+  const bed = [];
+  el.querySelectorAll('.preset-row').forEach(row => {
+    const mat = row.querySelector('.preset-hotend').dataset.material;
+    const h = parseInt(row.querySelector('.preset-hotend').value, 10);
+    const b = parseInt(row.querySelector('.preset-bed').value, 10);
+    if (!isNaN(h)) hotend.push({ label: mat, value: h });
+    if (!isNaN(b)) bed.push({ label: mat, value: b });
+  });
+
+  const base = {
+    id: v('p-id'),
+    model_name: v('p-model'),
+    custom_name: v('p-custom'),
+    icon,
+    temperature_presets: { hotend, bed },
+  };
+
+  if (connType === 'moonraker') {
+    const host    = v('p-host');
+    const port    = parseInt(el.querySelector('#p-port').value, 10) || 7125;
+    const camType = el.querySelector('#p-cam-type').value;
+    const conn    = { type: 'moonraker', host, port };
+    let camera    = null;
+    if (camType === 'mjpeg_direct') {
+      const streamUrl = v('p-stream-url');
+      const snapUrl   = v('p-snap-url');
+      camera = { type: 'mjpeg_direct', stream_url: streamUrl };
+      if (snapUrl) camera.snapshot_url = snapUrl;
+    }
+    return { ...base, connection: conn, ...(camera ? { camera } : {}) };
+  } else {
+    const host       = v('p-bambu-host');
+    const accessCode = v('p-access-code');
+    const serial     = v('p-serial');
+    const hasCam     = el.querySelector('#p-bambu-cam')?.checked;
+    const conn       = { type: 'bambu', host, access_code: accessCode, serial };
+    const camera     = hasCam ? { type: 'bambu_rtsp' } : null;
+    return { ...base, connection: conn, ...(camera ? { camera } : {}) };
+  }
+}
+
+function _validateFormData(data, connType, errorEl) {
+  const fail = msg => { errorEl.textContent = msg; errorEl.removeAttribute('hidden'); return false; };
+  errorEl.setAttribute('hidden', '');
+
+  if (!data.id)          return fail('ID is required');
+  if (!/^[a-z][a-z0-9_-]*$/.test(data.id))
+                         return fail('ID must be lowercase letters, digits, underscores or hyphens — starting with a letter');
+  if (!data.model_name)  return fail('Model name is required');
+  if (!data.custom_name) return fail('Custom name is required');
+
+  if (connType === 'moonraker') {
+    if (!data.connection.host) return fail('Host / IP is required');
+    if (data.camera?.type === 'mjpeg_direct' && !data.camera.stream_url)
+      return fail('Stream URL is required for MJPEG camera');
+  } else {
+    if (!data.connection.host)        return fail('Host / IP is required');
+    if (!data.connection.access_code) return fail('Access code is required');
+    if (!data.connection.serial)      return fail('Serial number is required');
+  }
+  return true;
+}
+
+async function _submitAddPrinter(el, connType) {
+  const errorEl   = el.querySelector('#settings-form-error');
+  const submitBtn = el.querySelector('#settings-add-form button[type="submit"]');
+  const data      = _collectFormData(el, connType);
+
+  if (!_validateFormData(data, connType, errorEl)) return;
+
+  const origText = submitBtn.textContent;
+  submitBtn.textContent = 'Adding…';
+  submitBtn.disabled = true;
+
+  try {
+    const r    = await fetch('/api/config/printers', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    const body = await r.json();
+    if (r.ok) {
+      showToast('Printer added', data.custom_name, 'success');
+      await refreshPrinters();
+      _renderSettingsContent('printers');
+    } else {
+      fail(body.detail ?? 'Failed to add printer');
+    }
+  } catch {
+    fail('Network error — check console');
+  } finally {
+    submitBtn.textContent = origText;
+    submitBtn.disabled    = false;
+  }
+
+  function fail(msg) { errorEl.textContent = msg; errorEl.removeAttribute('hidden'); }
+}
+
+async function _deletePrinter(id) {
+  try {
+    const r = await fetch(`/api/config/printers/${id}`, { method: 'DELETE' });
+    if (r.ok) {
+      showToast('Printer removed', id, 'info');
+      await refreshPrinters();
+      location.hash = '#/';
+    } else {
+      const body = await r.json();
+      showToast('Remove failed', body.detail ?? '', 'error');
+    }
+  } catch {
+    showToast('Network error', '', 'error');
+  }
+}
+
+// ── Appearance category ────────────────────────────────────────────────────
+
+const _ACCENT_COLORS = [
+  { label: 'Blue',   value: '#3b82f6' },
+  { label: 'Purple', value: '#8b5cf6' },
+  { label: 'Teal',   value: '#14b8a6' },
+  { label: 'Green',  value: '#22c55e' },
+  { label: 'Orange', value: '#f59e0b' },
+  { label: 'Pink',   value: '#ec4899' },
+];
+
+function _appearanceCategoryHtml() {
+  const current = (localStorage.getItem('fd_accent') ?? '#3b82f6').trim();
+  const swatches = _ACCENT_COLORS.map(c =>
+    `<button class="accent-swatch${c.value === current ? ' accent-swatch-active' : ''}"
+      style="background:${c.value}" data-accent="${c.value}" title="${c.label}"></button>`
+  ).join('');
+
+  return `
+    <div class="settings-section">
+      <div class="settings-section-title">Accent Color</div>
+      <div class="settings-form-row">
+        <label class="settings-label">Theme colour</label>
+        <div class="accent-swatches">${swatches}</div>
+      </div>
+    </div>`;
+}
+
+function _attachAppearanceEvents(el) {
+  el.querySelectorAll('.accent-swatch').forEach(swatch => {
+    swatch.addEventListener('click', () => {
+      const color = swatch.dataset.accent;
+      document.documentElement.style.setProperty('--printing', color);
+      localStorage.setItem('fd_accent', color);
+      el.querySelectorAll('.accent-swatch').forEach(s =>
+        s.classList.toggle('accent-swatch-active', s === swatch)
+      );
+    });
+  });
+}
+
+// ── Settings layout ────────────────────────────────────────────────────────
+
+async function _renderSettingsContent(category) {
+  const el = document.getElementById('settings-content');
+  if (!el) return;
+
+  if (category === 'printers') {
+    el.innerHTML = `<div class="detail-placeholder" style="min-height:10rem">Loading…</div>`;
+    let printers = [];
+    try {
+      const r = await fetch('/api/config/printers');
+      if (r.ok) printers = await r.json();
+    } catch {}
+    el.innerHTML = _printersCategoryHtml(printers);
+    _attachPrintersEvents(el);
+  } else if (category === 'appearance') {
+    el.innerHTML = _appearanceCategoryHtml();
+    _attachAppearanceEvents(el);
+  }
+}
+
+async function renderSettingsView() {
+  const body = document.getElementById('settings-body');
+
+  const navHtml = _SETTINGS_CATEGORIES.map(c =>
+    `<button class="settings-nav-item${c.id === _settingsCategory ? ' active' : ''}"
+      data-category="${c.id}">${c.label}</button>`
+  ).join('');
+
+  body.innerHTML = `
+    <nav class="settings-nav">${navHtml}</nav>
+    <div class="settings-content" id="settings-content"></div>`;
+
+  body.querySelectorAll('.settings-nav-item').forEach(item => {
+    item.addEventListener('click', () => {
+      _settingsCategory = item.dataset.category;
+      body.querySelectorAll('.settings-nav-item').forEach(i =>
+        i.classList.toggle('active', i === item)
+      );
+      _renderSettingsContent(_settingsCategory);
+    });
+  });
+
+  await _renderSettingsContent(_settingsCategory);
 }
 
 connectWS();
