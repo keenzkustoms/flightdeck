@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 15 May 2026 (night)_
+_Last updated 16 May 2026 (morning)_
 
 ## Current state
 
@@ -36,14 +36,12 @@ Service running at `http://flightdeck.local:8000` · `http://192.168.4.127:8000`
 - Printing cards: progress bar, layer counter, ETA, filename (subtask_name preferred for Bambu)
 - Finished cards: print complete summary + cooling indicator if hotend >50°C
 - Idle cards: last print info rows
-- Hover popover: live MJPEG or slicer thumbnail fallback + metadata
 - Header: status pill + live indicator + clock; footer: host IP + printer counts
 
 ### Camera feeds (Tier 1.5)
 - **Voron**: MJPEG direct from crowsnest — working
 - **X1C**: ffmpeg RTSPS proxy port 322 → MJPEG — working
 - **H2D**: RTSPS port 322 — working (LAN mode; printers.yaml `type: bambu_rtsp`)
-- Popover: live feed for PRINTING/PAUSED/ERROR; static thumbnail for FINISHED; suppressed for IDLE/OFFLINE
 - 2.5s fallback chain: live → static thumbnail → placeholder
 
 ---
@@ -87,6 +85,7 @@ All 10 steps from TIER2_SPEC.md shipped, plus four bonus items.
 - **Toast notifications** — slide-in banner bottom-right on print FINISHED (green) or ERROR (red); auto-dismisses after 5s, click to dismiss early; stacks if multiple fire
 - **Bell button** — 🔔 in header; disabled with tooltip on HTTP (notifications require HTTPS); activates if HTTPS is configured
 - **ffmpeg watchdog** — two-layer: proc-exit auto-restart (3s delay, only while clients connected); staleness watchdog kills frozen-but-alive ffmpeg if no frames for 15s
+- **ntfy.sh push notifications** — server-side transition detection; fires on print finished/error/paused even when browser is closed. Topic: `flightdeck-c1f2849dcb` (subscribe in ntfy app)
 
 ---
 
@@ -97,27 +96,34 @@ All 10 steps from TIER2_SPEC.md shipped, plus four bonus items.
 | Slow service shutdown | Done | 5s timeout on `asyncio.to_thread(p.stop)` in lifespan teardown — service now stops cleanly. |
 | Browser notifications (HTTPS) | Low | Bell button visible but inert on HTTP. Tailscale free plan doesn't support TLS certs. ntfy.sh now handles push — browser notifs are a nice-to-have. |
 | UFW | Done | Enabled; rules: ssh, 8000/tcp (flightdeck), tailscale0 interface. |
+| Voron slicer thumbnail | Low | Thumbnail shows in Print Details when printing, but only if gcode was sliced with embedded thumbnails (PrusaSlicer/OrcaSlicer thumbnail option must be enabled). Not yet confirmed working end-to-end. |
 
 ---
 
-## Fixed/shipped this session (15 May night)
+## Fixed/shipped this session (16 May morning)
 
-**Mobile camera/popover bugs** (real-device QA):
-1. **MJPEG stream leak** — navigating away on mobile left the camera `<img>` connection open, exhausting the browser's connection pool and killing subsequent feeds. Fixed by explicitly clearing `img.src` (and marking `data-stopped`) in the router, plus restoring the stream on return to the same printer.
-2. **Stuck preview popover** — browser back button bypasses click handlers so `hidePreview()` was never called, leaving the hover popover floating over the detail view. Fixed by calling `hidePreview()` at the top of every `router()` invocation.
-3. **Async race in showPreview** — if a long-press triggered a preview fetch and the user navigated before it completed, the fetch resolved *after* `hidePreview()` and put the popover back up (~5s visible until next WS tick called `router()`). Fixed with a stale-check guard `if (activeCard !== card) return` after the fetch.
+**ntfy push notifications:**
+1. **Notifications not firing** — `_check_transitions()` was inside the `if not _ws_clients: continue` guard, so it only ran when a browser tab was open. Moved above the guard; printers are now polled every 5s regardless of browser state.
+2. **Wrong notification format** — backend was posting JSON body (`json=` in httpx); ntfy.sh treated the whole JSON object as the message text. Fixed to use plain text body + `Title`/`Tags`/`Priority` headers.
 
-**Infrastructure:**
-- GitHub remote created — https://github.com/Kidabah/flightdeck
-- UFW enabled — rules: ssh, 8000/tcp, tailscale0
-- Slow shutdown fixed — 5s timeout on Bambu MQTT stop
-- **ntfy.sh push notifications** — server-side transition detection; fires on print finished/error/paused even when browser is closed. Topic: `flightdeck-c1f2849dcb` (subscribe in ntfy app)
+**Mobile camera popover bug:**
+3. **Popover appearing on detail view after navigating from dashboard** — clicking a card quickly (before the 200ms hover delay expired) left `hoverTimer` running. `hidePreview()` didn't clear it, so `showPreview` fired 200ms later on a hidden card. Fixed by cancelling both `hoverTimer` and `longPressTimer` in `hidePreview()`.
+   - Not reproducible from All Cameras view (no hover timers on camera tiles) — which is exactly what was reported.
+
+**H2D preview / thumbnail:**
+4. **H2D FTP is empty** — H2D stores no `.gcode.3mf` files in its FTP root (unlike X1C which stores them in `/`). Preview endpoint was returning 404. Now falls back to camera stream when no FTP thumbnail is available.
+5. **FTP failure caching** — `BambuPrinter.get_preview()` was not caching failed FTP lookups, causing a new FTP connection attempt on every thumbnail request. Added `_BAMBU_PREVIEW_FAILED` sentinel so failures are cached per-job.
+
+**Replaced hover popover with inline thumbnail:**
+6. **Removed entire popover system** — `showPreview`, `hidePreview`, `reposition`, floating-ui CDN import, all hover/long-press timer logic, all popover CSS. Dashboard cards now just navigate on tap.
+7. **Slicer thumbnail in Print Details panel** — shown above the File row; hidden via `onerror` if unavailable. Tap to collapse to a `▸ preview` strip; tap again to expand. Collapse state is preserved across WS tick re-renders.
 
 ---
 
 ## Next session priorities
 
 1. **Tier 3** — TBD (suggestions: OrcaSlicer upload, filament tracking, multi-user, HTTPS via mkcert)
+2. **Voron thumbnail** — confirm slicer has embedded thumbnails enabled; test end-to-end when Voron is printing
 
 ---
 
