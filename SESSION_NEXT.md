@@ -96,7 +96,7 @@ All 10 steps from TIER2_SPEC.md shipped, plus four bonus items.
 | Slow service shutdown | Done | 5s timeout on `asyncio.to_thread(p.stop)` in lifespan teardown — service now stops cleanly. |
 | Browser notifications (HTTPS) | Low | Bell button visible but inert on HTTP. Tailscale free plan doesn't support TLS certs. ntfy.sh now handles push — browser notifs are a nice-to-have. |
 | UFW | Done | Enabled; rules: ssh, 8000/tcp (flightdeck), tailscale0 interface. |
-| Voron slicer thumbnail | Low | Thumbnail shows in Print Details when printing, but only if gcode was sliced with embedded thumbnails (PrusaSlicer/OrcaSlicer thumbnail option must be enabled). Not yet confirmed working end-to-end. |
+| Voron slicer thumbnail | Done | OrcaSlicer embeds 32×32 and 400×300. Was picking 32×32 due to 200px cap in `_pick_thumbnail`. Fixed to pick largest available — now shows 400×300. |
 | Estop → firmware restart | Done | Full loop confirmed: idle → ESTOP badge on estop → firmware restart button → printer reinitialises → idle. |
 
 ---
@@ -136,8 +136,7 @@ All 10 steps from TIER2_SPEC.md shipped, plus four bonus items.
 
 ## Next session priorities
 
-1. **Voron thumbnail** — confirm slicer has embedded thumbnails enabled; test end-to-end when Voron is printing
-2. **Tier 3** — TBD (suggestions: OrcaSlicer upload, filament tracking, multi-user, HTTPS via mkcert)
+1. **Tier 3** — TBD (suggestions: OrcaSlicer upload, filament tracking, multi-user, HTTPS via mkcert)
 
 ---
 
