@@ -12,6 +12,7 @@ from ..models import PrinterStatus, JobStatus, TempReading
 log = logging.getLogger(__name__)
 
 FINISHED_TTL = timedelta(minutes=30)
+_BAMBU_PREVIEW_FAILED = object()  # sentinel: FTP failed, don't retry until job changes
 
 
 class BambuPrinter:
@@ -232,7 +233,8 @@ class BambuPrinter:
         if not subtask:
             return None
         if self._preview_cache and self._preview_cache[0] == subtask:
-            return self._preview_cache[1]
+            val = self._preview_cache[1]
+            return None if val is _BAMBU_PREVIEW_FAILED else val
         try:
             from .bambu_ftp import fetch_bambu_preview
             preview = fetch_bambu_preview(self._ip, self._access_code, subtask)
@@ -240,6 +242,7 @@ class BambuPrinter:
             return preview
         except Exception as exc:
             log.warning("FTP preview failed for %s: %s", self.model_name, exc)
+            self._preview_cache = (subtask, _BAMBU_PREVIEW_FAILED)
             return None
 
 

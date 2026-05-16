@@ -95,11 +95,11 @@ def _check_transitions(data: list[dict]) -> None:
 async def _broadcast_loop():
     while True:
         await asyncio.sleep(5)
-        if not _ws_clients:
-            continue
         try:
             data = await _gather_all()
             _check_transitions(data)
+            if not _ws_clients:
+                continue
             msg = json.dumps(data, default=_dt_default)
             dead: set[WebSocket] = set()
             for ws in list(_ws_clients):
@@ -294,6 +294,14 @@ async def get_printer_preview(printer_id: str):
                 )
 
             if preview is None:
+                # No FTP thumbnail — fall back to camera stream if one exists
+                if isinstance(camera, BambuRtspCamera):
+                    return PrintPreview(
+                        image_url=f"/api/camera/{printer_id}/stream",
+                        image_type="mjpeg",
+                        fallback_thumbnail_url=None,
+                        filename=status.job.subtask_name or status.job.filename,
+                    )
                 raise HTTPException(status_code=404, detail="preview unavailable")
             return PrintPreview(
                 image_url=thumb_url,

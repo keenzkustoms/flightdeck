@@ -1,6 +1,3 @@
-import { computePosition, flip, offset, arrow } from
-  'https://cdn.jsdelivr.net/npm/@floating-ui/dom@1.6.3/+esm';
-
 // ── Printer icons ──────────────────────────────────────────────────────────
 
 const ICONS = {
@@ -32,8 +29,6 @@ function getIcon(key) {
   return ICONS[key] ?? ICONS.generic;
 }
 
-const HOVER_DELAY_MS = 200;
-const LONG_PRESS_MS = 400;
 
 let _latestPrinters = [];
 let _tabsBuilt = false;
@@ -195,16 +190,6 @@ const _tempModal = (() => {
   return { open, close, isOpen };
 })();
 
-// ── Popover singleton ──────────────────────────────────────────────────────
-
-const popover = document.createElement('div');
-popover.id = 'preview-popover';
-popover.setAttribute('role', 'tooltip');
-const arrowEl = document.createElement('div');
-arrowEl.id = 'popover-arrow';
-popover.appendChild(arrowEl);
-document.body.appendChild(popover);
-
 // ── Confirmation modal ─────────────────────────────────────────────────────
 
 const _modal = (() => {
@@ -233,10 +218,6 @@ const _modal = (() => {
   };
 })();
 
-let activeCard = null;
-let hoverTimer = null;
-let longPressTimer = null;
-
 function formatTime(seconds) {
   if (!seconds) return '—';
   const h = Math.floor(seconds / 3600);
@@ -244,135 +225,24 @@ function formatTime(seconds) {
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
 }
 
-async function showPreview(card) {
-  if (activeCard === card) return;
-  const state = card._printerData?.state;
-  if (!state || state === 'idle' || state === 'offline') return;
-  activeCard = card;
-  const id = card.dataset.printerId;
+// ── Thumbnail lightbox ─────────────────────────────────────────────────────
 
-  let data = null;
-  try {
-    const resp = await fetch(`/api/printers/${id}/preview`);
-    if (resp.ok) data = await resp.json();
-  } catch { /* network error — render with no data */ }
-
-  // Navigation may have called hidePreview() while the fetch was in-flight — bail out.
-  if (activeCard !== card) return;
-
-  if (data) {
-    const filename = data.filename.replace(/.*\//, '');
-    const totalTime = formatTime(data.estimated_total_seconds);
-    const layerH = data.layer_height_mm ? `${data.layer_height_mm}mm` : null;
-    const filament = [
-      data.filament_weight_g ? `~${data.filament_weight_g.toFixed(0)}g` : null,
-      data.filament_type,
-    ].filter(Boolean).join(' · ');
-
-    let imgHtml;
-    if (data.image_type === 'mjpeg' && data.image_url) {
-      imgHtml = `<img id="popover-stream" src="${data.image_url}" alt="live feed">`;
-    } else if (data.image_url) {
-      imgHtml = `<img src="${data.image_url}" alt="print preview">`;
-    } else {
-      imgHtml = `<div class="popover-placeholder">□</div>`;
-    }
-
-    const metaRight = [layerH ? `Layer ${layerH}` : null, `Total ${totalTime}`]
-      .filter(Boolean).join(' · ');
-
-    popover.innerHTML = `
-      ${imgHtml}
-      <div class="popover-body">
-        <div class="popover-filename">${filename}</div>
-        <div class="popover-details"><span>${metaRight}</span></div>
-        ${filament ? `<div class="popover-filament">${filament}</div>` : ''}
-      </div>`;
-
-    // Wire fallback for MJPEG: 2.5s timeout then drop to static thumbnail or placeholder
-    if (data.image_type === 'mjpeg') {
-      const streamImg = popover.querySelector('#popover-stream');
-      if (streamImg) {
-        const fallback = data.fallback_thumbnail_url;
-        const applyFallback = () => {
-          if (fallback) {
-            streamImg.removeAttribute('id');
-            streamImg.src = fallback;
-          } else {
-            streamImg.replaceWith(
-              Object.assign(document.createElement('div'),
-                { className: 'popover-placeholder', textContent: '□' })
-            );
-          }
-        };
-        const timeout = setTimeout(applyFallback, 2500);
-        streamImg.onload = () => clearTimeout(timeout);
-        streamImg.onerror = () => { clearTimeout(timeout); applyFallback(); };
-      }
-    }
-  } else {
-    const card_p = activeCard?._printerData;
-    const filename = card_p?.job?.filename?.replace(/.*\//, '') ?? '';
-    popover.innerHTML = `
-      <div class="popover-placeholder">□</div>
-      <div class="popover-body">
-        ${filename ? `<div class="popover-filename">${filename}</div>` : ''}
-        <div class="popover-details"><span>Preview unavailable</span></div>
-      </div>`;
-  }
-  popover.appendChild(arrowEl);
-
-  popover.classList.add('visible');
-  await reposition(card);
-}
-
-async function reposition(card) {
-  const { x, y, placement, middlewareData } = await computePosition(card, popover, {
-    placement: 'top',
-    middleware: [
-      offset(8),
-      flip(),
-      arrow({ element: arrowEl }),
-    ],
-  });
-
-  Object.assign(popover.style, { left: `${x}px`, top: `${y}px` });
-
-  const { x: ax, y: ay } = middlewareData.arrow;
-  const side = { top: 'bottom', bottom: 'top', left: 'right', right: 'left' }[placement.split('-')[0]];
-  Object.assign(arrowEl.style, {
-    left: ax != null ? `${ax}px` : '',
-    top: ay != null ? `${ay}px` : '',
-    [side]: '-5px',
-    bottom: '', right: '',
-  });
-}
-
-function hidePreview() {
-  popover.classList.remove('visible');
-  activeCard = null;
-}
+const _thumbLightbox = (() => {
+  const overlay = document.createElement('div');
+  overlay.id = 'thumb-lightbox';
+  const img = document.createElement('img');
+  img.alt = 'Print thumbnail';
+  overlay.appendChild(img);
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', () => overlay.classList.remove('visible'));
+  return {
+    show(src) { img.src = src; overlay.classList.add('visible'); },
+  };
+})();
 
 // ── Event wiring ───────────────────────────────────────────────────────────
 
 function attachCardEvents(card) {
-  card.addEventListener('mouseenter', () => {
-    hoverTimer = setTimeout(() => showPreview(card), HOVER_DELAY_MS);
-  });
-  card.addEventListener('mouseleave', () => {
-    clearTimeout(hoverTimer);
-    hidePreview();
-  });
-
-  card.addEventListener('touchstart', e => {
-    longPressTimer = setTimeout(() => {
-      e.preventDefault();
-      showPreview(card);
-    }, LONG_PRESS_MS);
-  }, { passive: false });
-  card.addEventListener('touchend', () => clearTimeout(longPressTimer));
-  card.addEventListener('touchmove', () => clearTimeout(longPressTimer));
-
   card.addEventListener('click', () => {
     location.hash = `#/printer/${card.dataset.printerId}`;
   });
@@ -381,15 +251,8 @@ function attachCardEvents(card) {
       e.preventDefault();
       location.hash = `#/printer/${card.dataset.printerId}`;
     }
-    if (e.key === 'Escape') hidePreview();
   });
 }
-
-document.addEventListener('click', e => {
-  if (activeCard && !activeCard.contains(e.target) && !popover.contains(e.target)) {
-    hidePreview();
-  }
-});
 
 document.addEventListener('fullscreenchange', () => {
   if (!document.fullscreenElement && _camZoom === 2) {
@@ -712,9 +575,6 @@ function parseRoute() {
 function router() {
   const route = parseRoute();
 
-  // Dismiss any lingering hover popover — browser back button bypasses click handlers.
-  hidePreview();
-
   // Abort MJPEG streams when leaving their view — mobile browsers don't close
   // orphaned <img> connections automatically, which exhausts connection pool slots.
   if (route.view !== 'printer') {
@@ -781,7 +641,12 @@ function _detailPrintPanel(p) {
   const layers = job.layer_current != null && job.layer_total != null
     ? `${job.layer_current} / ${job.layer_total}` : '—';
 
-  return title +
+  const thumb = `<div class="detail-thumb">
+    <img class="detail-thumb-img" src="/api/printers/${p.id}/thumbnail" alt="Print thumbnail"
+         onerror="this.parentElement.hidden=true">
+  </div>`;
+
+  return title + thumb +
     `<div class="detail-row"><span class="detail-label">File</span><span class="detail-value">${name}</span></div>` +
     `<div class="detail-progress-bar"><div class="detail-progress-fill" style="width:${pct}%"></div></div>` +
     `<div class="detail-row"><span class="detail-label">Progress</span><span class="detail-value">${pct}%</span></div>` +
@@ -983,6 +848,11 @@ document.getElementById('view-printer').addEventListener('click', e => {
     `Exclude "${shortName}" from this print? The printer will skip this object.`,
     () => sendExcludeObject(id, name)
   );
+});
+
+document.getElementById('view-printer').addEventListener('click', e => {
+  const thumb = e.target.closest('.detail-thumb-img');
+  if (thumb) _thumbLightbox.show(thumb.src);
 });
 
 // ── History tab ───────────────────────────────────────────────────────────
