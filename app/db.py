@@ -239,6 +239,30 @@ def get_prints_for_day(printer_id: str, date_str: str) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def get_last_ended_at(printer_id: str) -> Optional[datetime]:
+    """Return ended_at of the most recently ended print for this printer."""
+    with _conn() as conn:
+        row = conn.execute(
+            """SELECT ended_at FROM prints
+               WHERE printer_id = ? AND final_state IS NOT NULL AND ended_at IS NOT NULL
+               ORDER BY ended_at DESC LIMIT 1""",
+            (printer_id,),
+        ).fetchone()
+    if row and row["ended_at"]:
+        return datetime.fromisoformat(row["ended_at"])
+    return None
+
+
+def is_print_closed(printer_id: str, job_key: str) -> bool:
+    """Return True if the given job already has a final_state recorded."""
+    with _conn() as conn:
+        row = conn.execute(
+            "SELECT final_state FROM prints WHERE printer_id = ? AND job_key = ?",
+            (printer_id, job_key),
+        ).fetchone()
+    return bool(row and row["final_state"] is not None)
+
+
 def get_last_print(printer_id: str) -> Optional[dict]:
     with _conn() as conn:
         row = conn.execute(

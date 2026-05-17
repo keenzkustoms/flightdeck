@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- Flightdeck logo icon — stacked build plates with nozzle -->
+  <!-- Red (#EF4444), rounded corners, medium plate spacing -->
+  
+  <!-- Bottom plate (lightest) -->
+  <path d="M10,52 L42,52 C44,52 46,51 47,49 L55,39 C56,37 56,36 54,36 L22,36 C20,36 18,37 17,39 L11,49 C10,51 10,52 12,52 Z" fill="#EF4444" opacity="0.3"/>
+  
+  <!-- Middle plate -->
+  <path d="M10,38 L42,38 C44,38 46,37 47,35 L55,25 C56,23 56,22 54,22 L22,22 C20,22 18,23 17,25 L11,35 C10,37 10,38 12,38 Z" fill="#EF4444" opacity="0.6"/>
+  
+  <!-- Top plate (full opacity) -->
+  <path d="M10,24 L42,24 C44,24 46,23 47,21 L55,11 C56,9 56,8 54,8 L22,8 C20,8 18,9 17,11 L11,21 C10,23 10,24 12,24 Z" fill="#EF4444" opacity="1.0"/>
+  
+  <!-- Nozzle -->
+  <line x1="36" y1="2" x2="36" y2="8" stroke="#e0e0e0" stroke-width="2.5" stroke-linecap="round"/>
+  <circle cx="36" cy="2" r="2.5" fill="#e0e0e0"/>
+</svg>

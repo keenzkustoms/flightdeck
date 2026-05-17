@@ -58,6 +58,7 @@ class BambuPrinter:
         self._preview_cache: tuple[str, object] | None = None
         self._seen_finish_this_session = False
         self._current_job_key: Optional[str] = None
+        self._error_job_key: Optional[str] = None  # job_key of active in-session error
 
     def start(self) -> None:
         self._printer.connect()
@@ -155,7 +156,10 @@ class BambuPrinter:
                 self._current_job_key = None
             finished_at = db.get_finished_at(self.id)
             if finished_at is None:
-                finished_at = now
+                # Anchor to the actual last print end time so a stale FINISH state
+                # after restart doesn't reset the 30-min window to "now".
+                last_ended = db.get_last_ended_at(self.id)
+                finished_at = last_ended if last_ended else now
                 db.set_finished_at(self.id, finished_at)
             if (now - finished_at.replace(tzinfo=timezone.utc)) > FINISHED_TTL:
                 db.clear_finished_at(self.id)
@@ -163,6 +167,7 @@ class BambuPrinter:
             return "finished"
 
         if raw == bl.GcodeState.IDLE:
+            self._error_job_key = None
             if self._seen_finish_this_session:
                 db.clear_finished_at(self.id)
                 self._seen_finish_this_session = False
@@ -188,6 +193,7 @@ class BambuPrinter:
         if raw in (bl.GcodeState.RUNNING, bl.GcodeState.PREPARE):
             db.clear_finished_at(self.id)
             self._seen_finish_this_session = False
+            self._error_job_key = None
             if self._current_job_key is None:
                 self._current_job_key = self._make_job_key(subtask)
                 db.on_print_started(
@@ -204,9 +210,33 @@ class BambuPrinter:
 
         if raw == bl.GcodeState.FAILED:
             db.clear_finished_at(self.id)
-            # Use current key if we have it; fall back to reconstructing from MQTT
-            # (covers the case where service restarted and printer was already FAILED)
-            job_key = self._current_job_key or self._make_job_key(subtask)
+
+            if self._current_job_key:
+                # In-session failure: close the job and start showing the error.
+                job_key = self._current_job_key
+                err_code = self._printer.mqtt_dump().get("print", {}).get("print_error", 0)
+                err_msg = f"Error code {err_code}" if err_code else "Unknown error"
+                db.on_print_ended(
+                    self.id, job_key,
+                    final_state="ERROR",
+                    layers_completed=job.layer_current if job else None,
+                    error_message=err_msg,
+                )
+                self._current_job_key = None
+                self._error_job_key = job_key
+                return "error"
+
+            if self._error_job_key:
+                # Already showing this in-session error; keep showing it until IDLE.
+                return "error"
+
+            # No in-session job — stale FAILED state from before service started.
+            job_key = self._make_job_key(subtask)
+            if job_key and db.is_print_closed(self.id, job_key):
+                # Error already recorded in a previous session; nothing new to show.
+                return "idle"
+
+            # Pre-existing failure not yet in DB — close it and show error once.
             if job_key:
                 err_code = self._printer.mqtt_dump().get("print", {}).get("print_error", 0)
                 err_msg = f"Error code {err_code}" if err_code else "Unknown error"
@@ -216,7 +246,7 @@ class BambuPrinter:
                     layers_completed=job.layer_current if job else None,
                     error_message=err_msg,
                 )
-            self._current_job_key = None
+                self._error_job_key = job_key
             return "error"
 
         return "offline"  # UNKNOWN or anything unexpected

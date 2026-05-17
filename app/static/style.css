@@ -72,13 +72,29 @@ header {
 
 /* ── Wordmark + tab strip ── */
 .wordmark {
-  font-size: 1rem;
-  font-weight: 700;
-  letter-spacing: 0.15em;
-  text-transform: uppercase;
-  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
   text-decoration: none;
   flex-shrink: 0;
+}
+.wordmark-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.1;
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-size: 0.875rem;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+}
+.flight-text {
+  background: linear-gradient(to bottom, #e0e0e0, #EF4444);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.deck-text {
+  color: #EF4444;
 }
 
 #tab-strip {

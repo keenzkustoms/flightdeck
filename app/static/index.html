@@ -4,11 +4,25 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Flightdeck</title>
-  <link rel="stylesheet" href="/static/style.css?v=20">
+  <link rel="icon" type="image/svg+xml" href="/static/flightdeck-icon.svg">
+  <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
+  <link rel="stylesheet" href="/static/style.css?v=22">
 </head>
 <body>
   <header>
-    <a class="wordmark" href="#/">FLIGHTDECK</a>
+    <a class="wordmark" href="#/">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="30" height="30" aria-hidden="true">
+        <path d="M10,52 L42,52 C44,52 46,51 47,49 L55,39 C56,37 56,36 54,36 L22,36 C20,36 18,37 17,39 L11,49 C10,51 10,52 12,52 Z" fill="#EF4444" opacity="0.3"/>
+        <path d="M10,38 L42,38 C44,38 46,37 47,35 L55,25 C56,23 56,22 54,22 L22,22 C20,22 18,23 17,25 L11,35 C10,37 10,38 12,38 Z" fill="#EF4444" opacity="0.6"/>
+        <path d="M10,24 L42,24 C44,24 46,23 47,21 L55,11 C56,9 56,8 54,8 L22,8 C20,8 18,9 17,11 L11,21 C10,23 10,24 12,24 Z" fill="#EF4444" opacity="1.0"/>
+        <line x1="36" y1="2" x2="36" y2="8" stroke="#e0e0e0" stroke-width="2.5" stroke-linecap="round"/>
+        <circle cx="36" cy="2" r="2.5" fill="#e0e0e0"/>
+      </svg>
+      <span class="wordmark-text">
+        <span class="flight-text">FLIGHT</span>
+        <span class="deck-text">DECK</span>
+      </span>
+    </a>
     <nav id="tab-strip"></nav>
     <div class="header-right">
       <button id="notif-btn" class="notif-btn" title="Enable print notifications">🔔</button>
