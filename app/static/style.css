@@ -1272,6 +1272,25 @@ header {
   border-left: 2px solid var(--error);
 }
 
+.print-failure-snapshot {
+  margin-bottom: 0.875rem;
+  border-radius: 0.5rem;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+.print-failure-snapshot img {
+  width: 100%;
+  display: block;
+  max-height: 240px;
+  object-fit: cover;
+}
+.snapshot-caption {
+  padding: 0.3rem 0.625rem;
+  font-size: 0.7rem;
+  color: var(--muted);
+  background: rgba(0,0,0,0.3);
+}
+
 .print-name {
   flex: 1;
   min-width: 0;

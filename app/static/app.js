@@ -1031,6 +1031,13 @@ function _showPrintDetail(printerId, dateStr, print) {
     ? `<div class="print-detail-error">${print.error_message}</div>`
     : '';
 
+  const snapshotHtml = print.has_snapshot
+    ? `<div class="print-failure-snapshot">
+         <img src="/api/printers/${printerId}/prints/${print.id}/snapshot" alt="Last frame before failure" loading="lazy">
+         <div class="snapshot-caption">Last frame before failure</div>
+       </div>`
+    : '';
+
   el.innerHTML = `<div class="history-day-panel">
     <div class="print-detail-nav">
       <button class="print-detail-back" data-back-date="${dateStr}">&larr; ${dateLabel}</button>
@@ -1039,6 +1046,7 @@ function _showPrintDetail(printerId, dateStr, print) {
       <span class="print-detail-name" title="${print.filename}">${name}</span>
       <span class="badge badge-${cls}" style="font-size:0.6rem;padding:0.15rem 0.5rem">${label}</span>
     </div>
+    ${snapshotHtml}
     ${errorHtml}
     <div>${rows.join('')}</div>
   </div>`;

@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
 log = logging.getLogger(__name__)
 
@@ -71,6 +72,51 @@ def _update_last_seen(status) -> None:
         status.last_seen = _last_seen_cache[status.id]
 
 
+async def _grab_snapshot(printer_id: str) -> Optional[bytes]:
+    """Return a JPEG frame for the given printer, or None if unavailable."""
+    # Bambu: pull latest frame from the RTSP proxy (already decoded JPEG)
+    proxy = _cam_proxies.get(printer_id)
+    if proxy is not None:
+        if proxy._latest:
+            return proxy._latest
+        # Proxy may be idle — try starting it briefly
+        try:
+            await proxy._start()
+            for _ in range(30):  # up to 3 s
+                if proxy._latest:
+                    return proxy._latest
+                await asyncio.sleep(0.1)
+        except Exception:
+            pass
+        return proxy._latest  # may still be None if camera is down
+
+    # Moonraker: hit the crowsnest snapshot URL directly
+    camera = _cameras.get(printer_id)
+    if isinstance(camera, MjpegDirectCamera) and camera.snapshot_url:
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                r = await client.get(camera.snapshot_url)
+                if r.status_code == 200:
+                    return r.content
+        except Exception as exc:
+            log.warning("snapshot fetch failed for %s: %s", printer_id, exc)
+
+    return None
+
+
+async def _do_failure_snapshot(printer_id: str) -> None:
+    jpeg = await _grab_snapshot(printer_id)
+    if not jpeg:
+        log.debug("no camera frame available for failure snapshot: %s", printer_id)
+        return
+    print_id = db.get_most_recent_print_id(printer_id)
+    if print_id is None:
+        log.debug("no print row to attach snapshot to: %s", printer_id)
+        return
+    db.save_print_snapshot(print_id, jpeg)
+    log.info("failure snapshot saved: %s print_id=%d (%d bytes)", printer_id, print_id, len(jpeg))
+
+
 async def _send_ntfy(title: str, message: str, tags: list[str], priority: int = 3) -> None:
     if not _ntfy:
         return
@@ -107,9 +153,11 @@ def _check_transitions(data: list[dict]) -> None:
         if prev == "printing" and curr == "finished":
             msg = f"{name}" + (f" · {label}" if label else "")
             asyncio.create_task(_send_ntfy("Print complete ✓", msg, ["white_check_mark"]))
-        elif curr == "error":
-            msg = f"{name}" + (f" · {label}" if label else "")
-            asyncio.create_task(_send_ntfy("Print error ⚠", msg, ["warning"], priority=4))
+        elif curr in ("error", "estop"):
+            asyncio.create_task(_do_failure_snapshot(pid))
+            if curr == "error":
+                msg = f"{name}" + (f" · {label}" if label else "")
+                asyncio.create_task(_send_ntfy("Print error ⚠", msg, ["warning"], priority=4))
         elif prev == "printing" and curr == "paused":
             msg = f"{name}" + (f" · {label}" if label else "")
             asyncio.create_task(_send_ntfy("Print paused ⏸", msg, ["double_vertical_bar"]))
@@ -431,6 +479,19 @@ async def camera_stream(printer_id: str):
         proxy.stream(),
         media_type="multipart/x-mixed-replace; boundary=frame",
         headers={"Cache-Control": "no-cache, no-store"},
+    )
+
+
+@app.get("/api/printers/{printer_id}/prints/{print_id}/snapshot")
+async def get_failure_snapshot(printer_id: str, print_id: int):
+    _assert_printer(printer_id)
+    jpeg = db.get_print_snapshot(print_id)
+    if not jpeg:
+        raise HTTPException(status_code=404, detail="no snapshot")
+    return Response(
+        content=jpeg,
+        media_type="image/jpeg",
+        headers={"Cache-Control": "public, max-age=31536000, immutable"},
     )
 
 

@@ -46,12 +46,17 @@ def init() -> None:
 
             DROP TABLE IF EXISTS print_history;
         """)
-    # Migrate existing DB: add last_seen column if missing
+    # Migrate existing DB: add columns if missing
     with _conn() as conn:
-        try:
-            conn.execute("ALTER TABLE printer_state ADD COLUMN last_seen TEXT")
-        except Exception:
-            pass
+        for stmt in (
+            "ALTER TABLE printer_state ADD COLUMN last_seen TEXT",
+            "ALTER TABLE prints ADD COLUMN snapshot_jpeg BLOB",
+            "ALTER TABLE prints ADD COLUMN snapshot_captured_at TIMESTAMP",
+        ):
+            try:
+                conn.execute(stmt)
+            except Exception:
+                pass
     # Clean up prints that started >24 h ago but never got a final_state
     # (backend crash during a print that has since ended)
     _close_stale_orphans()
@@ -262,7 +267,8 @@ def get_prints_for_day(printer_id: str, date_str: str) -> list[dict]:
         rows = conn.execute(
             """SELECT id, filename, subtask_name, started_at, ended_at,
                       duration_seconds, final_state, error_message,
-                      layers_total, layers_completed, filament_grams, material
+                      layers_total, layers_completed, filament_grams, material,
+                      snapshot_captured_at IS NOT NULL AS has_snapshot
                FROM prints
                WHERE printer_id = ? AND date(started_at) = ?
                ORDER BY started_at""",
@@ -317,6 +323,34 @@ def is_print_closed(printer_id: str, job_key: str) -> bool:
             (printer_id, job_key),
         ).fetchone()
     return bool(row and row["final_state"] is not None)
+
+
+def get_most_recent_print_id(printer_id: str) -> Optional[int]:
+    """Return the id of the most recently started print row for this printer."""
+    with _conn() as conn:
+        row = conn.execute(
+            "SELECT id FROM prints WHERE printer_id = ? ORDER BY started_at DESC LIMIT 1",
+            (printer_id,),
+        ).fetchone()
+    return row["id"] if row else None
+
+
+def save_print_snapshot(print_id: int, jpeg: bytes) -> None:
+    with _conn() as conn:
+        conn.execute(
+            """UPDATE prints SET snapshot_jpeg = ?, snapshot_captured_at = CURRENT_TIMESTAMP
+               WHERE id = ?""",
+            (jpeg, print_id),
+        )
+
+
+def get_print_snapshot(print_id: int) -> Optional[bytes]:
+    with _conn() as conn:
+        row = conn.execute(
+            "SELECT snapshot_jpeg FROM prints WHERE id = ?",
+            (print_id,),
+        ).fetchone()
+    return row["snapshot_jpeg"] if row else None
 
 
 def get_last_print(printer_id: str) -> Optional[dict]:
