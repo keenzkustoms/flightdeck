@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 17 May 2026_
+_Last updated 22 May 2026_
 
 ## Current state
 
@@ -101,7 +101,26 @@ All 10 steps from TIER2_SPEC.md shipped, plus four bonus items.
 
 ---
 
-## Fixed/shipped this session (17 May)
+## Fixed/shipped this session (22 May)
+
+**Parallel polling + last_seen persistence:**
+1. **`_gather_all()` parallelised** — all printers now polled concurrently via `asyncio.gather`; first-page load time drops from sum-of-latencies to max-of-latencies.
+2. **Moonraker double-fetch parallelised** — objects query and `/printer/info` now fire concurrently instead of sequentially, halving round-trips per poll cycle.
+3. **`last_seen` persisted to SQLite** — `printer_state` table now stores `last_seen`; offline cards show "Last connected HH:MM" after a service restart instead of "Never connected".
+4. **Label rename** — frontend "Last seen" → "Last connected" on offline cards.
+
+---
+
+## Fixed/shipped this session (17 May — logo & stale state)
+
+**Logo, favicon, and stale Bambu state fixes:**
+1. **Logo lockup** — inline SVG icon (30px) + FLIGHT/DECK CSS gradient wordmark in header; SVG favicon + 180×180 apple-touch-icon added.
+2. **H2D stuck on "complete" after restart** — `finished_at` TTL was anchored to service restart time, not actual `ended_at` from DB; fixed to read real timestamp.
+3. **X1C stuck on "error" after restart** — stale `FAILED` state with an already-closed DB job now resolves to idle instead of persisting.
+
+---
+
+## Fixed/shipped this session (17 May — estop & MQTT)
 
 **Estop / firmware restart flow (Voron):**
 1. **ESTOP state detection** — Moonraker returns `print_stats.state = "standby"` even when Klipper is in shutdown. Added a `/printer/info` check on every Moonraker poll; if `klippy_state == "shutdown"` the printer transitions to a new `estop` state.

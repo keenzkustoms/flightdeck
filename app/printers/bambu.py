@@ -173,13 +173,19 @@ class BambuPrinter:
                 self._seen_finish_this_session = False
                 self._current_job_key = None
                 return "idle"
-            # Close any open row — covers both in-session interrupts and restart-then-IDLE
-            job_key = self._current_job_key or self._make_job_key(subtask)
-            if job_key:
+            if self._current_job_key:
+                # In-session interrupt: we know the exact job key.
                 db.on_print_ended(
-                    self.id, job_key,
+                    self.id, self._current_job_key,
                     final_state="ERROR",
                     layers_completed=job.layer_current if job else None,
+                    error_message="Connection lost mid-print",
+                )
+            else:
+                # Service restarted while printer was mid-print then went idle:
+                # _make_job_key may return a stale/wrong key, so close all open rows directly.
+                db.close_open_prints(
+                    self.id,
                     error_message="Connection lost mid-print",
                 )
             self._current_job_key = None

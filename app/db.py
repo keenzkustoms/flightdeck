@@ -285,6 +285,30 @@ def get_last_ended_at(printer_id: str) -> Optional[datetime]:
     return None
 
 
+def close_open_prints(
+    printer_id: str,
+    *,
+    final_state: str = "ERROR",
+    error_message: Optional[str] = None,
+) -> int:
+    """Close every open (final_state IS NULL) row for a printer. Returns row count."""
+    now = datetime.utcnow().isoformat()
+    with _conn() as conn:
+        n = conn.execute(
+            """UPDATE prints
+               SET ended_at         = ?,
+                   duration_seconds = CAST(
+                       (julianday(?) - julianday(started_at)) * 86400 AS INTEGER),
+                   final_state      = ?,
+                   error_message    = COALESCE(?, error_message)
+               WHERE printer_id = ? AND final_state IS NULL""",
+            (now, now, final_state, error_message, printer_id),
+        ).rowcount
+    if n:
+        log.info("close_open_prints: closed %d row(s) for %s as %s", n, printer_id, final_state)
+    return n
+
+
 def is_print_closed(printer_id: str, job_key: str) -> bool:
     """Return True if the given job already has a final_state recorded."""
     with _conn() as conn:
