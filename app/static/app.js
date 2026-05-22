@@ -271,9 +271,9 @@ function fmtLastSeen(lastSeen) {
   const now = new Date();
   const isToday = d.toDateString() === now.toDateString();
   const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  if (isToday) return `Last seen ${time}`;
+  if (isToday) return `Last connected ${time}`;
   const date = d.toLocaleDateString([], { month: 'short', day: 'numeric' });
-  return `Last seen ${date}, ${time}`;
+  return `Last connected ${date}, ${time}`;
 }
 
 function connDot(lastSeen) {

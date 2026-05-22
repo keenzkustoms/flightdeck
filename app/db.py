@@ -16,7 +16,8 @@ def init() -> None:
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS printer_state (
                 printer_id   TEXT PRIMARY KEY,
-                finished_at  TEXT
+                finished_at  TEXT,
+                last_seen    TEXT
             );
 
             CREATE TABLE IF NOT EXISTS prints (
@@ -45,6 +46,12 @@ def init() -> None:
 
             DROP TABLE IF EXISTS print_history;
         """)
+    # Migrate existing DB: add last_seen column if missing
+    with _conn() as conn:
+        try:
+            conn.execute("ALTER TABLE printer_state ADD COLUMN last_seen TEXT")
+        except Exception:
+            pass
     # Clean up prints that started >24 h ago but never got a final_state
     # (backend crash during a print that has since ended)
     _close_stale_orphans()
@@ -104,6 +111,31 @@ def clear_finished_at(printer_id: str) -> None:
                ON CONFLICT(printer_id) DO UPDATE SET finished_at = NULL""",
             (printer_id,),
         )
+
+
+# ── last_seen persistence ─────────────────────────────────────────────────
+
+def set_last_seen(printer_id: str, ts: datetime) -> None:
+    with _conn() as conn:
+        conn.execute(
+            """INSERT INTO printer_state (printer_id, last_seen) VALUES (?, ?)
+               ON CONFLICT(printer_id) DO UPDATE SET last_seen = excluded.last_seen""",
+            (printer_id, ts.isoformat()),
+        )
+
+
+def get_all_last_seen() -> dict:
+    with _conn() as conn:
+        rows = conn.execute(
+            "SELECT printer_id, last_seen FROM printer_state WHERE last_seen IS NOT NULL"
+        ).fetchall()
+    result = {}
+    for row in rows:
+        try:
+            result[row["printer_id"]] = datetime.fromisoformat(row["last_seen"])
+        except Exception:
+            pass
+    return result
 
 
 # ── prints lifecycle ───────────────────────────────────────────────────────

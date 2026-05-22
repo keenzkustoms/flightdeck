@@ -30,43 +30,42 @@ class MoonrakerPreview:
 
 
 async def fetch(id: str, model_name: str, custom_name: str, icon: str, base_url: str) -> PrinterStatus:
+    import asyncio as _asyncio
     base_url = base_url.rstrip("/")
-    try:
+
+    async def _objects() -> dict:
         async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.get(f"{base_url}/printer/objects/query?{_OBJECTS}")
-            resp.raise_for_status()
-            data = resp.json()["result"]["status"]
-    except Exception as exc:
-        # Objects query failed — check if Moonraker is up but Klipper is in shutdown.
+            r = await client.get(f"{base_url}/printer/objects/query?{_OBJECTS}")
+            r.raise_for_status()
+            return r.json()["result"]["status"]
+
+    async def _info_state() -> str:
         try:
             async with httpx.AsyncClient(timeout=3.0) as client:
-                info_resp = await client.get(f"{base_url}/printer/info")
-                if info_resp.status_code == 200:
-                    klippy_state = info_resp.json().get("result", {}).get("state", "")
-                    if klippy_state == "shutdown":
-                        now = datetime.utcnow()
-                        return PrinterStatus(id=id, model_name=model_name, custom_name=custom_name,
-                                             icon=icon, kind="moonraker", state="estop",
-                                             last_seen=now, updated_at=now)
+                r = await client.get(f"{base_url}/printer/info")
+                if r.status_code == 200:
+                    return r.json().get("result", {}).get("state", "")
         except Exception:
             pass
+        return ""
+
+    # Fire both requests concurrently; _info_state never raises.
+    results = await _asyncio.gather(_objects(), _info_state(), return_exceptions=True)
+    data_or_exc, klippy_state = results[0], results[1]
+
+    if isinstance(data_or_exc, Exception):
+        exc = data_or_exc
+        if klippy_state == "shutdown":
+            now = datetime.utcnow()
+            return PrinterStatus(id=id, model_name=model_name, custom_name=custom_name,
+                                 icon=icon, kind="moonraker", state="estop",
+                                 last_seen=now, updated_at=now)
         return PrinterStatus(id=id, model_name=model_name, custom_name=custom_name,
                              icon=icon, kind="moonraker", state="offline", error=str(exc))
 
+    data = data_or_exc
     ps = data.get("print_stats", {})
-    raw_state = ps.get("state", "standby")
-
-    # Moonraker returns print_stats.state = "standby" even when Klipper is in shutdown.
-    # Always check /printer/info to catch the estop/shutdown condition.
-    try:
-        async with httpx.AsyncClient(timeout=3.0) as client:
-            info_resp = await client.get(f"{base_url}/printer/info")
-            if info_resp.status_code == 200:
-                klippy_state = info_resp.json().get("result", {}).get("state", "")
-                if klippy_state == "shutdown":
-                    raw_state = "shutdown"
-    except Exception:
-        pass
+    raw_state = "shutdown" if klippy_state == "shutdown" else ps.get("state", "standby")
 
     prev_raw = _prev_raw_state.get(id)
     _prev_raw_state[id] = raw_state

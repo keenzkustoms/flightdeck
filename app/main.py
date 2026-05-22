@@ -43,23 +43,30 @@ def _dt_default(obj):
 
 
 async def _gather_all() -> list[dict]:
-    results = []
-    for (id, model_name, custom_name, icon, url) in _moonraker:
+    async def _fetch_moonraker(id, model_name, custom_name, icon, url):
         status = await moonraker.fetch(id, model_name, custom_name, icon, url)
         status.temperature_presets = _presets.get(id, {})
         _update_last_seen(status)
-        results.append(asdict(status))
-    for p in _bambu:
+        return asdict(status)
+
+    async def _fetch_bambu(p):
         status = await asyncio.to_thread(p.status)
         status.temperature_presets = _presets.get(p.id, {})
         _update_last_seen(status)
-        results.append(asdict(status))
-    return results
+        return asdict(status)
+
+    tasks = (
+        [_fetch_moonraker(id, model_name, custom_name, icon, url)
+         for (id, model_name, custom_name, icon, url) in _moonraker] +
+        [_fetch_bambu(p) for p in _bambu]
+    )
+    return list(await asyncio.gather(*tasks))
 
 
 def _update_last_seen(status) -> None:
     if status.last_seen is not None:
         _last_seen_cache[status.id] = status.last_seen
+        db.set_last_seen(status.id, status.last_seen)
     elif status.state == "offline" and status.id in _last_seen_cache:
         status.last_seen = _last_seen_cache[status.id]
 
@@ -132,6 +139,7 @@ async def _broadcast_loop():
 async def lifespan(app: FastAPI):
     global _broadcast_task, _ntfy
     db.init()
+    _last_seen_cache.update(db.get_all_last_seen())
     cfg = load()
     _ntfy = cfg.ntfy
 
