@@ -39,19 +39,21 @@ async def fetch(id: str, model_name: str, custom_name: str, icon: str, base_url:
             r.raise_for_status()
             return r.json()["result"]["status"]
 
-    async def _info_state() -> str:
+    async def _info_state() -> tuple[str, str]:
         try:
             async with httpx.AsyncClient(timeout=3.0) as client:
                 r = await client.get(f"{base_url}/printer/info")
                 if r.status_code == 200:
-                    return r.json().get("result", {}).get("state", "")
+                    result = r.json().get("result", {})
+                    return result.get("state", ""), result.get("state_message", "")
         except Exception:
             pass
-        return ""
+        return "", ""
 
     # Fire both requests concurrently; _info_state never raises.
     results = await _asyncio.gather(_objects(), _info_state(), return_exceptions=True)
-    data_or_exc, klippy_state = results[0], results[1]
+    data_or_exc, klippy_info = results[0], results[1]
+    klippy_state, klippy_message = klippy_info if isinstance(klippy_info, tuple) else (klippy_info, "")
 
     if isinstance(data_or_exc, Exception):
         exc = data_or_exc
@@ -65,7 +67,12 @@ async def fetch(id: str, model_name: str, custom_name: str, icon: str, base_url:
 
     data = data_or_exc
     ps = data.get("print_stats", {})
-    raw_state = "shutdown" if klippy_state == "shutdown" else ps.get("state", "standby")
+    if klippy_state == "shutdown":
+        raw_state = "shutdown"
+    elif klippy_state == "error":
+        raw_state = "error"
+    else:
+        raw_state = ps.get("state", "standby")
 
     prev_raw = _prev_raw_state.get(id)
     _prev_raw_state[id] = raw_state
@@ -94,7 +101,7 @@ async def fetch(id: str, model_name: str, custom_name: str, icon: str, base_url:
             layer_total=info.get("total_layer"),
         )
 
-    error_message = ps.get("message") or None
+    error_message = ps.get("message") or klippy_message or None
     state = _resolve_state(id, raw_state, prev_raw, job, error_message)
 
     if state == "idle":
