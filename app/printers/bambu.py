@@ -118,6 +118,9 @@ class BambuPrinter:
 
             state = self._resolve_state(raw_state, job, subtask)
 
+            if state == "idle":
+                job = None  # MQTT retains last-print data; don't surface it as active
+
             idle_info: dict[str, str] = {}
             if state == "idle":
                 last = db.get_last_print(self.id)
@@ -154,6 +157,10 @@ class BambuPrinter:
                     layers_completed=job.layer_current if job else None,
                 )
                 self._current_job_key = None
+            else:
+                # Service restarted during the print; close any open row as FINISHED
+                # rather than leaving it orphaned for the stale-orphan sweep.
+                db.close_open_prints(self.id, final_state="FINISHED")
             finished_at = db.get_finished_at(self.id)
             if finished_at is None:
                 # Anchor to the actual last print end time so a stale FINISH state

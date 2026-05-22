@@ -97,6 +97,9 @@ async def fetch(id: str, model_name: str, custom_name: str, icon: str, base_url:
     error_message = ps.get("message") or None
     state = _resolve_state(id, raw_state, prev_raw, job, error_message)
 
+    if state == "idle":
+        job = None  # MQTT/Moonraker retains last-print data; don't surface it as active
+
     idle_info: dict[str, str] = {}
     if state == "idle":
         last = db.get_last_print(id)
@@ -123,6 +126,7 @@ async def fetch(id: str, model_name: str, custom_name: str, icon: str, base_url:
         id=id, model_name=model_name, custom_name=custom_name, icon=icon,
         kind="moonraker", state=state, temps=temps, job=job,
         idle_info=idle_info, mmu=mmu_panel, last_seen=now, updated_at=now,
+        error=error_message if state == "error" else None,
     )
 
 
