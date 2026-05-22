@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 22 May 2026_
+_Last updated 23 May 2026_
 
 ## Current state
 
@@ -98,6 +98,20 @@ All 10 steps from TIER2_SPEC.md shipped, plus four bonus items.
 | UFW | Done | Enabled; rules: ssh, 8000/tcp (flightdeck), tailscale0 interface. |
 | Voron slicer thumbnail | Done | OrcaSlicer embeds 32×32 and 400×300. Was picking 32×32 due to 200px cap in `_pick_thumbnail`. Fixed to pick largest available — now shows 400×300. |
 | Estop → firmware restart | Done | Full loop confirmed: idle → ESTOP badge on estop → firmware restart button → printer reinitialises → idle. |
+
+---
+
+## Fixed/shipped this session (23 May)
+
+**Klipper error state, stale job data, and orphan row cleanup:**
+
+1. **Klipper `error` state detected** — `/printer/info` previously only checked for `klippy_state == "shutdown"` (ESTOP). Now also maps `klippy_state == "error"` to `raw_state = "error"`, so a Klipper config error or failed init surfaces the ERROR badge instead of appearing idle. `state_message` is also extracted from `/printer/info` and used as the fallback `error_message` when `print_stats.message` is empty — wired into `PrinterState.error` when state is `error`. Error message text available for future UI display.
+
+2. **Idle job nulling (Moonraker + Bambu)** — Both pollers now set `job = None` immediately after resolving state to `"idle"`. Moonraker/MQTT retain last-print data in their objects even after a print ends; previously this data could leak into the idle card as if a job were active. Null-guard ensures idle state never carries a stale job payload.
+
+3. **FINISH + no job key → close open row** — Bambu poller: when the resolved state is `FINISHED` but `_current_job_key` is None (service restarted mid-print), the code now calls `db.close_open_prints(self.id, final_state="FINISHED")` immediately instead of leaving the row for the 24h stale-orphan sweep.
+
+4. **Stale-row artefacts excluded from last print display** — `db.get_last_print()` now filters out rows where `error_message = 'Abandoned (stale open row)'` so startup cleanup artefacts don't surface as the "last print" on idle cards.
 
 ---
 
