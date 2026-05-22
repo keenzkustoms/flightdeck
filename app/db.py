@@ -326,6 +326,7 @@ def get_last_print(printer_id: str) -> Optional[dict]:
                       layers_completed, layers_total
                FROM prints
                WHERE printer_id = ? AND final_state IS NOT NULL
+                 AND (error_message IS NULL OR error_message != 'Abandoned (stale open row)')
                ORDER BY started_at DESC LIMIT 1""",
             (printer_id,),
         ).fetchone()
