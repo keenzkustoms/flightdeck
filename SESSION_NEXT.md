@@ -109,6 +109,10 @@ All 10 steps from TIER2_SPEC.md shipped, plus four bonus items.
 3. **`last_seen` persisted to SQLite** — `printer_state` table now stores `last_seen`; offline cards show "Last connected HH:MM" after a service restart instead of "Never connected".
 4. **Label rename** — frontend "Last seen" → "Last connected" on offline cards.
 
+**Stale open print rows (history showing "running" for idle printers):**
+5. **Root cause** — on service restart `_current_job_key` resets to None; if the printer lands IDLE with the MQTT dump cleared, `_make_job_key` fell back to a timestamp key, so `on_print_ended` targeted the wrong row and the real open row survived indefinitely.
+6. **Fix** — IDLE branch now calls `db.close_open_prints()` (targets `WHERE printer_id = ? AND final_state IS NULL`) when `_current_job_key` is None, instead of guessing via `_make_job_key`. Two stale rows (H2D row 67, X1C row 68) closed directly in DB.
+
 ---
 
 ## Fixed/shipped this session (17 May — logo & stale state)
