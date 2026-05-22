@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 23 May 2026_
+_Last updated 23 May 2026 (session 2)_
 
 ## Current state
 
@@ -98,6 +98,22 @@ All 10 steps from TIER2_SPEC.md shipped, plus four bonus items.
 | UFW | Done | Enabled; rules: ssh, 8000/tcp (flightdeck), tailscale0 interface. |
 | Voron slicer thumbnail | Done | OrcaSlicer embeds 32×32 and 400×300. Was picking 32×32 due to 200px cap in `_pick_thumbnail`. Fixed to pick largest available — now shows 400×300. |
 | Estop → firmware restart | Done | Full loop confirmed: idle → ESTOP badge on estop → firmware restart button → printer reinitialises → idle. |
+
+---
+
+## Fixed/shipped this session (23 May session 2)
+
+**Failure snapshot on ERROR/ESTOP:**
+
+1. **DB migration** — `prints` table gains two new columns: `snapshot_jpeg BLOB` (the raw JPEG bytes) and `snapshot_captured_at TIMESTAMP`. Migration runs safely on the existing DB at startup via `ALTER TABLE … ADD COLUMN` with exception swallowing.
+
+2. **Frame capture** — `_grab_snapshot(printer_id)` in `main.py`: for Bambu, pulls `proxy._latest` (the most recently decoded JPEG already in memory from the RTSP stream); if the proxy was idle-stopped, tries starting it and waits up to 3s for a frame. For Moonraker (Voron), HTTP GETs the configured `snapshot_url` from `printers.yaml`.
+
+3. **Transition hook** — `_check_transitions()` now fires `asyncio.create_task(_do_failure_snapshot(pid))` whenever a printer enters `error` or `estop` state. `_do_failure_snapshot` grabs the frame, looks up the most recently started print row for that printer, and stores the JPEG to DB.
+
+4. **Snapshot endpoint** — `GET /api/printers/{printer_id}/prints/{print_id}/snapshot` returns the JPEG with a far-future cache header. `get_prints_for_day()` now includes `has_snapshot` boolean in each row.
+
+5. **History detail UI** — When `has_snapshot` is true, the print detail card shows the frame above the error message, capped at 240px with `object-fit: cover` and a "Last frame before failure" caption.
 
 ---
 
