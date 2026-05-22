@@ -29,8 +29,8 @@
     "ambient_drying_enabled": "false",
     "drying_presets": "",
     "per_printer_mapping_expanded": "false",
-    "date_format": "system",
-    "time_format": "system",
+    "date_format": "eu",
+    "time_format": "24h",
     "default_printer_id": "None",
     "ftp_retry_enabled": "true",
     "ftp_retry_count": "3",
@@ -47,7 +47,7 @@
     "ha_enabled": "false",
     "ha_url": "",
     "ha_token": "",
-    "library_archive_mode": "ask",
+    "library_archive_mode": "always",
     "library_disk_warning_gb": "5.0",
     "camera_view_mode": "window",
     "preferred_slicer": "orcaslicer",
@@ -64,6 +64,12 @@
     "default_timelapse": "false",
     "stagger_group_size": "2",
     "stagger_interval_minutes": "5",
-    "require_plate_clear": "false"
+    "require_plate_clear": "false",
+    "local_backup_enabled": "false",
+    "dark_background": "oled",
+    "dark_accent": "blue",
+    "virtual_printer_enabled": "false",
+    "virtual_printer_mode": "immediate",
+    "virtual_printer_archive_name_source": "filename"
   }
 }
