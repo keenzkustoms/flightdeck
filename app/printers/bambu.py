@@ -1,6 +1,7 @@
 from __future__ import annotations
 import logging
 import threading
+import time
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
@@ -60,6 +61,8 @@ class BambuPrinter:
         self._current_job_key: Optional[str] = None
         self._error_job_key: Optional[str] = None  # job_key of active in-session error
         self._cancel_requested = False
+        self._estimated_stored = False   # True once slicer estimate written for this job
+        self._job_started_at: float = 0.0  # monotonic time when _current_job_key was set
 
     def start(self) -> None:
         self._printer.connect()
@@ -156,6 +159,8 @@ class BambuPrinter:
         now = datetime.now(timezone.utc)
 
         if raw == bl.GcodeState.FINISH:
+            self._estimated_stored = False
+            self._job_started_at = 0.0
             self._seen_finish_this_session = True
             if self._current_job_key:
                 db.on_print_finished(
@@ -180,6 +185,8 @@ class BambuPrinter:
             return "finished"
 
         if raw == bl.GcodeState.IDLE:
+            self._estimated_stored = False
+            self._job_started_at = 0.0
             self._error_job_key = None
             if self._seen_finish_this_session:
                 db.clear_finished_at(self.id)
@@ -224,6 +231,8 @@ class BambuPrinter:
             self._error_job_key = None
             if self._current_job_key is None:
                 self._current_job_key = self._make_job_key(subtask)
+                self._job_started_at = time.monotonic()
+                self._estimated_stored = False
                 db.on_print_started(
                     self.id,
                     self._current_job_key,
@@ -231,12 +240,28 @@ class BambuPrinter:
                     subtask_name=subtask,
                     layers_total=job.layer_total if job else None,
                 )
+            # Derived slicer estimate: capture once after 60s elapsed.
+            # Primary path for Bambu — no metadata API available.
+            # Formula: slicer_total = eta_seconds / (1 - progress)
+            # (remaining = total * fraction_remaining, so total = remaining / fraction_remaining)
+            if (not self._estimated_stored
+                    and self._job_started_at > 0
+                    and time.monotonic() - self._job_started_at > 60
+                    and job is not None
+                    and job.eta_seconds is not None
+                    and 0.01 < job.progress < 0.99):
+                slicer_total = int(job.eta_seconds / (1.0 - job.progress))
+                db.update_estimated_duration(self.id, self._current_job_key, slicer_total)
+                log.info("stored slicer estimate for %s: %ds (derived)", self.id, slicer_total)
+                self._estimated_stored = True
             return "printing"
 
         if raw == bl.GcodeState.PAUSE:
             return "paused"
 
         if raw == bl.GcodeState.FAILED:
+            self._estimated_stored = False
+            self._job_started_at = 0.0
             db.clear_finished_at(self.id)
 
             if self._current_job_key:

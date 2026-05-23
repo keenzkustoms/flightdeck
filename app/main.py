@@ -55,13 +55,21 @@ async def _gather_all() -> list[dict]:
         status = await moonraker.fetch(id, model_name, custom_name, icon, url)
         status.temperature_presets = _presets.get(id, {})
         _update_last_seen(status)
-        return asdict(status)
+        d = asdict(status)
+        cal = db.get_calibration(id)
+        if cal:
+            d["eta_calibration"] = cal
+        return d
 
     async def _fetch_bambu(p):
         status = await asyncio.to_thread(p.status)
         status.temperature_presets = _presets.get(p.id, {})
         _update_last_seen(status)
-        return asdict(status)
+        d = asdict(status)
+        cal = db.get_calibration(p.id)
+        if cal:
+            d["eta_calibration"] = cal
+        return d
 
     tasks = (
         [_fetch_moonraker(id, model_name, custom_name, icon, url)

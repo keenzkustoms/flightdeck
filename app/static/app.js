@@ -360,7 +360,7 @@ function renderCard(p) {
         <div class="job-meta">
           <span>${pct}%</span>
           <span>${layers}</span>
-          <span>ETA ${formatEta(p.job.eta_seconds)}</span>
+          <span>ETA ${p.eta_calibration?.ratio != null && p.job.eta_seconds != null ? formatEta(Math.round(p.job.eta_seconds * p.eta_calibration.ratio)) : formatEta(p.job.eta_seconds)}</span>
         </div>
       </div>`;
   }
@@ -667,12 +667,23 @@ function _detailPrintPanel(p) {
          onerror="this.parentElement.hidden=true">
   </div>`;
 
+  const cal = p.eta_calibration;  // {ratio: float|null, count: int} or undefined
+  let etaValue;
+  if (cal && cal.ratio != null && job.eta_seconds != null) {
+    const fdEta = formatEta(Math.round(job.eta_seconds * cal.ratio));
+    etaValue = `Slicer: ${formatEta(job.eta_seconds)} · Flightdeck: ${fdEta} <span class="eta-count">(${cal.count} prints)</span>`;
+  } else if (cal && job.eta_seconds != null) {
+    etaValue = `${formatEta(job.eta_seconds)} <span class="eta-count">(calibrating ${cal.count}/5)</span>`;
+  } else {
+    etaValue = formatEta(job.eta_seconds);
+  }
+
   return title + thumb +
     `<div class="detail-row"><span class="detail-label">File</span><span class="detail-value">${name}</span></div>` +
     `<div class="detail-progress-bar"><div class="detail-progress-fill" style="width:${pct}%"></div></div>` +
     `<div class="detail-row"><span class="detail-label">Progress</span><span class="detail-value">${pct}%</span></div>` +
     `<div class="detail-row"><span class="detail-label">Layer</span><span class="detail-value">${layers}</span></div>` +
-    `<div class="detail-row"><span class="detail-label">ETA</span><span class="detail-value">${formatEta(job.eta_seconds)}</span></div>`;
+    `<div class="detail-row"><span class="detail-label">ETA</span><span class="detail-value eta-row">${etaValue}</span></div>`;
 }
 
 const _TEMP_CTRL_HEATERS = new Set(['hotend', 'bed']);

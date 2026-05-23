@@ -14,6 +14,7 @@ log = logging.getLogger(__name__)
 _preview_cache: dict[str, tuple[str, "MoonrakerPreview"]] = {}
 _prev_raw_state: dict[str, str] = {}   # printer_id → last raw Klipper state
 _active_job_key: dict[str, str] = {}   # printer_id → job_key for the running print
+_estimated_stored: set[str] = set()    # printer_ids where slicer estimate is already stored
 
 FINISHED_TTL = timedelta(minutes=30)
 
@@ -104,6 +105,25 @@ async def fetch(id: str, model_name: str, custom_name: str, icon: str, base_url:
     error_message = ps.get("message") or klippy_message or None
     state = _resolve_state(id, raw_state, prev_raw, job, error_message)
 
+    # Capture slicer estimated duration once per job via metadata endpoint (primary path).
+    # Documented fallback for Bambu (no metadata API): derived in bambu.py after 60s elapsed.
+    if state == "printing" and id not in _estimated_stored and id in _active_job_key:
+        filename = ps.get("filename", "")
+        if filename:
+            try:
+                async with httpx.AsyncClient(timeout=3.0) as client:
+                    meta_resp = await client.get(
+                        f"{base_url}/server/files/metadata", params={"filename": filename}
+                    )
+                    if meta_resp.status_code == 200:
+                        estimated = meta_resp.json().get("result", {}).get("estimated_time")
+                        if estimated:
+                            db.update_estimated_duration(id, _active_job_key[id], int(estimated))
+                            log.info("stored slicer estimate for %s: %ds", id, estimated)
+            except Exception as exc:
+                log.debug("metadata fetch for duration failed %s: %s", id, exc)
+        _estimated_stored.add(id)  # mark attempted regardless of success
+
     if state == "idle":
         job = None  # MQTT/Moonraker retains last-print data; don't surface it as active
 
@@ -162,9 +182,11 @@ def _resolve_state(
                     layers_total=job.layer_total if job else None,
                 )
             _active_job_key[printer_id] = job_key
+            _estimated_stored.discard(printer_id)  # new job — fetch estimate fresh
         return "printing"
 
     if raw == "complete":
+        _estimated_stored.discard(printer_id)
         job_key = _active_job_key.pop(printer_id, None)
         finished_at = db.get_finished_at(printer_id)
         if finished_at is None:
@@ -181,6 +203,7 @@ def _resolve_state(
         return "finished"
 
     if raw == "cancelled":
+        _estimated_stored.discard(printer_id)
         job_key = _active_job_key.pop(printer_id, None)
         if job_key:
             db.on_print_ended(
@@ -198,6 +221,7 @@ def _resolve_state(
         return "estop"
 
     if raw == "error":
+        _estimated_stored.discard(printer_id)
         job_key = _active_job_key.pop(printer_id, None)
         if job_key:
             msg = f"Klipper error: {error_message}" if error_message else "Klipper error"
@@ -211,6 +235,7 @@ def _resolve_state(
         return "error"
 
     # standby — check for recent finish (startup hydration)
+    _estimated_stored.discard(printer_id)
     if printer_id in _active_job_key:
         # Printer went standby while we had an active key (restart → printer also reset)
         job_key = _active_job_key.pop(printer_id)

@@ -52,6 +52,7 @@ def init() -> None:
             "ALTER TABLE printer_state ADD COLUMN last_seen TEXT",
             "ALTER TABLE prints ADD COLUMN snapshot_jpeg BLOB",
             "ALTER TABLE prints ADD COLUMN snapshot_captured_at TIMESTAMP",
+            "ALTER TABLE prints ADD COLUMN estimated_duration_seconds INTEGER",
         ):
             try:
                 conn.execute(stmt)
@@ -188,6 +189,7 @@ def on_print_finished(
                WHERE printer_id = ? AND job_key = ? AND final_state IS NULL""",
             (now, now, layers_completed, filament_grams, printer_id, job_key),
         )
+    _cal_cache.pop(printer_id, None)
     log.info("print finished: %s key=%s", printer_id, job_key)
 
 
@@ -351,6 +353,57 @@ def get_print_snapshot(print_id: int) -> Optional[bytes]:
             (print_id,),
         ).fetchone()
     return row["snapshot_jpeg"] if row else None
+
+
+# ── ETA calibration ───────────────────────────────────────────────────────
+# Per-printer cache of (ratio, count). Invalidated by on_print_finished.
+# Sample: last 50 FINISHED rows with estimated_duration_seconds set.
+# Minimum 5 samples to produce a ratio; below that ratio is None.
+# Why 50: stable enough to smooth outliers, recent enough to reflect
+# current slicer profile and hardware config.
+_cal_cache: dict[str, Optional[dict]] = {}
+
+
+def update_estimated_duration(printer_id: str, job_key: str, seconds: int) -> None:
+    """Store the slicer's estimated total duration for a running print."""
+    with _conn() as conn:
+        conn.execute(
+            "UPDATE prints SET estimated_duration_seconds = ? WHERE printer_id = ? AND job_key = ?",
+            (seconds, printer_id, job_key),
+        )
+
+
+def get_calibration(printer_id: str) -> Optional[dict]:
+    """Return {ratio, count} for ETA calibration, or None if no samples exist.
+
+    ratio is None when count < 5 (insufficient data — show 'calibrating').
+    ratio = sum(actual_duration) / sum(estimated_duration) over last 50 FINISHED prints.
+    """
+    if printer_id in _cal_cache:
+        return _cal_cache[printer_id]
+    with _conn() as conn:
+        row = conn.execute(
+            """SELECT SUM(duration_seconds)           AS actual,
+                      SUM(estimated_duration_seconds) AS estimated,
+                      COUNT(*)                        AS cnt
+               FROM (
+                   SELECT duration_seconds, estimated_duration_seconds
+                   FROM prints
+                   WHERE printer_id = ?
+                     AND final_state = 'FINISHED'
+                     AND estimated_duration_seconds IS NOT NULL
+                     AND estimated_duration_seconds > 0
+                   ORDER BY started_at DESC
+                   LIMIT 50
+               )""",
+            (printer_id,),
+        ).fetchone()
+    result = None
+    if row and row["cnt"] > 0 and row["estimated"]:
+        ratio = (row["actual"] / row["estimated"]) if row["cnt"] >= 5 else None
+        result = {"ratio": ratio, "count": int(row["cnt"])}
+    _cal_cache[printer_id] = result
+    return result
 
 
 def get_last_print(printer_id: str) -> Optional[dict]:

@@ -361,6 +361,14 @@ header {
   letter-spacing: 0.05em;
 }
 
+/* ── ETA calibration ── */
+.eta-row { line-height: 1.5; }
+.eta-count {
+  font-size: 0.7rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
 /* ── Connection dot ── */
 .conn-dot {
   width: 7px;
