@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 23 May 2026 (session 5)_
+_Last updated 23 May 2026 (session 6)_
 
 ## Current state
 
@@ -98,6 +98,18 @@ All 10 steps from TIER2_SPEC.md shipped, plus four bonus items.
 | UFW | Done | Enabled; rules: ssh, 8000/tcp (flightdeck), tailscale0 interface. |
 | Voron slicer thumbnail | Done | OrcaSlicer embeds 32×32 and 400×300. Was picking 32×32 due to 200px cap in `_pick_thumbnail`. Fixed to pick largest available — now shows 400×300. |
 | Estop → firmware restart | Done | Full loop confirmed: idle → ESTOP badge on estop → firmware restart button → printer reinitialises → idle. |
+
+---
+
+## Fixed/shipped this session (23 May session 6)
+
+**ntfy Title headers crashing on emoji (notifications still not delivered):**
+
+1. **Root cause** — ntfy Title strings contained non-ASCII emoji (`⏸`, `✓`, `⚠`). HTTP headers must be ASCII; httpx raised `'ascii' codec can't encode character '⏸'` before the request was sent. Confirmed in journalctl: transition detected, ntfy send attempted, immediate failure. Tags already render emoji on the ntfy app side.
+
+2. **Fix** — Removed emoji from all four Title strings: `"Print paused ⏸"` → `"Print paused"`, `"Print complete ✓"` → `"Print complete"`, `"Print error ⚠"` → `"Print error"`, `"Print cancelled"` unchanged. Commit: `beb68eb`.
+
+3. **Confirmed working** — paused H2D during live print; journalctl showed `state transition h2d: printing → paused` → `ntfy sending` → `ntfy sent OK (HTTP 200)`; notification received on phone.
 
 ---
 
