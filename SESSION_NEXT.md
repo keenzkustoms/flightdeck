@@ -101,6 +101,16 @@ All 10 steps from TIER2_SPEC.md shipped, plus four bonus items.
 
 ---
 
+## Fixed/shipped this session (23 May session 8)
+
+**H2D dual-nozzle display fixes:**
+
+1. **Nozzle order** — Left nozzle now appears before Right in both the card and detail panel, matching the physical hotend layout. Fixed by sorting `Object.entries(p.temps)` using a `_TEMP_SORT` priority map (`hotend_l: 0, hotend_r: 1, hotend: 2, bed: 3, chamber: 4`) in both `renderCard` and `_detailTempsPanel`.
+
+2. **Temperature colour coding** — All actual-temperature readings are now coloured by value via a `_tempClass(actual)` helper: `≥ 180°C → red (var(--error))`, `60–179°C → blue (#60a5fa)`, `< 60°C → white (default)`. Applies globally — card temp strip, detail panel ctrl rows (hotend/bed) and non-ctrl rows (nozzles, chamber). Both CSS classes (`.temp-hot`, `.temp-warm`) added to style.css.
+
+---
+
 ## Fixed/shipped this session (23 May session 7)
 
 **Decision log — per-print structured audit trail:**
