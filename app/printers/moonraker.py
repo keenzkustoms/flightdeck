@@ -200,11 +200,12 @@ def _resolve_state(
     if raw == "error":
         job_key = _active_job_key.pop(printer_id, None)
         if job_key:
+            msg = f"Klipper error: {error_message}" if error_message else "Klipper error"
             db.on_print_ended(
                 printer_id, job_key,
                 final_state="ERROR",
                 layers_completed=job.layer_current if job else None,
-                error_message=error_message or "Unknown error",
+                error_message=msg,
             )
         db.clear_finished_at(printer_id)
         return "error"

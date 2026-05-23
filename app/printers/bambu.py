@@ -59,6 +59,7 @@ class BambuPrinter:
         self._seen_finish_this_session = False
         self._current_job_key: Optional[str] = None
         self._error_job_key: Optional[str] = None  # job_key of active in-session error
+        self._cancel_requested = False
 
     def start(self) -> None:
         self._printer.connect()
@@ -180,15 +181,23 @@ class BambuPrinter:
                 db.clear_finished_at(self.id)
                 self._seen_finish_this_session = False
                 self._current_job_key = None
+                self._cancel_requested = False
                 return "idle"
             if self._current_job_key:
-                # In-session interrupt: we know the exact job key.
-                db.on_print_ended(
-                    self.id, self._current_job_key,
-                    final_state="ERROR",
-                    layers_completed=job.layer_current if job else None,
-                    error_message="Connection lost mid-print",
-                )
+                # In-session stop: distinguish user-initiated cancel from unexpected drop.
+                if self._cancel_requested:
+                    db.on_print_ended(
+                        self.id, self._current_job_key,
+                        final_state="CANCELLED",
+                        layers_completed=job.layer_current if job else None,
+                    )
+                else:
+                    db.on_print_ended(
+                        self.id, self._current_job_key,
+                        final_state="ERROR",
+                        layers_completed=job.layer_current if job else None,
+                        error_message="Connection lost mid-print",
+                    )
             else:
                 # Service restarted while printer was mid-print then went idle:
                 # _make_job_key may return a stale/wrong key, so close all open rows directly.
@@ -196,6 +205,7 @@ class BambuPrinter:
                     self.id,
                     error_message="Connection lost mid-print",
                 )
+            self._cancel_requested = False
             self._current_job_key = None
             finished_at = db.get_finished_at(self.id)
             if finished_at is not None:
@@ -229,7 +239,7 @@ class BambuPrinter:
                 # In-session failure: close the job and start showing the error.
                 job_key = self._current_job_key
                 err_code = self._printer.mqtt_dump().get("print", {}).get("print_error", 0)
-                err_msg = f"Error code {err_code}" if err_code else "Unknown error"
+                err_msg = f"Bambu error: {err_code}" if err_code else "Print failed"
                 db.on_print_ended(
                     self.id, job_key,
                     final_state="ERROR",
@@ -237,6 +247,7 @@ class BambuPrinter:
                     error_message=err_msg,
                 )
                 self._current_job_key = None
+                self._cancel_requested = False
                 self._error_job_key = job_key
                 return "error"
 
@@ -253,7 +264,7 @@ class BambuPrinter:
             # Pre-existing failure not yet in DB — close it and show error once.
             if job_key:
                 err_code = self._printer.mqtt_dump().get("print", {}).get("print_error", 0)
-                err_msg = f"Error code {err_code}" if err_code else "Unknown error"
+                err_msg = f"Bambu error: {err_code}" if err_code else "Print failed"
                 db.on_print_ended(
                     self.id, job_key,
                     final_state="ERROR",
@@ -283,9 +294,11 @@ class BambuPrinter:
         self._printer.resume_print()
 
     def cancel(self) -> None:
+        self._cancel_requested = True
         self._printer.stop_print()
 
     def estop(self) -> None:
+        self._cancel_requested = True
         self._printer.stop_print()  # Bambu MQTT has no dedicated e-stop
 
     def set_temp(self, heater: str, target: int) -> None:
