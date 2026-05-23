@@ -101,6 +101,26 @@ All 10 steps from TIER2_SPEC.md shipped, plus four bonus items.
 
 ---
 
+## Fixed/shipped this session (23 May session 4)
+
+**Cancel vs error distinction in print history:**
+
+1. **Root cause** — Bambu's `GcodeState.IDLE` is used for both user-initiated cancel and unexpected printer drop. Both were recorded as `final_state="ERROR"` with `"Connection lost mid-print"`, making every cancel look like a failure.
+
+2. **Fix (bambu.py)** — Added `_cancel_requested` flag (default `False`). `cancel()` and `estop()` set it before sending the stop command. In `_resolve_state`, the `GcodeState.IDLE` handler now checks the flag: if set → `CANCELLED` (no error message); if not set → `ERROR` / `"Connection lost mid-print"`. Flag is cleared on all IDLE exit paths including the `_seen_finish_this_session` fast-path. FAILED state error messages improved: `"Bambu error: {err_code}"` or `"Print failed"` instead of `"Unknown error"`. Commit: `c55d737`.
+
+3. **Fix (moonraker.py)** — Klipper error messages now prefixed with `"Klipper error: "` for clarity. Moonraker's `cancelled` GcodeState was already recording `CANCELLED` correctly — no change needed there.
+
+4. **DB fixup** — Print row 71 (`Roll-Up_Storage_Box_plate_1`, 13:43 cancel) corrected directly from `ERROR` → `CANCELLED`.
+
+**Error message taxonomy going forward:**
+- User cancel / E-Stop → `CANCELLED`, no error message
+- Bambu firmware failure → `ERROR` / `"Bambu error: {code}"` or `"Print failed"`
+- Connection lost mid-print → `ERROR` / `"Connection lost mid-print"`
+- Klipper error → `ERROR` / `"Klipper error: {message}"`
+
+---
+
 ## Fixed/shipped this session (23 May session 3)
 
 **H2D chamber temperature bogus reading (4,259,904°C):**
