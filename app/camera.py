@@ -48,7 +48,7 @@ class BambuCameraProxy:
             "-rtsp_transport", "tcp",
             "-i", self._url,
             "-f", "image2pipe", "-vcodec", "mjpeg",
-            "-r", "10", "-q:v", "5",
+            "-r", "10", "-q:v", "2",
             "pipe:1",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
