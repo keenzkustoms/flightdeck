@@ -82,10 +82,11 @@ class BambuPrinter:
             substage_raw = self._printer.get_current_state()
             substage = substage_raw.value if substage_raw is not None else None
 
+            dump = self._printer.mqtt_dump()
             temps: dict[str, TempReading] = {}
             nozzle = self._printer.get_nozzle_temperature()
             bed = self._printer.get_bed_temperature()
-            chamber = self._printer.get_chamber_temperature()
+            chamber = _read_chamber_temp(dump, self.model_name)
             mc = self._printer.mqtt_client
             if nozzle is not None:
                 temps["hotend"] = TempReading(
@@ -98,7 +99,7 @@ class BambuPrinter:
                     target=float(mc.get_bed_temperature_target()),
                 )
             if chamber is not None:
-                temps["chamber"] = TempReading(actual=float(chamber), target=0.0)
+                temps["chamber"] = TempReading(actual=chamber, target=0.0)
 
             job = None
             filename = self._printer.get_file_name()
@@ -128,7 +129,7 @@ class BambuPrinter:
                     idle_info["Last print"] = _fmt_last_print(last)
 
             try:
-                ams = _parse_ams(self._printer.mqtt_dump().get("print", {}))
+                ams = _parse_ams(dump.get("print", {}))
             except Exception:
                 ams = []
 
@@ -312,6 +313,43 @@ class BambuPrinter:
             log.warning("FTP preview failed for %s: %s", self.model_name, exc)
             self._preview_cache = (subtask, _BAMBU_PREVIEW_FAILED)
             return None
+
+
+def _read_chamber_temp(mqtt_dump: dict, model_name: str) -> float | None:
+    """Return chamber temperature in °C, or None if unavailable/invalid.
+
+    X1C stores device.ctc.info.temp as a plain int (e.g. 27 → 27 °C).
+    H2D packs it as (actual_celsius << 16) | target_celsius
+    (e.g. 4259905 = 0x410041 → actual = 0x41 = 65 °C).
+    Clamp at 150 °C to catch any future encoding surprises.
+    """
+    print_data = mqtt_dump.get("print", {})
+
+    raw = print_data.get("chamber_temper")
+    if raw is not None:
+        try:
+            val = float(raw)
+            return val if 0 <= val <= 150 else None
+        except (TypeError, ValueError):
+            pass
+
+    device = print_data.get("device", {})
+    if isinstance(device, dict):
+        ctc = device.get("ctc", {})
+        if isinstance(ctc, dict):
+            info = ctc.get("info", {})
+            if isinstance(info, dict):
+                packed = info.get("temp")
+                if packed is not None:
+                    try:
+                        val = int(packed)
+                        if model_name == "H2D":
+                            val = val >> 16  # upper 16 bits = actual °C
+                        return float(val) if 0 <= val <= 150 else None
+                    except (TypeError, ValueError):
+                        pass
+
+    return None
 
 
 def _parse_ams(dump: dict) -> list[dict]:
