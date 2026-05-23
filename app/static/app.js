@@ -312,7 +312,7 @@ function renderTemp(label, reading) {
     </div>`;
 }
 
-const TEMP_LABELS = { hotend: 'Hotend', bed: 'Bed', chamber: 'Chamber' };
+const TEMP_LABELS = { hotend: 'Hotend', hotend_l: 'Left', hotend_r: 'Right', bed: 'Bed', chamber: 'Chamber' };
 
 function jobDisplayName(job) {
   const raw = job.filename || '';
@@ -676,7 +676,7 @@ function _detailPrintPanel(p) {
 }
 
 const _TEMP_CTRL_HEATERS = new Set(['hotend', 'bed']);
-const _TEMP_LABELS = { hotend: 'Hotend', bed: 'Bed', chamber: 'Chamber' };
+const _TEMP_LABELS = { hotend: 'Hotend', hotend_l: 'Left', hotend_r: 'Right', bed: 'Bed', chamber: 'Chamber' };
 
 function _getDisplayTarget(id, heater, wsTarget) {
   const key = `${id}:${heater}`;

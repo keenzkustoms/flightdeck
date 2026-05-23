@@ -85,15 +85,19 @@ class BambuPrinter:
 
             dump = self._printer.mqtt_dump()
             temps: dict[str, TempReading] = {}
-            nozzle = self._printer.get_nozzle_temperature()
+            mc = self._printer.mqtt_client
+            dual = _read_dual_nozzle_temps(dump, self.model_name)
+            if dual:
+                temps.update(dual)
+            else:
+                nozzle = self._printer.get_nozzle_temperature()
+                if nozzle is not None:
+                    temps["hotend"] = TempReading(
+                        actual=float(nozzle),
+                        target=float(mc.get_nozzle_temperature_target()),
+                    )
             bed = self._printer.get_bed_temperature()
             chamber = _read_chamber_temp(dump, self.model_name)
-            mc = self._printer.mqtt_client
-            if nozzle is not None:
-                temps["hotend"] = TempReading(
-                    actual=float(nozzle),
-                    target=float(mc.get_nozzle_temperature_target()),
-                )
             if bed is not None:
                 temps["bed"] = TempReading(
                     actual=float(bed),
@@ -326,6 +330,52 @@ class BambuPrinter:
             log.warning("FTP preview failed for %s: %s", self.model_name, exc)
             self._preview_cache = (subtask, _BAMBU_PREVIEW_FAILED)
             return None
+
+
+def _read_dual_nozzle_temps(mqtt_dump: dict, model_name: str) -> dict[str, "TempReading"]:
+    """Return {hotend_l, hotend_r} TempReadings for dual-nozzle printers (H2D only).
+
+    H2D extruder encoding in device.extruder.info[]:
+      - Primary extruder (id=0, Right): packed (actual<<16)|target  e.g. 17694990=(270<<16)|270
+      - Secondary extruder (id=1, Left): plain int when temp>>16==0  e.g. 77 → 77°C
+    Assignment confirmed: nozzle_temper tracks extruder[0] (Right); extruder[1] is Left.
+    """
+    if model_name != "H2D":
+        return {}
+
+    print_data = mqtt_dump.get("print", {})
+    device = print_data.get("device", {})
+    if not isinstance(device, dict):
+        return {}
+    ext = device.get("extruder", {})
+    if not isinstance(ext, dict):
+        return {}
+    info = ext.get("info", [])
+    if not isinstance(info, list) or len(info) < 2:
+        return {}
+
+    _ID_TO_KEY = {0: "hotend_r", 1: "hotend_l"}
+    result: dict[str, TempReading] = {}
+    for entry in info:
+        eid = entry.get("id")
+        raw = entry.get("temp")
+        if eid is None or raw is None:
+            continue
+        try:
+            val = int(raw)
+            if val >> 16 > 0:
+                actual = float(val >> 16)
+                target = float(val & 0xFFFF)
+            else:
+                actual = float(val)
+                target = 0.0
+            if 0 <= actual <= 400:
+                key = _ID_TO_KEY.get(eid, f"hotend_{eid}")
+                result[key] = TempReading(actual=actual, target=target)
+        except (TypeError, ValueError):
+            pass
+
+    return result if len(result) == 2 else {}
 
 
 def _read_chamber_temp(mqtt_dump: dict, model_name: str) -> float | None:

@@ -6,8 +6,9 @@ from typing import Optional
 
 log = logging.getLogger(__name__)
 
-_IDLE_TIMEOUT  = 60   # seconds before killing ffmpeg after last client leaves
-_STALE_TIMEOUT = 15   # seconds without a new frame before declaring stream dead
+_IDLE_TIMEOUT    = 60  # seconds before killing ffmpeg after last client leaves
+_STALE_TIMEOUT   = 8   # seconds without a new frame before declaring stream dead
+_INITIAL_TIMEOUT = 10  # max seconds to wait for the very first frame after (re)start
 _FRAME_START = b"\xff\xd8"
 _FRAME_END   = b"\xff\xd9"
 
@@ -29,6 +30,7 @@ class BambuCameraProxy:
         self._watchdog_task: Optional[asyncio.Task] = None
         self._latest: Optional[bytes] = None
         self._last_frame_at: float = 0.0
+        self._started_at: float = 0.0
         self._clients: int = 0
         self._idle_task: Optional[asyncio.Task] = None
 
@@ -39,6 +41,7 @@ class BambuCameraProxy:
             return
         self._latest = None
         self._last_frame_at = 0.0
+        self._started_at = time.monotonic()
         self._proc = await asyncio.create_subprocess_exec(
             "ffmpeg",
             "-loglevel", "error",
@@ -78,12 +81,22 @@ class BambuCameraProxy:
             await self.stop()
 
     async def _watchdog(self) -> None:
-        """Kill a frozen-but-alive ffmpeg if no frames arrive for _STALE_TIMEOUT seconds."""
+        """Kill ffmpeg if no frames arrive — covers both stale streams and stuck reconnects."""
         while True:
-            await asyncio.sleep(10)
-            if self._clients == 0 or self._last_frame_at == 0.0:
+            await asyncio.sleep(5)
+            if self._clients == 0:
                 continue
-            if (time.monotonic() - self._last_frame_at) > _STALE_TIMEOUT:
+            now = time.monotonic()
+            if self._last_frame_at == 0.0:
+                # Waiting for first frame — kill if ffmpeg is taking too long to connect.
+                if self._started_at > 0 and (now - self._started_at) > _INITIAL_TIMEOUT:
+                    log.warning("camera no initial frame after %ds, restarting: %s", _INITIAL_TIMEOUT, self._id)
+                    if self._proc:
+                        try:
+                            self._proc.kill()
+                        except Exception:
+                            pass
+            elif (now - self._last_frame_at) > _STALE_TIMEOUT:
                 log.warning("camera stale (%ds no frames), restarting: %s", _STALE_TIMEOUT, self._id)
                 if self._proc:
                     try:
