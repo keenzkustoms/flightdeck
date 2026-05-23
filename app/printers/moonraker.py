@@ -12,9 +12,11 @@ from ..models import PrinterStatus, JobStatus, TempReading
 log = logging.getLogger(__name__)
 
 _preview_cache: dict[str, tuple[str, "MoonrakerPreview"]] = {}
-_prev_raw_state: dict[str, str] = {}   # printer_id → last raw Klipper state
-_active_job_key: dict[str, str] = {}   # printer_id → job_key for the running print
-_estimated_stored: set[str] = set()    # printer_ids where slicer estimate is already stored
+_prev_raw_state: dict[str, str] = {}           # printer_id → last raw Klipper state
+_active_job_key: dict[str, str] = {}           # printer_id → job_key for the running print
+_active_print_id: dict[str, Optional[int]] = {}  # printer_id → prints.id for the running print
+_error_print_id: dict[str, Optional[int]] = {}   # printer_id → prints.id of the last error (for snapshot)
+_estimated_stored: set[str] = set()            # printer_ids where slicer estimate is already stored
 
 FINISHED_TTL = timedelta(minutes=30)
 
@@ -120,6 +122,13 @@ async def fetch(id: str, model_name: str, custom_name: str, icon: str, base_url:
                         if estimated:
                             db.update_estimated_duration(id, _active_job_key[id], int(estimated))
                             log.info("stored slicer estimate for %s: %ds", id, estimated)
+                            pid = _active_print_id.get(id)
+                            if pid:
+                                secs = int(estimated)
+                                db.log_decision(id, "calibration_captured",
+                                               f"Slicer estimate from metadata: {secs}s "
+                                               f"({secs // 3600}h {(secs % 3600) // 60}m)",
+                                               print_id=pid)
             except Exception as exc:
                 log.debug("metadata fetch for duration failed %s: %s", id, exc)
         _estimated_stored.add(id)  # mark attempted regardless of success
@@ -173,21 +182,30 @@ def _resolve_state(
             # On backend restart mid-print: reuse existing open row rather than
             # creating a duplicate with a different timestamp key
             existing = db.get_open_print_key(printer_id, filename)
-            if existing:
-                job_key = existing
-            else:
-                job_key = f"{filename}@{int(now.timestamp())}"
-                db.on_print_started(
-                    printer_id, job_key, filename,
-                    layers_total=job.layer_total if job else None,
-                )
+            job_key = existing if existing else f"{filename}@{int(now.timestamp())}"
+            print_id, is_reattach = db.on_print_started(
+                printer_id, job_key, filename,
+                layers_total=job.layer_total if job else None,
+            )
             _active_job_key[printer_id] = job_key
+            _active_print_id[printer_id] = print_id
             _estimated_stored.discard(printer_id)  # new job — fetch estimate fresh
+            _error_print_id.pop(printer_id, None)
+            if is_reattach and print_id:
+                db.log_decision(printer_id, "job_reattached",
+                               f"Service restarted mid-print; reattached to existing row key={job_key}",
+                               print_id=print_id)
+            elif print_id:
+                db.log_decision(printer_id, "job_started",
+                               f"New print started key={job_key}",
+                               print_id=print_id)
         return "printing"
 
     if raw == "complete":
         _estimated_stored.discard(printer_id)
         job_key = _active_job_key.pop(printer_id, None)
+        _active_print_id.pop(printer_id, None)
+        _error_print_id.pop(printer_id, None)
         finished_at = db.get_finished_at(printer_id)
         if finished_at is None:
             finished_at = now
@@ -205,12 +223,18 @@ def _resolve_state(
     if raw == "cancelled":
         _estimated_stored.discard(printer_id)
         job_key = _active_job_key.pop(printer_id, None)
+        _active_print_id.pop(printer_id, None)
+        _error_print_id.pop(printer_id, None)
         if job_key:
-            db.on_print_ended(
+            print_id = db.on_print_ended(
                 printer_id, job_key,
                 final_state="CANCELLED",
                 layers_completed=job.layer_current if job else None,
             )
+            if print_id:
+                db.log_decision(printer_id, "cancel_resolved",
+                               "Print cancelled by user",
+                               print_id=print_id)
         db.clear_finished_at(printer_id)
         return "idle"
 
@@ -223,14 +247,18 @@ def _resolve_state(
     if raw == "error":
         _estimated_stored.discard(printer_id)
         job_key = _active_job_key.pop(printer_id, None)
+        _active_print_id.pop(printer_id, None)
         if job_key:
             msg = f"Klipper error: {error_message}" if error_message else "Klipper error"
-            db.on_print_ended(
+            print_id = db.on_print_ended(
                 printer_id, job_key,
                 final_state="ERROR",
                 layers_completed=job.layer_current if job else None,
                 error_message=msg,
             )
+            _error_print_id[printer_id] = print_id
+            if print_id:
+                db.log_decision(printer_id, "error_resolved", msg, print_id=print_id)
         db.clear_finished_at(printer_id)
         return "error"
 
@@ -239,8 +267,14 @@ def _resolve_state(
     if printer_id in _active_job_key:
         # Printer went standby while we had an active key (restart → printer also reset)
         job_key = _active_job_key.pop(printer_id)
-        db.on_print_ended(printer_id, job_key, final_state="ERROR",
+        _active_print_id.pop(printer_id, None)
+        _error_print_id.pop(printer_id, None)
+        print_id = db.on_print_ended(printer_id, job_key, final_state="ERROR",
                           error_message="Connection lost mid-print")
+        if print_id:
+            db.log_decision(printer_id, "connection_lost",
+                           "Printer went standby while job was active; connection lost",
+                           print_id=print_id)
 
     finished_at = db.get_finished_at(printer_id)
     if finished_at is not None:

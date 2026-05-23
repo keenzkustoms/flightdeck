@@ -1049,6 +1049,13 @@ function _showPrintDetail(printerId, dateStr, print) {
        </div>`
     : '';
 
+  const decisionHtml = print.id
+    ? `<details class="decision-trail" data-print-id="${print.id}" data-printer-id="${printerId}">
+         <summary>Decision trail</summary>
+         <div class="decision-list"><span class="decision-empty">Loading…</span></div>
+       </details>`
+    : '';
+
   el.innerHTML = `<div class="history-day-panel">
     <div class="print-detail-nav">
       <button class="print-detail-back" data-back-date="${dateStr}">&larr; ${dateLabel}</button>
@@ -1060,7 +1067,41 @@ function _showPrintDetail(printerId, dateStr, print) {
     ${snapshotHtml}
     ${errorHtml}
     <div>${rows.join('')}</div>
+    ${decisionHtml}
   </div>`;
+
+  const trail = el.querySelector('.decision-trail');
+  if (trail) {
+    trail.addEventListener('toggle', function () {
+      if (!this.open) return;
+      const list = this.querySelector('.decision-list');
+      if (list.dataset.loaded) return;
+      list.dataset.loaded = '1';
+      const pid = this.dataset.printId;
+      const prid = this.dataset.printerId;
+      fetch(`/api/printers/${prid}/prints/${pid}/decisions`)
+        .then(r => r.ok ? r.json() : [])
+        .then(decisions => {
+          if (!decisions.length) {
+            list.innerHTML = '<span class="decision-empty">No decisions recorded.</span>';
+            return;
+          }
+          list.innerHTML = decisions.map(d => {
+            const ts = new Date(d.logged_at.endsWith('Z') ? d.logged_at : d.logged_at + 'Z')
+              .toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            const detail = d.detail
+              ? `<span class="decision-detail">${d.detail}</span>`
+              : '';
+            return `<div class="decision-item">
+              <span class="decision-ts">${ts}</span>
+              <span class="decision-event">${d.event}</span>
+              ${detail}
+            </div>`;
+          }).join('');
+        })
+        .catch(() => { list.innerHTML = '<span class="decision-empty">Failed to load.</span>'; });
+    });
+  }
 }
 
 function _renderDayList(printerId, dateStr, prints, el) {

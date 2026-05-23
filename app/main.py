@@ -59,6 +59,7 @@ async def _gather_all() -> list[dict]:
         cal = db.get_calibration(id)
         if cal:
             d["eta_calibration"] = cal
+        d["_error_print_id"] = moonraker._error_print_id.get(id)
         return d
 
     async def _fetch_bambu(p):
@@ -69,6 +70,7 @@ async def _gather_all() -> list[dict]:
         cal = db.get_calibration(p.id)
         if cal:
             d["eta_calibration"] = cal
+        d["_error_print_id"] = p._error_print_id
         return d
 
     tasks = (
@@ -126,17 +128,23 @@ async def _grab_snapshot(printer_id: str) -> Optional[bytes]:
     return None
 
 
-async def _do_failure_snapshot(printer_id: str) -> None:
+async def _do_failure_snapshot(printer_id: str, print_id: Optional[int]) -> None:
     jpeg = await _grab_snapshot(printer_id)
     if not jpeg:
         log.debug("no camera frame available for failure snapshot: %s", printer_id)
+        if print_id:
+            db.log_decision(printer_id, "failure_snapshot_unavailable",
+                           "No camera frame available", print_id=print_id)
         return
-    print_id = db.get_most_recent_print_id(printer_id)
     if print_id is None:
         log.debug("no print row to attach snapshot to: %s", printer_id)
+        db.log_decision(printer_id, "failure_snapshot_unavailable",
+                       "No print_id available (snapshot discarded)", print_id=None)
         return
     db.save_print_snapshot(print_id, jpeg)
     log.info("failure snapshot saved: %s print_id=%d (%d bytes)", printer_id, print_id, len(jpeg))
+    db.log_decision(printer_id, "failure_snapshot_saved",
+                   f"{len(jpeg)} bytes", print_id=print_id)
 
 
 async def _send_ntfy(title: str, message: str, tags: list[str], priority: int = 3) -> None:
@@ -180,7 +188,8 @@ def _check_transitions(data: list[dict]) -> None:
             msg = f"{name}" + (f" · {label}" if label else "")
             asyncio.create_task(_send_ntfy("Print complete", msg, ["white_check_mark"]))
         elif curr in ("error", "estop"):
-            asyncio.create_task(_do_failure_snapshot(pid))
+            error_pid = p.get("_error_print_id")
+            asyncio.create_task(_do_failure_snapshot(pid, error_pid))
             if curr == "error":
                 msg = f"{name}" + (f" · {label}" if label else "")
                 asyncio.create_task(_send_ntfy("Print error", msg, ["warning"], priority=4))
@@ -522,6 +531,12 @@ async def get_failure_snapshot(printer_id: str, print_id: int):
         media_type="image/jpeg",
         headers={"Cache-Control": "public, max-age=31536000, immutable"},
     )
+
+
+@app.get("/api/printers/{printer_id}/prints/{print_id}/decisions")
+async def get_print_decisions(printer_id: str, print_id: int):
+    _assert_printer(printer_id)
+    return db.get_decisions(print_id)
 
 
 @app.get("/api/printers/{printer_id}/history/calendar")

@@ -44,6 +44,21 @@ def init() -> None:
             CREATE UNIQUE INDEX IF NOT EXISTS idx_prints_job_key
                 ON prints(printer_id, job_key);
 
+            CREATE TABLE IF NOT EXISTS decisions (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                print_id     INTEGER REFERENCES prints(id),
+                printer_id   TEXT NOT NULL,
+                event        TEXT NOT NULL,
+                detail       TEXT,
+                logged_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_decisions_print_id
+                ON decisions(print_id);
+
+            CREATE INDEX IF NOT EXISTS idx_decisions_printer_logged
+                ON decisions(printer_id, logged_at DESC);
+
             DROP TABLE IF EXISTS print_history;
         """)
     # Migrate existing DB: add columns if missing
@@ -76,6 +91,11 @@ def _conn():
 
 def _close_stale_orphans() -> None:
     with _conn() as conn:
+        orphans = conn.execute(
+            """SELECT id, printer_id FROM prints
+               WHERE final_state IS NULL
+                 AND started_at < datetime('now', '-24 hours')""",
+        ).fetchall()
         n = conn.execute(
             """UPDATE prints
                SET ended_at = CURRENT_TIMESTAMP,
@@ -86,6 +106,10 @@ def _close_stale_orphans() -> None:
         ).rowcount
     if n:
         log.info("Closed %d stale print row(s) as ERROR", n)
+        for row in orphans:
+            log_decision(row["printer_id"], "orphan_closed",
+                        "Row open >24h at service start; Flightdeck restarted during this print",
+                        print_id=row["id"])
 
 
 # ── printer_state (FINISHED TTL) ──────────────────────────────────────────
@@ -155,17 +179,27 @@ def on_print_started(
     started_at: Optional[datetime] = None,
     layers_total: Optional[int] = None,
     material: Optional[str] = None,
-) -> None:
+) -> tuple[Optional[int], bool]:
+    """Returns (print_id, is_reattach). is_reattach=True when row already existed."""
     ts = (started_at or datetime.utcnow()).isoformat()
     with _conn() as conn:
-        conn.execute(
+        cursor = conn.execute(
             """INSERT INTO prints
                (printer_id, job_key, filename, subtask_name, started_at, layers_total, material)
                VALUES (?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(printer_id, job_key) DO NOTHING""",
             (printer_id, job_key, filename, subtask_name, ts, layers_total, material),
         )
-    log.info("print started: %s key=%s file=%s", printer_id, job_key, filename)
+        if cursor.rowcount > 0:
+            print_id, is_reattach = cursor.lastrowid, False
+        else:
+            row = conn.execute(
+                "SELECT id FROM prints WHERE printer_id = ? AND job_key = ?",
+                (printer_id, job_key),
+            ).fetchone()
+            print_id, is_reattach = (row["id"] if row else None), True
+    log.info("print started: %s key=%s file=%s reattach=%s", printer_id, job_key, filename, is_reattach)
+    return print_id, is_reattach
 
 
 def on_print_finished(
@@ -175,9 +209,15 @@ def on_print_finished(
     ended_at: Optional[datetime] = None,
     layers_completed: Optional[int] = None,
     filament_grams: Optional[float] = None,
-) -> None:
+) -> Optional[int]:
+    """Returns print_id of the row that was closed, or None if not found."""
     now = (ended_at or datetime.utcnow()).isoformat()
     with _conn() as conn:
+        row = conn.execute(
+            "SELECT id FROM prints WHERE printer_id = ? AND job_key = ? AND final_state IS NULL",
+            (printer_id, job_key),
+        ).fetchone()
+        print_id = row["id"] if row else None
         conn.execute(
             """UPDATE prints
                SET ended_at         = ?,
@@ -191,6 +231,7 @@ def on_print_finished(
         )
     _cal_cache.pop(printer_id, None)
     log.info("print finished: %s key=%s", printer_id, job_key)
+    return print_id
 
 
 def on_print_ended(
@@ -201,9 +242,15 @@ def on_print_ended(
     ended_at: Optional[datetime] = None,
     layers_completed: Optional[int] = None,
     error_message: Optional[str] = None,
-) -> None:
+) -> Optional[int]:
+    """Returns print_id of the row that was closed, or None if not found."""
     now = (ended_at or datetime.utcnow()).isoformat()
     with _conn() as conn:
+        row = conn.execute(
+            "SELECT id FROM prints WHERE printer_id = ? AND job_key = ? AND final_state IS NULL",
+            (printer_id, job_key),
+        ).fetchone()
+        print_id = row["id"] if row else None
         conn.execute(
             """UPDATE prints
                SET ended_at         = ?,
@@ -216,6 +263,7 @@ def on_print_ended(
             (now, now, final_state, layers_completed, error_message, printer_id, job_key),
         )
     log.info("print ended %s: %s key=%s", final_state, printer_id, job_key)
+    return print_id
 
 
 # ── queries ────────────────────────────────────────────────────────────────
@@ -298,10 +346,15 @@ def close_open_prints(
     *,
     final_state: str = "ERROR",
     error_message: Optional[str] = None,
-) -> int:
-    """Close every open (final_state IS NULL) row for a printer. Returns row count."""
+) -> list[int]:
+    """Close every open (final_state IS NULL) row for a printer. Returns list of closed print_ids."""
     now = datetime.utcnow().isoformat()
     with _conn() as conn:
+        rows = conn.execute(
+            "SELECT id FROM prints WHERE printer_id = ? AND final_state IS NULL",
+            (printer_id,),
+        ).fetchall()
+        closed_ids = [r["id"] for r in rows]
         n = conn.execute(
             """UPDATE prints
                SET ended_at         = ?,
@@ -314,7 +367,7 @@ def close_open_prints(
         ).rowcount
     if n:
         log.info("close_open_prints: closed %d row(s) for %s as %s", n, printer_id, final_state)
-    return n
+    return closed_ids
 
 
 def is_print_closed(printer_id: str, job_key: str) -> bool:
@@ -353,6 +406,36 @@ def get_print_snapshot(print_id: int) -> Optional[bytes]:
             (print_id,),
         ).fetchone()
     return row["snapshot_jpeg"] if row else None
+
+
+# ── decision log ──────────────────────────────────────────────────────────
+
+def log_decision(
+    printer_id: str,
+    event: str,
+    detail: Optional[str] = None,
+    *,
+    print_id: Optional[int] = None,
+) -> None:
+    """Append a structured decision entry. Never raises — fire-and-forget."""
+    try:
+        with _conn() as conn:
+            conn.execute(
+                "INSERT INTO decisions (print_id, printer_id, event, detail) VALUES (?, ?, ?, ?)",
+                (print_id, printer_id, event, detail),
+            )
+    except Exception as exc:
+        log.warning("log_decision failed (%s %s): %s", printer_id, event, exc)
+
+
+def get_decisions(print_id: int) -> list[dict]:
+    """Return all decisions for a given print row, ordered by time."""
+    with _conn() as conn:
+        rows = conn.execute(
+            "SELECT id, event, detail, logged_at FROM decisions WHERE print_id = ? ORDER BY logged_at",
+            (print_id,),
+        ).fetchall()
+    return [dict(r) for r in rows]
 
 
 # ── ETA calibration ───────────────────────────────────────────────────────

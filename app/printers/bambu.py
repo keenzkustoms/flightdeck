@@ -63,6 +63,8 @@ class BambuPrinter:
         self._cancel_requested = False
         self._estimated_stored = False   # True once slicer estimate written for this job
         self._job_started_at: float = 0.0  # monotonic time when _current_job_key was set
+        self._current_print_id: Optional[int] = None  # prints.id for the active job
+        self._error_print_id: Optional[int] = None    # prints.id of the last error (for snapshot)
 
     def start(self) -> None:
         self._printer.connect()
@@ -168,10 +170,16 @@ class BambuPrinter:
                     layers_completed=job.layer_current if job else None,
                 )
                 self._current_job_key = None
+                self._current_print_id = None
             else:
                 # Service restarted during the print; close any open row as FINISHED
                 # rather than leaving it orphaned for the stale-orphan sweep.
-                db.close_open_prints(self.id, final_state="FINISHED")
+                closed_ids = db.close_open_prints(self.id, final_state="FINISHED")
+                for pid in closed_ids:
+                    db.log_decision(self.id, "job_cleanup",
+                                   "FINISH seen at startup with no tracked job; closed open row as FINISHED",
+                                   print_id=pid)
+                self._current_print_id = None
             finished_at = db.get_finished_at(self.id)
             if finished_at is None:
                 # Anchor to the actual last print end time so a stale FINISH state
@@ -188,36 +196,51 @@ class BambuPrinter:
             self._estimated_stored = False
             self._job_started_at = 0.0
             self._error_job_key = None
+            self._error_print_id = None
             if self._seen_finish_this_session:
                 db.clear_finished_at(self.id)
                 self._seen_finish_this_session = False
                 self._current_job_key = None
+                self._current_print_id = None
                 self._cancel_requested = False
                 return "idle"
             if self._current_job_key:
                 # In-session stop: distinguish user-initiated cancel from unexpected drop.
                 if self._cancel_requested:
-                    db.on_print_ended(
+                    print_id = db.on_print_ended(
                         self.id, self._current_job_key,
                         final_state="CANCELLED",
                         layers_completed=job.layer_current if job else None,
                     )
+                    if print_id:
+                        db.log_decision(self.id, "cancel_resolved",
+                                       f"User-initiated cancel confirmed (layers={job.layer_current if job else None})",
+                                       print_id=print_id)
                 else:
-                    db.on_print_ended(
+                    print_id = db.on_print_ended(
                         self.id, self._current_job_key,
                         final_state="ERROR",
                         layers_completed=job.layer_current if job else None,
                         error_message="Connection lost mid-print",
                     )
+                    if print_id:
+                        db.log_decision(self.id, "connection_lost",
+                                       "Printer went IDLE without cancel request; likely connection drop",
+                                       print_id=print_id)
             else:
                 # Service restarted while printer was mid-print then went idle:
                 # _make_job_key may return a stale/wrong key, so close all open rows directly.
-                db.close_open_prints(
+                closed_ids = db.close_open_prints(
                     self.id,
                     error_message="Connection lost mid-print",
                 )
+                for pid in closed_ids:
+                    db.log_decision(self.id, "job_cleanup",
+                                   "IDLE seen at startup with no tracked job; closed open rows as ERROR",
+                                   print_id=pid)
             self._cancel_requested = False
             self._current_job_key = None
+            self._current_print_id = None
             finished_at = db.get_finished_at(self.id)
             if finished_at is not None:
                 if (now - finished_at.replace(tzinfo=timezone.utc)) <= FINISHED_TTL:
@@ -229,17 +252,27 @@ class BambuPrinter:
             db.clear_finished_at(self.id)
             self._seen_finish_this_session = False
             self._error_job_key = None
+            self._error_print_id = None
             if self._current_job_key is None:
                 self._current_job_key = self._make_job_key(subtask)
                 self._job_started_at = time.monotonic()
                 self._estimated_stored = False
-                db.on_print_started(
+                print_id, is_reattach = db.on_print_started(
                     self.id,
                     self._current_job_key,
                     job.filename if job else "",
                     subtask_name=subtask,
                     layers_total=job.layer_total if job else None,
                 )
+                self._current_print_id = print_id
+                if is_reattach and print_id:
+                    db.log_decision(self.id, "job_reattached",
+                                   f"Service restarted mid-print; reattached to existing row key={self._current_job_key}",
+                                   print_id=print_id)
+                elif print_id:
+                    db.log_decision(self.id, "job_started",
+                                   f"New print started key={self._current_job_key}",
+                                   print_id=print_id)
             # Derived slicer estimate: capture once after 60s elapsed.
             # Primary path for Bambu — no metadata API available.
             # Formula: slicer_total = eta_seconds / (1 - progress)
@@ -253,6 +286,11 @@ class BambuPrinter:
                 slicer_total = int(job.eta_seconds / (1.0 - job.progress))
                 db.update_estimated_duration(self.id, self._current_job_key, slicer_total)
                 log.info("stored slicer estimate for %s: %ds (derived)", self.id, slicer_total)
+                if self._current_print_id:
+                    db.log_decision(self.id, "calibration_captured",
+                                   f"Slicer estimate derived: {slicer_total}s "
+                                   f"({slicer_total // 3600}h {(slicer_total % 3600) // 60}m)",
+                                   print_id=self._current_print_id)
                 self._estimated_stored = True
             return "printing"
 
@@ -269,15 +307,19 @@ class BambuPrinter:
                 job_key = self._current_job_key
                 err_code = self._printer.mqtt_dump().get("print", {}).get("print_error", 0)
                 err_msg = f"Bambu error: {err_code}" if err_code else "Print failed"
-                db.on_print_ended(
+                print_id = db.on_print_ended(
                     self.id, job_key,
                     final_state="ERROR",
                     layers_completed=job.layer_current if job else None,
                     error_message=err_msg,
                 )
                 self._current_job_key = None
+                self._current_print_id = None
                 self._cancel_requested = False
                 self._error_job_key = job_key
+                self._error_print_id = print_id
+                if print_id:
+                    db.log_decision(self.id, "error_resolved", err_msg, print_id=print_id)
                 return "error"
 
             if self._error_job_key:
@@ -294,13 +336,18 @@ class BambuPrinter:
             if job_key:
                 err_code = self._printer.mqtt_dump().get("print", {}).get("print_error", 0)
                 err_msg = f"Bambu error: {err_code}" if err_code else "Print failed"
-                db.on_print_ended(
+                print_id = db.on_print_ended(
                     self.id, job_key,
                     final_state="ERROR",
                     layers_completed=job.layer_current if job else None,
                     error_message=err_msg,
                 )
                 self._error_job_key = job_key
+                self._error_print_id = print_id
+                if print_id:
+                    db.log_decision(self.id, "error_resolved",
+                                   f"Stale error at service start: {err_msg}",
+                                   print_id=print_id)
             return "error"
 
         return "offline"  # UNKNOWN or anything unexpected

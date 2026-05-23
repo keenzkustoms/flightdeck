@@ -1299,6 +1299,40 @@ header {
   background: rgba(0,0,0,0.3);
 }
 
+.decision-trail {
+  margin-top: 1rem;
+  font-size: 0.8rem;
+  border-top: 1px solid var(--border);
+  padding-top: 0.75rem;
+}
+.decision-trail summary {
+  cursor: pointer;
+  color: var(--muted);
+  user-select: none;
+  list-style: none;
+  padding: 0.1rem 0;
+}
+.decision-trail summary::-webkit-details-marker { display: none; }
+.decision-trail summary::before { content: '▶  '; font-size: 0.6rem; }
+.decision-trail[open] summary::before { content: '▼  '; }
+.decision-list {
+  margin-top: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.decision-item {
+  display: grid;
+  grid-template-columns: 5.5rem 10rem 1fr;
+  gap: 0.5rem;
+  align-items: baseline;
+  font-size: 0.78rem;
+}
+.decision-ts { color: var(--muted); font-variant-numeric: tabular-nums; }
+.decision-event { color: var(--text); font-weight: 500; }
+.decision-detail { color: var(--muted); }
+.decision-empty { color: var(--muted); font-size: 0.78rem; }
+
 .print-name {
   flex: 1;
   min-width: 0;
