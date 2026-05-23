@@ -170,15 +170,15 @@ def _check_transitions(data: list[dict]) -> None:
 
         if prev == "printing" and curr == "finished":
             msg = f"{name}" + (f" · {label}" if label else "")
-            asyncio.create_task(_send_ntfy("Print complete ✓", msg, ["white_check_mark"]))
+            asyncio.create_task(_send_ntfy("Print complete", msg, ["white_check_mark"]))
         elif curr in ("error", "estop"):
             asyncio.create_task(_do_failure_snapshot(pid))
             if curr == "error":
                 msg = f"{name}" + (f" · {label}" if label else "")
-                asyncio.create_task(_send_ntfy("Print error ⚠", msg, ["warning"], priority=4))
+                asyncio.create_task(_send_ntfy("Print error", msg, ["warning"], priority=4))
         elif prev == "printing" and curr == "paused":
             msg = f"{name}" + (f" · {label}" if label else "")
-            asyncio.create_task(_send_ntfy("Print paused ⏸", msg, ["double_vertical_bar"]))
+            asyncio.create_task(_send_ntfy("Print paused", msg, ["double_vertical_bar"]))
         elif prev == "printing" and curr == "idle":
             msg = f"{name}" + (f" · {label}" if label else "")
             asyncio.create_task(_send_ntfy("Print cancelled", msg, ["x"]))
