@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 23 May 2026 (session 6)_
+_Last updated 23 May 2026 (session 7)_
 
 ## Current state
 
@@ -98,6 +98,36 @@ All 10 steps from TIER2_SPEC.md shipped, plus four bonus items.
 | UFW | Done | Enabled; rules: ssh, 8000/tcp (flightdeck), tailscale0 interface. |
 | Voron slicer thumbnail | Done | OrcaSlicer embeds 32×32 and 400×300. Was picking 32×32 due to 200px cap in `_pick_thumbnail`. Fixed to pick largest available — now shows 400×300. |
 | Estop → firmware restart | Done | Full loop confirmed: idle → ESTOP badge on estop → firmware restart button → printer reinitialises → idle. |
+
+---
+
+## Fixed/shipped this session (23 May session 7)
+
+**Decision log — per-print structured audit trail:**
+
+1. **`decisions` table** — new SQLite table (`id`, `print_id`, `printer_id`, `event`, `detail`, `logged_at`). `print_id` is a nullable FK to `prints.id`; NULL is used for printer-level events that genuinely can't be tied to a single row.
+
+2. **`log_decision()` / `get_decisions()`** — fire-and-forget append (never raises) and simple SELECT by print_id, in `db.py`.
+
+3. **`on_print_started` now returns `(print_id, is_reattach)`** — `rowcount > 0` → fresh insert, return `lastrowid`; `rowcount == 0` → conflict (row already exists), query for its id. Callers store `print_id` in `self._current_print_id` (Bambu) / `_active_print_id[id]` (Moonraker) and log `job_started` or `job_reattached` accordingly.
+
+4. **`on_print_finished` / `on_print_ended` / `close_open_prints` return print_id(s)** — SELECT id before UPDATE so callers get the row id without a second round-trip. `close_open_prints` returns `list[int]` (was `int`).
+
+5. **Decisions logged throughout lifecycle:**
+   - `job_started` / `job_reattached` — Bambu + Moonraker
+   - `calibration_captured` — both, with human-readable duration (e.g. `7h 48m`)
+   - `cancel_resolved` — user-initiated cancel confirmed
+   - `connection_lost` — IDLE/standby without cancel request
+   - `error_resolved` — FAILED or Klipper error, with error message
+   - `job_cleanup` — orphan rows closed at FINISH/IDLE with no tracked key
+   - `orphan_closed` — >24h stale row swept at startup
+   - `failure_snapshot_saved` / `failure_snapshot_unavailable` — from `main.py`
+
+6. **`_error_print_id` threaded from printer modules through fetch helpers** — `p._error_print_id` (Bambu) and `moonraker._error_print_id.get(id)` are injected as `"_error_print_id"` into the status dicts returned by `_fetch_bambu` / `_fetch_moonraker`. `_do_failure_snapshot` now takes `print_id: Optional[int]` explicitly instead of calling `get_most_recent_print_id`. `_check_transitions` passes `p.get("_error_print_id")` on error transitions.
+
+7. **`GET /api/printers/{printer_id}/prints/{print_id}/decisions`** — new endpoint, returns list of `{id, event, detail, logged_at}`.
+
+8. **History detail UI** — decision trail `<details>/<summary>` section below the print stats. Lazy-fetches on first open; subsequent opens serve cached DOM. Rendered as a 3-column grid: timestamp | event | detail. Empty state shows "No decisions recorded."
 
 ---
 
