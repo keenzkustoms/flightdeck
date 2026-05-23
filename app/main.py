@@ -9,6 +9,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+_app_log = logging.getLogger("app")
+_app_log.setLevel(logging.INFO)
+if not _app_log.handlers:
+    _h = logging.StreamHandler()
+    _h.setFormatter(logging.Formatter("%(levelname)s:%(name)s: %(message)s"))
+    _app_log.addHandler(_h)
+    _app_log.propagate = False
 log = logging.getLogger(__name__)
 
 from fastapi import FastAPI, HTTPException, WebSocket
@@ -61,7 +68,14 @@ async def _gather_all() -> list[dict]:
          for (id, model_name, custom_name, icon, url) in _moonraker] +
         [_fetch_bambu(p) for p in _bambu]
     )
-    return list(await asyncio.gather(*tasks))
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    out = []
+    for r in results:
+        if isinstance(r, Exception):
+            log.warning("printer fetch failed: %s", r)
+        else:
+            out.append(r)
+    return out
 
 
 def _update_last_seen(status) -> None:
@@ -119,10 +133,12 @@ async def _do_failure_snapshot(printer_id: str) -> None:
 
 async def _send_ntfy(title: str, message: str, tags: list[str], priority: int = 3) -> None:
     if not _ntfy:
+        log.debug("ntfy not configured, skipping: %s", title)
         return
+    log.info("ntfy sending: %s | %s", title, message)
     try:
         async with httpx.AsyncClient() as client:
-            await client.post(
+            resp = await client.post(
                 f"{_ntfy.url}/{_ntfy.topic}",
                 content=message.encode(),
                 headers={
@@ -132,6 +148,7 @@ async def _send_ntfy(title: str, message: str, tags: list[str], priority: int = 
                 },
                 timeout=5,
             )
+        log.info("ntfy sent OK (HTTP %d): %s", resp.status_code, title)
     except Exception as exc:
         log.warning("ntfy send failed: %s", exc)
 
@@ -144,6 +161,7 @@ def _check_transitions(data: list[dict]) -> None:
         _prev_states[pid] = curr
         if prev is None or prev == curr:
             continue
+        log.info("state transition %s: %s → %s", pid, prev, curr)
         name = p.get("custom_name") or p.get("id")
         job = p.get("job") or {}
         fname = (job.get("filename") or "").rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
@@ -161,6 +179,9 @@ def _check_transitions(data: list[dict]) -> None:
         elif prev == "printing" and curr == "paused":
             msg = f"{name}" + (f" · {label}" if label else "")
             asyncio.create_task(_send_ntfy("Print paused ⏸", msg, ["double_vertical_bar"]))
+        elif prev == "printing" and curr == "idle":
+            msg = f"{name}" + (f" · {label}" if label else "")
+            asyncio.create_task(_send_ntfy("Print cancelled", msg, ["x"]))
 
 
 async def _broadcast_loop():
@@ -179,8 +200,8 @@ async def _broadcast_loop():
                 except Exception:
                     dead.add(ws)
             _ws_clients.difference_update(dead)
-        except Exception:
-            pass
+        except Exception as exc:
+            log.warning("broadcast loop error: %s", exc)
 
 
 @asynccontextmanager
