@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 23 May 2026 (session 2)_
+_Last updated 23 May 2026 (session 3)_
 
 ## Current state
 
@@ -98,6 +98,22 @@ All 10 steps from TIER2_SPEC.md shipped, plus four bonus items.
 | UFW | Done | Enabled; rules: ssh, 8000/tcp (flightdeck), tailscale0 interface. |
 | Voron slicer thumbnail | Done | OrcaSlicer embeds 32×32 and 400×300. Was picking 32×32 due to 200px cap in `_pick_thumbnail`. Fixed to pick largest available — now shows 400×300. |
 | Estop → firmware restart | Done | Full loop confirmed: idle → ESTOP badge on estop → firmware restart button → printer reinitialises → idle. |
+
+---
+
+## Fixed/shipped this session (23 May session 3)
+
+**H2D chamber temperature bogus reading (4,259,904°C):**
+
+1. **Root cause** — The H2D encodes temperatures in `device.ctc.info.temp` as a packed int: `(actual_celsius << 16) | target_celsius`. The bambulabs_api library (shared by X1C and H2D) just casts the raw value to `float()`, which works for X1C (plain int, e.g. 27) but returns 4,259,904 for the H2D (e.g. `(65 << 16) | 65 = 4,259,905`). Neither printer sends the top-level `chamber_temper` field — both fall through to the `device.ctc.info.temp` path. X1C bed/nozzle are unaffected (those come from `bed_temper`/`nozzle_temper` plain floats).
+
+2. **Fix** — New `_read_chamber_temp(mqtt_dump, model_name)` helper in `app/printers/bambu.py`. For `model_name == "H2D"` applies `value >> 16` to extract actual °C; for X1C uses value directly. Also clamps values >150°C to `None` (omits the row from display) as a defensive catch-all against future encoding surprises. Single `mqtt_dump()` call per poll cycle shared between chamber temp and AMS parsing. Commit: `5692d90`.
+
+**H2D camera investigation (apparent frozen frame):**
+
+- Confirmed RTSP stream on port 322 is live and connected — long-running ffmpeg (PID started at 13:26) has `ESTAB` TCP connection to H2D:322 with active data in receive buffer.
+- What appeared to be a "frozen snapshot" was the live camera showing the static build plate between failed prints — scene genuinely unchanged, not a software bug.
+- Noted a stale `CLOSE-WAIT` socket on port 6000 (H2D binary camera protocol from an old probe) — harmless, clears on service restart.
 
 ---
 
