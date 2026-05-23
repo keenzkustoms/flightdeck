@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 23 May 2026 (session 3)_
+_Last updated 23 May 2026 (session 5)_
 
 ## Current state
 
@@ -98,6 +98,41 @@ All 10 steps from TIER2_SPEC.md shipped, plus four bonus items.
 | UFW | Done | Enabled; rules: ssh, 8000/tcp (flightdeck), tailscale0 interface. |
 | Voron slicer thumbnail | Done | OrcaSlicer embeds 32×32 and 400×300. Was picking 32×32 due to 200px cap in `_pick_thumbnail`. Fixed to pick largest available — now shows 400×300. |
 | Estop → firmware restart | Done | Full loop confirmed: idle → ESTOP badge on estop → firmware restart button → printer reinitialises → idle. |
+
+---
+
+## Fixed/shipped this session (23 May session 5)
+
+**ntfy notifications not firing (root cause found and fixed):**
+
+1. **Root cause** — `asyncio.gather(*tasks)` in `_gather_all()` had no `return_exceptions=True`. Any single printer fetch error (e.g. Moonraker offline/unreachable) caused the entire gather to raise, which was then silently swallowed by `except Exception: pass` in `_broadcast_loop`. `_check_transitions()` never ran — for any printer — whenever any other printer was unhealthy. This explained why Bambu print events produced zero notifications: the Moonraker printer timing out would kill all transition detection.
+
+2. **Fix** — Added `return_exceptions=True` to `asyncio.gather` in `_gather_all`. Per-printer failures are now logged as `WARNING` and the rest of the list continues to be processed. Commit: `9ec64a3`.
+
+3. **Logging fixed** — `app.*` loggers were silently filtered at WARNING level (Python root logger default; uvicorn's `--log-level info` only affects uvicorn's own loggers). Fixed by attaching a StreamHandler directly to the `app` logger at INFO level with `propagate=False`. Now `INFO:app.main: state transition h2d: printing → finished` appears in journalctl.
+
+4. **Additional hardening in `main.py`:**
+   - `_check_transitions` logs every state change: `INFO:app.main: state transition {id}: {prev} → {curr}`
+   - `_send_ntfy` logs before sending and on success/failure (shows HTTP status code)
+   - `_broadcast_loop` now logs exceptions instead of silently ignoring them
+   - Added `printing → idle` notification path (covers user-cancelled prints)
+   - `--log-level info` added to uvicorn ExecStart in `flightdeck.service`
+
+**H2D dual-nozzle temperatures:**
+
+5. **New `_read_dual_nozzle_temps()` helper in `bambu.py`** — for H2D only: reads `device.extruder.info[]` array from the MQTT dump. Extruder 0 (Right) uses packed encoding `(actual<<16)|target`; extruder 1 (Left) is plain int when `temp>>16==0`. Returns `{hotend_l, hotend_r}` TempReadings; falls back to single `hotend` for all other models. `status()` updated to use dual readings when available.
+
+6. **Frontend (`app.js`)** — added `hotend_l`/`hotend_r` labels (`Left`/`Right`) to both the card-view `TEMP_LABELS` map and the detail-panel `_TEMP_LABELS` map. Temperature edit controls remain gated to `hotend` and `bed` only.
+
+**Camera watchdog gap (stale reconnect):**
+
+7. **Bug** — after ffmpeg was killed and restarted, `_last_frame_at` reset to `0.0`. The watchdog's stale-frame branch checked `now - _last_frame_at > _STALE_TIMEOUT`, which was always False when `_last_frame_at == 0.0`. A stuck-reconnecting ffmpeg could sit indefinitely with no frames and no watchdog kill.
+
+8. **Fix** — Added `_started_at` timestamp (set on each `_start()` call) and `_INITIAL_TIMEOUT = 10s`. Watchdog now has two paths: if `_last_frame_at == 0.0` it checks elapsed time since `_started_at` and kills after 10s; otherwise it uses the existing stale-frame check (tightened from 15s to 8s). Watchdog poll interval tightened from 10s to 5s.
+
+**MJPEG quality:**
+
+9. **ffmpeg `-q:v` lowered from 5 → 2** — noticeably sharper MJPEG output on both Bambu camera feeds.
 
 ---
 
