@@ -236,6 +236,9 @@ header {
   font-size: 0.75rem;
 }
 
+.temp-hot  { color: var(--error); }
+.temp-warm { color: #60a5fa; }
+
 .job {
   display: flex;
   flex-direction: column;

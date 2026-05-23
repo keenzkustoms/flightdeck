@@ -300,15 +300,24 @@ function formatEta(seconds) {
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
 }
 
+const _TEMP_SORT = { hotend_l: 0, hotend_r: 1, hotend: 2, bed: 3, chamber: 4 };
+
+function _tempClass(actual) {
+  if (actual >= 180) return ' temp-hot';
+  if (actual >= 60)  return ' temp-warm';
+  return '';
+}
+
 function renderTemp(label, reading) {
   const actual = reading.actual.toFixed(0);
+  const cls = _tempClass(reading.actual);
   const target = reading.target > 0
     ? `<span class="temp-target">/${reading.target.toFixed(0)}°</span>`
     : '';
   return `
     <div class="temp-item">
       <span class="temp-label">${label}</span>
-      <span class="temp-value">${actual}°${target}</span>
+      <span class="temp-value${cls}">${actual}°${target}</span>
     </div>`;
 }
 
@@ -327,6 +336,7 @@ function renderCard(p) {
   const dataAttr = ` data-printer-id="${p.id}"`;
 
   const temps = Object.entries(p.temps || {})
+    .sort(([a], [b]) => (_TEMP_SORT[a] ?? 99) - (_TEMP_SORT[b] ?? 99))
     .map(([k, r]) => renderTemp(TEMP_LABELS[k] ?? k, r))
     .join('');
 
@@ -702,16 +712,19 @@ function _detailTempsPanel(p) {
   const title = `<div class="detail-panel-title">Temperatures</div>`;
   if (!entries.length) return title + `<div class="detail-row"><span class="detail-label">—</span></div>`;
 
-  const rows = entries.map(([k, r]) => {
+  const rows = entries
+    .sort(([a], [b]) => (_TEMP_SORT[a] ?? 99) - (_TEMP_SORT[b] ?? 99))
+    .map(([k, r]) => {
     const label = _TEMP_LABELS[k] ?? k;
     const actual = r.actual.toFixed(0);
     const target = _getDisplayTarget(p.id, k, r.target);
     const hasCtrl = _TEMP_CTRL_HEATERS.has(k);
+    const cls = _tempClass(r.actual);
 
     if (!hasCtrl) {
       return `<div class="temp-ctrl-row">
         <span class="temp-row-label">${label}</span>
-        <div class="temp-readings"><span class="temp-actual">${actual}°</span></div>
+        <div class="temp-readings"><span class="temp-actual${cls}">${actual}°</span></div>
       </div>`;
     }
 
@@ -723,7 +736,7 @@ function _detailTempsPanel(p) {
     return `<div class="temp-ctrl-row">
       <span class="temp-row-label">${label}</span>
       <div class="temp-readings" data-temp-edit="${k}" data-printer-id="${p.id}" style="cursor:pointer">
-        <span class="temp-actual">${actual}°</span>
+        <span class="temp-actual${cls}">${actual}°</span>
         ${targetHtml}
       </div>
       <div class="temp-nudge">
