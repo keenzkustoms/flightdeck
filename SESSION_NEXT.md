@@ -399,7 +399,11 @@ Install: open `https://flightdeck.tail7de73e.ts.net` → Chrome: install icon in
 
 ## Next session priorities
 
-1. **Tier 3** — TBD (suggestions: Bambu OrcaSlicer interception, multi-user auth, print queue for Voron)
+1. **Print annotations** — `notes` column on prints table; "Add note" link in finish toast and history detail. 30 min, high value.
+2. **Per-spool tracking** — Define spools (material, brand, colour, starting weight, printer/slot), auto-deduct per print, low-stock badge on printer card. Natural extension of filament catalogue.
+3. **Thumbnail gallery** — Grid view of past prints: thumbnails, state badge, printer, material, duration. Filter by printer or material. Mostly frontend — thumbnails already stored for relay prints.
+4. **Maintenance scheduler** — Per-printer items (e.g. "clean nozzle every 50 prints"). Track last completed. Due badge on printer card. Small self-contained DB table + UI.
+5. **ETA accuracy report** — Surface the estimated vs actual duration data already being collected. Per-printer stat + scatter chart. One DB query, mostly frontend.
 
 ---
 
