@@ -2181,4 +2181,8 @@ loadSettings();
 connectWS();
 initNotifBtn();
 window.addEventListener('hashchange', router);
+
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/static/sw.js').catch(() => {});
+}
 router();
