@@ -67,8 +67,9 @@ header {
   color: var(--text);
 }
 .notif-btn:hover { opacity: 0.8; }
-.notif-btn.notif-on { opacity: 1; }
-.notif-btn.notif-off { opacity: 0.2; cursor: not-allowed; }
+.notif-btn.notif-on { opacity: 1; filter: brightness(1.3); }
+.notif-btn.notif-off { opacity: 0.25; cursor: not-allowed; }
+.notif-btn.notif-unavailable { opacity: 0.15; cursor: not-allowed; }
 
 /* ── Wordmark + tab strip ── */
 .wordmark {

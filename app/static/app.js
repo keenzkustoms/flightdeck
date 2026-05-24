@@ -1469,19 +1469,29 @@ function _detectTransitions(printers) {
     _notifSeeded = true;
     return;
   }
-  if (Notification.permission !== 'granted') return;
   printers.forEach(p => {
     const prev = _prevStates[p.id];
     _prevStates[p.id] = p.state;
     if (prev === p.state) return;
+
+    let title = null, toastMsg = null, toastType = 'info';
     if (p.state === 'finished' && prev === 'printing') {
-      showToast('Print complete', p.custom_name, 'success');
-      if (Notification.permission === 'granted')
-        new Notification('Print complete ✓', { body: p.custom_name });
+      title = 'Print complete'; toastMsg = 'Print complete'; toastType = 'success';
     } else if (p.state === 'error') {
-      showToast('Print error — check printer', p.custom_name, 'error');
-      if (Notification.permission === 'granted')
-        new Notification('Print error ⚠', { body: p.custom_name });
+      title = 'Print error'; toastMsg = 'Print error — check printer'; toastType = 'error';
+    } else if (p.state === 'paused' && prev === 'printing') {
+      title = 'Print paused'; toastMsg = 'Print paused'; toastType = 'info';
+    }
+    if (!title) return;
+
+    // Toast: only when tab is visible (user is looking at the dashboard)
+    if (document.visibilityState === 'visible') {
+      showToast(toastMsg, p.custom_name, toastType);
+    }
+
+    // Browser notification: only when tab is hidden (ntfy covers the closed-browser case)
+    if (Notification.permission === 'granted' && document.visibilityState === 'hidden') {
+      new Notification(title, { body: p.custom_name });
     }
   });
 }
@@ -1490,21 +1500,22 @@ function initNotifBtn() {
   const btn = document.getElementById('notif-btn');
   if (!btn) return;
   if (!('Notification' in window) || !window.isSecureContext) {
-    btn.classList.add('notif-off');
-    btn.title = 'Notifications require HTTPS — access the app via https:// to enable';
+    btn.classList.add('notif-unavailable');
+    btn.title = `Notifications require HTTPS — open ${window.location.hostname} via https://`;
     return;
   }
   const update = () => {
     const perm = Notification.permission;
-    btn.classList.toggle('notif-on', perm === 'granted');
-    btn.classList.toggle('notif-off', perm === 'denied');
-    btn.title = perm === 'granted' ? 'Notifications on'
-              : perm === 'denied'  ? 'Notifications blocked — check browser settings'
-              : 'Enable print notifications';
+    btn.classList.toggle('notif-on',          perm === 'granted');
+    btn.classList.toggle('notif-off',         perm === 'denied');
+    btn.classList.remove('notif-unavailable');
+    btn.title = perm === 'granted' ? 'Browser notifications on — fires when tab is in background'
+              : perm === 'denied'  ? 'Notifications blocked — check browser site settings'
+              : 'Enable browser notifications';
   };
   update();
   btn.addEventListener('click', async () => {
-    if (Notification.permission === 'granted') return;
+    if (Notification.permission === 'denied') return;
     await Notification.requestPermission();
     update();
   });

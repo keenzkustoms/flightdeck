@@ -1,10 +1,10 @@
 # Flightdeck — next session brief
-_Last updated 24 May 2026 (session 9)_
+_Last updated 24 May 2026 (session 10)_
 
 ## Current state
 
 **Tier 1 complete. Tier 2 complete. Post-Tier-2 niceties complete.**
-Service running at `http://flightdeck.local:8000` · `http://192.168.4.127:8000` · `http://100.106.112.104:8000` (Tailscale)
+Service running at `http://flightdeck.local:8000` · `http://192.168.4.127:8000` · **`https://flightdeck.tail7de73e.ts.net`** (Tailscale Serve — HTTPS)
 
 ---
 
@@ -343,9 +343,25 @@ All 10 steps from TIER2_SPEC.md shipped, plus four bonus items.
 
 ---
 
+## Fixed/shipped this session (24 May session 10)
+
+**Tailscale Serve — HTTPS:**
+
+1. `tailscale set --operator=flightdeck` to grant non-root serve access.
+2. `tailscale serve --bg http://localhost:8000` — persistent config, survives reboots. Tailscale manages the cert automatically.
+3. HTTPS URL: `https://flightdeck.tail7de73e.ts.net` — available on all devices with Tailscale.
+
+**Browser bell notifications:**
+
+4. **Dedup rule** — ntfy always fires server-side (no change). Browser notification fires only when `document.visibilityState === 'hidden'` (tab open but in background/minimised). Toast fires only when `visibilityState === 'visible'` (user looking at the dashboard — no popup needed). "Tab fully focused" case stays quiet.
+5. **`paused` transition added** — `printing → paused` now fires a toast (when visible) and browser notification (when hidden), matching ntfy behaviour.
+6. **Bug fix** — previous code had `if (Notification.permission !== 'granted') return` before the forEach, which silently suppressed toasts when permission wasn't granted. Fixed by separating the toast path (always) from the Notification path (permission + hidden guard).
+7. **`notif-unavailable` class** — replaces old `notif-off` for the HTTPS-not-available case; opacity 0.15 + `cursor: not-allowed`. `notif-off` now specifically means browser-denied.
+8. **Bell button tooltip** — granted: "Browser notifications on — fires when tab is in background"; denied: "Notifications blocked — check browser site settings"; default: "Enable browser notifications".
+
 ## Next session priorities
 
-1. **Tier 3** — TBD (suggestions: filament tracking, multi-user, HTTPS via mkcert, Bambu OrcaSlicer interception)
+1. **Tier 3** — TBD (suggestions: filament tracking, multi-user, Bambu OrcaSlicer interception, PWA install)
 
 ---
 
