@@ -403,6 +403,10 @@ class BambuPrinter:
             self._preview_cache = (subtask, _BAMBU_PREVIEW_FAILED)
             return None
 
+    def seed_preview(self, subtask_name: str, preview) -> None:
+        """Pre-populate preview cache from relay upload; avoids FTP fetch for H2D."""
+        self._preview_cache = (subtask_name, preview)
+
 
 def _read_dual_nozzle_temps(mqtt_dump: dict, model_name: str) -> dict[str, "TempReading"]:
     """Return {hotend_l, hotend_r} TempReadings for dual-nozzle printers (H2D only).

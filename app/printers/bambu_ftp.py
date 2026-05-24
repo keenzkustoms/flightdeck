@@ -45,27 +45,18 @@ class _ImplicitFTP_TLS(ftplib.FTP_TLS):
         return conn, size
 
 
-def fetch_bambu_preview(ip: str, access_code: str, subtask_name: str) -> Optional[BambuPreview]:
-    """Download the .3mf for the current job and extract thumbnail + metadata."""
-    ftp = _ImplicitFTP_TLS()
-    try:
-        ftp.connect(ip, 990, timeout=15)
-        ftp.login("bblp", access_code)
-        ftp.prot_p()
-        ftp.set_pasv(True)
-
-        buf = io.BytesIO()
-        ftp.retrbinary(f"RETR /{subtask_name}.gcode.3mf", buf.write)
-        buf.seek(0)
-    finally:
-        try:
-            ftp.quit()
-        except Exception:
-            pass
-
+def _parse_3mf(buf: io.BytesIO) -> BambuPreview:
+    """Extract thumbnail and metadata from an in-memory .gcode.3mf zip."""
     with zipfile.ZipFile(buf) as z:
-        image_png = z.read("Metadata/plate_1.png")
-        slice_xml = z.read("Metadata/slice_info.config").decode()
+        try:
+            image_png: Optional[bytes] = z.read("Metadata/plate_1.png")
+        except KeyError:
+            image_png = None
+        try:
+            slice_xml = z.read("Metadata/slice_info.config").decode()
+        except KeyError:
+            return BambuPreview(image_png=image_png, estimated_total_seconds=None,
+                                filament_weight_g=None, filament_type=None)
 
     root_el = ET.fromstring(slice_xml)
     plate = root_el.find("plate")
@@ -85,3 +76,52 @@ def fetch_bambu_preview(ip: str, access_code: str, subtask_name: str) -> Optiona
         filament_weight_g=float(weight) if weight else None,
         filament_type=filament_type,
     )
+
+
+def fetch_bambu_preview(ip: str, access_code: str, subtask_name: str) -> Optional[BambuPreview]:
+    """Download the .3mf for the current job and extract thumbnail + metadata."""
+    ftp = _ImplicitFTP_TLS()
+    try:
+        ftp.connect(ip, 990, timeout=15)
+        ftp.login("bblp", access_code)
+        ftp.prot_p()
+        ftp.set_pasv(True)
+
+        buf = io.BytesIO()
+        ftp.retrbinary(f"RETR /{subtask_name}.gcode.3mf", buf.write)
+        buf.seek(0)
+    finally:
+        try:
+            ftp.quit()
+        except Exception:
+            pass
+
+    return _parse_3mf(buf)
+
+
+def upload_bambu_file(ip: str, access_code: str, filename: str, data: bytes) -> BambuPreview:
+    """Upload a .gcode.3mf to the printer via FTPS and return parsed metadata.
+
+    Raises on connection or transfer failure — caller handles retry logic.
+    """
+    buf = io.BytesIO(data)
+    ftp = _ImplicitFTP_TLS()
+    try:
+        ftp.connect(ip, 990, timeout=30)
+        ftp.login("bblp", access_code)
+        ftp.prot_p()
+        ftp.set_pasv(True)
+        buf.seek(0)
+        ftp.storbinary(f"STOR /{filename}", buf)
+    finally:
+        try:
+            ftp.quit()
+        except Exception:
+            pass
+
+    try:
+        buf.seek(0)
+        return _parse_3mf(buf)
+    except Exception:
+        return BambuPreview(image_png=None, estimated_total_seconds=None,
+                            filament_weight_g=None, filament_type=None)

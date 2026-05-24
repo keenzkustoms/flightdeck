@@ -18,14 +18,14 @@ if not _app_log.handlers:
     _app_log.propagate = False
 log = logging.getLogger(__name__)
 
-from fastapi import FastAPI, HTTPException, WebSocket
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile, WebSocket
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 import httpx
 
-from . import db
+from . import db, relay
 from .camera import BambuCameraProxy
 from .models import PrintPreview
 from .printer_config import BambuConnection, BambuRtspCamera, MjpegDirectCamera, MoonrakerConnection, NtfyConfig, PrinterEntry, load, save
@@ -711,3 +711,74 @@ async def get_settings():
 async def put_setting(key: str, body: SettingUpdate):
     db.set_setting(key, body.value)
     return {"ok": True}
+
+
+# ── OrcaSlicer relay ──────────────────────────────────────────────────────
+# Configure OrcaSlicer Physical Printer host as:
+#   http://<flightdeck-host>:8000/relay/<printer_id>
+# OrcaSlicer appends /printer/info, /server/files/upload, /printer/print/start.
+
+def _find_bambu(printer_id: str):
+    return next((p for p in _bambu if p.id == printer_id), None)
+
+def _find_moonraker_url(printer_id: str):
+    return next((url for (id, _, _, _, url) in _moonraker if id == printer_id), None)
+
+_BUSY_STATES = {"printing", "paused"}
+
+
+@app.get("/relay/{printer_id}/printer/info")
+async def relay_printer_info(printer_id: str):
+    if _find_bambu(printer_id) or _find_moonraker_url(printer_id):
+        return {"result": {"hostname": printer_id, "state": "ready", "state_message": ""}}
+    raise HTTPException(status_code=404, detail="printer not found")
+
+
+@app.post("/relay/{printer_id}/server/files/upload")
+async def relay_upload(printer_id: str, request: Request, file: UploadFile = File(...)):
+    source_ip = request.client.host if request.client else "unknown"
+    filename = file.filename or "upload.gcode.3mf"
+    # Strip any path prefix OrcaSlicer may include (e.g. "gcodes/model.gcode.3mf")
+    filename = filename.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+    data = await file.read()
+
+    bambu = _find_bambu(printer_id)
+    if bambu:
+        await relay.bambu_upload(printer_id, filename, data, source_ip, bambu)
+        return {"result": {"item": {"path": filename, "root": "gcodes"}, "action": "create_file"}}
+
+    mr_url = _find_moonraker_url(printer_id)
+    if mr_url:
+        await relay.moonraker_upload(printer_id, filename, data, source_ip, mr_url)
+        return {"result": {"item": {"path": filename, "root": "gcodes"}, "action": "create_file"}}
+
+    raise HTTPException(status_code=404, detail="printer not found")
+
+
+@app.post("/relay/{printer_id}/printer/print/start")
+async def relay_print_start(printer_id: str, request: Request):
+    source_ip = request.client.host if request.client else "unknown"
+    body = await request.json()
+    filename = (body.get("filename") or "").rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+    if not filename:
+        raise HTTPException(status_code=422, detail="filename required")
+
+    # Belt-and-braces: refuse if printer is already busy
+    current = next((p for p in _latestPrinters if p.get("id") == printer_id), None)
+    if current and current.get("state") in _BUSY_STATES:
+        state = current["state"]
+        db.log_decision(printer_id, "relay_start_blocked",
+                        f"file={filename} source={source_ip} printer_state={state}")
+        raise HTTPException(status_code=409, detail=f"Printer is {state}")
+
+    bambu = _find_bambu(printer_id)
+    if bambu:
+        await relay.bambu_print_start(printer_id, filename, source_ip, bambu)
+        return {"result": "ok"}
+
+    mr_url = _find_moonraker_url(printer_id)
+    if mr_url:
+        await relay.moonraker_print_start(printer_id, filename, source_ip, mr_url)
+        return {"result": "ok"}
+
+    raise HTTPException(status_code=404, detail="printer not found")
