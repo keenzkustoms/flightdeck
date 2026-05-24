@@ -66,6 +66,12 @@ def init() -> None:
                 value      TEXT NOT NULL,
                 updated_at TIMESTAMP NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS material_costs (
+                material      TEXT PRIMARY KEY,
+                cost_per_gram REAL NOT NULL,
+                updated_at    TEXT NOT NULL
+            );
         """)
     # Migrate existing DB: add columns if missing
     with _conn() as conn:
@@ -74,6 +80,8 @@ def init() -> None:
             "ALTER TABLE prints ADD COLUMN snapshot_jpeg BLOB",
             "ALTER TABLE prints ADD COLUMN snapshot_captured_at TIMESTAMP",
             "ALTER TABLE prints ADD COLUMN estimated_duration_seconds INTEGER",
+            "ALTER TABLE prints ADD COLUMN filament_grams REAL",
+            "ALTER TABLE prints ADD COLUMN material TEXT",
         ):
             try:
                 conn.execute(stmt)
@@ -215,6 +223,7 @@ def on_print_finished(
     ended_at: Optional[datetime] = None,
     layers_completed: Optional[int] = None,
     filament_grams: Optional[float] = None,
+    material: Optional[str] = None,
 ) -> Optional[int]:
     """Returns print_id of the row that was closed, or None if not found."""
     now = (ended_at or datetime.utcnow()).isoformat()
@@ -231,9 +240,10 @@ def on_print_finished(
                        (julianday(?) - julianday(started_at)) * 86400 AS INTEGER),
                    final_state      = 'FINISHED',
                    layers_completed = COALESCE(?, layers_completed),
-                   filament_grams   = COALESCE(?, filament_grams)
+                   filament_grams   = COALESCE(?, filament_grams),
+                   material         = COALESCE(?, material)
                WHERE printer_id = ? AND job_key = ? AND final_state IS NULL""",
-            (now, now, layers_completed, filament_grams, printer_id, job_key),
+            (now, now, layers_completed, filament_grams, material, printer_id, job_key),
         )
     _cal_cache.pop(printer_id, None)
     log.info("print finished: %s key=%s", printer_id, job_key)
@@ -512,6 +522,87 @@ def set_setting(key: str, value: str) -> None:
                SET value = excluded.value, updated_at = excluded.updated_at""",
             (key, value),
         )
+
+
+# ── material costs ────────────────────────────────────────────────────────
+
+def get_material_costs() -> dict:
+    with _conn() as conn:
+        rows = conn.execute("SELECT material, cost_per_gram FROM material_costs").fetchall()
+    return {r["material"]: r["cost_per_gram"] for r in rows}
+
+
+def set_material_cost(material: str, cost_per_gram: float) -> None:
+    with _conn() as conn:
+        conn.execute(
+            """INSERT INTO material_costs (material, cost_per_gram, updated_at)
+               VALUES (?, ?, CURRENT_TIMESTAMP)
+               ON CONFLICT(material) DO UPDATE
+               SET cost_per_gram = excluded.cost_per_gram, updated_at = excluded.updated_at""",
+            (material, cost_per_gram),
+        )
+
+
+def get_filament_summary(printer_id: Optional[str] = None) -> dict:
+    """Aggregate filament usage: totals, by material, by month (last 12), by printer."""
+    where = "WHERE final_state = 'FINISHED' AND filament_grams IS NOT NULL"
+    params_base: list = []
+    if printer_id:
+        where += " AND printer_id = ?"
+        params_base.append(printer_id)
+
+    with _conn() as conn:
+        costs = {r["material"]: r["cost_per_gram"]
+                 for r in conn.execute("SELECT material, cost_per_gram FROM material_costs").fetchall()}
+
+        total_row = conn.execute(
+            f"SELECT COALESCE(SUM(filament_grams), 0) AS grams FROM prints {where}",
+            params_base,
+        ).fetchone()
+        total_g = total_row["grams"] if total_row else 0.0
+
+        mat_rows = conn.execute(
+            f"""SELECT COALESCE(material, 'Unknown') AS material,
+                       SUM(filament_grams) AS grams
+                FROM prints {where}
+                GROUP BY material ORDER BY grams DESC""",
+            params_base,
+        ).fetchall()
+
+        month_rows = conn.execute(
+            f"""SELECT strftime('%Y-%m', started_at) AS month,
+                       SUM(filament_grams) AS grams
+                FROM prints {where}
+                GROUP BY month ORDER BY month DESC LIMIT 12""",
+            params_base,
+        ).fetchall()
+
+        printer_rows = conn.execute(
+            f"""SELECT printer_id, SUM(filament_grams) AS grams
+                FROM prints {where}
+                GROUP BY printer_id ORDER BY grams DESC""",
+            params_base,
+        ).fetchall() if not printer_id else []
+
+    def _cost(material: str, grams: float) -> Optional[float]:
+        cpg = costs.get(material)
+        return round(cpg * grams, 2) if cpg is not None else None
+
+    by_material = [
+        {"material": r["material"], "grams": round(r["grams"], 1),
+         "cost": _cost(r["material"], r["grams"])}
+        for r in mat_rows
+    ]
+    total_cost = sum(e["cost"] for e in by_material if e["cost"] is not None) or None
+
+    return {
+        "total_grams": round(total_g, 1),
+        "total_cost":  round(total_cost, 2) if total_cost else None,
+        "by_material": by_material,
+        "by_month":    [{"month": r["month"], "grams": round(r["grams"], 1)} for r in month_rows],
+        "by_printer":  [{"printer_id": r["printer_id"], "grams": round(r["grams"], 1)}
+                        for r in printer_rows],
+    }
 
 
 def get_last_print(printer_id: str) -> Optional[dict]:

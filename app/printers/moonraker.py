@@ -17,6 +17,7 @@ _active_job_key: dict[str, str] = {}           # printer_id → job_key for the 
 _active_print_id: dict[str, Optional[int]] = {}  # printer_id → prints.id for the running print
 _error_print_id: dict[str, Optional[int]] = {}   # printer_id → prints.id of the last error (for snapshot)
 _estimated_stored: set[str] = set()            # printer_ids where slicer estimate is already stored
+_filament_grams: dict[str, float] = {}         # printer_id → filament_weight_total from slicer metadata
 
 FINISHED_TTL = timedelta(minutes=30)
 
@@ -118,7 +119,8 @@ async def fetch(id: str, model_name: str, custom_name: str, icon: str, base_url:
                         f"{base_url}/server/files/metadata", params={"filename": filename}
                     )
                     if meta_resp.status_code == 200:
-                        estimated = meta_resp.json().get("result", {}).get("estimated_time")
+                        result = meta_resp.json().get("result", {})
+                        estimated = result.get("estimated_time")
                         if estimated:
                             db.update_estimated_duration(id, _active_job_key[id], int(estimated))
                             log.info("stored slicer estimate for %s: %ds", id, estimated)
@@ -129,6 +131,9 @@ async def fetch(id: str, model_name: str, custom_name: str, icon: str, base_url:
                                                f"Slicer estimate from metadata: {secs}s "
                                                f"({secs // 3600}h {(secs % 3600) // 60}m)",
                                                print_id=pid)
+                        fw = result.get("filament_weight_total")
+                        if fw:
+                            _filament_grams[id] = float(fw)
             except Exception as exc:
                 log.debug("metadata fetch for duration failed %s: %s", id, exc)
         _estimated_stored.add(id)  # mark attempted regardless of success
@@ -214,6 +219,7 @@ def _resolve_state(
                 db.on_print_finished(
                     printer_id, job_key,
                     layers_completed=job.layer_current if job else None,
+                    filament_grams=_filament_grams.pop(printer_id, None),
                 )
         if (now - finished_at.replace(tzinfo=timezone.utc)) > FINISHED_TTL:
             db.clear_finished_at(printer_id)

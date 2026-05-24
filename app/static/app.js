@@ -1607,6 +1607,7 @@ const _SETTINGS_CATEGORIES = [
   { id: 'printers',   label: 'Printers'   },
   { id: 'appearance', label: 'Appearance' },
   { id: 'slicer',     label: 'Slicer'     },
+  { id: 'filament',   label: 'Filament'   },
 ];
 
 async function refreshPrinters() {
@@ -2044,6 +2045,112 @@ function _attachSlicerEvents(el) {
   });
 }
 
+// ── Filament category ─────────────────────────────────────────────────────
+
+const _DEFAULT_MATERIALS = ['PLA', 'PETG', 'ABS', 'ASA', 'TPU'];
+
+function _fmtGrams(g) {
+  if (g == null || g === 0) return '—';
+  if (g >= 1000) return `${(g / 1000).toFixed(2)}kg`;
+  return `${Math.round(g)}g`;
+}
+
+function _filamentCategoryHtml(summary, costs) {
+  const totalG    = summary.total_grams  || 0;
+  const totalCost = summary.total_cost   ?? null;
+  const byMat     = summary.by_material  || [];
+  const byMonth   = (summary.by_month    || []).slice(0, 6);
+
+  const usedMats = byMat.map(m => m.material).filter(m => m && m !== 'Unknown');
+  const allMats  = [...new Set([..._DEFAULT_MATERIALS, ...usedMats])];
+
+  const statsHtml = totalG > 0
+    ? `<div class="filament-totals">
+        <div class="filament-total-item">
+          <span class="filament-total-value">${_fmtGrams(totalG)}</span>
+          <span class="filament-total-label">total used</span>
+        </div>
+        ${totalCost != null ? `<div class="filament-total-item">
+          <span class="filament-total-value">$${totalCost.toFixed(2)}</span>
+          <span class="filament-total-label">est. cost</span>
+        </div>` : ''}
+      </div>`
+    : `<p class="filament-empty">No filament data yet — accumulates from completed prints.</p>`;
+
+  const matHtml = byMat.length > 0
+    ? `<table class="filament-table">
+        <thead><tr><th>Material</th><th>Used</th><th>Est. cost</th></tr></thead>
+        <tbody>${byMat.map(m => `
+          <tr>
+            <td>${m.material}</td>
+            <td>${_fmtGrams(m.grams)}</td>
+            <td>${m.cost != null ? '$' + m.cost.toFixed(2) : '—'}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>` : '';
+
+  const monthHtml = byMonth.length > 0
+    ? `<div class="filament-months">${byMonth.map(m => {
+        const pct = totalG > 0 ? Math.round((m.grams / totalG) * 100) : 0;
+        const [y, mo] = m.month.split('-');
+        const lbl = new Date(+y, +mo - 1).toLocaleString('default', { month: 'short', year: '2-digit' });
+        return `<div class="filament-month-row">
+          <span class="filament-month-label">${lbl}</span>
+          <div class="filament-month-bar-bg"><div class="filament-month-bar" style="width:${Math.max(pct,2)}%"></div></div>
+          <span class="filament-month-val">${_fmtGrams(m.grams)}</span>
+        </div>`;
+      }).join('')}</div>` : '';
+
+  const costRows = allMats.map(mat => {
+    const val = costs[mat] != null ? costs[mat] : '';
+    return `<div class="cost-row">
+      <span class="cost-material">${mat}</span>
+      <div class="cost-input-wrap">
+        <span class="cost-prefix">$/g</span>
+        <input class="cost-input" type="number" min="0" step="0.001" placeholder="0.000"
+               value="${val}" data-material="${mat}">
+      </div>
+      <button class="cost-save-btn" data-material="${mat}">Save</button>
+    </div>`;
+  }).join('');
+
+  return `
+    <div class="settings-section">
+      <div class="settings-section-title">Usage</div>
+      ${statsHtml}${matHtml}${monthHtml}
+    </div>
+    <div class="settings-section">
+      <div class="settings-section-title">Cost per Gram</div>
+      <p class="filament-empty">Enter your filament cost in dollars per gram (e.g. PLA at $25/kg = $0.025/g).</p>
+      <div class="cost-grid">${costRows}</div>
+    </div>`;
+}
+
+function _attachFilamentEvents(el) {
+  el.querySelectorAll('.cost-save-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const mat   = btn.dataset.material;
+      const input = el.querySelector(`.cost-input[data-material="${mat}"]`);
+      const val   = parseFloat(input.value);
+      if (isNaN(val) || val < 0) { input.focus(); return; }
+      btn.disabled = true; btn.textContent = '…';
+      try {
+        const r = await fetch(`/api/filament/costs/${encodeURIComponent(mat)}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ cost_per_gram: val }),
+        });
+        if (!r.ok) throw new Error();
+        btn.textContent = '✓';
+        setTimeout(() => { btn.textContent = 'Save'; btn.disabled = false; }, 1500);
+      } catch {
+        btn.textContent = 'Error';
+        setTimeout(() => { btn.textContent = 'Save'; btn.disabled = false; }, 2000);
+      }
+    });
+  });
+}
+
 const _ACCENT_COLORS = [
   { label: 'Blue',   value: '#3b82f6' },
   { label: 'Purple', value: '#8b5cf6' },
@@ -2149,6 +2256,14 @@ async function _renderSettingsContent(category) {
   } else if (category === 'slicer') {
     el.innerHTML = _slicerCategoryHtml();
     _attachSlicerEvents(el);
+  } else if (category === 'filament') {
+    el.innerHTML = `<div class="detail-placeholder" style="min-height:10rem">Loading…</div>`;
+    const [summary, costs] = await Promise.all([
+      fetch('/api/filament/summary').then(r => r.json()).catch(() => ({})),
+      fetch('/api/filament/costs').then(r => r.json()).catch(() => ({})),
+    ]);
+    el.innerHTML = _filamentCategoryHtml(summary, costs);
+    _attachFilamentEvents(el);
   }
 }
 

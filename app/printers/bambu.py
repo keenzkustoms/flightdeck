@@ -165,9 +165,16 @@ class BambuPrinter:
             self._job_started_at = 0.0
             self._seen_finish_this_session = True
             if self._current_job_key:
+                filament_g = material = None
+                if self._preview_cache:
+                    _, pv = self._preview_cache
+                    filament_g = pv.filament_weight_g
+                    material = pv.filament_type
                 db.on_print_finished(
                     self.id, self._current_job_key,
                     layers_completed=job.layer_current if job else None,
+                    filament_grams=filament_g,
+                    material=material,
                 )
                 self._current_job_key = None
                 self._current_print_id = None

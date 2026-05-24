@@ -713,6 +713,29 @@ async def put_setting(key: str, body: SettingUpdate):
     return {"ok": True}
 
 
+# ── Filament tracking ─────────────────────────────────────────────────────
+
+class CostUpdate(BaseModel):
+    cost_per_gram: float
+
+@app.get("/api/filament/costs")
+async def get_filament_costs():
+    return db.get_material_costs()
+
+@app.put("/api/filament/costs/{material}")
+async def put_filament_cost(material: str, body: CostUpdate):
+    db.set_material_cost(material, body.cost_per_gram)
+    return {"ok": True}
+
+@app.get("/api/filament/summary")
+async def get_filament_summary():
+    return db.get_filament_summary()
+
+@app.get("/api/filament/summary/{printer_id}")
+async def get_filament_summary_printer(printer_id: str):
+    return db.get_filament_summary(printer_id)
+
+
 # ── OrcaSlicer relay ──────────────────────────────────────────────────────
 # Configure OrcaSlicer Physical Printer host as:
 #   http://<flightdeck-host>:8000/relay/<printer_id>

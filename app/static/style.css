@@ -1823,6 +1823,165 @@ select.settings-input { cursor: pointer; }
   .slicer-grid { grid-template-columns: 1fr; }
 }
 
+/* ── Filament tracking ───────────────────────────────────────────────────── */
+
+.filament-empty {
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin: 0;
+}
+
+.filament-totals {
+  display: flex;
+  gap: 2rem;
+}
+
+.filament-total-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.filament-total-value {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1;
+}
+
+.filament-total-label {
+  font-size: 0.7rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.filament-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+
+.filament-table th {
+  text-align: left;
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  padding: 0.3rem 0.5rem 0.4rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.filament-table td {
+  padding: 0.45rem 0.5rem 0.45rem 0;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  color: var(--text);
+}
+
+.filament-table tr:last-child td { border-bottom: none; }
+
+.filament-months {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.filament-month-row {
+  display: grid;
+  grid-template-columns: 3.5rem 1fr 3rem;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.filament-month-label {
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.filament-month-bar-bg {
+  height: 6px;
+  background: rgba(255,255,255,0.06);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.filament-month-bar {
+  height: 100%;
+  background: var(--printing);
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+
+.filament-month-val {
+  font-size: 0.72rem;
+  color: var(--text);
+  text-align: right;
+}
+
+.cost-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.cost-row {
+  display: grid;
+  grid-template-columns: 3.5rem 1fr auto;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.cost-material {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.cost-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 0.4rem;
+  padding: 0.3rem 0.6rem;
+}
+
+.cost-prefix {
+  font-size: 0.72rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.cost-input {
+  background: none;
+  border: none;
+  outline: none;
+  color: var(--text);
+  font-size: 0.85rem;
+  width: 5rem;
+  -moz-appearance: textfield;
+}
+
+.cost-input::-webkit-outer-spin-button,
+.cost-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
+.cost-save-btn {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid var(--border);
+  border-radius: 0.4rem;
+  color: var(--text);
+  font-size: 0.75rem;
+  padding: 0.3rem 0.7rem;
+  cursor: pointer;
+  transition: background 0.15s;
+  white-space: nowrap;
+}
+
+.cost-save-btn:hover:not(:disabled) { background: rgba(255,255,255,0.12); }
+.cost-save-btn:disabled { opacity: 0.5; cursor: default; }
+
 @media (max-width: 640px) {
   .settings-body {
     flex-direction: column;
