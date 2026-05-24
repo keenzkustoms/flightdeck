@@ -694,3 +694,20 @@ async def get_printer_thumbnail(printer_id: str):
             raise HTTPException(status_code=404, detail="no thumbnail")
 
     raise HTTPException(status_code=404, detail="printer not found")
+
+
+# ── User settings ─────────────────────────────────────────────────────────
+
+class SettingUpdate(BaseModel):
+    value: str
+
+
+@app.get("/api/settings")
+async def get_settings():
+    return db.get_all_settings()
+
+
+@app.put("/api/settings/{key}")
+async def put_setting(key: str, body: SettingUpdate):
+    db.set_setting(key, body.value)
+    return {"ok": True}

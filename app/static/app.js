@@ -1,3 +1,45 @@
+// ── Settings cache & display helpers ──────────────────────────────────────
+
+let _serverSettings = {};
+
+function _toDisplayTemp(celsius) {
+  return _serverSettings.temp_unit === 'F'
+    ? Math.round(celsius * 9/5 + 32)
+    : Math.round(celsius);
+}
+function _fromDisplayTemp(display) {
+  return _serverSettings.temp_unit === 'F'
+    ? Math.round((display - 32) * 5/9)
+    : display;
+}
+function _tempUnitLabel() { return _serverSettings.temp_unit === 'F' ? '°F' : '°'; }
+function _clockOpts(extra = {}) {
+  return { hour: '2-digit', minute: '2-digit', hour12: _serverSettings.time_format !== '24h', ...extra };
+}
+
+async function loadSettings() {
+  // One-time migration: push any existing localStorage value to the server
+  const legacy = localStorage.getItem('fd_accent');
+  if (legacy) {
+    try {
+      await fetch('/api/settings/accent', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value: legacy }),
+      });
+    } catch {}
+    localStorage.removeItem('fd_accent');
+  }
+
+  try {
+    const r = await fetch('/api/settings');
+    if (r.ok) _serverSettings = await r.json();
+  } catch {}
+
+  const accent = _serverSettings.accent ?? '#3b82f6';
+  document.documentElement.style.setProperty('--printing', accent);
+}
+
 // ── Printer icons ──────────────────────────────────────────────────────────
 
 const ICONS = {
@@ -111,7 +153,7 @@ const _tempModal = (() => {
     overlay.querySelector('#tm-composed').textContent = _composed || '___';
     const val = parseInt(_composed, 10);
     const hot = _composed && !isNaN(val) && (
-      (_heater === 'bed' ? val > 120 : val > 280)
+      (_heater === 'bed' ? val > _toDisplayTemp(120) : val > _toDisplayTemp(280))
     );
     const w = overlay.querySelector('#tm-warning');
     if (hot) w.removeAttribute('hidden'); else w.setAttribute('hidden', '');
@@ -131,18 +173,19 @@ const _tempModal = (() => {
 
   function doConfirm() {
     if (!_composed) return;
-    const val = parseInt(_composed, 10);
-    if (isNaN(val)) return;
-    const clamped = Math.max(0, Math.min(_max, val));
-    if (clamped !== val) {
-      _composed = String(clamped);
+    const displayVal = parseInt(_composed, 10);
+    if (isNaN(displayVal)) return;
+    const celsiusVal = _fromDisplayTemp(displayVal);
+    const clampedC = Math.max(0, Math.min(_max, celsiusVal));
+    if (clampedC !== celsiusVal) {
+      _composed = String(_toDisplayTemp(clampedC));
       const el = overlay.querySelector('#tm-composed');
       el.classList.add('composed-clamp');
       el.textContent = _composed;
       setTimeout(() => el.classList.remove('composed-clamp'), 500);
       return;
     }
-    sendTempSet(_printerId, _heater, clamped);
+    sendTempSet(_printerId, _heater, clampedC);
     close();
   }
 
@@ -172,14 +215,15 @@ const _tempModal = (() => {
   function open({ printerId, heater, label, current, target, presets = [], max = 300 }) {
     _printerId = printerId;
     _heater = heater;
-    _max = max;
-    _composed = target > 0 ? String(Math.round(target)) : '';
+    _max = max;  // always Celsius
+    const unit = _tempUnitLabel();
+    _composed = target > 0 ? String(_toDisplayTemp(target)) : '';
     overlay.querySelector('#tm-title').textContent = label.toUpperCase();
-    overlay.querySelector('#tm-current').textContent = `${Math.round(current)}°`;
-    overlay.querySelector('#tm-range').textContent = `Range: 0–${max}°C`;
+    overlay.querySelector('#tm-current').textContent = `${_toDisplayTemp(current)}${unit}`;
+    overlay.querySelector('#tm-range').textContent = `Range: 0–${_toDisplayTemp(max)}${unit}`;
     const allPresets = [{ label: 'Off', value: 0 }, ...presets];
     overlay.querySelector('#tm-presets').innerHTML = allPresets
-      .map(p => `<button class="temp-preset-btn" data-value="${p.value}">${p.label}</button>`)
+      .map(p => `<button class="temp-preset-btn" data-value="${p.value > 0 ? _toDisplayTemp(p.value) : 0}">${p.label}</button>`)
       .join('');
     overlay.querySelector('#tm-warning').setAttribute('hidden', '');
     updateDisplay();
@@ -270,7 +314,7 @@ function fmtLastSeen(lastSeen) {
   if (!d) return 'Never connected';
   const now = new Date();
   const isToday = d.toDateString() === now.toDateString();
-  const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const time = d.toLocaleTimeString([], _clockOpts());
   if (isToday) return `Last connected ${time}`;
   const date = d.toLocaleDateString([], { month: 'short', day: 'numeric' });
   return `Last connected ${date}, ${time}`;
@@ -309,15 +353,16 @@ function _tempClass(actual) {
 }
 
 function renderTemp(label, reading) {
-  const actual = reading.actual.toFixed(0);
+  const actual = _toDisplayTemp(reading.actual);
   const cls = _tempClass(reading.actual);
+  const unit = _tempUnitLabel();
   const target = reading.target > 0
-    ? `<span class="temp-target">/${reading.target.toFixed(0)}°</span>`
+    ? `<span class="temp-target">/${_toDisplayTemp(reading.target)}${unit}</span>`
     : '';
   return `
     <div class="temp-item">
       <span class="temp-label">${label}</span>
-      <span class="temp-value${cls}">${actual}°${target}</span>
+      <span class="temp-value${cls}">${actual}${unit}${target}</span>
     </div>`;
 }
 
@@ -452,9 +497,9 @@ function setLiveIndicator(connected) {
 
 // Clock — updates every second independent of data
 setInterval(() => {
-  document.getElementById('refresh-time').textContent = new Date().toLocaleTimeString();
+  document.getElementById('refresh-time').textContent = new Date().toLocaleTimeString([], _clockOpts());
 }, 1000);
-document.getElementById('refresh-time').textContent = new Date().toLocaleTimeString();
+document.getElementById('refresh-time').textContent = new Date().toLocaleTimeString([], _clockOpts());
 
 // ── Print controls ────────────────────────────────────────────────────────
 
@@ -716,32 +761,33 @@ function _detailTempsPanel(p) {
     .sort(([a], [b]) => (_TEMP_SORT[a] ?? 99) - (_TEMP_SORT[b] ?? 99))
     .map(([k, r]) => {
     const label = _TEMP_LABELS[k] ?? k;
-    const actual = r.actual.toFixed(0);
-    const target = _getDisplayTarget(p.id, k, r.target);
+    const targetC = _getDisplayTarget(p.id, k, r.target);  // always Celsius
+    const actual = _toDisplayTemp(r.actual);
+    const unit = _tempUnitLabel();
     const hasCtrl = _TEMP_CTRL_HEATERS.has(k);
     const cls = _tempClass(r.actual);
 
     if (!hasCtrl) {
       return `<div class="temp-ctrl-row">
         <span class="temp-row-label">${label}</span>
-        <div class="temp-readings"><span class="temp-actual${cls}">${actual}°</span></div>
+        <div class="temp-readings"><span class="temp-actual${cls}">${actual}${unit}</span></div>
       </div>`;
     }
 
-    const targetHtml = target > 0
+    const targetHtml = targetC > 0
       ? `<span class="temp-sep">/</span>
-         <span class="temp-target-val" data-temp-edit="${k}" data-printer-id="${p.id}">${Math.round(target)}°</span>`
+         <span class="temp-target-val" data-temp-edit="${k}" data-printer-id="${p.id}">${_toDisplayTemp(targetC)}${unit}</span>`
       : `<span class="temp-sep" style="font-size:0.75rem">off</span>`;
 
     return `<div class="temp-ctrl-row">
       <span class="temp-row-label">${label}</span>
       <div class="temp-readings" data-temp-edit="${k}" data-printer-id="${p.id}" style="cursor:pointer">
-        <span class="temp-actual${cls}">${actual}°</span>
+        <span class="temp-actual${cls}">${actual}${unit}</span>
         ${targetHtml}
       </div>
       <div class="temp-nudge">
-        <button class="temp-btn" data-temp-action="dec" data-heater="${k}" data-printer-id="${p.id}" data-target="${Math.round(target)}">−</button>
-        <button class="temp-btn" data-temp-action="inc" data-heater="${k}" data-printer-id="${p.id}" data-target="${Math.round(target)}">+</button>
+        <button class="temp-btn" data-temp-action="dec" data-heater="${k}" data-printer-id="${p.id}" data-target="${Math.round(targetC)}">−</button>
+        <button class="temp-btn" data-temp-action="inc" data-heater="${k}" data-printer-id="${p.id}" data-target="${Math.round(targetC)}">+</button>
       </div>
     </div>`;
   }).join('');
@@ -1009,7 +1055,7 @@ function _printRowHtml(print, idx, dateStr) {
 
   const dur = print.duration_seconds ? formatTime(print.duration_seconds) : '—';
   const ts = print.started_at + (print.started_at.endsWith('Z') ? '' : 'Z');
-  const time = new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const time = new Date(ts).toLocaleTimeString([], _clockOpts());
   const layers = (print.layers_completed != null && print.layers_total)
     ? ` · ${print.layers_completed}/${print.layers_total}L` : '';
 
@@ -1033,7 +1079,7 @@ function _showPrintDetail(printerId, dateStr, print) {
   const fmtTs = ts => {
     if (!ts) return '—';
     return new Date(ts.endsWith('Z') ? ts : ts + 'Z')
-      .toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      .toLocaleTimeString([], _clockOpts({ second: '2-digit' }));
   };
 
   const d = new Date(dateStr + 'T00:00:00Z');
@@ -1101,7 +1147,7 @@ function _showPrintDetail(printerId, dateStr, print) {
           }
           list.innerHTML = decisions.map(d => {
             const ts = new Date(d.logged_at.endsWith('Z') ? d.logged_at : d.logged_at + 'Z')
-              .toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+              .toLocaleTimeString([], _clockOpts({ second: '2-digit' }));
             const detail = d.detail
               ? `<span class="decision-detail">${d.detail}</span>`
               : '';
@@ -1544,12 +1590,6 @@ function connectWS() {
 
 // ── Settings view ─────────────────────────────────────────────────────────
 
-// Apply saved appearance on load
-(function () {
-  const accent = localStorage.getItem('fd_accent');
-  if (accent) document.documentElement.style.setProperty('--printing', accent);
-})();
-
 let _settingsCategory = 'printers';
 
 const _SETTINGS_CATEGORIES = [
@@ -1913,12 +1953,22 @@ const _ACCENT_COLORS = [
   { label: 'Pink',   value: '#ec4899' },
 ];
 
+function _settingToggle(key, options, current) {
+  return options.map(({ value, label }) =>
+    `<button class="setting-toggle-btn${current === value ? ' setting-toggle-active' : ''}"
+       data-setting-key="${key}" data-setting-value="${value}">${label}</button>`
+  ).join('');
+}
+
 function _appearanceCategoryHtml() {
-  const current = (localStorage.getItem('fd_accent') ?? '#3b82f6').trim();
+  const accent = (_serverSettings.accent ?? '#3b82f6').trim();
   const swatches = _ACCENT_COLORS.map(c =>
-    `<button class="accent-swatch${c.value === current ? ' accent-swatch-active' : ''}"
+    `<button class="accent-swatch${c.value === accent ? ' accent-swatch-active' : ''}"
       style="background:${c.value}" data-accent="${c.value}" title="${c.label}"></button>`
   ).join('');
+
+  const tempUnit = _serverSettings.temp_unit ?? 'C';
+  const timeFormat = _serverSettings.time_format ?? '24h';
 
   return `
     <div class="settings-section">
@@ -1926,6 +1976,21 @@ function _appearanceCategoryHtml() {
       <div class="settings-form-row">
         <label class="settings-label">Theme colour</label>
         <div class="accent-swatches">${swatches}</div>
+      </div>
+    </div>
+    <div class="settings-section">
+      <div class="settings-section-title">Units &amp; Format</div>
+      <div class="settings-form-row">
+        <label class="settings-label">Temperature</label>
+        <div class="setting-toggle-group">
+          ${_settingToggle('temp_unit', [{ value: 'C', label: '°C' }, { value: 'F', label: '°F' }], tempUnit)}
+        </div>
+      </div>
+      <div class="settings-form-row">
+        <label class="settings-label">Time format</label>
+        <div class="setting-toggle-group">
+          ${_settingToggle('time_format', [{ value: '24h', label: '24h' }, { value: '12h', label: '12h' }], timeFormat)}
+        </div>
       </div>
     </div>`;
 }
@@ -1935,9 +2000,29 @@ function _attachAppearanceEvents(el) {
     swatch.addEventListener('click', () => {
       const color = swatch.dataset.accent;
       document.documentElement.style.setProperty('--printing', color);
-      localStorage.setItem('fd_accent', color);
+      _serverSettings.accent = color;
+      fetch('/api/settings/accent', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value: color }),
+      }).catch(() => {});
       el.querySelectorAll('.accent-swatch').forEach(s =>
         s.classList.toggle('accent-swatch-active', s === swatch)
+      );
+    });
+  });
+
+  el.querySelectorAll('.setting-toggle-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const { settingKey: key, settingValue: value } = btn.dataset;
+      _serverSettings[key] = value;
+      fetch(`/api/settings/${key}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value }),
+      }).catch(() => {});
+      el.querySelectorAll(`.setting-toggle-btn[data-setting-key="${key}"]`).forEach(b =>
+        b.classList.toggle('setting-toggle-active', b === btn)
       );
     });
   });
@@ -1989,6 +2074,7 @@ async function renderSettingsView() {
   await _renderSettingsContent(_settingsCategory);
 }
 
+loadSettings();
 connectWS();
 initNotifBtn();
 window.addEventListener('hashchange', router);

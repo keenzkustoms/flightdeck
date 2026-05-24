@@ -60,6 +60,12 @@ def init() -> None:
                 ON decisions(printer_id, logged_at DESC);
 
             DROP TABLE IF EXISTS print_history;
+
+            CREATE TABLE IF NOT EXISTS settings (
+                key        TEXT PRIMARY KEY,
+                value      TEXT NOT NULL,
+                updated_at TIMESTAMP NOT NULL
+            );
         """)
     # Migrate existing DB: add columns if missing
     with _conn() as conn:
@@ -487,6 +493,25 @@ def get_calibration(printer_id: str) -> Optional[dict]:
         result = {"ratio": ratio, "count": int(row["cnt"])}
     _cal_cache[printer_id] = result
     return result
+
+
+# ── user settings ─────────────────────────────────────────────────────────
+
+def get_all_settings() -> dict:
+    with _conn() as conn:
+        rows = conn.execute("SELECT key, value FROM settings").fetchall()
+    return {r["key"]: r["value"] for r in rows}
+
+
+def set_setting(key: str, value: str) -> None:
+    with _conn() as conn:
+        conn.execute(
+            """INSERT INTO settings (key, value, updated_at)
+               VALUES (?, ?, CURRENT_TIMESTAMP)
+               ON CONFLICT(key) DO UPDATE
+               SET value = excluded.value, updated_at = excluded.updated_at""",
+            (key, value),
+        )
 
 
 def get_last_print(printer_id: str) -> Optional[dict]:
