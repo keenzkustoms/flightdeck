@@ -6,9 +6,10 @@ from typing import Optional
 
 log = logging.getLogger(__name__)
 
-_IDLE_TIMEOUT    = 60  # seconds before killing ffmpeg after last client leaves
-_STALE_TIMEOUT   = 8   # seconds without a new frame before declaring stream dead
-_INITIAL_TIMEOUT = 10  # max seconds to wait for the very first frame after (re)start
+_IDLE_TIMEOUT       = 60    # seconds before killing ffmpeg after last client leaves
+_STALE_TIMEOUT      = 8     # seconds without a new frame before declaring stream dead
+_INITIAL_TIMEOUT    = 10    # max seconds to wait for the very first frame after (re)start
+_MAX_SESSION_LIFE   = 900   # 15 min — H2D firmware silently freezes long-lived RTSP sessions
 _FRAME_START = b"\xff\xd8"
 _FRAME_END   = b"\xff\xd9"
 
@@ -81,28 +82,30 @@ class BambuCameraProxy:
             await self.stop()
 
     async def _watchdog(self) -> None:
-        """Kill ffmpeg if no frames arrive — covers both stale streams and stuck reconnects."""
+        """Kill ffmpeg if no frames arrive — covers both stale streams and stuck reconnects.
+        Also recycles the RTSP session periodically: H2D firmware silently freezes
+        long-lived connections while continuing to send the same frame."""
         while True:
             await asyncio.sleep(5)
             if self._clients == 0:
                 continue
             now = time.monotonic()
             if self._last_frame_at == 0.0:
-                # Waiting for first frame — kill if ffmpeg is taking too long to connect.
                 if self._started_at > 0 and (now - self._started_at) > _INITIAL_TIMEOUT:
                     log.warning("camera no initial frame after %ds, restarting: %s", _INITIAL_TIMEOUT, self._id)
                     if self._proc:
-                        try:
-                            self._proc.kill()
-                        except Exception:
-                            pass
+                        try: self._proc.kill()
+                        except Exception: pass
             elif (now - self._last_frame_at) > _STALE_TIMEOUT:
                 log.warning("camera stale (%ds no frames), restarting: %s", _STALE_TIMEOUT, self._id)
                 if self._proc:
-                    try:
-                        self._proc.kill()
-                    except Exception:
-                        pass
+                    try: self._proc.kill()
+                    except Exception: pass
+            elif (now - self._started_at) > _MAX_SESSION_LIFE:
+                log.info("camera session max lifetime reached, recycling RTSP connection: %s", self._id)
+                if self._proc:
+                    try: self._proc.kill()
+                    except Exception: pass
 
     # ── frame reader ───────────────────────────────────────────────────────
 
