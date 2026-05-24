@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 24 May 2026 (session 10)_
+_Last updated 24 May 2026 (session 11)_
 
 ## Current state
 
@@ -359,9 +359,21 @@ All 10 steps from TIER2_SPEC.md shipped, plus four bonus items.
 7. **`notif-unavailable` class** — replaces old `notif-off` for the HTTPS-not-available case; opacity 0.15 + `cursor: not-allowed`. `notif-off` now specifically means browser-denied.
 8. **Bell button tooltip** — granted: "Browser notifications on — fires when tab is in background"; denied: "Notifications blocked — check browser site settings"; default: "Enable browser notifications".
 
+## Fixed/shipped this session (24 May session 11)
+
+**PWA install:**
+
+1. **`manifest.json`** — `display: standalone`, `theme_color: #0a0a0f`, `background_color: #0a0a0f`, start_url `/`. App opens without browser chrome — its own window/space on every platform.
+2. **Icons** — 192×192 and 512×512 PNGs generated from `flightdeck-icon.svg` via `cairosvg`. Plus SVG at `sizes: any` for browsers that support it. Existing `apple-touch-icon.png` covers iOS.
+3. **Service worker (`sw.js`)** — minimal: `install → skipWaiting`, `activate → clients.claim()`. No fetch handler / no caching — dashboard requires a live Pi connection. Just enough to satisfy PWA installability criteria.
+4. **`<link rel="manifest">` + `<meta name="theme-color">`** added to `index.html`.
+5. **SW registration** in `app.js` at startup (feature-detected, silent on failure).
+
+Install: open `https://flightdeck.tail7de73e.ts.net` → Chrome: install icon in address bar / Android: Add to Home Screen / iOS Safari: Share → Add to Home Screen.
+
 ## Next session priorities
 
-1. **Tier 3** — TBD (suggestions: filament tracking, multi-user, Bambu OrcaSlicer interception, PWA install)
+1. **Tier 3** — TBD (suggestions: filament tracking, Bambu OrcaSlicer interception, multi-user auth)
 
 ---
 
