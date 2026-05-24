@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 24 May 2026 (session 11)_
+_Last updated 24 May 2026 (session 12)_
 
 ## Current state
 
@@ -371,9 +371,24 @@ All 10 steps from TIER2_SPEC.md shipped, plus four bonus items.
 
 Install: open `https://flightdeck.tail7de73e.ts.net` → Chrome: install icon in address bar / Android: Add to Home Screen / iOS Safari: Share → Add to Home Screen.
 
+## Fixed/shipped this session (24 May session 12)
+
+**Filament tracking:**
+
+1. **`prints.filament_grams` + `prints.material`** — columns already existed in schema; added migration stmts so existing DBs get them safely.
+2. **Data wired at print end:**
+   - Bambu: reads `filament_weight_g` / `filament_type` from `_preview_cache` (seeded by relay upload at `bambu_upload` time, or from FTP fetch) when `GcodeState.FINISH` fires.
+   - Moonraker: captures `filament_weight_total` from the existing slicer metadata fetch (already happening for ETA calibration); stored in `_filament_grams[printer_id]` and consumed at `raw == "complete"`.
+3. **`material_costs` table** — `material TEXT PRIMARY KEY, cost_per_gram REAL, updated_at TEXT`. Populated via `GET/PUT /api/filament/costs/{material}`.
+4. **`get_filament_summary(printer_id=None)`** — returns `total_grams`, `total_cost`, `by_material` (with per-material cost), `by_month` (last 12), `by_printer`.
+5. **`GET /api/filament/summary`** and **`GET /api/filament/summary/{printer_id}`** endpoints.
+6. **Filament settings tab** — cost-per-gram editor for PLA/PETG/ABS/ASA/TPU (+ any materials seen in DB); usage totals (weight + est. cost); material breakdown table; monthly bar chart. Data accumulates from completed prints going forward; historical rows stay NULL.
+
+**Note:** Bambu direct prints (not via relay) only get filament data if `get_preview()` was called during the print (i.e. the detail view was open). Relay prints always have it. Moonraker always has it via metadata API.
+
 ## Next session priorities
 
-1. **Tier 3** — TBD (suggestions: filament tracking, Bambu OrcaSlicer interception, multi-user auth)
+1. **Tier 3** — TBD (suggestions: Bambu OrcaSlicer interception, multi-user auth, print queue for Voron)
 
 ---
 
