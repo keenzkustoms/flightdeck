@@ -2061,9 +2061,6 @@ function _filamentCategoryHtml(summary, costs) {
   const byMat     = summary.by_material  || [];
   const byMonth   = (summary.by_month    || []).slice(0, 6);
 
-  const usedMats = byMat.map(m => m.material).filter(m => m && m !== 'Unknown');
-  const allMats  = [...new Set([..._DEFAULT_MATERIALS, ...usedMats])];
-
   const statsHtml = totalG > 0
     ? `<div class="filament-totals">
         <div class="filament-total-item">
@@ -2101,14 +2098,36 @@ function _filamentCategoryHtml(summary, costs) {
         </div>`;
       }).join('')}</div>` : '';
 
-  const costRows = allMats.map(mat => {
-    const val = costs[mat] != null ? costs[mat] : '';
-    return `<div class="cost-row">
-      <span class="cost-material">${mat}</span>
-      <div class="cost-input-wrap">
-        <span class="cost-prefix">$/g</span>
-        <input class="cost-input" type="number" min="0" step="0.001" placeholder="0.000"
-               value="${val}" data-material="${mat}">
+  // Merge default materials with saved ones; saved ones may override defaults
+  const savedMats  = Object.keys(costs);
+  const allMats    = [...new Set([..._DEFAULT_MATERIALS, ...savedMats])];
+
+  const costCards = allMats.map(mat => {
+    const entry   = costs[mat] || {};
+    const cpg     = entry.cost_per_gram ?? '';
+    const brand   = entry.brand   || '';
+    const comment = entry.comment || '';
+    return `<div class="cost-card" data-material="${mat}">
+      <div class="cost-card-header">
+        <span class="cost-card-name">${mat}</span>
+        <button class="cost-delete-btn" data-material="${mat}" title="Remove">×</button>
+      </div>
+      <div class="cost-card-fields">
+        <div class="cost-field-group">
+          <label class="cost-label">Brand</label>
+          <input class="cost-brand-input" type="text" placeholder="e.g. Bambu, eSUN"
+                 data-material="${mat}" value="${brand}">
+        </div>
+        <div class="cost-field-group cost-field-narrow">
+          <label class="cost-label">$/g</label>
+          <input class="cost-input" type="number" min="0" step="0.001" placeholder="0.000"
+                 data-material="${mat}" value="${cpg}">
+        </div>
+      </div>
+      <div class="cost-field-group">
+        <label class="cost-label">Notes</label>
+        <input class="cost-comment-input" type="text" placeholder="Optional notes"
+               data-material="${mat}" value="${comment}">
       </div>
       <button class="cost-save-btn" data-material="${mat}">Save</button>
     </div>`;
@@ -2120,35 +2139,115 @@ function _filamentCategoryHtml(summary, costs) {
       ${statsHtml}${matHtml}${monthHtml}
     </div>
     <div class="settings-section">
-      <div class="settings-section-title">Cost per Gram</div>
-      <p class="filament-empty">Enter your filament cost in dollars per gram (e.g. PLA at $25/kg = $0.025/g).</p>
-      <div class="cost-grid">${costRows}</div>
+      <div class="settings-section-title">Filament catalogue</div>
+      <p class="filament-empty">Cost per gram is used to estimate print costs. Brand and notes are for your reference.</p>
+      <div class="cost-card-grid">${costCards}</div>
+    </div>
+    <div class="settings-section">
+      <div class="settings-section-title">Add material</div>
+      <div class="cost-card cost-add-form">
+        <div class="cost-card-fields">
+          <div class="cost-field-group">
+            <label class="cost-label">Material *</label>
+            <input id="new-mat-name" type="text" class="cost-brand-input" placeholder="e.g. ASA+PC">
+          </div>
+          <div class="cost-field-group">
+            <label class="cost-label">Brand</label>
+            <input id="new-mat-brand" type="text" class="cost-brand-input" placeholder="e.g. eSUN">
+          </div>
+          <div class="cost-field-group cost-field-narrow">
+            <label class="cost-label">$/g</label>
+            <input id="new-mat-cost" type="number" class="cost-input" min="0" step="0.001" placeholder="0.000">
+          </div>
+        </div>
+        <div class="cost-field-group">
+          <label class="cost-label">Notes</label>
+          <input id="new-mat-comment" type="text" class="cost-comment-input" placeholder="e.g. Requires enclosure, high temp">
+        </div>
+        <button class="cost-add-btn">Add material</button>
+      </div>
     </div>`;
 }
 
 function _attachFilamentEvents(el) {
+  async function saveMaterial(mat, btn) {
+    const cpgInput  = el.querySelector(`.cost-input[data-material="${mat}"]`);
+    const brandInput = el.querySelector(`.cost-brand-input[data-material="${mat}"]`);
+    const noteInput  = el.querySelector(`.cost-comment-input[data-material="${mat}"]`);
+    const val = parseFloat(cpgInput?.value);
+    if (isNaN(val) || val < 0) { cpgInput?.focus(); return; }
+    btn.disabled = true; btn.textContent = '…';
+    try {
+      const r = await fetch(`/api/filament/costs/${encodeURIComponent(mat)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          cost_per_gram: val,
+          brand:   brandInput?.value.trim() || null,
+          comment: noteInput?.value.trim()  || null,
+        }),
+      });
+      if (!r.ok) throw new Error();
+      btn.textContent = '✓';
+      setTimeout(() => { btn.textContent = 'Save'; btn.disabled = false; }, 1500);
+    } catch {
+      btn.textContent = 'Error';
+      setTimeout(() => { btn.textContent = 'Save'; btn.disabled = false; }, 2000);
+    }
+  }
+
   el.querySelectorAll('.cost-save-btn').forEach(btn => {
+    btn.addEventListener('click', () => saveMaterial(btn.dataset.material, btn));
+  });
+
+  el.querySelectorAll('.cost-delete-btn').forEach(btn => {
     btn.addEventListener('click', async () => {
-      const mat   = btn.dataset.material;
-      const input = el.querySelector(`.cost-input[data-material="${mat}"]`);
-      const val   = parseFloat(input.value);
-      if (isNaN(val) || val < 0) { input.focus(); return; }
-      btn.disabled = true; btn.textContent = '…';
+      const mat = btn.dataset.material;
+      if (!confirm(`Remove "${mat}" from your filament catalogue?`)) return;
+      btn.disabled = true;
+      try {
+        const r = await fetch(`/api/filament/costs/${encodeURIComponent(mat)}`, { method: 'DELETE' });
+        if (!r.ok) throw new Error();
+        btn.closest('.cost-card').remove();
+      } catch {
+        btn.disabled = false;
+      }
+    });
+  });
+
+  const addBtn = el.querySelector('.cost-add-btn');
+  if (addBtn) {
+    addBtn.addEventListener('click', async () => {
+      const nameEl    = el.querySelector('#new-mat-name');
+      const brandEl   = el.querySelector('#new-mat-brand');
+      const costEl    = el.querySelector('#new-mat-cost');
+      const commentEl = el.querySelector('#new-mat-comment');
+      const mat = nameEl.value.trim().toUpperCase();
+      if (!mat) { nameEl.focus(); return; }
+      const cpg = parseFloat(costEl.value);
+      if (isNaN(cpg) || cpg < 0) { costEl.focus(); return; }
+      addBtn.disabled = true; addBtn.textContent = '…';
       try {
         const r = await fetch(`/api/filament/costs/${encodeURIComponent(mat)}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ cost_per_gram: val }),
+          body: JSON.stringify({
+            cost_per_gram: cpg,
+            brand:   brandEl.value.trim()   || null,
+            comment: commentEl.value.trim() || null,
+          }),
         });
         if (!r.ok) throw new Error();
-        btn.textContent = '✓';
-        setTimeout(() => { btn.textContent = 'Save'; btn.disabled = false; }, 1500);
+        // Clear form and reload the filament section
+        nameEl.value = ''; brandEl.value = ''; costEl.value = ''; commentEl.value = '';
+        addBtn.textContent = 'Add material'; addBtn.disabled = false;
+        _renderSettingsContent('filament');
       } catch {
-        btn.textContent = 'Error';
-        setTimeout(() => { btn.textContent = 'Save'; btn.disabled = false; }, 2000);
+        addBtn.textContent = 'Error';
+        setTimeout(() => { addBtn.textContent = 'Add material'; addBtn.disabled = false; }, 2000);
       }
     });
-  });
+  }
 }
 
 const _ACCENT_COLORS = [

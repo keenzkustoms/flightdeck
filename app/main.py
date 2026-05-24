@@ -717,6 +717,8 @@ async def put_setting(key: str, body: SettingUpdate):
 
 class CostUpdate(BaseModel):
     cost_per_gram: float
+    brand: Optional[str] = None
+    comment: Optional[str] = None
 
 @app.get("/api/filament/costs")
 async def get_filament_costs():
@@ -724,7 +726,12 @@ async def get_filament_costs():
 
 @app.put("/api/filament/costs/{material}")
 async def put_filament_cost(material: str, body: CostUpdate):
-    db.set_material_cost(material, body.cost_per_gram)
+    db.set_material_cost(material, body.cost_per_gram, body.brand, body.comment)
+    return {"ok": True}
+
+@app.delete("/api/filament/costs/{material}")
+async def delete_filament_cost(material: str):
+    db.delete_material_cost(material)
     return {"ok": True}
 
 @app.get("/api/filament/summary")

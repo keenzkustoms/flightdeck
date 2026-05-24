@@ -1919,68 +1919,121 @@ select.settings-input { cursor: pointer; }
   text-align: right;
 }
 
-.cost-grid {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.cost-row {
+.cost-card-grid {
   display: grid;
-  grid-template-columns: 3.5rem 1fr auto;
-  align-items: center;
+  grid-template-columns: repeat(2, 1fr);
   gap: 0.75rem;
 }
 
-.cost-material {
-  font-size: 0.82rem;
-  font-weight: 600;
-  color: var(--text);
+.cost-card {
+  background: #1d1d2e;
+  border: 1.5px solid var(--border);
+  border-radius: 0.625rem;
+  padding: 0.875rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
 }
 
-.cost-input-wrap {
+.cost-add-form {
+  background: rgba(255,255,255,0.02);
+  border-style: dashed;
+}
+
+.cost-card-header {
   display: flex;
   align-items: center;
-  gap: 0.3rem;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 0.4rem;
-  padding: 0.3rem 0.6rem;
+  justify-content: space-between;
 }
 
-.cost-prefix {
-  font-size: 0.72rem;
-  color: var(--muted);
-  white-space: nowrap;
+.cost-card-name {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--text);
 }
 
-.cost-input {
+.cost-delete-btn {
   background: none;
   border: none;
-  outline: none;
-  color: var(--text);
-  font-size: 0.85rem;
-  width: 5rem;
-  -moz-appearance: textfield;
+  color: var(--muted);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0.2rem;
+  border-radius: 0.25rem;
+  transition: color 0.15s;
+}
+.cost-delete-btn:hover { color: var(--error); }
+
+.cost-card-fields {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-end;
 }
 
+.cost-field-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  flex: 1;
+}
+
+.cost-field-narrow { flex: 0 0 5.5rem; }
+
+.cost-label {
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.cost-brand-input,
+.cost-comment-input,
+.cost-input {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 0.375rem;
+  color: var(--text);
+  font-size: 0.82rem;
+  padding: 0.3rem 0.5rem;
+  outline: none;
+  width: 100%;
+  box-sizing: border-box;
+  transition: border-color 0.15s;
+}
+
+.cost-brand-input:focus,
+.cost-comment-input:focus,
+.cost-input:focus { border-color: var(--printing); }
+
+.cost-input { -moz-appearance: textfield; }
 .cost-input::-webkit-outer-spin-button,
 .cost-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 
-.cost-save-btn {
+.cost-save-btn,
+.cost-add-btn {
+  align-self: flex-start;
   background: rgba(255,255,255,0.06);
   border: 1px solid var(--border);
   border-radius: 0.4rem;
   color: var(--text);
   font-size: 0.75rem;
-  padding: 0.3rem 0.7rem;
+  padding: 0.35rem 0.85rem;
   cursor: pointer;
   transition: background 0.15s;
   white-space: nowrap;
 }
 
-.cost-save-btn:hover:not(:disabled) { background: rgba(255,255,255,0.12); }
-.cost-save-btn:disabled { opacity: 0.5; cursor: default; }
+.cost-save-btn:hover:not(:disabled),
+.cost-add-btn:hover:not(:disabled) { background: rgba(255,255,255,0.12); }
+
+.cost-save-btn:disabled,
+.cost-add-btn:disabled { opacity: 0.5; cursor: default; }
+
+@media (max-width: 640px) {
+  .cost-card-grid { grid-template-columns: 1fr; }
+}
 
 @media (max-width: 640px) {
   .settings-body {
