@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 24 May 2026 (session 12)_
+_Last updated 24 May 2026 (session 13)_
 
 ## Current state
 
@@ -385,6 +385,17 @@ Install: open `https://flightdeck.tail7de73e.ts.net` → Chrome: install icon in
 6. **Filament settings tab** — cost-per-gram editor for PLA/PETG/ABS/ASA/TPU (+ any materials seen in DB); usage totals (weight + est. cost); material breakdown table; monthly bar chart. Data accumulates from completed prints going forward; historical rows stay NULL.
 
 **Note:** Bambu direct prints (not via relay) only get filament data if `get_preview()` was called during the print (i.e. the detail view was open). Relay prints always have it. Moonraker always has it via metadata API.
+
+## Fixed/shipped this session (24 May session 13)
+
+**H2D frozen camera — root cause found and fixed:**
+
+- **Symptom**: H2D camera feed frozen in app; RHS panel updating every 10s (WS alive), camera static.
+- **Investigation**: `md5sum` of two proxy grabs 3s apart → identical hashes. Direct ffmpeg grabs from RTSP 3s apart → different hashes. Confirmed: RTSP source is live, proxy `_latest` is stuck.
+- **Root cause**: H2D firmware bug — long-lived RTSP sessions silently freeze. The printer keeps the TCP connection alive and continues sending the same frame indefinitely. Existing `_STALE_TIMEOUT` (8s without a frame) doesn't catch this because frames do arrive, just always the same one.
+- **Fix** (`camera.py`): Added `_MAX_SESSION_LIFE = 900` (15 min). Watchdog now recycles the ffmpeg process after 15 minutes regardless of frame health, establishing a fresh RTSP connection. Brief ~3s hiccup on recycle; no manual intervention needed.
+- **Confirmed**: `kill -9` on the 90-min-old ffmpeg → new process started → proxy immediately returned differing hashes.
+- **Note**: X1C does not exhibit this behaviour; only H2D has been observed to freeze long-lived sessions.
 
 ## Next session priorities
 
