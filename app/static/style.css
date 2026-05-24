@@ -1739,6 +1739,89 @@ select.settings-input { cursor: pointer; }
   color: #fff;
 }
 
+/* ── Slicer cards ─────────────────────────────────────────────────────── */
+
+.slicer-hint {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.slicer-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.75rem;
+}
+
+.slicer-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 1rem;
+  border: 1.5px solid var(--border);
+  border-radius: 0.625rem;
+  background: #1d1d2e;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  overflow: hidden;
+}
+.slicer-card:hover { border-color: var(--printing); background: #232336; }
+.slicer-card-selected {
+  border-color: var(--printing);
+  background: color-mix(in srgb, var(--printing) 10%, #1d1d2e);
+}
+
+.slicer-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.slicer-card-name {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.slicer-badge {
+  font-size: 0.6rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 0.2em 0.55em;
+  border-radius: 0.25rem;
+  white-space: nowrap;
+}
+.slicer-badge-community { background: #7c3aed22; color: #7c3aed; }
+.slicer-badge-official   { background: #0284c722; color: #0284c7; }
+
+.slicer-card-desc {
+  font-size: 0.78rem;
+  color: #94a3b8;
+  margin: 0;
+  line-height: 1.4;
+}
+.slicer-card-pros {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: 0.75rem;
+  color: #94a3b8;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.slicer-detected {
+  font-size: 0.7rem;
+  color: var(--printing);
+  font-weight: 600;
+  margin-top: auto;
+  padding-top: 0.25rem;
+}
+
+@media (max-width: 640px) {
+  .slicer-grid { grid-template-columns: 1fr; }
+}
+
 @media (max-width: 640px) {
   .settings-body {
     flex-direction: column;

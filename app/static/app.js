@@ -1595,6 +1595,7 @@ let _settingsCategory = 'printers';
 const _SETTINGS_CATEGORIES = [
   { id: 'printers',   label: 'Printers'   },
   { id: 'appearance', label: 'Appearance' },
+  { id: 'slicer',     label: 'Slicer'     },
 ];
 
 async function refreshPrinters() {
@@ -1944,6 +1945,94 @@ async function _deletePrinter(id) {
 
 // ── Appearance category ────────────────────────────────────────────────────
 
+// ── Slicer category ────────────────────────────────────────────────────────
+
+const _SLICER_DEFINITIONS = [
+  {
+    id: 'OrcaSlicer',
+    badge: 'Community',
+    badgeType: 'community',
+    color: '#5c67f2',
+    description: 'Feature-rich multi-brand slicer forked from Bambu Studio. The most popular choice for Bambu and Klipper users.',
+    pros: ['Supports all major printer brands', 'Active development, frequent releases', 'Strong community & plugin ecosystem'],
+  },
+  {
+    id: 'Bambu Studio',
+    badge: 'Official · Bambu',
+    badgeType: 'official',
+    color: '#1ba94c',
+    description: 'Bambu Lab\'s own slicer. Best-in-class AMS colour management and first to receive Bambu-specific features.',
+    pros: ['Native AMS management', 'First to get Bambu-specific features', 'Official support & documentation'],
+  },
+  {
+    id: 'PrusaSlicer',
+    badge: 'Official · Prusa',
+    badgeType: 'official',
+    color: '#fa6831',
+    description: 'Prusa Research\'s slicer. Industry standard for reliability, documentation, and broad compatibility.',
+    pros: ['Excellent documentation', 'Broad printer compatibility', 'Stable, well-tested releases'],
+  },
+  {
+    id: 'SuperSlicer',
+    badge: 'Community',
+    badgeType: 'community',
+    color: '#2196f3',
+    description: 'PrusaSlicer fork with extended calibration tools and finer-grained control over print parameters.',
+    pros: ['Extended calibration features', 'More granular settings', 'PrusaSlicer-compatible profiles'],
+  },
+];
+
+function _slicerCategoryHtml() {
+  const selected = _serverSettings.preferred_slicer ?? '';
+  const detected = _serverSettings.slicer_detected_version ?? '';
+
+  const cards = _SLICER_DEFINITIONS.map(s => {
+    const isSelected = s.id === selected;
+    const pros = s.pros.map(p => `<li>${p}</li>`).join('');
+
+    // Show detected version on whichever card matches the detected slicer name
+    const detectedMatch = detected && detected.toLowerCase().startsWith(s.id.toLowerCase());
+    const versionTag = detectedMatch
+      ? `<div class="slicer-detected">detected ${detected.replace(s.id, '').trim() || detected}</div>`
+      : '';
+
+    return `
+      <button class="slicer-card${isSelected ? ' slicer-card-selected' : ''}" data-slicer-id="${s.id}" style="border-top: 3px solid ${s.color}">
+        <div class="slicer-card-header">
+          <span class="slicer-card-name" style="color:${s.color}">${s.id}</span>
+          <span class="slicer-badge slicer-badge-${s.badgeType}">${s.badge}</span>
+        </div>
+        <p class="slicer-card-desc">${s.description}</p>
+        <ul class="slicer-card-pros">${pros}</ul>
+        ${versionTag}
+      </button>`;
+  }).join('');
+
+  return `
+    <div class="settings-section">
+      <div class="settings-section-title">Preferred Slicer</div>
+      <p class="slicer-hint">Select your slicer to record your preference. Flightdeck auto-detects the version from jobs submitted via the relay.</p>
+      <div class="slicer-grid">${cards}</div>
+    </div>`;
+}
+
+function _attachSlicerEvents(el) {
+  el.querySelectorAll('.slicer-card').forEach(card => {
+    card.addEventListener('click', () => {
+      const id = card.dataset.slicerId;
+      _serverSettings.preferred_slicer = id;
+      fetch('/api/settings/preferred_slicer', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value: id }),
+      }).catch(() => {});
+      el.querySelectorAll('.slicer-card').forEach(c =>
+        c.classList.toggle('slicer-card-selected', c === card)
+      );
+    });
+  });
+}
+
 const _ACCENT_COLORS = [
   { label: 'Blue',   value: '#3b82f6' },
   { label: 'Purple', value: '#8b5cf6' },
@@ -2046,6 +2135,9 @@ async function _renderSettingsContent(category) {
   } else if (category === 'appearance') {
     el.innerHTML = _appearanceCategoryHtml();
     _attachAppearanceEvents(el);
+  } else if (category === 'slicer') {
+    el.innerHTML = _slicerCategoryHtml();
+    _attachSlicerEvents(el);
   }
 }
 
