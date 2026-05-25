@@ -201,6 +201,18 @@ def _check_transitions(data: list[dict]) -> None:
             asyncio.create_task(_send_ntfy("Print cancelled", msg, ["x"]))
 
 
+async def _push_toast(message: str, sub: str = "", toast_type: str = "warning") -> None:
+    """Push a one-shot toast to all connected WebSocket clients."""
+    payload = json.dumps({"type": "toast", "message": message, "sub": sub, "toastType": toast_type})
+    dead: set[WebSocket] = set()
+    for ws in list(_ws_clients):
+        try:
+            await ws.send_text(payload)
+        except Exception:
+            dead.add(ws)
+    _ws_clients.difference_update(dead)
+
+
 async def _broadcast_loop():
     while True:
         await asyncio.sleep(5)
@@ -934,6 +946,29 @@ async def relay_print_start(printer_id: str, request: Request):
 
     mr_url = _find_moonraker_url(printer_id)
     if mr_url:
+        # Pre-print spool low-stock warning
+        try:
+            async with httpx.AsyncClient(timeout=3.0) as client:
+                meta_r = await client.get(f"{mr_url}/server/files/metadata",
+                                          params={"filename": filename})
+                if meta_r.status_code == 200:
+                    fw = meta_r.json().get("result", {}).get("filament_weight_total")
+                    if fw:
+                        needed = float(fw)
+                        loaded = db.get_spools_by_printer(printer_id)
+                        if loaded:
+                            for slot, spool in loaded.items():
+                                remaining = spool["remaining_g"]
+                                if needed > remaining:
+                                    detail = (f"Spool #{spool['id']} ({spool['material']} {spool['brand']}): "
+                                              f"needs {needed:.0f}g, only {remaining:.0f}g remaining")
+                                    db.log_decision(printer_id, "spool_low_warning", detail)
+                                    await _push_toast(
+                                        f"⚠️ Low filament on slot {slot}",
+                                        f"Needs {needed:.0f}g · {remaining:.0f}g remaining",
+                                    )
+        except Exception:
+            pass
         await relay.moonraker_print_start(printer_id, filename, source_ip, mr_url)
         return {"result": "ok"}
 
