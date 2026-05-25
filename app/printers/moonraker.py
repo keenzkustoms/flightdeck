@@ -115,10 +115,34 @@ async def fetch(id: str, model_name: str, custom_name: str, icon: str, base_url:
             and _mmu_gate_snapshot_print_id.get(id) != new_print_id):
         mmu_data = data.get("mmu", {})
         if mmu_data.get("enabled"):
-            _mmu_gate_snapshot[id] = _snapshot_mmu_gates(mmu_data)
+            raw_gates = _snapshot_mmu_gates(mmu_data)
+            _mmu_gate_snapshot[id] = raw_gates
             _mmu_gate_snapshot_print_id[id] = new_print_id
+            # Enrich with spool assignments and persist to DB
+            enriched: dict[str, dict] = {}
+            for gate_idx, gate_data in raw_gates.items():
+                spool = db.get_spool_at_slot(id, gate_idx)
+                enriched[str(gate_idx)] = {**gate_data, "spool_id": spool["id"] if spool else None}
+                if spool is None:
+                    db.log_decision(id, "spool_missing",
+                                   f"No spool assigned to MMU gate {gate_idx}",
+                                   print_id=new_print_id)
+            db.write_slot_snapshot(new_print_id, enriched)
             log.info("MMU gate snapshot for %s print_id=%d: gates=%s",
-                     id, new_print_id, list(_mmu_gate_snapshot[id].keys()))
+                     id, new_print_id, list(raw_gates.keys()))
+        else:
+            # Non-MMU Voron: single extruder at slot 0
+            _mmu_gate_snapshot_print_id[id] = new_print_id
+            spool = db.get_spool_at_slot(id, 0)
+            enriched = {"0": {"material": "", "color": "", "filament_name": "", "status": 1,
+                               "spool_id": spool["id"] if spool else None}}
+            if spool is None:
+                db.log_decision(id, "spool_missing",
+                               "No spool assigned to single-extruder slot 0",
+                               print_id=new_print_id)
+            db.write_slot_snapshot(new_print_id, enriched)
+            log.info("Single-extruder spool snapshot for %s print_id=%d: spool=%s",
+                     id, new_print_id, spool["id"] if spool else None)
 
     # Capture slicer estimated duration once per job via metadata endpoint (primary path).
     # Documented fallback for Bambu (no metadata API): derived in bambu.py after 60s elapsed.
@@ -221,18 +245,26 @@ def _resolve_state(
     if raw == "complete":
         _estimated_stored.discard(printer_id)
         job_key = _active_job_key.pop(printer_id, None)
-        _active_print_id.pop(printer_id, None)
+        completed_print_id = _active_print_id.pop(printer_id, None)
         _error_print_id.pop(printer_id, None)
         finished_at = db.get_finished_at(printer_id)
         if finished_at is None:
             finished_at = now
             db.set_finished_at(printer_id, finished_at)
             if job_key:
-                db.on_print_finished(
+                fg = _filament_grams.pop(printer_id, None)
+                closed_id = db.on_print_finished(
                     printer_id, job_key,
                     layers_completed=job.layer_current if job else None,
-                    filament_grams=_filament_grams.pop(printer_id, None),
+                    filament_grams=fg,
                 )
+                pid = closed_id or completed_print_id
+                if pid and fg:
+                    db.deduct_spool_usage(printer_id, pid, fg)
+                elif pid and _mmu_gate_snapshot_print_id.get(printer_id) == pid:
+                    db.log_decision(printer_id, "spool_no_deduction_cancelled",
+                                   "Print finished but filament weight unknown; no spool deduction",
+                                   print_id=pid)
         if (now - finished_at.replace(tzinfo=timezone.utc)) > FINISHED_TTL:
             db.clear_finished_at(printer_id)
             return "idle"
@@ -253,6 +285,10 @@ def _resolve_state(
                 db.log_decision(printer_id, "cancel_resolved",
                                "Print cancelled by user",
                                print_id=print_id)
+                if _mmu_gate_snapshot_print_id.get(printer_id) == print_id:
+                    db.log_decision(printer_id, "spool_no_deduction_cancelled",
+                                   "Print cancelled; no filament deducted from spools",
+                                   print_id=print_id)
         db.clear_finished_at(printer_id)
         return "idle"
 

@@ -67,6 +67,7 @@ class BambuPrinter:
         self._error_print_id: Optional[int] = None    # prints.id of the last error (for snapshot)
         self._ams_slot_snapshot: dict[int, dict] = {}      # slot_index → slot info at print start
         self._ams_slot_snapshot_print_id: Optional[int] = None  # print_id the snapshot belongs to
+        self._ams_active_slot_at_start: Optional[int] = None    # tray_now at print start for deduction
 
     def start(self) -> None:
         self._printer.connect()
@@ -134,10 +135,26 @@ class BambuPrinter:
             if (state == "printing"
                     and self._current_print_id is not None
                     and self._ams_slot_snapshot_print_id != self._current_print_id):
-                self._ams_slot_snapshot = _snapshot_ams_slots(dump.get("print", {}))
+                raw_snap = _snapshot_ams_slots(dump.get("print", {}))
+                self._ams_slot_snapshot = raw_snap
                 self._ams_slot_snapshot_print_id = self._current_print_id
-                log.info("AMS slot snapshot for %s print_id=%d: slots=%s",
-                         self.id, self._current_print_id, list(self._ams_slot_snapshot.keys()))
+                # Capture active tray for single-spool deduction attribution
+                ams_raw = dump.get("print", {}).get("ams", {})
+                tray_now = int(ams_raw.get("tray_now", 255))
+                self._ams_active_slot_at_start = None if tray_now == 255 else tray_now
+                # Enrich snapshot with current spool assignments and persist to DB
+                enriched: dict[str, dict] = {}
+                for slot_idx, slot_data in raw_snap.items():
+                    spool = db.get_spool_at_slot(self.id, slot_idx)
+                    enriched[str(slot_idx)] = {**slot_data, "spool_id": spool["id"] if spool else None}
+                    if spool is None:
+                        db.log_decision(self.id, "spool_missing",
+                                       f"No spool assigned to AMS slot {slot_idx}",
+                                       print_id=self._current_print_id)
+                db.write_slot_snapshot(self._current_print_id, enriched)
+                log.info("AMS slot snapshot for %s print_id=%d: slots=%s active=%s",
+                         self.id, self._current_print_id, list(raw_snap.keys()),
+                         self._ams_active_slot_at_start)
 
             if state == "idle":
                 job = None  # MQTT retains last-print data; don't surface it as active
@@ -180,14 +197,24 @@ class BambuPrinter:
                     _, pv = self._preview_cache
                     filament_g = pv.filament_weight_g
                     material = pv.filament_type
-                db.on_print_finished(
+                finished_print_id = db.on_print_finished(
                     self.id, self._current_job_key,
                     layers_completed=job.layer_current if job else None,
                     filament_grams=filament_g,
                     material=material,
                 )
+                if finished_print_id and filament_g:
+                    db.deduct_spool_usage(
+                        self.id, finished_print_id, filament_g,
+                        active_slot=self._ams_active_slot_at_start,
+                    )
+                elif finished_print_id and self._ams_slot_snapshot_print_id == finished_print_id:
+                    db.log_decision(self.id, "spool_no_deduction_cancelled",
+                                   "Print finished but filament weight unknown; no spool deduction",
+                                   print_id=finished_print_id)
                 self._current_job_key = None
                 self._current_print_id = None
+                self._ams_active_slot_at_start = None
             else:
                 # Service restarted during the print; close any open row as FINISHED
                 # rather than leaving it orphaned for the stale-orphan sweep.
@@ -233,6 +260,10 @@ class BambuPrinter:
                         db.log_decision(self.id, "cancel_resolved",
                                        f"User-initiated cancel confirmed (layers={job.layer_current if job else None})",
                                        print_id=print_id)
+                        if self._ams_slot_snapshot_print_id == print_id:
+                            db.log_decision(self.id, "spool_no_deduction_cancelled",
+                                           "Print cancelled; no filament deducted from spools",
+                                           print_id=print_id)
                 else:
                     print_id = db.on_print_ended(
                         self.id, self._current_job_key,
@@ -244,6 +275,10 @@ class BambuPrinter:
                         db.log_decision(self.id, "connection_lost",
                                        "Printer went IDLE without cancel request; likely connection drop",
                                        print_id=print_id)
+                        if self._ams_slot_snapshot_print_id == print_id:
+                            db.log_decision(self.id, "spool_no_deduction_cancelled",
+                                           "Print ended as ERROR; no filament deducted from spools",
+                                           print_id=print_id)
             else:
                 # Service restarted while printer was mid-print then went idle:
                 # _make_job_key may return a stale/wrong key, so close all open rows directly.
@@ -258,6 +293,7 @@ class BambuPrinter:
             self._cancel_requested = False
             self._current_job_key = None
             self._current_print_id = None
+            self._ams_active_slot_at_start = None
             finished_at = db.get_finished_at(self.id)
             if finished_at is not None:
                 if (now - finished_at.replace(tzinfo=timezone.utc)) <= FINISHED_TTL:

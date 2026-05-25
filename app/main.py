@@ -764,6 +764,111 @@ async def get_filament_summary_printer(printer_id: str):
     return db.get_filament_summary(printer_id)
 
 
+# ── Spools ───────────────────────────────────────────────────────────────
+
+class SpoolCreate(BaseModel):
+    material: str
+    brand: str
+    color_hex: str
+    label_weight_g: float
+    remaining_g: Optional[float] = None
+    subtype: Optional[str] = None
+    color_name: Optional[str] = None
+    location_printer_id: Optional[str] = None
+    location_slot: Optional[int] = None
+    notes: Optional[str] = None
+
+class SpoolUpdate(BaseModel):
+    material: Optional[str] = None
+    brand: Optional[str] = None
+    subtype: Optional[str] = None
+    color_hex: Optional[str] = None
+    color_name: Optional[str] = None
+    label_weight_g: Optional[float] = None
+    remaining_g: Optional[float] = None
+    notes: Optional[str] = None
+
+class SpoolMove(BaseModel):
+    printer_id: Optional[str] = None
+    slot: Optional[int] = None
+
+@app.get("/api/spools/summary")
+async def get_spools_summary():
+    return db.get_spools_summary()
+
+@app.get("/api/spools/by-printer/{printer_id}")
+async def get_spools_by_printer(printer_id: str):
+    return db.get_spools_by_printer(printer_id)
+
+@app.get("/api/spools")
+async def get_spools(include_archived: bool = False):
+    return db.get_spools(include_archived=include_archived)
+
+@app.get("/api/spools/{spool_id}")
+async def get_spool(spool_id: int):
+    s = db.get_spool(spool_id)
+    if not s:
+        raise HTTPException(status_code=404, detail="Spool not found")
+    return s
+
+@app.post("/api/spools")
+async def create_spool(body: SpoolCreate):
+    remaining = body.remaining_g if body.remaining_g is not None else body.label_weight_g
+    if body.location_printer_id and body.location_slot is not None:
+        result = db.move_spool(-1, body.location_printer_id, body.location_slot)
+        if not result["ok"]:
+            raise HTTPException(status_code=409,
+                detail=f"Slot occupied by spool #{result['conflict_spool_id']}")
+    spool_id = db.create_spool(
+        material=body.material, brand=body.brand, color_hex=body.color_hex,
+        label_weight_g=body.label_weight_g, remaining_g=remaining,
+        subtype=body.subtype, color_name=body.color_name,
+        location_printer_id=body.location_printer_id,
+        location_slot=body.location_slot, notes=body.notes,
+    )
+    return {"id": spool_id}
+
+@app.put("/api/spools/{spool_id}")
+async def update_spool(spool_id: int, body: SpoolUpdate):
+    fields = {k: v for k, v in body.model_dump().items() if v is not None}
+    if not db.update_spool(spool_id, **fields):
+        raise HTTPException(status_code=404, detail="Spool not found")
+    return {"ok": True}
+
+@app.delete("/api/spools/{spool_id}")
+async def delete_spool(spool_id: int):
+    if not db.delete_spool(spool_id):
+        raise HTTPException(status_code=404, detail="Spool not found")
+    return {"ok": True}
+
+@app.post("/api/spools/{spool_id}/archive")
+async def archive_spool(spool_id: int):
+    db.archive_spool(spool_id)
+    return {"ok": True}
+
+@app.post("/api/spools/{spool_id}/restore")
+async def restore_spool(spool_id: int):
+    db.restore_spool(spool_id)
+    return {"ok": True}
+
+@app.post("/api/spools/{spool_id}/reset_weight")
+async def reset_spool_weight(spool_id: int):
+    db.reset_spool_weight(spool_id)
+    return {"ok": True}
+
+@app.post("/api/spools/{spool_id}/move")
+async def move_spool(spool_id: int, body: SpoolMove):
+    result = db.move_spool(spool_id, body.printer_id, body.slot)
+    if not result["ok"]:
+        conflict = db.get_spool(result["conflict_spool_id"])
+        raise HTTPException(status_code=409, detail={
+            "message": "Slot occupied",
+            "conflict_spool_id": result["conflict_spool_id"],
+            "conflict_spool": conflict,
+        })
+    return {"ok": True}
+
+
 # ── OrcaSlicer relay ──────────────────────────────────────────────────────
 # Configure OrcaSlicer Physical Printer host as:
 #   http://<flightdeck-host>:8000/relay/<printer_id>

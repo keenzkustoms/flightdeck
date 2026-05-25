@@ -75,6 +75,30 @@ def init() -> None:
                 updated_at    TEXT NOT NULL,
                 PRIMARY KEY (material, brand)
             );
+
+            CREATE TABLE IF NOT EXISTS spools (
+                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                material            TEXT NOT NULL,
+                brand               TEXT NOT NULL,
+                subtype             TEXT,
+                color_hex           TEXT NOT NULL,
+                color_name          TEXT,
+                -- REAL so partial-spool additions and gram-precision deductions don't lose precision
+                label_weight_g      REAL NOT NULL,
+                remaining_g         REAL NOT NULL,
+                location_printer_id TEXT,
+                location_slot       INTEGER,
+                notes               TEXT,
+                added_at            TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                archived_at         TIMESTAMP,
+                UNIQUE(location_printer_id, location_slot)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_spools_active
+                ON spools(archived_at) WHERE archived_at IS NULL;
+
+            CREATE INDEX IF NOT EXISTS idx_spools_location
+                ON spools(location_printer_id, location_slot) WHERE archived_at IS NULL;
         """)
     # Migrate existing DB: add columns if missing
     with _conn() as conn:
@@ -88,6 +112,8 @@ def init() -> None:
             "ALTER TABLE material_costs ADD COLUMN brand TEXT",
             "ALTER TABLE material_costs ADD COLUMN comment TEXT",
             "ALTER TABLE prints ADD COLUMN notes TEXT",
+            "ALTER TABLE prints ADD COLUMN spool_usage TEXT",
+            "ALTER TABLE prints ADD COLUMN ams_slot_snapshot TEXT",
         ):
             try:
                 conn.execute(stmt)
@@ -690,3 +716,274 @@ def get_last_print(printer_id: str) -> Optional[dict]:
             (printer_id,),
         ).fetchone()
     return dict(row) if row else None
+
+
+# ── spools ────────────────────────────────────────────────────────────────
+
+def create_spool(
+    material: str,
+    brand: str,
+    color_hex: str,
+    label_weight_g: float,
+    remaining_g: float,
+    *,
+    subtype: Optional[str] = None,
+    color_name: Optional[str] = None,
+    location_printer_id: Optional[str] = None,
+    location_slot: Optional[int] = None,
+    notes: Optional[str] = None,
+) -> int:
+    with _conn() as conn:
+        cursor = conn.execute(
+            """INSERT INTO spools
+               (material, brand, subtype, color_hex, color_name,
+                label_weight_g, remaining_g, location_printer_id, location_slot, notes)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (material, brand, subtype, color_hex, color_name,
+             label_weight_g, remaining_g, location_printer_id, location_slot, notes),
+        )
+        spool_id = cursor.lastrowid
+    printer = location_printer_id or "none"
+    log_decision(printer, "spool_added",
+                f"Spool #{spool_id} {material}/{brand} {color_hex} {remaining_g}g added")
+    return spool_id
+
+
+def get_spools(include_archived: bool = False) -> list:
+    with _conn() as conn:
+        where = "" if include_archived else "WHERE archived_at IS NULL"
+        rows = conn.execute(
+            f"""SELECT id, material, brand, subtype, color_hex, color_name,
+                       label_weight_g, remaining_g, location_printer_id, location_slot,
+                       notes, added_at, archived_at
+                FROM spools {where}
+                ORDER BY material, brand, id"""
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_spool(spool_id: int) -> Optional[dict]:
+    with _conn() as conn:
+        row = conn.execute(
+            """SELECT id, material, brand, subtype, color_hex, color_name,
+                      label_weight_g, remaining_g, location_printer_id, location_slot,
+                      notes, added_at, archived_at
+               FROM spools WHERE id = ?""",
+            (spool_id,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def update_spool(spool_id: int, **fields) -> bool:
+    allowed = {"material", "brand", "subtype", "color_hex", "color_name",
+               "label_weight_g", "remaining_g", "notes"}
+    updates = {k: v for k, v in fields.items() if k in allowed}
+    if not updates:
+        return False
+    cols = ", ".join(f"{k} = ?" for k in updates)
+    vals = list(updates.values()) + [spool_id]
+    with _conn() as conn:
+        c = conn.execute(f"UPDATE spools SET {cols} WHERE id = ?", vals)
+    return c.rowcount > 0
+
+
+def delete_spool(spool_id: int) -> bool:
+    with _conn() as conn:
+        c = conn.execute("DELETE FROM spools WHERE id = ?", (spool_id,))
+    return c.rowcount > 0
+
+
+def archive_spool(spool_id: int) -> bool:
+    with _conn() as conn:
+        c = conn.execute(
+            "UPDATE spools SET archived_at = CURRENT_TIMESTAMP WHERE id = ? AND archived_at IS NULL",
+            (spool_id,),
+        )
+    if c.rowcount:
+        log_decision("system", "spool_archived", f"Spool #{spool_id} archived")
+    return c.rowcount > 0
+
+
+def restore_spool(spool_id: int) -> bool:
+    with _conn() as conn:
+        c = conn.execute(
+            "UPDATE spools SET archived_at = NULL WHERE id = ?",
+            (spool_id,),
+        )
+    if c.rowcount:
+        log_decision("system", "spool_restored", f"Spool #{spool_id} restored")
+    return c.rowcount > 0
+
+
+def reset_spool_weight(spool_id: int) -> bool:
+    with _conn() as conn:
+        c = conn.execute(
+            "UPDATE spools SET remaining_g = label_weight_g WHERE id = ?",
+            (spool_id,),
+        )
+    if c.rowcount:
+        log_decision("system", "spool_weight_reset", f"Spool #{spool_id} weight reset to label weight")
+    return c.rowcount > 0
+
+
+def move_spool(spool_id: int, printer_id: Optional[str], slot: Optional[int]) -> dict:
+    """Move spool to a new location. Returns {ok: bool, conflict_spool_id: int|None}."""
+    with _conn() as conn:
+        if printer_id is not None:
+            conflict = conn.execute(
+                """SELECT id FROM spools
+                   WHERE location_printer_id = ? AND location_slot IS ?
+                     AND archived_at IS NULL AND id != ?""",
+                (printer_id, slot, spool_id),
+            ).fetchone()
+            if conflict:
+                return {"ok": False, "conflict_spool_id": conflict["id"]}
+        old = conn.execute(
+            "SELECT location_printer_id, location_slot FROM spools WHERE id = ?",
+            (spool_id,),
+        ).fetchone()
+        conn.execute(
+            "UPDATE spools SET location_printer_id = ?, location_slot = ? WHERE id = ?",
+            (printer_id, slot, spool_id),
+        )
+    if old:
+        old_loc = f"{old['location_printer_id']}:{old['location_slot']}" if old["location_printer_id"] else "storage"
+        new_loc = f"{printer_id}:{slot}" if printer_id else "storage"
+        log_decision("system", "spool_moved", f"Spool #{spool_id} {old_loc} → {new_loc}")
+    return {"ok": True, "conflict_spool_id": None}
+
+
+def get_spools_summary() -> dict:
+    with _conn() as conn:
+        row = conn.execute(
+            """SELECT COUNT(*)                                                        AS total_count,
+                      COALESCE(SUM(remaining_g), 0)                                  AS total_remaining_g,
+                      COALESCE(SUM(label_weight_g - remaining_g), 0)                 AS total_consumed_g,
+                      COALESCE(SUM(CASE WHEN location_printer_id IS NOT NULL THEN 1 ELSE 0 END), 0) AS in_printer_count
+               FROM spools WHERE archived_at IS NULL"""
+        ).fetchone()
+        threshold_row = conn.execute(
+            "SELECT value FROM settings WHERE key = 'spool_low_stock_pct'"
+        ).fetchone()
+        low_pct = float(threshold_row["value"]) if threshold_row else 20.0
+        low_count = conn.execute(
+            """SELECT COUNT(*) AS n FROM spools
+               WHERE archived_at IS NULL AND label_weight_g > 0
+                 AND (remaining_g * 100.0 / label_weight_g) < ?""",
+            (low_pct,),
+        ).fetchone()["n"]
+        by_mat = conn.execute(
+            """SELECT material, COALESCE(SUM(remaining_g), 0) AS grams
+               FROM spools WHERE archived_at IS NULL
+               GROUP BY material ORDER BY material"""
+        ).fetchall()
+    return {
+        "total_count": row["total_count"],
+        "total_remaining_g": round(row["total_remaining_g"], 1),
+        "total_consumed_g": round(row["total_consumed_g"], 1),
+        "in_printer_count": row["in_printer_count"],
+        "low_stock_count": low_count,
+        "low_stock_pct": low_pct,
+        "by_material": [{"material": r["material"], "grams": round(r["grams"], 1)} for r in by_mat],
+    }
+
+
+def get_spools_by_printer(printer_id: str) -> dict:
+    """Returns {slot_index: spool_dict} for active spools loaded on this printer."""
+    with _conn() as conn:
+        rows = conn.execute(
+            """SELECT id, material, brand, subtype, color_hex, color_name,
+                      label_weight_g, remaining_g, location_slot, notes
+               FROM spools
+               WHERE location_printer_id = ? AND archived_at IS NULL""",
+            (printer_id,),
+        ).fetchall()
+    return {r["location_slot"]: dict(r) for r in rows}
+
+
+def get_spool_at_slot(printer_id: str, slot: int) -> Optional[dict]:
+    with _conn() as conn:
+        row = conn.execute(
+            """SELECT id, material, brand, color_hex, color_name, remaining_g, label_weight_g
+               FROM spools
+               WHERE location_printer_id = ? AND location_slot = ? AND archived_at IS NULL""",
+            (printer_id, slot),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def write_slot_snapshot(print_id: int, snapshot: dict) -> None:
+    """Persist the enriched slot/gate snapshot (with spool_ids) to the prints row."""
+    import json
+    with _conn() as conn:
+        conn.execute(
+            "UPDATE prints SET ams_slot_snapshot = ? WHERE id = ?",
+            (json.dumps(snapshot), print_id),
+        )
+
+
+def deduct_spool_usage(
+    printer_id: str,
+    print_id: int,
+    total_grams: float,
+    active_slot: Optional[int] = None,
+) -> None:
+    """Read stored slot snapshot, deduct grams from mapped spools, write spool_usage JSON."""
+    import json
+    with _conn() as conn:
+        row = conn.execute(
+            "SELECT ams_slot_snapshot FROM prints WHERE id = ?", (print_id,)
+        ).fetchone()
+        if not row or not row["ams_slot_snapshot"]:
+            log.info("No slot snapshot for print %d, skipping spool deduction", print_id)
+            return
+        snapshot = json.loads(row["ams_slot_snapshot"])
+
+    # snapshot: {slot_str: {... "spool_id": int|null}}
+    slots_with = [(int(s), d["spool_id"]) for s, d in snapshot.items() if d.get("spool_id")]
+    slots_without = [int(s) for s, d in snapshot.items() if not d.get("spool_id")]
+
+    # Attribute grams: active_slot gets everything if known; else equal split
+    slot_grams: dict[int, float] = {}
+    if active_slot is not None and any(s == active_slot for s, _ in slots_with):
+        slot_grams[active_slot] = total_grams
+    elif slots_with:
+        per = total_grams / len(slots_with)
+        for s, _ in slots_with:
+            slot_grams[s] = per
+
+    spool_usage = []
+    spool_id_map = {s: sid for s, sid in slots_with}
+
+    with _conn() as conn:
+        for slot, grams in slot_grams.items():
+            spool_id = spool_id_map[slot]
+            cur = conn.execute("SELECT remaining_g FROM spools WHERE id = ?", (spool_id,)).fetchone()
+            if not cur:
+                continue
+            old_r = cur["remaining_g"]
+            new_r = max(0.0, old_r - grams)
+            conn.execute("UPDATE spools SET remaining_g = ? WHERE id = ?", (new_r, spool_id))
+            spool_usage.append({"spool_id": spool_id, "grams": round(grams, 2), "slot": slot})
+            if old_r - grams < 0:
+                log_decision(printer_id, "spool_overdrawn",
+                            f"Spool #{spool_id} slot {slot}: tried to deduct {grams:.1f}g "
+                            f"but only {old_r:.1f}g remained; clamped to 0",
+                            print_id=print_id)
+            else:
+                log_decision(printer_id, "spool_deducted",
+                            f"Spool #{spool_id} slot {slot}: {grams:.1f}g deducted "
+                            f"({old_r:.1f}g → {new_r:.1f}g)",
+                            print_id=print_id)
+
+        for slot in slots_without:
+            unattr = slot_grams.get(slot, 0.0) if not slots_with else 0.0
+            log_decision(printer_id, "spool_missing",
+                        f"Slot {slot}: no spool assigned; {unattr:.1f}g unattributed",
+                        print_id=print_id)
+
+        if spool_usage:
+            conn.execute(
+                "UPDATE prints SET spool_usage = ? WHERE id = ?",
+                (json.dumps(spool_usage), print_id),
+            )

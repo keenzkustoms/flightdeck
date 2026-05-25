@@ -1709,6 +1709,7 @@ const _SETTINGS_CATEGORIES = [
   { id: 'appearance', label: 'Appearance' },
   { id: 'slicer',     label: 'Slicer'     },
   { id: 'filament',   label: 'Filament'   },
+  { id: 'spools',     label: 'Spools'     },
 ];
 
 async function refreshPrinters() {
@@ -2552,6 +2553,342 @@ function _attachAppearanceEvents(el) {
 
 // ── Settings layout ────────────────────────────────────────────────────────
 
+// ── Spool luminance helper ────────────────────────────────────────────────
+function _spoolTextColor(hex) {
+  const h = hex.replace('#', '');
+  if (h.length < 6) return '#ffffff';
+  const r = parseInt(h.slice(0,2), 16) / 255;
+  const g = parseInt(h.slice(2,4), 16) / 255;
+  const b = parseInt(h.slice(4,6), 16) / 255;
+  const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+  return lum > 0.55 ? '#1a1a1a' : '#ffffff';
+}
+
+function _spoolProgressColor(pct) {
+  if (pct >= 50) return 'var(--printing)';
+  if (pct >= 20) return '#f59e0b';
+  return 'var(--error)';
+}
+
+function _spoolsCategoryHtml(spools, summary, costs) {
+  // Summary strip
+  const matStr = (summary.by_material || []).map(m => `${m.material} ${Math.round(m.grams)}g`).join(' · ') || '—';
+  const summaryHtml = `
+    <div class="spool-summary-strip">
+      <div class="spool-stat">
+        <span class="spool-stat-value">${summary.total_remaining_g != null ? (summary.total_remaining_g / 1000).toFixed(2) + 'kg' : '—'}</span>
+        <span class="spool-stat-label">inventory</span>
+        <span class="spool-stat-sub">${summary.total_count || 0} spools</span>
+      </div>
+      <div class="spool-stat">
+        <span class="spool-stat-value">${summary.total_consumed_g != null ? (summary.total_consumed_g / 1000).toFixed(2) + 'kg' : '—'}</span>
+        <span class="spool-stat-label">consumed</span>
+      </div>
+      <div class="spool-stat spool-stat-wide">
+        <span class="spool-stat-value spool-stat-mat">${matStr}</span>
+        <span class="spool-stat-label">by material</span>
+      </div>
+      <div class="spool-stat">
+        <span class="spool-stat-value">${summary.in_printer_count || 0}</span>
+        <span class="spool-stat-label">in printer</span>
+      </div>
+      <div class="spool-stat${(summary.low_stock_count || 0) > 0 ? ' spool-stat-warn' : ''}">
+        <span class="spool-stat-value">${summary.low_stock_count || 0}</span>
+        <span class="spool-stat-label">low stock</span>
+        <span class="spool-stat-sub">&lt;${summary.low_stock_pct || 20}%</span>
+      </div>
+    </div>`;
+
+  // Card grid
+  const cardHtml = spools.length === 0
+    ? `<p class="filament-empty">No spools yet. Add your first spool to start tracking inventory.</p>`
+    : spools.map(s => {
+        const pct = s.label_weight_g > 0 ? Math.round(s.remaining_g * 100 / s.label_weight_g) : 0;
+        const barColor = _spoolProgressColor(pct);
+        const bandColor = s.color_hex || '#404040';
+        const textColor = _spoolTextColor(bandColor);
+        const used = Math.max(0, (s.label_weight_g - s.remaining_g));
+        const location = s.location_printer_id
+          ? (() => {
+              const p = _latestPrinters.find(x => x.id === s.location_printer_id);
+              const pname = p ? p.custom_name : s.location_printer_id;
+              return `<span class="spool-location-badge" title="${pname} slot ${s.location_slot}">📍 ${pname}</span>`;
+            })()
+          : '';
+        return `<div class="spool-card" data-spool-id="${s.id}">
+          <div class="spool-card-band" style="background:${bandColor};color:${textColor}">
+            <span class="spool-color-name">${s.color_name || '—'}</span>
+            <span class="spool-id-badge">#${s.id}</span>
+          </div>
+          <div class="spool-card-body">
+            <div class="spool-card-row">
+              <span class="spool-material">${s.material}${s.subtype ? ' ' + s.subtype : ''}</span>
+              ${location}
+            </div>
+            <div class="spool-card-row spool-brand">${s.brand}</div>
+            <div class="spool-remaining-row">
+              <span class="spool-remaining-label">Remaining</span>
+              <span class="spool-remaining-pct${pct < 20 ? ' spool-low' : pct < 50 ? ' spool-amber' : ''}">${pct}%</span>
+              <span class="spool-remaining-g">${Math.round(s.remaining_g)}g</span>
+            </div>
+            <div class="spool-progress-bar">
+              <div class="spool-progress-fill" style="width:${pct}%;background:${barColor}"></div>
+            </div>
+            <div class="spool-meta-row">
+              <span class="spool-meta">Label: ${Math.round(s.label_weight_g)}g</span>
+              <span class="spool-meta">Used: ${Math.round(used)}g</span>
+            </div>
+            <div class="spool-card-actions">
+              <button class="spool-action-btn" data-action="archive" data-id="${s.id}" title="Archive">📦</button>
+              <button class="spool-action-btn" data-action="reset" data-id="${s.id}" title="Reset weight">🔄</button>
+              <button class="spool-action-btn" data-action="delete" data-id="${s.id}" title="Delete">🗑</button>
+            </div>
+          </div>
+        </div>`;
+      }).join('');
+
+  return `
+    <div class="spool-page-header">
+      <div class="settings-section-title">Spool Inventory</div>
+      <button class="spool-add-btn">+ Add Spool</button>
+    </div>
+    ${summaryHtml}
+    <div class="spool-card-grid">${cardHtml}</div>`;
+}
+
+function _attachSpoolsEvents(el, costs) {
+  el.querySelector('.spool-add-btn')?.addEventListener('click', () =>
+    _openAddSpoolModal(costs, () => _renderSettingsContent('spools'))
+  );
+
+  el.querySelectorAll('.spool-action-btn').forEach(btn => {
+    btn.addEventListener('click', async e => {
+      e.stopPropagation();
+      const { action, id } = btn.dataset;
+      if (action === 'archive') {
+        if (!confirm('Archive this spool? It will be hidden from active inventory.')) return;
+        await fetch(`/api/spools/${id}/archive`, { method: 'POST' });
+        _renderSettingsContent('spools');
+      } else if (action === 'reset') {
+        if (!confirm('Reset remaining weight to full label weight?')) return;
+        await fetch(`/api/spools/${id}/reset_weight`, { method: 'POST' });
+        _renderSettingsContent('spools');
+      } else if (action === 'delete') {
+        if (!confirm('Permanently delete this spool? This cannot be undone.')) return;
+        await fetch(`/api/spools/${id}`, { method: 'DELETE' });
+        _renderSettingsContent('spools');
+      }
+    });
+  });
+}
+
+function _openAddSpoolModal(costs, onSaved) {
+  // Build material → brands map from catalogue
+  const matBrands = {};
+  for (const e of (costs || [])) {
+    if (!matBrands[e.material]) matBrands[e.material] = [];
+    matBrands[e.material].push(e.brand);
+  }
+  const materials = Object.keys(matBrands).sort();
+
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+
+  const printerOpts = _latestPrinters.map(p =>
+    `<option value="${p.id}" data-kind="${p.kind}">${p.custom_name}</option>`
+  ).join('');
+
+  overlay.innerHTML = `
+    <div class="modal-box spool-modal">
+      <div class="modal-header">
+        <span class="modal-title">Add Spool</span>
+        <button class="modal-close-btn">✕</button>
+      </div>
+      <div class="spool-modal-form">
+        <div class="spool-form-row">
+          <label class="spool-form-label">Material *</label>
+          <select id="sm-material" class="spool-form-input">
+            <option value="">— select —</option>
+            ${materials.map(m => `<option value="${m}">${m}</option>`).join('')}
+          </select>
+        </div>
+        <div class="spool-form-row">
+          <label class="spool-form-label">Brand *</label>
+          <select id="sm-brand" class="spool-form-input" disabled>
+            <option value="">— select material first —</option>
+          </select>
+        </div>
+        <div class="spool-form-row">
+          <label class="spool-form-label">Subtype</label>
+          <input id="sm-subtype" class="spool-form-input" type="text" placeholder="Basic, Matte, Silk…">
+        </div>
+        <div class="spool-form-row">
+          <label class="spool-form-label">Colour *</label>
+          <div class="spool-color-row">
+            <input id="sm-color-picker" type="color" value="#808080" class="spool-color-picker">
+            <input id="sm-color-hex" class="spool-form-input spool-color-hex" type="text" placeholder="#808080" value="#808080" maxlength="7">
+            <div id="sm-color-preview" class="spool-color-preview" style="background:#808080"></div>
+          </div>
+        </div>
+        <div class="spool-form-row">
+          <label class="spool-form-label">Colour name</label>
+          <input id="sm-color-name" class="spool-form-input" type="text" placeholder="e.g. Jade White">
+        </div>
+        <div class="spool-form-row">
+          <label class="spool-form-label">Label weight *</label>
+          <div class="spool-inline-row">
+            <input id="sm-label-g" class="spool-form-input spool-weight-input" type="number" min="1" value="1000"> g
+          </div>
+        </div>
+        <div class="spool-form-row">
+          <label class="spool-form-label">Remaining</label>
+          <div class="spool-inline-row">
+            <input id="sm-remaining-g" class="spool-form-input spool-weight-input" type="number" min="0" value="1000"> g
+            <span class="spool-form-hint">(defaults to label weight)</span>
+          </div>
+        </div>
+        <div class="spool-form-row">
+          <label class="spool-form-label">Location</label>
+          <div class="spool-location-block">
+            <label class="spool-radio-label">
+              <input type="radio" name="sm-loc" value="storage" checked> In storage
+            </label>
+            <label class="spool-radio-label">
+              <input type="radio" name="sm-loc" value="loaded"> Loaded on:
+            </label>
+            <div id="sm-location-selects" class="spool-location-selects hidden">
+              <select id="sm-printer" class="spool-form-input">
+                ${printerOpts}
+              </select>
+              <select id="sm-slot" class="spool-form-input">
+                <option value="0">Slot 1</option>
+                <option value="1">Slot 2</option>
+                <option value="2">Slot 3</option>
+                <option value="3">Slot 4</option>
+              </select>
+            </div>
+          </div>
+        </div>
+        <div class="spool-form-row">
+          <label class="spool-form-label">Notes</label>
+          <input id="sm-notes" class="spool-form-input" type="text" placeholder="Optional notes">
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="modal-btn" id="sm-cancel">Cancel</button>
+        <button class="modal-btn modal-btn-confirm" id="sm-submit">Add Spool</button>
+      </div>
+    </div>`;
+
+  document.body.appendChild(overlay);
+
+  const matSel  = overlay.querySelector('#sm-material');
+  const brandSel = overlay.querySelector('#sm-brand');
+  const picker  = overlay.querySelector('#sm-color-picker');
+  const hexIn   = overlay.querySelector('#sm-color-hex');
+  const preview = overlay.querySelector('#sm-color-preview');
+  const labelG  = overlay.querySelector('#sm-label-g');
+  const remainG = overlay.querySelector('#sm-remaining-g');
+  const locSels = overlay.querySelector('#sm-location-selects');
+  const printerSel = overlay.querySelector('#sm-printer');
+  const slotSel = overlay.querySelector('#sm-slot');
+
+  function syncColor(hex) {
+    const valid = /^#[0-9a-fA-F]{6}$/.test(hex);
+    preview.style.background = valid ? hex : '#808080';
+    if (valid) picker.value = hex;
+  }
+
+  matSel.addEventListener('change', () => {
+    const brands = matBrands[matSel.value] || [];
+    brandSel.innerHTML = brands.length
+      ? brands.map(b => `<option value="${b}">${b || '(unbranded)'}</option>`).join('')
+      : '<option value="">— no brands in catalogue —</option>';
+    brandSel.disabled = brands.length === 0;
+  });
+
+  picker.addEventListener('input', () => {
+    hexIn.value = picker.value;
+    syncColor(picker.value);
+  });
+
+  hexIn.addEventListener('input', () => syncColor(hexIn.value));
+
+  labelG.addEventListener('input', () => {
+    if (remainG.value === '' || parseFloat(remainG.value) > parseFloat(labelG.value)) {
+      remainG.value = labelG.value;
+    }
+  });
+
+  overlay.querySelectorAll('input[name="sm-loc"]').forEach(r => {
+    r.addEventListener('change', () => {
+      locSels.classList.toggle('hidden', r.value === 'storage');
+    });
+  });
+
+  function _updateSlots() {
+    const sel = printerSel.options[printerSel.selectedIndex];
+    const kind = sel?.dataset.kind || 'bambu';
+    if (kind === 'moonraker') {
+      slotSel.innerHTML = '<option value="0">Single extruder</option>';
+    } else {
+      slotSel.innerHTML = [0,1,2,3].map(i => `<option value="${i}">Slot ${i+1}</option>`).join('');
+    }
+  }
+  printerSel.addEventListener('change', _updateSlots);
+  _updateSlots();
+
+  overlay.querySelector('.modal-close-btn').addEventListener('click', () => overlay.remove());
+  overlay.querySelector('#sm-cancel').addEventListener('click', () => overlay.remove());
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+
+  overlay.querySelector('#sm-submit').addEventListener('click', async () => {
+    const material = matSel.value.trim();
+    const brand    = brandSel.value.trim();
+    const hex      = hexIn.value.trim();
+    const labelW   = parseFloat(labelG.value);
+    if (!material) { matSel.focus(); return; }
+    if (!brand)    { brandSel.focus(); return; }
+    if (!/^#[0-9a-fA-F]{6}$/.test(hex)) { hexIn.focus(); return; }
+    if (isNaN(labelW) || labelW <= 0) { labelG.focus(); return; }
+
+    const locMode = overlay.querySelector('input[name="sm-loc"]:checked').value;
+    const body = {
+      material,
+      brand,
+      color_hex:      hex,
+      label_weight_g: labelW,
+      remaining_g:    parseFloat(remainG.value) || labelW,
+      subtype:        overlay.querySelector('#sm-subtype').value.trim() || null,
+      color_name:     overlay.querySelector('#sm-color-name').value.trim() || null,
+      notes:          overlay.querySelector('#sm-notes').value.trim() || null,
+      location_printer_id: locMode === 'loaded' ? printerSel.value : null,
+      location_slot:       locMode === 'loaded' ? parseInt(slotSel.value) : null,
+    };
+
+    const btn = overlay.querySelector('#sm-submit');
+    btn.disabled = true; btn.textContent = '…';
+    try {
+      const r = await fetch('/api/spools', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (r.status === 409) {
+        const err = await r.json();
+        btn.textContent = `Slot occupied (#${err.detail?.conflict_spool_id ?? '?'})`;
+        setTimeout(() => { btn.textContent = 'Add Spool'; btn.disabled = false; }, 3000);
+        return;
+      }
+      if (!r.ok) throw new Error();
+      overlay.remove();
+      onSaved();
+    } catch {
+      btn.textContent = 'Error';
+      setTimeout(() => { btn.textContent = 'Add Spool'; btn.disabled = false; }, 2000);
+    }
+  });
+}
+
 async function _renderSettingsContent(category) {
   const el = document.getElementById('settings-content');
   if (!el) return;
@@ -2579,6 +2916,15 @@ async function _renderSettingsContent(category) {
     ]);
     el.innerHTML = _filamentCategoryHtml(summary, costs);
     _attachFilamentEvents(el);
+  } else if (category === 'spools') {
+    el.innerHTML = `<div class="detail-placeholder" style="min-height:10rem">Loading…</div>`;
+    const [spools, summary, costs] = await Promise.all([
+      fetch('/api/spools').then(r => r.json()).catch(() => []),
+      fetch('/api/spools/summary').then(r => r.json()).catch(() => ({})),
+      fetch('/api/filament/costs').then(r => r.json()).catch(() => []),
+    ]);
+    el.innerHTML = _spoolsCategoryHtml(spools, summary, costs);
+    _attachSpoolsEvents(el, costs);
   }
 }
 

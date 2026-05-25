@@ -2211,3 +2211,324 @@ select.settings-input { cursor: pointer; }
   .settings-printer-meta { flex-direction: column; align-items: flex-end; gap: 0.5rem; }
   .settings-printer-type { display: none; }
 }
+
+/* ── Spool inventory ───────────────────────────────────────────────────── */
+
+.spool-page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+
+.spool-add-btn {
+  background: rgba(255,255,255,0.07);
+  border: 1px solid var(--border);
+  border-radius: 0.4rem;
+  color: var(--text);
+  font-size: 0.85rem;
+  padding: 0.35rem 0.8rem;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.spool-add-btn:hover { background: rgba(255,255,255,0.13); }
+
+/* Summary strip */
+.spool-summary-strip {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.25rem;
+}
+
+.spool-stat {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.85rem;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 6rem;
+}
+.spool-stat-wide { min-width: 12rem; }
+.spool-stat-warn { border-color: #f59e0b; }
+
+.spool-stat-value {
+  font-size: 1.1rem;
+  font-weight: 500;
+  color: var(--text);
+}
+.spool-stat-mat {
+  font-size: 0.82rem;
+  font-weight: 400;
+  color: var(--muted);
+}
+.spool-stat-label {
+  font-size: 0.72rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-top: 0.1rem;
+}
+.spool-stat-sub {
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+/* Card grid */
+.spool-card-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.75rem;
+}
+@media (max-width: 900px) { .spool-card-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 580px) { .spool-card-grid { grid-template-columns: 1fr; } }
+
+.spool-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.spool-card-band {
+  height: 60px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 0.75rem;
+  font-weight: 500;
+}
+
+.spool-color-name {
+  font-size: 0.95rem;
+  opacity: 0.95;
+}
+
+.spool-id-badge {
+  font-size: 0.72rem;
+  opacity: 0.6;
+  font-weight: 400;
+}
+
+.spool-card-body {
+  padding: 0.6rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  flex: 1;
+}
+
+.spool-card-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+}
+
+.spool-material {
+  font-size: 0.88rem;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.spool-brand {
+  font-size: 0.8rem;
+  color: var(--muted);
+  justify-content: flex-start;
+}
+
+.spool-location-badge {
+  font-size: 0.72rem;
+  color: var(--printing);
+}
+
+.spool-remaining-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  margin-top: 0.3rem;
+}
+
+.spool-remaining-label {
+  font-size: 0.75rem;
+  color: var(--muted);
+  flex: 1;
+}
+
+.spool-remaining-pct {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--printing);
+}
+.spool-remaining-pct.spool-amber { color: #f59e0b; }
+.spool-remaining-pct.spool-low   { color: var(--error); }
+
+.spool-remaining-g {
+  font-size: 0.82rem;
+  color: var(--text);
+}
+
+.spool-progress-bar {
+  height: 6px;
+  background: rgba(255,255,255,0.08);
+  border-radius: 3px;
+  overflow: hidden;
+  margin: 0.2rem 0 0.3rem;
+}
+.spool-progress-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.spool-meta-row {
+  display: flex;
+  gap: 1rem;
+}
+.spool-meta {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.spool-card-actions {
+  display: flex;
+  gap: 0.35rem;
+  justify-content: flex-end;
+  margin-top: 0.4rem;
+  padding-top: 0.4rem;
+  border-top: 1px solid rgba(255,255,255,0.04);
+}
+
+.spool-action-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.9rem;
+  padding: 0.15rem 0.3rem;
+  border-radius: 0.25rem;
+  opacity: 0.5;
+  transition: opacity 0.15s;
+}
+.spool-action-btn:hover { opacity: 1; }
+
+/* Add Spool modal */
+.spool-modal {
+  max-width: 440px;
+  width: 100%;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.spool-modal-form {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.25rem 0 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.spool-form-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+}
+
+.spool-form-label {
+  font-size: 0.82rem;
+  color: var(--muted);
+  min-width: 7.5rem;
+  padding-top: 0.45rem;
+  flex-shrink: 0;
+}
+
+.spool-form-input {
+  flex: 1;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 0.35rem;
+  color: var(--text);
+  font-size: 0.85rem;
+  padding: 0.35rem 0.55rem;
+  outline: none;
+  width: 100%;
+}
+.spool-form-input:focus { border-color: var(--printing); }
+.spool-form-input:disabled { opacity: 0.45; }
+
+.spool-color-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 1;
+}
+
+.spool-color-picker {
+  width: 2.2rem;
+  height: 2rem;
+  border: 1px solid var(--border);
+  border-radius: 0.3rem;
+  background: none;
+  cursor: pointer;
+  padding: 1px;
+  flex-shrink: 0;
+}
+
+.spool-color-hex {
+  flex: 1;
+  font-family: monospace;
+}
+
+.spool-color-preview {
+  width: 2rem;
+  height: 2rem;
+  border-radius: 0.3rem;
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.spool-weight-input { max-width: 5rem; flex: none; }
+
+.spool-inline-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex: 1;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.spool-form-hint {
+  font-size: 0.75rem;
+  color: var(--muted);
+  opacity: 0.7;
+}
+
+.spool-location-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  flex: 1;
+}
+
+.spool-radio-label {
+  font-size: 0.85rem;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  cursor: pointer;
+}
+
+.spool-location-selects {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.spool-location-selects.hidden { display: none; }
+.spool-location-selects .spool-form-input { flex: 1; min-width: 8rem; }
