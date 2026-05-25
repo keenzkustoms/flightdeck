@@ -2614,6 +2614,23 @@ async function _refreshSpoolsByPrinter() {
   } catch {}
 }
 
+// ── AMS slot label helper ─────────────────────────────────────────────────
+// Given a printer object and a flat slot index (unit_id*4 + tray_id), return
+// a human-readable label like "AMS 1 · S2" or "AMS HT".
+function _amsSlotLabel(printer, slotIndex) {
+  if (!printer?.ams?.length) return `S${slotIndex + 1}`;
+  for (const unit of printer.ams) {
+    for (const slot of unit.slots) {
+      if (unit.unit * 4 + slot.idx === slotIndex) {
+        return unit.slots.length === 1
+          ? unit.label
+          : `${unit.label} · S${slot.idx + 1}`;
+      }
+    }
+  }
+  return `S${slotIndex}`;
+}
+
 // ── Spool luminance helper ────────────────────────────────────────────────
 function _spoolTextColor(hex) {
   const h = hex.replace('#', '');
@@ -2692,7 +2709,9 @@ function _spoolTableHtml(spools) {
     const pctCls = pct < 20 ? ' spool-low' : pct < 50 ? ' spool-amber' : '';
     const added = s.added_at ? s.added_at.slice(0, 10).split('-').reverse().join('/') : '—';
     const p = _latestPrinters.find(x => x.id === s.location_printer_id);
-    const loc = s.location_printer_id ? `${p?.custom_name ?? s.location_printer_id} S${s.location_slot}` : '—';
+    const loc = s.location_printer_id
+      ? `${p?.custom_name ?? s.location_printer_id} ${_amsSlotLabel(p, s.location_slot)}`
+      : '—';
     return `<tr class="spool-tr" data-spool-id="${s.id}">
       <td class="spool-td">#${s.id}</td>
       <td class="spool-td">${added}</td>
@@ -3142,10 +3161,31 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
   });
 
   function updateSlots() {
-    const kind = printerSel.options[printerSel.selectedIndex]?.dataset.kind || 'bambu';
-    slotSel.innerHTML = kind === 'moonraker'
-      ? '<option value="0">Single extruder</option>'
-      : [0,1,2,3].map(i => `<option value="${i}"${p0.location_slot===i?' selected':''}>Slot ${i+1}</option>`).join('');
+    const opt = printerSel.options[printerSel.selectedIndex];
+    const kind = opt?.dataset.kind || 'bambu';
+    if (kind === 'moonraker') {
+      slotSel.innerHTML = '<option value="0">Single extruder</option>';
+      return;
+    }
+    const printer = _latestPrinters.find(x => x.id === printerSel.value);
+    const units = printer?.ams;
+    if (units?.length) {
+      const opts = [];
+      for (const unit of units) {
+        for (const slot of unit.slots) {
+          const flatIdx = unit.unit * 4 + slot.idx;
+          const label = unit.slots.length === 1
+            ? unit.label
+            : `${unit.label} · Slot ${slot.idx + 1}`;
+          opts.push(`<option value="${flatIdx}"${p0.location_slot===flatIdx?' selected':''}>${label}</option>`);
+        }
+      }
+      slotSel.innerHTML = opts.join('');
+    } else {
+      slotSel.innerHTML = [0,1,2,3].map(i =>
+        `<option value="${i}"${p0.location_slot===i?' selected':''}>Slot ${i+1}</option>`
+      ).join('');
+    }
   }
   printerSel.addEventListener('change', updateSlots);
   updateSlots();
