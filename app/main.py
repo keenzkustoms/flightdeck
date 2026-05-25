@@ -539,6 +539,28 @@ async def get_print_decisions(printer_id: str, print_id: int):
     return db.get_decisions(print_id)
 
 
+class NotesRequest(BaseModel):
+    notes: str = ""
+
+
+@app.patch("/api/printers/{printer_id}/prints/{print_id}/notes")
+async def update_print_notes(printer_id: str, print_id: int, body: NotesRequest):
+    _assert_printer(printer_id)
+    found = db.update_print_notes(print_id, body.notes)
+    if not found:
+        raise HTTPException(status_code=404, detail="print not found")
+    return {"ok": True}
+
+
+@app.get("/api/printers/{printer_id}/prints/latest-finished")
+async def get_latest_finished(printer_id: str):
+    _assert_printer(printer_id)
+    print_id = db.get_latest_finished_print_id(printer_id)
+    if print_id is None:
+        raise HTTPException(status_code=404, detail="no finished prints")
+    return {"print_id": print_id}
+
+
 @app.get("/api/printers/{printer_id}/history/calendar")
 async def get_history_calendar(printer_id: str, year: int | None = None):
     from datetime import datetime as _dt

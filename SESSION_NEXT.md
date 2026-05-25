@@ -428,3 +428,8 @@ Install: open `https://flightdeck.tail7de73e.ts.net` → Chrome: install icon in
 | `greyhound` | Voron | Greyhound Elite V2 | Moonraker @ 192.168.4.215:7125 | MJPEG direct (crowsnest) |
 | `x1c` | X1C | Greyhound Ludicrous | Bambu MQTT @ 192.168.4.43 — LAN mode | RTSP port 322 (ffmpeg) — working |
 | `h2d` | H2D | BigBoy | Bambu MQTT @ 192.168.4.206 — LAN mode | RTSP port 322 (ffmpeg) — working |
+
+From real usage testing — 24 May session 13:
+1. Active-printer identity at distance. When viewing a printer's Live tab, the active printer name is hard to read across a room. Add a large printer-name banner above the camera feed and/or a per-printer brand-colour accent on the active tab. Pairs well with the colour system already used on the slicer settings cards.
+2. Duplicate-printer detection on add. When adding a printer whose connection details (IP, MQTT credentials, Moonraker URL) match an existing entry, show a confirmation dialog: "A printer with the same connection already exists: '<name>'. Adding another instance will create a separate dashboard card pulling the same data. Continue as virtual instance? / Cancel / View existing." Bonus: auto-suggest a "(Test)" name suffix to avoid duplicate dashboard card names.
+Both surfaced during virtual-printer add/remove stress test against real connections.

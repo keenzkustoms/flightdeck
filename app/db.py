@@ -84,6 +84,7 @@ def init() -> None:
             "ALTER TABLE prints ADD COLUMN material TEXT",
             "ALTER TABLE material_costs ADD COLUMN brand TEXT",
             "ALTER TABLE material_costs ADD COLUMN comment TEXT",
+            "ALTER TABLE prints ADD COLUMN notes TEXT",
         ):
             try:
                 conn.execute(stmt)
@@ -336,7 +337,7 @@ def get_prints_for_day(printer_id: str, date_str: str) -> list[dict]:
             """SELECT id, filename, subtask_name, started_at, ended_at,
                       duration_seconds, final_state, error_message,
                       layers_total, layers_completed, filament_grams, material,
-                      snapshot_captured_at IS NOT NULL AS has_snapshot
+                      snapshot_captured_at IS NOT NULL AS has_snapshot, notes
                FROM prints
                WHERE printer_id = ? AND date(started_at) = ?
                ORDER BY started_at""",
@@ -424,6 +425,28 @@ def get_print_snapshot(print_id: int) -> Optional[bytes]:
             (print_id,),
         ).fetchone()
     return row["snapshot_jpeg"] if row else None
+
+
+def update_print_notes(print_id: int, notes: str) -> bool:
+    """Update notes for a print row. Returns True if a row was updated."""
+    with _conn() as conn:
+        n = conn.execute(
+            "UPDATE prints SET notes = ? WHERE id = ?",
+            (notes or None, print_id),
+        ).rowcount
+    return n > 0
+
+
+def get_latest_finished_print_id(printer_id: str) -> Optional[int]:
+    """Return the id of the most recently finished (FINISHED) print for this printer."""
+    with _conn() as conn:
+        row = conn.execute(
+            """SELECT id FROM prints
+               WHERE printer_id = ? AND final_state = 'FINISHED'
+               ORDER BY ended_at DESC LIMIT 1""",
+            (printer_id,),
+        ).fetchone()
+    return row["id"] if row else None
 
 
 # ── decision log ──────────────────────────────────────────────────────────

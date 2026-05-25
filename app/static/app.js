@@ -40,6 +40,14 @@ async function loadSettings() {
   document.documentElement.style.setProperty('--printing', accent);
 }
 
+// ── Per-printer accent colours ────────────────────────────────────────────
+const _PRINTER_ACCENT_PALETTE = ['#a855f7', '#22c55e', '#f59e0b', '#60a5fa', '#ef4444'];
+
+function _printerColor(id) {
+  const idx = _latestPrinters.findIndex(x => x.id === id);
+  return _PRINTER_ACCENT_PALETTE[Math.max(0, idx) % _PRINTER_ACCENT_PALETTE.length];
+}
+
 // ── Printer icons ──────────────────────────────────────────────────────────
 
 const ICONS = {
@@ -93,10 +101,13 @@ const _toastContainer = document.createElement('div');
 _toastContainer.id = 'toast-container';
 document.body.appendChild(_toastContainer);
 
-function showToast(message, sub, type = 'info') {
+function showToast(message, sub, type = 'info', opts = {}) {
   const t = document.createElement('div');
   t.className = `toast toast-${type}`;
-  t.innerHTML = `<span class="toast-msg">${message}</span>${sub ? `<span class="toast-sub">${sub}</span>` : ''}`;
+  const noteBtn = opts.addNote
+    ? `<button class="toast-note-btn" title="Add a note to this print">Add note</button>`
+    : '';
+  t.innerHTML = `<span class="toast-msg">${message}</span>${sub ? `<span class="toast-sub">${sub}</span>` : ''}${noteBtn}`;
   _toastContainer.appendChild(t);
   requestAnimationFrame(() => t.classList.add('toast-in'));
   const remove = () => {
@@ -104,7 +115,64 @@ function showToast(message, sub, type = 'info') {
     t.addEventListener('transitionend', () => t.remove(), { once: true });
   };
   const timer = setTimeout(remove, 5000);
-  t.addEventListener('click', () => { clearTimeout(timer); remove(); });
+  t.addEventListener('click', e => {
+    if (e.target.classList.contains('toast-note-btn')) {
+      e.stopPropagation();
+      clearTimeout(timer);
+      remove();
+      _openNoteModal(opts.printerId);
+      return;
+    }
+    clearTimeout(timer);
+    remove();
+  });
+}
+
+function _openNoteModal(printerId) {
+  fetch(`/api/printers/${printerId}/prints/latest-finished`)
+    .then(r => r.ok ? r.json() : null)
+    .then(data => {
+      if (!data) return;
+      _showNoteEditor(printerId, data.print_id, '', null);
+    })
+    .catch(() => {});
+}
+
+function _showNoteEditor(printerId, printId, existing, onSaved) {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal-box note-editor-modal">
+      <div class="modal-message" style="margin-bottom:0.75rem">Print note</div>
+      <textarea class="note-textarea" rows="4" placeholder="Add a note about this print…">${existing ?? ''}</textarea>
+      <div class="modal-actions" style="margin-top:0.75rem">
+        <button class="modal-btn" id="note-cancel">Cancel</button>
+        <button class="modal-btn" id="note-save" style="background:rgba(30,80,30,0.4);border-color:#16a34a;color:#86efac">Save</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  const ta = overlay.querySelector('.note-textarea');
+  ta.focus();
+  ta.setSelectionRange(ta.value.length, ta.value.length);
+  const close = () => overlay.remove();
+  overlay.querySelector('#note-cancel').addEventListener('click', close);
+  overlay.querySelector('#note-save').addEventListener('click', async () => {
+    const notes = ta.value.trim();
+    try {
+      await fetch(`/api/printers/${printerId}/prints/${printId}/notes`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ notes }),
+      });
+      close();
+      if (onSaved) onSaved(notes);
+    } catch {}
+  });
+  // Enter = save (shift+enter = newline)
+  ta.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); overlay.querySelector('#note-save').click(); }
+    if (e.key === 'Escape') close();
+  });
 }
 
 // ── Temperature modal ─────────────────────────────────────────────────────
@@ -680,7 +748,10 @@ function router() {
 function buildTabs(printers) {
   const nav = document.getElementById('tab-strip');
   nav.innerHTML = [
-    ...printers.map(p => `<a class="tab" href="#/printer/${p.id}">${p.model_name}</a>`),
+    ...printers.map((p, i) => {
+      const color = _PRINTER_ACCENT_PALETTE[i % _PRINTER_ACCENT_PALETTE.length];
+      return `<a class="tab" href="#/printer/${p.id}" style="--tab-accent:${color}">${p.model_name}</a>`;
+    }),
     `<a class="tab" href="#/cameras">All Cameras</a>`,
     `<a class="tab" href="#/settings">Settings</a>`,
   ].join('');
@@ -1115,6 +1186,15 @@ function _showPrintDetail(printerId, dateStr, print) {
        </details>`
     : '';
 
+  const notesHtml = `<div class="print-notes-block" data-print-id="${print.id}" data-printer-id="${printerId}">
+    <div class="print-notes-view">
+      ${print.notes
+        ? `<div class="print-notes-text">${print.notes}</div>`
+        : `<span class="print-notes-empty">No notes</span>`}
+      <button class="print-notes-edit-btn">${print.notes ? 'Edit' : 'Add note'}</button>
+    </div>
+  </div>`;
+
   el.innerHTML = `<div class="history-day-panel">
     <div class="print-detail-nav">
       <button class="print-detail-back" data-back-date="${dateStr}">&larr; ${dateLabel}</button>
@@ -1126,8 +1206,25 @@ function _showPrintDetail(printerId, dateStr, print) {
     ${snapshotHtml}
     ${errorHtml}
     <div>${rows.join('')}</div>
+    ${notesHtml}
     ${decisionHtml}
   </div>`;
+
+  const notesBlock = el.querySelector('.print-notes-block');
+  if (notesBlock) {
+    const _refreshNotesView = (notes) => {
+      notesBlock.querySelector('.print-notes-view').innerHTML = notes
+        ? `<div class="print-notes-text">${notes}</div><button class="print-notes-edit-btn">Edit</button>`
+        : `<span class="print-notes-empty">No notes</span><button class="print-notes-edit-btn">Add note</button>`;
+    };
+    notesBlock.addEventListener('click', e => {
+      if (!e.target.classList.contains('print-notes-edit-btn')) return;
+      const prid = notesBlock.dataset.printerId;
+      const pid  = parseInt(notesBlock.dataset.printId, 10);
+      const existing = notesBlock.querySelector('.print-notes-text')?.textContent ?? '';
+      _showNoteEditor(prid, pid, existing, saved => _refreshNotesView(saved));
+    });
+  }
 
   const trail = el.querySelector('.decision-trail');
   if (trail) {
@@ -1292,10 +1389,13 @@ async function renderPrinterDetail(id, subtab = 'live') {
       ? `<img id="detail-cam-img" src="${camUrl}" alt="Live camera">`
       : `<div class="camera-hero-offline">${p.state === 'offline' ? 'Printer offline' : 'No camera configured'}</div>`;
 
+    const printerColor = _printerColor(id);
+    const bannerTextColor = p.icon === 'bambu' ? '#22c55e' : p.icon === 'voron' ? '#ef4444' : 'var(--text)';
     el.innerHTML =
       _detailSubTabs(id, 'live') +
       `<div class="detail-body">
         <div class="detail-left">
+          <div class="camera-name-banner" style="--tab-accent:${printerColor};color:${bannerTextColor}">${p.custom_name}</div>
           <div class="camera-hero">${camHtml}</div>
         </div>
         <div class="detail-right">
@@ -1486,7 +1586,8 @@ function _detectTransitions(printers) {
 
     // Toast: only when tab is visible (user is looking at the dashboard)
     if (document.visibilityState === 'visible') {
-      showToast(toastMsg, p.custom_name, toastType);
+      const toastOpts = (toastType === 'success') ? { addNote: true, printerId: p.id } : {};
+      showToast(toastMsg, p.custom_name, toastType, toastOpts);
     }
 
     // Browser notification: only when tab is hidden (ntfy covers the closed-browser case)
@@ -1911,6 +2012,12 @@ async function _submitAddPrinter(el, connType) {
 
   if (!_validateFormData(data, connType, errorEl)) return;
 
+  const dup = await _checkDuplicateConnection(data, connType);
+  if (dup) {
+    const choice = await _showDuplicateModal(dup.custom_name, dup.id);
+    if (choice !== 'continue') return;
+  }
+
   const origText = submitBtn.textContent;
   submitBtn.textContent = 'Adding…';
   submitBtn.disabled = true;
@@ -1937,6 +2044,47 @@ async function _submitAddPrinter(el, connType) {
   }
 
   function fail(msg) { errorEl.textContent = msg; errorEl.removeAttribute('hidden'); }
+}
+
+async function _checkDuplicateConnection(data, connType) {
+  try {
+    const r = await fetch('/api/config/printers');
+    if (!r.ok) return null;
+    const existing = await r.json();
+    for (const p of existing) {
+      const conn = p.connection;
+      if (connType === 'moonraker' && conn.type === 'moonraker') {
+        if (conn.host === data.connection.host && conn.port === data.connection.port) return p;
+      } else if (connType === 'bambu' && conn.type === 'bambu') {
+        if (conn.host === data.connection.host || conn.serial === data.connection.serial) return p;
+      }
+    }
+  } catch {}
+  return null;
+}
+
+function _showDuplicateModal(name, id) {
+  return new Promise(resolve => {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `
+      <div class="modal-box">
+        <div class="modal-message">A printer with the same connection details already exists: <strong>${name}</strong>.<br><br>Adding another instance will create a separate dashboard card pulling the same data.</div>
+        <div class="modal-actions">
+          <button class="modal-btn" id="dup-cancel">Cancel</button>
+          <button class="modal-btn" id="dup-view">View existing</button>
+          <button class="modal-btn modal-btn-danger" id="dup-continue">Continue anyway</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    const cleanup = result => { overlay.remove(); resolve(result); };
+    overlay.querySelector('#dup-cancel').addEventListener('click', () => cleanup('cancel'));
+    overlay.querySelector('#dup-view').addEventListener('click', () => {
+      cleanup('view');
+      location.hash = `#/printer/${id}`;
+    });
+    overlay.querySelector('#dup-continue').addEventListener('click', () => cleanup('continue'));
+  });
 }
 
 async function _deletePrinter(id) {
