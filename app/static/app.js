@@ -2795,7 +2795,16 @@ function _spoolsCategoryHtml(spools, summary, costs) {
   return `
     <div class="spool-page-header">
       <div class="settings-section-title">Spool Inventory</div>
-      <button class="spool-add-btn">+ Add Spool</button>
+      <div class="spool-header-actions">
+        <div class="spool-view-toggle">
+          <button class="spool-view-btn${_spoolsViewMode==='cards'?' active':''}" data-view="cards">Cards</button>
+          <button class="spool-view-btn${_spoolsViewMode==='table'?' active':''}" data-view="table">Table</button>
+        </div>
+        <select class="spool-filter-sel" data-fkey="material">${matOpts}</select>
+        <select class="spool-filter-sel" data-fkey="brand">${brandOpts}</select>
+        <input class="spool-search" type="search" placeholder="Search…" value="${_spoolsFilter.search}">
+        <button class="spool-add-btn">+ Add Spool</button>
+      </div>
     </div>
     <div class="spool-summary-strip">
       <div class="spool-stat">
@@ -2822,17 +2831,10 @@ function _spoolsCategoryHtml(spools, summary, costs) {
       </div>
     </div>
     <div class="spool-filter-bar">
-      <input class="spool-search" type="search" placeholder="Search…" value="${_spoolsFilter.search}">
       <div class="spool-chips">
         ${fc('status','active','Active')}${fc('status','archived','Archived')}
         <span class="spool-chip-sep"></span>
         ${fc('slotFilter','all','All')}${fc('slotFilter','loaded','Loaded')}${fc('slotFilter','storage','Storage')}${fc('slotFilter','low','Low stock')}
-        <select class="spool-filter-sel" data-fkey="material">${matOpts}</select>
-        <select class="spool-filter-sel" data-fkey="brand">${brandOpts}</select>
-      </div>
-      <div class="spool-view-toggle">
-        <button class="spool-view-btn${_spoolsViewMode==='cards'?' active':''}" data-view="cards">Cards</button>
-        <button class="spool-view-btn${_spoolsViewMode==='table'?' active':''}" data-view="table">Table</button>
       </div>
     </div>
     <div id="spool-list"></div>`;
@@ -2970,6 +2972,10 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
           </div>
         </div>
         <div class="spool-form-row">
+          <span class="spool-form-label"></span>
+          <div id="sm-prev-picks" class="spool-prev-picks hidden"></div>
+        </div>
+        <div class="spool-form-row">
           <label class="spool-form-label">Subtype</label>
           <input id="sm-subtype" class="spool-form-input" type="text" placeholder="Basic, Matte, Silk…" value="${p0.subtype||''}">
         </div>
@@ -3043,11 +3049,49 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
   const locSels   = overlay.querySelector('#sm-location-selects');
   const printerSel= overlay.querySelector('#sm-printer');
   const slotSel   = overlay.querySelector('#sm-slot');
+  const prevPicks = overlay.querySelector('#sm-prev-picks');
 
   function syncColor(hex) {
     const valid = /^#[0-9a-fA-F]{6}$/.test(hex);
     preview.style.background = valid ? hex : '#808080';
     if (valid) { picker.value = hex; hexIn.value = hex; }
+  }
+
+  function updatePrevPicks() {
+    if (isEdit) return;
+    const mat   = matNewMode  ? matNewIn.value.trim().toUpperCase() : matSel.value;
+    const brand = brandNewMode ? brandNewIn.value.trim() : brandSel.value;
+    if (!mat || !brand) { prevPicks.classList.add('hidden'); return; }
+    const seen = new Set();
+    const picks = [];
+    for (const s of _allSpools) {
+      if (s.material !== mat || s.brand !== brand || s.archived_at) continue;
+      const key = (s.color_hex || '') + '|' + (s.color_name || '') + '|' + (s.subtype || '');
+      if (seen.has(key)) continue;
+      seen.add(key);
+      picks.push(s);
+    }
+    if (!picks.length) { prevPicks.classList.add('hidden'); return; }
+    prevPicks.innerHTML =
+      `<span class="spool-prev-label">Previously used:</span>` +
+      `<div class="spool-prev-swatches">` +
+      picks.slice(0, 6).map(s =>
+        `<button type="button" class="spool-prev-swatch" data-hex="${s.color_hex||'#808080'}" data-name="${s.color_name||''}" data-subtype="${s.subtype||''}" data-weight="${s.label_weight_g}" title="${s.color_name||s.color_hex}${s.subtype?' · '+s.subtype:''}">` +
+        `<span class="spool-prev-dot" style="background:${s.color_hex||'#808080'}"></span>` +
+        `<span class="spool-prev-name">${s.color_name || s.color_hex}</span>` +
+        `</button>`
+      ).join('') +
+      `</div>`;
+    prevPicks.classList.remove('hidden');
+    prevPicks.querySelectorAll('.spool-prev-swatch').forEach(btn => {
+      btn.addEventListener('click', () => {
+        syncColor(btn.dataset.hex);
+        overlay.querySelector('#sm-color-name').value = btn.dataset.name;
+        overlay.querySelector('#sm-subtype').value    = btn.dataset.subtype;
+        labelG.value = btn.dataset.weight;
+        if (!remainG.dataset.touched) remainG.value = btn.dataset.weight;
+      });
+    });
   }
 
   function populateBrands(mat) {
@@ -3056,10 +3100,12 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
       ? brands.map(b => `<option value="${b}"${p0.brand===b?' selected':''}>${b||'(unbranded)'}</option>`).join('')
       : '<option value="">— no brands in catalogue —</option>';
     brandSel.disabled = brands.length === 0;
+    updatePrevPicks();
   }
   if (p0.material) populateBrands(p0.material);
 
   matSel.addEventListener('change', () => populateBrands(matSel.value));
+  brandSel.addEventListener('change', updatePrevPicks);
 
   // New material toggle
   let matNewMode = false;

@@ -1560,7 +1560,7 @@ header {
   display: flex;
   gap: 0;
   overflow: hidden;
-  max-width: 940px;
+  max-width: 1140px;
   width: 100%;
   margin: 0 auto;
   padding: 2rem 2rem 0;
@@ -2221,6 +2221,12 @@ select.settings-input { cursor: pointer; }
   margin-bottom: 0.75rem;
 }
 
+.spool-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
 .spool-add-btn {
   background: rgba(255,255,255,0.07);
   border: 1px solid var(--border);
@@ -2550,6 +2556,16 @@ select.settings-input { cursor: pointer; }
   flex: 1;
 }
 
+.spool-search {
+  padding: 0.2rem 0.5rem;
+  border-radius: 0.4rem;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--text);
+  font-size: 0.82rem;
+  width: 10rem;
+}
+
 .spool-chip {
   padding: 0.2rem 0.65rem;
   border-radius: 1rem;
@@ -2604,28 +2620,6 @@ select.settings-input { cursor: pointer; }
 .spool-view-btn:hover { background: var(--hover); color: var(--text); }
 .spool-view-btn.active { background: var(--accent); color: #fff; }
 
-.spool-search-wrap {
-  position: relative;
-  flex: 0 0 auto;
-}
-.spool-search-wrap input {
-  padding: 0.2rem 0.5rem 0.2rem 1.6rem;
-  border-radius: 0.4rem;
-  border: 1px solid var(--border);
-  background: var(--card);
-  color: var(--text);
-  font-size: 0.82rem;
-  width: 12rem;
-}
-.spool-search-icon {
-  position: absolute;
-  left: 0.4rem;
-  top: 50%;
-  transform: translateY(-50%);
-  color: var(--muted);
-  font-size: 0.8rem;
-  pointer-events: none;
-}
 
 /* ── Spool table view ──────────────────────────────────────────────────────── */
 
@@ -2697,16 +2691,21 @@ select.settings-input { cursor: pointer; }
   display: flex;
   gap: 0.35rem;
   flex-wrap: wrap;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid var(--border);
+  border-radius: 0.4rem;
+  padding: 0.4rem 0.5rem;
 }
 
 .spool-swatch {
   width: 1.35rem;
   height: 1.35rem;
   border-radius: 50%;
-  border: 2px solid transparent;
+  border: 2px solid rgba(255,255,255,0.3);
   cursor: pointer;
   transition: transform 0.1s, border-color 0.1s;
   outline: none;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.4);
 }
 .spool-swatch:hover { transform: scale(1.18); }
 .spool-swatch.selected {
@@ -2722,6 +2721,51 @@ select.settings-input { cursor: pointer; }
 }
 
 /* ── Inline brand/material add in modal ────────────────────────────────────── */
+
+.spool-prev-picks {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  padding: 0.15rem 0;
+}
+.spool-prev-label {
+  font-size: 0.75rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.spool-prev-swatches {
+  display: flex;
+  gap: 0.3rem;
+  flex-wrap: wrap;
+}
+.spool-prev-swatch {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.15rem 0.45rem;
+  border-radius: 1rem;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--text);
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.spool-prev-swatch:hover { background: var(--hover); border-color: var(--muted); }
+.spool-prev-dot {
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 50%;
+  flex-shrink: 0;
+  border: 1px solid rgba(255,255,255,0.15);
+}
+.spool-prev-name {
+  max-width: 6rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .spool-mat-block {
   display: flex;
