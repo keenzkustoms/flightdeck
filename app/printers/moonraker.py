@@ -18,6 +18,8 @@ _active_print_id: dict[str, Optional[int]] = {}  # printer_id → prints.id for 
 _error_print_id: dict[str, Optional[int]] = {}   # printer_id → prints.id of the last error (for snapshot)
 _estimated_stored: set[str] = set()            # printer_ids where slicer estimate is already stored
 _filament_grams: dict[str, float] = {}         # printer_id → filament_weight_total from slicer metadata
+_mmu_gate_snapshot: dict[str, dict[int, dict]] = {}       # printer_id → {gate_index: gate_info} at print start
+_mmu_gate_snapshot_print_id: dict[str, Optional[int]] = {}  # printer_id → print_id the snapshot belongs to
 
 FINISHED_TTL = timedelta(minutes=30)
 
@@ -107,6 +109,16 @@ async def fetch(id: str, model_name: str, custom_name: str, icon: str, base_url:
 
     error_message = ps.get("message") or klippy_message or None
     state = _resolve_state(id, raw_state, prev_raw, job, error_message)
+
+    new_print_id = _active_print_id.get(id)
+    if (state == "printing" and new_print_id is not None
+            and _mmu_gate_snapshot_print_id.get(id) != new_print_id):
+        mmu_data = data.get("mmu", {})
+        if mmu_data.get("enabled"):
+            _mmu_gate_snapshot[id] = _snapshot_mmu_gates(mmu_data)
+            _mmu_gate_snapshot_print_id[id] = new_print_id
+            log.info("MMU gate snapshot for %s print_id=%d: gates=%s",
+                     id, new_print_id, list(_mmu_gate_snapshot[id].keys()))
 
     # Capture slicer estimated duration once per job via metadata endpoint (primary path).
     # Documented fallback for Bambu (no metadata API): derived in bambu.py after 60s elapsed.
@@ -391,6 +403,28 @@ def _fmt_mmu(mmu: dict) -> str:
         parts.append(mat)
     parts.append(f"{ready}/{num_gates} loaded")
     return " · ".join(parts)
+
+
+def _snapshot_mmu_gates(mmu: dict) -> dict[int, dict]:
+    """Capture MMU gate state at print start. Returns {gate_index: gate_info} for loaded gates."""
+    num_gates = int(mmu.get("num_gates", 0))
+    statuses = mmu.get("gate_status", [])
+    materials = mmu.get("gate_material", [])
+    colors = mmu.get("gate_color", [])
+    filament_names = mmu.get("gate_filament_name", [])
+    result: dict[int, dict] = {}
+    for i in range(num_gates):
+        status = statuses[i] if i < len(statuses) else 0
+        if status == 0:
+            continue
+        color = colors[i] if i < len(colors) else ""
+        result[i] = {
+            "material": materials[i] if i < len(materials) else "",
+            "color": f"#{color}" if color and not color.startswith("#") else color,
+            "filament_name": filament_names[i] if i < len(filament_names) else "",
+            "status": status,
+        }
+    return result
 
 
 def _parse_mmu(mmu: dict, mmu_machine: dict, _gate_map: dict) -> list:

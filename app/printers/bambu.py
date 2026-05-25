@@ -65,6 +65,8 @@ class BambuPrinter:
         self._job_started_at: float = 0.0  # monotonic time when _current_job_key was set
         self._current_print_id: Optional[int] = None  # prints.id for the active job
         self._error_print_id: Optional[int] = None    # prints.id of the last error (for snapshot)
+        self._ams_slot_snapshot: dict[int, dict] = {}      # slot_index → slot info at print start
+        self._ams_slot_snapshot_print_id: Optional[int] = None  # print_id the snapshot belongs to
 
     def start(self) -> None:
         self._printer.connect()
@@ -128,6 +130,14 @@ class BambuPrinter:
                 )
 
             state = self._resolve_state(raw_state, job, subtask)
+
+            if (state == "printing"
+                    and self._current_print_id is not None
+                    and self._ams_slot_snapshot_print_id != self._current_print_id):
+                self._ams_slot_snapshot = _snapshot_ams_slots(dump.get("print", {}))
+                self._ams_slot_snapshot_print_id = self._current_print_id
+                log.info("AMS slot snapshot for %s print_id=%d: slots=%s",
+                         self.id, self._current_print_id, list(self._ams_slot_snapshot.keys()))
 
             if state == "idle":
                 job = None  # MQTT retains last-print data; don't surface it as active
@@ -536,6 +546,30 @@ def _parse_ams(dump: dict) -> list[dict]:
         if slots:
             result.append({"unit": unit_id, "label": _AMS_LABELS.get(unit_id, f"AMS {unit_id + 1}"), "slots": slots})
 
+    return result
+
+
+def _snapshot_ams_slots(print_data: dict) -> dict[int, dict]:
+    """Capture AMS slot state at print start. Returns {slot_index: slot_info}."""
+    ams_raw = print_data.get("ams", {})
+    result: dict[int, dict] = {}
+    for unit_data in ams_raw.get("ams", []):
+        unit_id = int(unit_data.get("id", 0))
+        for tray_data in unit_data.get("tray", []):
+            tray_id = int(tray_data.get("id", 0))
+            tray_type = tray_data.get("tray_type", "")
+            if not tray_type:
+                continue
+            slot_index = unit_id * 4 + tray_id
+            hex_c = tray_data.get("tray_color", "")
+            color = f"#{hex_c[:6].upper()}" if len(hex_c) >= 6 and hex_c.upper() not in ("00000000", "") else ""
+            result[slot_index] = {
+                "type": tray_type,
+                "brand": tray_data.get("tray_sub_brands", ""),
+                "color": color,
+                "uuid": tray_data.get("tray_uuid", ""),
+                "remain_pct": tray_data.get("remain", -1),
+            }
     return result
 
 
