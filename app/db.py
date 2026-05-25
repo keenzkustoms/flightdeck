@@ -68,9 +68,12 @@ def init() -> None:
             );
 
             CREATE TABLE IF NOT EXISTS material_costs (
-                material      TEXT PRIMARY KEY,
+                material      TEXT NOT NULL,
+                brand         TEXT NOT NULL DEFAULT '',
                 cost_per_gram REAL NOT NULL,
-                updated_at    TEXT NOT NULL
+                comment       TEXT,
+                updated_at    TEXT NOT NULL,
+                PRIMARY KEY (material, brand)
             );
         """)
     # Migrate existing DB: add columns if missing
@@ -90,6 +93,28 @@ def init() -> None:
                 conn.execute(stmt)
             except Exception:
                 pass
+    # Migrate material_costs to composite PK (material, brand) if still on single-column PK
+    with _conn() as conn:
+        info = conn.execute("PRAGMA table_info(material_costs)").fetchall()
+        pk_cols = [r["name"] for r in info if r["pk"] > 0]
+        if pk_cols == ["material"]:
+            conn.execute("""
+                CREATE TABLE _mat_new (
+                    material      TEXT NOT NULL,
+                    brand         TEXT NOT NULL DEFAULT '',
+                    cost_per_gram REAL NOT NULL,
+                    comment       TEXT,
+                    updated_at    TEXT NOT NULL,
+                    PRIMARY KEY (material, brand)
+                )""")
+            conn.execute("""
+                INSERT INTO _mat_new (material, brand, cost_per_gram, comment, updated_at)
+                SELECT material, COALESCE(brand, ''), cost_per_gram, comment,
+                       COALESCE(updated_at, datetime('now'))
+                FROM material_costs""")
+            conn.execute("DROP TABLE material_costs")
+            conn.execute("ALTER TABLE _mat_new RENAME TO material_costs")
+
     # Clean up prints that started >24 h ago but never got a final_state
     # (backend crash during a print that has since ended)
     _close_stale_orphans()
@@ -551,43 +576,42 @@ def set_setting(key: str, value: str) -> None:
 
 # ── material costs ────────────────────────────────────────────────────────
 
-def get_material_costs() -> dict:
+def get_material_costs() -> list:
     with _conn() as conn:
         rows = conn.execute(
-            "SELECT material, cost_per_gram, brand, comment FROM material_costs ORDER BY material"
+            "SELECT material, brand, cost_per_gram, comment FROM material_costs ORDER BY material, brand"
         ).fetchall()
-    return {
-        r["material"]: {
-            "cost_per_gram": r["cost_per_gram"],
-            "brand":   r["brand"],
-            "comment": r["comment"],
-        }
+    return [
+        {"material": r["material"], "brand": r["brand"],
+         "cost_per_gram": r["cost_per_gram"], "comment": r["comment"]}
         for r in rows
-    }
+    ]
 
 
 def set_material_cost(
     material: str,
+    brand: str,
     cost_per_gram: float,
-    brand: Optional[str] = None,
     comment: Optional[str] = None,
 ) -> None:
     with _conn() as conn:
         conn.execute(
-            """INSERT INTO material_costs (material, cost_per_gram, brand, comment, updated_at)
+            """INSERT INTO material_costs (material, brand, cost_per_gram, comment, updated_at)
                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
-               ON CONFLICT(material) DO UPDATE
+               ON CONFLICT(material, brand) DO UPDATE
                SET cost_per_gram = excluded.cost_per_gram,
-                   brand         = excluded.brand,
                    comment       = excluded.comment,
                    updated_at    = excluded.updated_at""",
-            (material, cost_per_gram, brand, comment),
+            (material, brand, cost_per_gram, comment),
         )
 
 
-def delete_material_cost(material: str) -> None:
+def delete_material_cost(material: str, brand: str) -> None:
     with _conn() as conn:
-        conn.execute("DELETE FROM material_costs WHERE material = ?", (material,))
+        conn.execute(
+            "DELETE FROM material_costs WHERE material = ? AND brand = ?",
+            (material, brand),
+        )
 
 
 def get_filament_summary(printer_id: Optional[str] = None) -> dict:
@@ -599,8 +623,10 @@ def get_filament_summary(printer_id: Optional[str] = None) -> dict:
         params_base.append(printer_id)
 
     with _conn() as conn:
-        costs = {r["material"]: r["cost_per_gram"]
-                 for r in conn.execute("SELECT material, cost_per_gram FROM material_costs").fetchall()}  # flat float map for cost calc
+        costs = {r["material"]: r["avg_cpg"]
+                 for r in conn.execute(
+                     "SELECT material, AVG(cost_per_gram) AS avg_cpg FROM material_costs GROUP BY material"
+                 ).fetchall()}
 
         total_row = conn.execute(
             f"SELECT COALESCE(SUM(filament_grams), 0) AS grams FROM prints {where}",
