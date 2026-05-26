@@ -99,6 +99,7 @@ const _dayPrintsCache = {};     // `${printerId}:${dateStr}` → prints[]
 let _camerasFull = false;       // true once cameras grid has been fully rendered
 let _camZoom = 0;               // 0=normal, 1=wide, 2=fullscreen
 let _onSettings = false;        // true while settings view is active
+let _onFailures = false;        // true while failure review is active
 
 // ── Toast notifications ────────────────────────────────────────────────────
 
@@ -762,7 +763,9 @@ function router() {
   }
 
   const wasOnSettings = _onSettings;
+  const wasOnFailures = _onFailures;
   _onSettings = route.view === 'settings';
+  _onFailures = route.view === 'failures';
 
   document.getElementById('view-dashboard').hidden = route.view !== 'dashboard';
   document.getElementById('view-printer').hidden   = route.view !== 'printer';
@@ -787,7 +790,7 @@ function router() {
   if (route.view === 'spool') renderSpoolDetail(route.id);
   if (route.view === 'cameras') renderCamerasView();
   if (route.view === 'queue') renderQueueView();
-  if (route.view === 'failures') renderFailuresView();
+  if (route.view === 'failures' && !wasOnFailures) renderFailuresView();
   if (route.view === 'settings' && !wasOnSettings) renderSettingsView();
 }
 

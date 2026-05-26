@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 26 May 2026 (post-session 21, failure review polish)_
+_Last updated 26 May 2026 (post-session 21, failure review flicker fix)_
 
 ## Current state
 
@@ -371,6 +371,10 @@ Evidence-based failure review was added as a top-level operational view. It repo
 - Failure rows now include a subtle `History` link back to the printer history surface.
 - Failure stat grid now auto-fits, so three-card and four-card states both fill the row cleanly.
 - Static cache-bust bumped to `v=34`.
+
+### Flicker fix
+- Failure Review no longer re-renders on every websocket/dashboard tick while already active, preventing the brief `Loading...` flash.
+- Static cache-bust bumped to `v=35`.
 
 ---
 
