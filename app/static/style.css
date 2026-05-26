@@ -3080,6 +3080,39 @@ select.settings-input { cursor: pointer; }
   border-radius: 0.9rem;
 }
 
+.health-badge {
+  border-radius: 999px;
+  padding: 0.15rem 0.45rem;
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.health-healthy {
+  background: rgba(34,197,94,0.14);
+  color: #86efac;
+}
+
+.health-watch {
+  background: rgba(245,158,11,0.16);
+  color: #fbbf24;
+}
+
+.health-attention {
+  background: rgba(239,68,68,0.18);
+  color: #fca5a5;
+}
+
+.health-line {
+  margin-top: 0.6rem;
+  padding-top: 0.55rem;
+  border-top: 1px solid rgba(255,255,255,0.04);
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
 .spool-loaded-panel {
   margin-top: 0.5rem;
   padding: 0.5rem 0.6rem;

@@ -442,6 +442,16 @@ function renderTemp(label, reading) {
 
 const TEMP_LABELS = { hotend: 'Hotend', hotend_l: 'Left', hotend_r: 'Right', bed: 'Bed', chamber: 'Chamber' };
 
+function _healthBadge(health) {
+  if (!health) return '';
+  return `<span class="health-badge health-${health.status}" title="${esc((health.reasons || []).map(r => r.message).join(' · ') || health.label)}">${health.label}</span>`;
+}
+
+function _healthLine(health) {
+  if (!health?.reasons?.length) return '';
+  return `<div class="health-line">${esc(health.reasons[0].message)}</div>`;
+}
+
 function jobDisplayName(job) {
   const raw = job.filename || '';
   const subtask = (job.subtask_name || '').trim();
@@ -522,6 +532,8 @@ function renderCard(p) {
   const lowStockBadge = hasLowStock
     ? `<span class="badge badge-loaded-low" title="Low filament on this printer">Low filament</span>`
     : '';
+  const healthBadge = _healthBadge(p.health);
+  const healthLine = _healthLine(p.health);
 
   const loadedPanel = loadedSpools.length > 0 ? `
     <div class="spool-loaded-panel">
@@ -552,6 +564,7 @@ function renderCard(p) {
           </div>
         </div>
         <div class="card-badges">
+          ${healthBadge}
           ${lowStockBadge}
           <span class="badge badge-${p.state}">${badgeLabel}</span>
         </div>
@@ -560,6 +573,7 @@ function renderCard(p) {
       ${body}
       ${idleRows}
       ${error}
+      ${healthLine}
       ${loadedPanel}
     </div>`;
 }

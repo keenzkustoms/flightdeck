@@ -60,6 +60,7 @@ async def _gather_all() -> list[dict]:
         cal = db.get_calibration(id)
         if cal:
             d["eta_calibration"] = cal
+        d["health"] = db.get_printer_health(id)
         d["_error_print_id"] = moonraker._error_print_id.get(id)
         return d
 
@@ -71,6 +72,7 @@ async def _gather_all() -> list[dict]:
         cal = db.get_calibration(p.id)
         if cal:
             d["eta_calibration"] = cal
+        d["health"] = db.get_printer_health(p.id)
         d["_error_print_id"] = p._error_print_id
         return d
 

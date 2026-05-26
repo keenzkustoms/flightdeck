@@ -1,9 +1,9 @@
 # Flightdeck — next session brief
-_Last updated 26 May 2026 (post-session 21, failure review flicker fix)_
+_Last updated 26 May 2026 (post-session 22, printer health score)_
 
 ## Current state
 
-**Tier 1 complete. Tier 2 complete. Post-Tier-2 niceties complete. Spool inventory + Print queue + queue refinements + Maintenance schedule + Queue preflight + Spool traceability + Failure review shipped.**
+**Tier 1 complete. Tier 2 complete. Post-Tier-2 niceties complete. Spool inventory + Print queue + queue refinements + Maintenance schedule + Queue preflight + Spool traceability + Failure review + Printer health score shipped.**
 
 Service running at:
 - `http://flightdeck.local:8000`
@@ -378,9 +378,51 @@ Evidence-based failure review was added as a top-level operational view. It repo
 
 ---
 
+## What was built — Session 22 (Printer health score — 26 May)
+
+Compact, explainable printer health was added to the main dashboard cards.
+
+### Backend
+- New `db.get_printer_health(printer_id)` helper computes:
+  - status: `healthy`, `watch`, `attention`
+  - label: `Healthy`, `Watch`, `Needs attention`
+  - 14-day print count
+  - 14-day failure/cancel count
+  - 14-day early failure count
+  - 14-day success rate when enough data exists
+  - reason list
+- Health reasons currently include:
+  - due maintenance
+  - recent failed/cancelled/estop prints
+  - early failures
+  - failed queue jobs
+  - low recent success rate
+- Health data is attached to `/api/printers` websocket/API payloads for each printer.
+
+### UI
+- Dashboard printer cards now show a health badge beside the existing state badge.
+- Badge states:
+  - Healthy: green
+  - Watch: amber
+  - Needs attention: red
+- First health reason is shown as a compact muted line on the card.
+- Full reason list is available in the badge tooltip.
+- Static cache-bust bumped to `v=36`.
+
+### Verification
+- Python compile: `python -m py_compile app/db.py app/main.py`
+- FastAPI import smoke: `import app.main`
+- JS syntax: `node --check app/static/app.js` via `nvm`
+- Printer health DB smoke test against temporary SQLite DB:
+  - empty printer reports healthy
+  - three recent early failures report attention
+- Service restart still needs interactive sudo from user after deploy
+
+---
+
 ## Known issues
 
-- Service restart pending for Sessions 18/19/20/21 until user runs `sudo systemctl restart flightdeck.service`.
+- Service restart pending for Sessions 18/19/20/21/22 until user runs `sudo systemctl restart flightdeck.service`.
 - Non-fatal `spool_deducted` decision-log SQLite lock can occur during spool deduction; trace data still writes.
 
 ---
@@ -435,7 +477,7 @@ Evidence-based failure review was added as a top-level operational view. It repo
 
 ## Repository
 - https://github.com/Kidabah/flightdeck (private)
-- Recent commits: spool inventory (session 14), per-printer identity colours + duplicate detection (session 15), print queue subsystem (session 16), queue refinements + format additions (session 17), maintenance schedule (session 18), queue preflight (session 19), spool traceability (session 20), failure review (session 21)
+- Recent commits: spool inventory (session 14), per-printer identity colours + duplicate detection (session 15), print queue subsystem (session 16), queue refinements + format additions (session 17), maintenance schedule (session 18), queue preflight (session 19), spool traceability (session 20), failure review (session 21), printer health score (session 22)
 
 ---
 

@@ -537,6 +537,86 @@ def get_failure_review(days: int = 90) -> dict:
     }
 
 
+def get_printer_health(printer_id: str) -> dict:
+    """Explainable compact health signal for dashboard cards."""
+    reasons: list[dict] = []
+    with _conn() as conn:
+        recent = conn.execute(
+            """SELECT
+                   COUNT(*) AS total,
+                   SUM(CASE WHEN final_state = 'FINISHED' THEN 1 ELSE 0 END) AS finished,
+                   SUM(CASE WHEN final_state IN ('ERROR', 'CANCELLED', 'ESTOP') THEN 1 ELSE 0 END) AS failed
+               FROM prints
+               WHERE printer_id = ?
+                 AND final_state IS NOT NULL
+                 AND started_at >= datetime('now', '-14 days')""",
+            (printer_id,),
+        ).fetchone()
+        early = conn.execute(
+            """SELECT COUNT(*) AS n
+               FROM prints
+               WHERE printer_id = ?
+                 AND final_state IN ('ERROR', 'CANCELLED', 'ESTOP')
+                 AND started_at >= datetime('now', '-14 days')
+                 AND (
+                   (duration_seconds IS NOT NULL AND duration_seconds <= 600)
+                   OR (layers_total IS NOT NULL AND layers_total > 0
+                       AND layers_completed IS NOT NULL
+                       AND layers_completed * 1.0 / layers_total <= 0.25)
+                 )""",
+            (printer_id,),
+        ).fetchone()
+        queue = conn.execute(
+            """SELECT
+                   SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed,
+                   SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending
+               FROM print_queue
+               WHERE printer_id = ?""",
+            (printer_id,),
+        ).fetchone()
+
+    total = int(recent["total"] or 0)
+    failed = int(recent["failed"] or 0)
+    finished = int(recent["finished"] or 0)
+    early_failures = int(early["n"] or 0)
+    failed_queue = int(queue["failed"] or 0)
+
+    due_maintenance = [m for m in get_maintenance_items(printer_id) if m.get("is_due")]
+    if due_maintenance:
+        reasons.append({"level": "attention", "message": f"{len(due_maintenance)} maintenance due"})
+    if failed >= 3:
+        reasons.append({"level": "attention", "message": f"{failed} failed/cancelled prints in 14d"})
+    elif failed >= 1:
+        reasons.append({"level": "watch", "message": f"{failed} failed/cancelled print{'s' if failed != 1 else ''} in 14d"})
+    if early_failures >= 3:
+        reasons.append({"level": "watch", "message": f"{early_failures} early failures in 14d"})
+    if failed_queue:
+        reasons.append({"level": "watch", "message": f"{failed_queue} failed queue job{'s' if failed_queue != 1 else ''}"})
+
+    success_rate = round(finished * 100 / total) if total else None
+    if success_rate is not None and total >= 5 and success_rate < 70:
+        reasons.append({"level": "attention", "message": f"{success_rate}% success over 14d"})
+    elif success_rate is not None and total >= 5 and success_rate < 85:
+        reasons.append({"level": "watch", "message": f"{success_rate}% success over 14d"})
+
+    if any(r["level"] == "attention" for r in reasons):
+        status, label = "attention", "Needs attention"
+    elif reasons:
+        status, label = "watch", "Watch"
+    else:
+        status, label = "healthy", "Healthy"
+
+    return {
+        "status": status,
+        "label": label,
+        "success_rate_14d": success_rate,
+        "prints_14d": total,
+        "failures_14d": failed,
+        "early_failures_14d": early_failures,
+        "reasons": reasons[:4],
+    }
+
+
 def get_last_ended_at(printer_id: str) -> Optional[datetime]:
     """Return ended_at of the most recently ended print for this printer."""
     with _conn() as conn:
