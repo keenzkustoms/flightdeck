@@ -3252,7 +3252,7 @@ function _spoolCardHtml(s) {
         <span class="spool-meta">Used: ${Math.round(used)}g</span>
       </div>
       <div class="spool-card-actions">
-        <a class="spool-action-btn" href="#/spool/${s.id}" title="Details">Details</a>
+        <a class="spool-action-btn spool-action-detail" href="#/spool/${s.id}" title="Details">Details</a>
         <button class="spool-action-btn spool-action-edit" data-action="edit"      data-id="${s.id}" title="Edit">Edit</button>
         <button class="spool-action-btn" data-action="duplicate" data-id="${s.id}" title="Duplicate">📋</button>
         <button class="spool-action-btn" data-action="reset"     data-id="${s.id}" title="Reset weight">🔄</button>
@@ -3288,7 +3288,7 @@ function _spoolTableHtml(spools) {
       <td class="spool-td spool-td-num">${Math.round(s.label_weight_g)}g</td>
       <td class="spool-td spool-td-num"><span class="${pctCls}">${Math.round(s.remaining_g)}g (${pct}%)</span></td>
       <td class="spool-td spool-td-actions">
-        <a class="spool-action-btn" href="#/spool/${s.id}" title="Details">Details</a>
+        <a class="spool-action-btn spool-action-detail" href="#/spool/${s.id}" title="Details">Details</a>
         <button class="spool-action-btn spool-action-edit" data-action="edit"      data-id="${s.id}" title="Edit">Edit</button>
         <button class="spool-action-btn" data-action="duplicate" data-id="${s.id}" title="Duplicate">📋</button>
         <button class="spool-action-btn" data-action="reset"     data-id="${s.id}" title="Reset">🔄</button>

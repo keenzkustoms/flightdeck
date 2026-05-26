@@ -2668,6 +2668,7 @@ select.settings-input { cursor: pointer; }
   transition: opacity 0.15s;
 }
 .spool-action-btn:hover { opacity: 1; }
+.spool-action-detail,
 .spool-action-edit {
   opacity: 0.8;
   font-size: 0.8rem;
@@ -2676,6 +2677,13 @@ select.settings-input { cursor: pointer; }
   color: var(--accent);
   border: 1px solid currentColor !important;
   padding: 0.1rem 0.45rem !important;
+}
+.spool-action-detail {
+  color: var(--muted);
+  text-decoration: none;
+}
+.spool-action-detail:hover {
+  color: var(--text);
 }
 .spool-action-edit:hover { opacity: 1; }
 

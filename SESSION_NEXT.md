@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 26 May 2026 (post-session 20, spool traceability)_
+_Last updated 26 May 2026 (post-session 20, spool traceability + details button polish)_
 
 ## Current state
 
@@ -323,6 +323,9 @@ Spool-to-print traceability was added so physical filament inventory can be insp
 
 ### Follow-up note
 - Smoke testing surfaced an existing non-fatal SQLite lock warning in `log_decision()` during spool deduction (`spool_deducted` logging inside a write transaction). Spool deduction and `prints.spool_usage` still write correctly. Consider tidying decision logging around spool deduction in a small future cleanup.
+
+### UI polish follow-up
+- Spool inventory `Details` links now use the same lighter pill treatment as the `Edit` button, with cache-bust bumped to `v=32`.
 
 ---
 
