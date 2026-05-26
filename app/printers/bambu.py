@@ -460,6 +460,14 @@ class BambuPrinter:
         """Pre-populate preview cache from relay upload; avoids FTP fetch for H2D."""
         self._preview_cache = (subtask_name, preview)
 
+    def send_file(self, file_path: str, filename: str) -> None:
+        """Upload a .gcode.3mf to the printer via FTPS then send the MQTT print command."""
+        from .bambu_ftp import upload_bambu_file
+        with open(file_path, "rb") as f:
+            data = f.read()
+        upload_bambu_file(self._ip, self._access_code, filename, data)
+        self._printer.start_print(filename, 1)
+
 
 def _read_dual_nozzle_temps(mqtt_dump: dict, model_name: str) -> dict[str, "TempReading"]:
     """Return {hotend_l, hotend_r} TempReadings for dual-nozzle printers (H2D only).

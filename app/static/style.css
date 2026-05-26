@@ -2883,3 +2883,210 @@ select.settings-input { cursor: pointer; }
 }
 .spool-loaded-pct.spool-amber { color: #d97706; }
 .spool-loaded-pct.spool-low   { color: #ef4444; font-weight: 600; }
+
+
+/* ── Print queue ──────────────────────────────────────────────────────── */
+
+.queue-page {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 1.5rem 1rem 4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+.queue-printer-section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.queue-printer-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.9rem 1.1rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+.queue-printer-name {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.queue-printer-kind {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--muted);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.1rem 0.4rem;
+}
+
+/* Upload area */
+.queue-upload-area {
+  padding: 0.6rem 1rem;
+  border-bottom: 1px solid var(--border);
+  transition: background 0.15s;
+}
+.queue-upload-area.drag-over { background: var(--hover); }
+
+.queue-upload-label {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  cursor: pointer;
+  padding: 0.55rem 0.75rem;
+  border: 1.5px dashed var(--border);
+  border-radius: 7px;
+  transition: border-color 0.15s, background 0.15s;
+}
+.queue-upload-label:hover,
+.queue-upload-area.drag-over .queue-upload-label {
+  border-color: var(--accent);
+  background: rgba(59,130,246,0.07);
+}
+.queue-file-input { display: none; }
+.queue-upload-icon { font-size: 1.2rem; color: var(--muted); }
+.queue-upload-text { font-size: 0.82rem; color: var(--muted); }
+.queue-upload-progress {
+  margin-top: 0.35rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+  padding: 0 0.25rem;
+}
+
+/* Job list */
+.queue-jobs { display: flex; flex-direction: column; }
+
+.queue-empty {
+  padding: 1.1rem 1.1rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+  text-align: center;
+}
+
+.queue-job {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  padding: 0.7rem 1rem;
+  border-top: 1px solid var(--border);
+  transition: background 0.12s;
+}
+.queue-job:hover { background: var(--hover); }
+.queue-job-active { background: rgba(59,130,246,0.06); }
+
+.queue-job-thumb {
+  width: 52px;
+  height: 52px;
+  border-radius: 6px;
+  overflow: hidden;
+  flex-shrink: 0;
+  background: var(--card);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.queue-job-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.queue-job-thumb-placeholder {
+  font-size: 1.4rem;
+  opacity: 0.35;
+}
+
+.queue-job-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.queue-job-name {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.queue-job-meta {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+.queue-job-status-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+.queue-job-error {
+  font-size: 0.72rem;
+  color: #f87171;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 220px;
+}
+
+/* Status badges */
+.queue-badge {
+  display: inline-block;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 0.12rem 0.45rem;
+  border-radius: 4px;
+}
+.queue-badge-pending   { background: rgba(100,116,139,0.18); color: var(--muted); }
+.queue-badge-uploading { background: rgba(59,130,246,0.18);  color: #60a5fa;
+                         animation: queue-pulse 1.2s ease-in-out infinite; }
+.queue-badge-printing  { background: rgba(59,130,246,0.2);   color: #93c5fd; }
+.queue-badge-done      { background: rgba(34,197,94,0.18);   color: #4ade80; }
+.queue-badge-failed    { background: rgba(239,68,68,0.18);   color: #f87171; }
+.queue-badge-cancelled { background: rgba(100,116,139,0.13); color: #64748b; }
+
+@keyframes queue-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.55; }
+}
+
+/* Action buttons */
+.queue-job-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  flex-shrink: 0;
+}
+.queue-act-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  border-radius: 5px;
+  padding: 0.2rem 0.45rem;
+  font-size: 0.78rem;
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity 0.12s, color 0.12s, border-color 0.12s;
+}
+.queue-act-btn:hover:not(:disabled) { opacity: 1; }
+.queue-act-btn:disabled { opacity: 0.25; cursor: default; }
+.queue-act-send { color: var(--accent); border-color: var(--accent); }
+.queue-act-send:hover:not(:disabled) { background: rgba(59,130,246,0.1); }
+.queue-act-del  { color: #f87171; border-color: #f87171; }
+.queue-act-del:hover:not(:disabled)  { background: rgba(239,68,68,0.1); }
+
+@media (max-width: 540px) {
+  .queue-job { gap: 0.6rem; padding: 0.6rem 0.75rem; }
+  .queue-job-thumb { width: 40px; height: 40px; }
+  .queue-job-actions { flex-direction: row; }
+}

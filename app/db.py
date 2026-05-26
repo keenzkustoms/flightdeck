@@ -9,6 +9,7 @@ from typing import Optional
 log = logging.getLogger(__name__)
 
 DB_PATH = Path(__file__).parent.parent / "flightdeck.db"
+UPLOADS_DIR = Path(__file__).parent.parent / "uploads"
 
 
 def init() -> None:
@@ -99,6 +100,27 @@ def init() -> None:
 
             CREATE INDEX IF NOT EXISTS idx_spools_location
                 ON spools(location_printer_id, location_slot) WHERE archived_at IS NULL;
+
+            CREATE TABLE IF NOT EXISTS print_queue (
+                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                printer_id          TEXT NOT NULL,
+                position            INTEGER NOT NULL DEFAULT 0,
+                filename            TEXT NOT NULL,
+                file_path           TEXT NOT NULL,
+                file_size           INTEGER,
+                status              TEXT NOT NULL DEFAULT 'pending',
+                preview_png         BLOB,
+                estimated_seconds   INTEGER,
+                filament_weight_g   REAL,
+                filament_type       TEXT,
+                created_at          TEXT DEFAULT (datetime('now')),
+                started_at          TEXT,
+                finished_at         TEXT,
+                error_msg           TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_queue_printer_status
+                ON print_queue(printer_id, status, position);
         """)
     # Migrate existing DB: add columns if missing
     with _conn() as conn:
@@ -140,6 +162,8 @@ def init() -> None:
                 FROM material_costs""")
             conn.execute("DROP TABLE material_costs")
             conn.execute("ALTER TABLE _mat_new RENAME TO material_costs")
+
+    UPLOADS_DIR.mkdir(exist_ok=True)
 
     # Clean up prints that started >24 h ago but never got a final_state
     # (backend crash during a print that has since ended)
@@ -987,3 +1011,175 @@ def deduct_spool_usage(
                 "UPDATE prints SET spool_usage = ? WHERE id = ?",
                 (json.dumps(spool_usage), print_id),
             )
+
+
+# ── print queue ───────────────────────────────────────────────────────────
+
+def queue_add(
+    printer_id: str,
+    filename: str,
+    file_path: str,
+    file_size: int,
+    *,
+    preview_png: Optional[bytes] = None,
+    estimated_seconds: Optional[int] = None,
+    filament_weight_g: Optional[float] = None,
+    filament_type: Optional[str] = None,
+) -> int:
+    with _conn() as conn:
+        row = conn.execute(
+            "SELECT COALESCE(MAX(position), 0) + 1 AS next FROM print_queue WHERE printer_id = ?",
+            (printer_id,),
+        ).fetchone()
+        position = row["next"]
+        cursor = conn.execute(
+            """INSERT INTO print_queue
+               (printer_id, position, filename, file_path, file_size,
+                preview_png, estimated_seconds, filament_weight_g, filament_type)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (printer_id, position, filename, file_path, file_size,
+             preview_png, estimated_seconds, filament_weight_g, filament_type),
+        )
+        return cursor.lastrowid
+
+
+def queue_list(printer_id: Optional[str] = None) -> list[dict]:
+    _STATUS_ORDER = "CASE status WHEN 'printing' THEN 0 WHEN 'uploading' THEN 1 WHEN 'pending' THEN 2 ELSE 3 END"
+    with _conn() as conn:
+        if printer_id:
+            rows = conn.execute(
+                f"""SELECT id, printer_id, position, filename, file_size, status,
+                           estimated_seconds, filament_weight_g, filament_type,
+                           created_at, started_at, finished_at, error_msg,
+                           (preview_png IS NOT NULL) AS has_preview
+                    FROM print_queue WHERE printer_id = ?
+                    ORDER BY {_STATUS_ORDER}, position, id""",
+                (printer_id,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                f"""SELECT id, printer_id, position, filename, file_size, status,
+                           estimated_seconds, filament_weight_g, filament_type,
+                           created_at, started_at, finished_at, error_msg,
+                           (preview_png IS NOT NULL) AS has_preview
+                    FROM print_queue
+                    ORDER BY printer_id, {_STATUS_ORDER}, position, id""",
+            ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def queue_get_preview(job_id: int) -> Optional[bytes]:
+    with _conn() as conn:
+        row = conn.execute(
+            "SELECT preview_png FROM print_queue WHERE id = ?", (job_id,)
+        ).fetchone()
+    return row["preview_png"] if row else None
+
+
+def queue_get(job_id: int) -> Optional[dict]:
+    with _conn() as conn:
+        row = conn.execute(
+            """SELECT id, printer_id, position, filename, file_path, file_size,
+                      status, estimated_seconds, filament_weight_g, filament_type,
+                      created_at, started_at, finished_at, error_msg
+               FROM print_queue WHERE id = ?""",
+            (job_id,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def queue_update_status(job_id: int, status: str, error_msg: Optional[str] = None) -> bool:
+    with _conn() as conn:
+        if error_msg is not None:
+            c = conn.execute(
+                "UPDATE print_queue SET status = ?, error_msg = ? WHERE id = ?",
+                (status, error_msg, job_id),
+            )
+        else:
+            c = conn.execute(
+                "UPDATE print_queue SET status = ? WHERE id = ?", (status, job_id)
+            )
+    return c.rowcount > 0
+
+
+def queue_set_started(job_id: int) -> bool:
+    with _conn() as conn:
+        c = conn.execute(
+            "UPDATE print_queue SET status = 'printing', started_at = datetime('now') WHERE id = ?",
+            (job_id,),
+        )
+    return c.rowcount > 0
+
+
+def queue_finish_active(printer_id: str) -> int:
+    with _conn() as conn:
+        c = conn.execute(
+            """UPDATE print_queue SET status = 'done', finished_at = datetime('now')
+               WHERE printer_id = ? AND status IN ('printing', 'uploading')""",
+            (printer_id,),
+        )
+    return c.rowcount
+
+
+def queue_cancel_active(printer_id: str, status: str = "cancelled") -> int:
+    with _conn() as conn:
+        c = conn.execute(
+            "UPDATE print_queue SET status = ? WHERE printer_id = ? AND status IN ('printing', 'uploading')",
+            (status, printer_id),
+        )
+    return c.rowcount
+
+
+def queue_delete(job_id: int) -> tuple[bool, Optional[str]]:
+    """Delete a pending/failed/cancelled job. Returns (deleted, file_path)."""
+    with _conn() as conn:
+        row = conn.execute(
+            "SELECT file_path FROM print_queue WHERE id = ? AND status IN ('pending', 'failed', 'cancelled')",
+            (job_id,),
+        ).fetchone()
+        if not row:
+            return False, None
+        conn.execute("DELETE FROM print_queue WHERE id = ?", (job_id,))
+    return True, row["file_path"]
+
+
+def queue_next_pending(printer_id: str) -> Optional[dict]:
+    with _conn() as conn:
+        row = conn.execute(
+            """SELECT id, printer_id, filename, file_path
+               FROM print_queue
+               WHERE printer_id = ? AND status = 'pending'
+               ORDER BY position ASC, id ASC LIMIT 1""",
+            (printer_id,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def queue_reorder(job_id: int, direction: str) -> bool:
+    with _conn() as conn:
+        job = conn.execute(
+            "SELECT printer_id, position FROM print_queue WHERE id = ? AND status = 'pending'",
+            (job_id,),
+        ).fetchone()
+        if not job:
+            return False
+        pid, pos = job["printer_id"], job["position"]
+        if direction == "up":
+            nbr = conn.execute(
+                """SELECT id, position FROM print_queue
+                   WHERE printer_id = ? AND status = 'pending' AND position < ?
+                   ORDER BY position DESC LIMIT 1""",
+                (pid, pos),
+            ).fetchone()
+        else:
+            nbr = conn.execute(
+                """SELECT id, position FROM print_queue
+                   WHERE printer_id = ? AND status = 'pending' AND position > ?
+                   ORDER BY position ASC LIMIT 1""",
+                (pid, pos),
+            ).fetchone()
+        if not nbr:
+            return False
+        conn.execute("UPDATE print_queue SET position = ? WHERE id = ?", (nbr["position"], job_id))
+        conn.execute("UPDATE print_queue SET position = ? WHERE id = ?", (pos, nbr["id"]))
+    return True

@@ -18,7 +18,7 @@ if not _app_log.handlers:
     _app_log.propagate = False
 log = logging.getLogger(__name__)
 
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile, WebSocket
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -187,18 +187,21 @@ def _check_transitions(data: list[dict]) -> None:
         if prev == "printing" and curr == "finished":
             msg = f"{name}" + (f" · {label}" if label else "")
             asyncio.create_task(_send_ntfy("Print complete", msg, ["white_check_mark"]))
+            asyncio.create_task(_on_print_finished_queue(pid))
         elif curr in ("error", "estop"):
             error_pid = p.get("_error_print_id")
             asyncio.create_task(_do_failure_snapshot(pid, error_pid))
             if curr == "error":
                 msg = f"{name}" + (f" · {label}" if label else "")
                 asyncio.create_task(_send_ntfy("Print error", msg, ["warning"], priority=4))
+            db.queue_cancel_active(pid, "failed")
         elif prev == "printing" and curr == "paused":
             msg = f"{name}" + (f" · {label}" if label else "")
             asyncio.create_task(_send_ntfy("Print paused", msg, ["double_vertical_bar"]))
         elif prev == "printing" and curr == "idle":
             msg = f"{name}" + (f" · {label}" if label else "")
             asyncio.create_task(_send_ntfy("Print cancelled", msg, ["x"]))
+            db.queue_cancel_active(pid, "cancelled")
 
 
 async def _push_toast(message: str, sub: str = "", toast_type: str = "warning") -> None:
@@ -879,6 +882,176 @@ async def move_spool(spool_id: int, body: SpoolMove):
             "conflict_spool": conflict,
         })
     return {"ok": True}
+
+
+# ── Print queue ──────────────────────────────────────────────────────────
+
+_ALLOWED_BAMBU_EXT = {".3mf"}
+_ALLOWED_MOONRAKER_EXT = {".gcode"}
+
+
+def _printer_kind(printer_id: str) -> Optional[str]:
+    for (pid, *_) in _moonraker:
+        if pid == printer_id:
+            return "moonraker"
+    for p in _bambu:
+        if p.id == printer_id:
+            return "bambu"
+    return None
+
+
+async def _advance_queue(printer_id: str) -> None:
+    job = db.queue_next_pending(printer_id)
+    if not job:
+        return
+    job_id, filename, file_path = job["id"], job["filename"], job["file_path"]
+    db.queue_update_status(job_id, "uploading")
+    try:
+        for (pid, _, _, _, url) in _moonraker:
+            if pid == printer_id:
+                await moonraker.upload_and_start(url, file_path, filename)
+                db.queue_set_started(job_id)
+                log.info("queue: started job %d on %s (%s)", job_id, printer_id, filename)
+                return
+        for p in _bambu:
+            if p.id == printer_id:
+                await asyncio.to_thread(p.send_file, file_path, filename)
+                db.queue_set_started(job_id)
+                log.info("queue: started job %d on %s (%s)", job_id, printer_id, filename)
+                return
+        db.queue_update_status(job_id, "failed", "Printer not found")
+    except Exception as exc:
+        log.error("queue: failed to start job %d on %s: %s", job_id, printer_id, exc)
+        db.queue_update_status(job_id, "failed", str(exc))
+
+
+async def _on_print_finished_queue(printer_id: str) -> None:
+    db.queue_finish_active(printer_id)
+    await _advance_queue(printer_id)
+
+
+@app.get("/api/queue")
+async def get_queue(printer_id: Optional[str] = None):
+    return db.queue_list(printer_id)
+
+
+@app.post("/api/queue/upload", status_code=201)
+async def queue_upload(printer_id: str = Form(...), file: UploadFile = File(...)):
+    kind = _printer_kind(printer_id)
+    if kind is None:
+        raise HTTPException(status_code=404, detail="printer not found")
+
+    raw_name = (file.filename or "upload").rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+    ext = "." + raw_name.split(".", 1)[-1] if "." in raw_name else ""
+    # Normalise double-extension .gcode.3mf → treat as .3mf
+    if raw_name.endswith(".gcode.3mf"):
+        ext = ".3mf"
+
+    allowed = _ALLOWED_BAMBU_EXT if kind == "bambu" else _ALLOWED_MOONRAKER_EXT
+    if ext not in allowed:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unsupported file type '{ext}' for {kind} printer. Expected: {', '.join(sorted(allowed))}",
+        )
+
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=422, detail="Empty file")
+
+    import uuid as _uuid
+    safe_name = f"{_uuid.uuid4().hex[:8]}_{raw_name}"
+    file_path = str(db.UPLOADS_DIR / safe_name)
+    with open(file_path, "wb") as f:
+        f.write(data)
+
+    preview_png = estimated_seconds = filament_weight_g = filament_type = None
+    if ext == ".3mf":
+        try:
+            from .printers.bambu_ftp import _parse_3mf
+            import io
+            p = _parse_3mf(io.BytesIO(data))
+            preview_png = p.image_png
+            estimated_seconds = p.estimated_total_seconds
+            filament_weight_g = p.filament_weight_g
+            filament_type = p.filament_type
+        except Exception:
+            pass
+
+    job_id = db.queue_add(
+        printer_id, raw_name, file_path, len(data),
+        preview_png=preview_png,
+        estimated_seconds=estimated_seconds,
+        filament_weight_g=filament_weight_g,
+        filament_type=filament_type,
+    )
+    return {"id": job_id}
+
+
+@app.get("/api/queue/{job_id}/preview")
+async def get_queue_preview(job_id: int):
+    png = db.queue_get_preview(job_id)
+    if not png:
+        raise HTTPException(status_code=404, detail="no preview")
+    return Response(content=png, media_type="image/png",
+                    headers={"Cache-Control": "public, max-age=86400"})
+
+
+@app.delete("/api/queue/{job_id}")
+async def delete_queue_job(job_id: int):
+    deleted, file_path = db.queue_delete(job_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Job not found or not deletable")
+    if file_path:
+        try:
+            Path(file_path).unlink(missing_ok=True)
+        except Exception:
+            pass
+    return {"ok": True}
+
+
+class QueueReorderRequest(BaseModel):
+    direction: str  # "up" | "down"
+
+
+@app.post("/api/queue/{job_id}/reorder")
+async def reorder_queue_job(job_id: int, body: QueueReorderRequest):
+    if body.direction not in ("up", "down"):
+        raise HTTPException(status_code=422, detail="direction must be 'up' or 'down'")
+    if not db.queue_reorder(job_id, body.direction):
+        raise HTTPException(status_code=404, detail="Job not found or cannot reorder")
+    return {"ok": True}
+
+
+@app.post("/api/queue/{job_id}/send")
+async def send_queue_job(job_id: int):
+    job = db.queue_get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job["status"] != "pending":
+        raise HTTPException(status_code=409, detail=f"Job status is '{job['status']}', must be pending")
+    asyncio.create_task(_advance_queue_specific(job_id, job["printer_id"],
+                                                job["filename"], job["file_path"]))
+    return {"ok": True}
+
+
+async def _advance_queue_specific(job_id: int, printer_id: str,
+                                   filename: str, file_path: str) -> None:
+    db.queue_update_status(job_id, "uploading")
+    try:
+        for (pid, _, _, _, url) in _moonraker:
+            if pid == printer_id:
+                await moonraker.upload_and_start(url, file_path, filename)
+                db.queue_set_started(job_id)
+                return
+        for p in _bambu:
+            if p.id == printer_id:
+                await asyncio.to_thread(p.send_file, file_path, filename)
+                db.queue_set_started(job_id)
+                return
+        db.queue_update_status(job_id, "failed", "Printer not found")
+    except Exception as exc:
+        log.error("queue send: job %d failed: %s", job_id, exc)
+        db.queue_update_status(job_id, "failed", str(exc))
 
 
 # ── OrcaSlicer relay ──────────────────────────────────────────────────────

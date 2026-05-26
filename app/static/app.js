@@ -734,6 +734,7 @@ function parseRoute() {
   const printerMatch = hash.match(/^#\/printer\/([^/]+)(?:\/(history))?/);
   if (printerMatch) return { view: 'printer', id: printerMatch[1], subtab: printerMatch[2] || 'live' };
   if (hash === '#/cameras') return { view: 'cameras' };
+  if (hash === '#/queue') return { view: 'queue' };
   if (hash === '#/settings') return { view: 'settings' };
   return { view: 'dashboard' };
 }
@@ -758,6 +759,7 @@ function router() {
   document.getElementById('view-dashboard').hidden = route.view !== 'dashboard';
   document.getElementById('view-printer').hidden   = route.view !== 'printer';
   document.getElementById('view-cameras').hidden   = route.view !== 'cameras';
+  document.getElementById('view-queue').hidden     = route.view !== 'queue';
   document.getElementById('view-settings').hidden  = route.view !== 'settings';
 
   document.querySelectorAll('#tab-strip .tab').forEach(tab => {
@@ -765,12 +767,14 @@ function router() {
     tab.classList.toggle('active',
       (route.view === 'printer'  && href === `#/printer/${route.id}`) ||
       (route.view === 'cameras'  && href === '#/cameras') ||
+      (route.view === 'queue'    && href === '#/queue') ||
       (route.view === 'settings' && href === '#/settings')
     );
   });
 
   if (route.view === 'printer') renderPrinterDetail(route.id, route.subtab);
   if (route.view === 'cameras') renderCamerasView();
+  if (route.view === 'queue') renderQueueView();
   if (route.view === 'settings' && !wasOnSettings) renderSettingsView();
 }
 
@@ -782,6 +786,7 @@ function buildTabs(printers) {
       return `<a class="tab" href="#/printer/${p.id}" style="--tab-accent:${color}">${p.model_name}</a>`;
     }),
     `<a class="tab" href="#/cameras">All Cameras</a>`,
+    `<a class="tab" href="#/queue">Queue</a>`,
     `<a class="tab" href="#/settings">Settings</a>`,
   ].join('');
   _tabsBuilt = true;
@@ -1498,6 +1503,190 @@ async function renderPrinterDetail(id, subtab = 'live') {
     if (amsEl) amsEl.innerHTML = _detailAmsPanel(p);
     const mmuEl = el.querySelector('#detail-mmu');
     if (mmuEl) mmuEl.innerHTML = _detailMmuPanel(p);
+  }
+}
+
+// ── Print queue ───────────────────────────────────────────────────────────
+
+const _QUEUE_STATUS_LABEL = {
+  pending:   'Pending',
+  uploading: 'Uploading…',
+  printing:  'Printing',
+  done:      'Done',
+  failed:    'Failed',
+  cancelled: 'Cancelled',
+};
+
+function _queueStatusBadge(status) {
+  return `<span class="queue-badge queue-badge-${status}">${_QUEUE_STATUS_LABEL[status] || status}</span>`;
+}
+
+function _fmtSeconds(s) {
+  if (!s) return '';
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+  return h ? `${h}h ${m}m` : `${m}m`;
+}
+
+function _queueJobCard(job, isFirst, isLast) {
+  const isPending   = job.status === 'pending';
+  const isActive    = job.status === 'printing' || job.status === 'uploading';
+  const previewSrc  = job.has_preview ? `/api/queue/${job.id}/preview` : '';
+  const meta = [
+    job.filament_type || '',
+    job.filament_weight_g ? `${Math.round(job.filament_weight_g)}g` : '',
+    job.estimated_seconds ? _fmtSeconds(job.estimated_seconds) : '',
+  ].filter(Boolean).join(' · ');
+
+  return `<div class="queue-job ${isActive ? 'queue-job-active' : ''}" data-job-id="${job.id}">
+    <div class="queue-job-thumb">
+      ${previewSrc
+        ? `<img src="${previewSrc}" alt="" loading="lazy">`
+        : `<div class="queue-job-thumb-placeholder">🖨</div>`}
+    </div>
+    <div class="queue-job-body">
+      <div class="queue-job-name" title="${job.filename}">${job.filename}</div>
+      ${meta ? `<div class="queue-job-meta">${meta}</div>` : ''}
+      <div class="queue-job-status-row">
+        ${_queueStatusBadge(job.status)}
+        ${job.error_msg ? `<span class="queue-job-error" title="${job.error_msg}">⚠ ${job.error_msg}</span>` : ''}
+      </div>
+    </div>
+    <div class="queue-job-actions">
+      ${isPending ? `
+        <button class="queue-act-btn" data-action="up"   data-id="${job.id}" title="Move up"   ${isFirst ? 'disabled' : ''}>▲</button>
+        <button class="queue-act-btn" data-action="down" data-id="${job.id}" title="Move down" ${isLast  ? 'disabled' : ''}>▼</button>
+        <button class="queue-act-btn queue-act-send" data-action="send"   data-id="${job.id}" title="Send now">▶</button>
+        <button class="queue-act-btn queue-act-del"  data-action="delete" data-id="${job.id}" title="Remove">✕</button>
+      ` : (job.status === 'failed' || job.status === 'cancelled') ? `
+        <button class="queue-act-btn queue-act-del" data-action="delete" data-id="${job.id}" title="Remove">✕</button>
+      ` : ''}
+    </div>
+  </div>`;
+}
+
+function _queuePrinterSection(printerId, printerLabel, jobs, kind) {
+  const accept = kind === 'bambu' ? '.3mf,.gcode.3mf' : '.gcode';
+  const pending = jobs.filter(j => j.status === 'pending');
+
+  const jobsHtml = jobs.length
+    ? jobs.map((j, i) => {
+        const pendingIdx = pending.indexOf(j);
+        return _queueJobCard(j, pendingIdx === 0, pendingIdx === pending.length - 1);
+      }).join('')
+    : '<div class="queue-empty">No jobs queued</div>';
+
+  return `<section class="queue-printer-section" data-printer-id="${printerId}">
+    <div class="queue-printer-header">
+      <h2 class="queue-printer-name">${printerLabel}</h2>
+      <span class="queue-printer-kind">${kind}</span>
+    </div>
+    <div class="queue-upload-area" data-printer-id="${printerId}">
+      <label class="queue-upload-label">
+        <input type="file" class="queue-file-input" accept="${accept}"
+               data-printer-id="${printerId}" data-kind="${kind}">
+        <span class="queue-upload-icon">⊕</span>
+        <span class="queue-upload-text">Drop ${accept} file or click to browse</span>
+      </label>
+      <div class="queue-upload-progress" hidden></div>
+    </div>
+    <div class="queue-jobs" data-printer-id="${printerId}">${jobsHtml}</div>
+  </section>`;
+}
+
+async function renderQueueView() {
+  const el = document.getElementById('queue-page');
+  try {
+    const [jobs, printers] = await Promise.all([
+      fetch('/api/queue').then(r => r.json()),
+      fetch('/api/printers').then(r => r.json()),
+    ]);
+
+    const byPrinter = {};
+    for (const p of printers) byPrinter[p.id] = { label: p.custom_name || p.model_name, kind: p.kind, jobs: [] };
+    for (const j of jobs) {
+      if (byPrinter[j.printer_id]) byPrinter[j.printer_id].jobs.push(j);
+    }
+
+    el.innerHTML = Object.entries(byPrinter)
+      .map(([pid, { label, kind, jobs: pjobs }]) =>
+        _queuePrinterSection(pid, label, pjobs, kind))
+      .join('');
+
+    el.querySelectorAll('.queue-file-input').forEach(inp => {
+      inp.addEventListener('change', e => _queueHandleFile(e.target));
+    });
+    el.querySelectorAll('.queue-upload-area').forEach(area => {
+      area.addEventListener('dragover', e => { e.preventDefault(); area.classList.add('drag-over'); });
+      area.addEventListener('dragleave', () => area.classList.remove('drag-over'));
+      area.addEventListener('drop', e => {
+        e.preventDefault();
+        area.classList.remove('drag-over');
+        const inp = area.querySelector('.queue-file-input');
+        if (e.dataTransfer.files[0] && inp) {
+          _queueHandleFileRaw(inp.dataset.printerId, inp.dataset.kind, e.dataTransfer.files[0], area);
+        }
+      });
+    });
+    el.addEventListener('click', _queueHandleAction);
+  } catch (err) {
+    el.innerHTML = `<div class="detail-placeholder">Failed to load queue: ${err.message}</div>`;
+  }
+}
+
+async function _queueHandleFile(inp) {
+  if (!inp.files[0]) return;
+  const area = inp.closest('.queue-upload-area');
+  await _queueHandleFileRaw(inp.dataset.printerId, inp.dataset.kind, inp.files[0], area);
+  inp.value = '';
+}
+
+async function _queueHandleFileRaw(printerId, kind, file, area) {
+  const progress = area.querySelector('.queue-upload-progress');
+  const label = area.querySelector('.queue-upload-label');
+  progress.hidden = false;
+  progress.textContent = `Uploading ${file.name}…`;
+  label.style.opacity = '0.4';
+  try {
+    const fd = new FormData();
+    fd.append('printer_id', printerId);
+    fd.append('file', file, file.name);
+    const r = await fetch('/api/queue/upload', { method: 'POST', body: fd });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      throw new Error(err.detail || r.statusText);
+    }
+    progress.textContent = '✓ Added to queue';
+    setTimeout(() => renderQueueView(), 800);
+  } catch (e) {
+    progress.textContent = `✗ ${e.message}`;
+    setTimeout(() => { progress.hidden = true; label.style.opacity = ''; }, 4000);
+  } finally {
+    label.style.opacity = '';
+  }
+}
+
+async function _queueHandleAction(e) {
+  const btn = e.target.closest('[data-action]');
+  if (!btn) return;
+  const { action, id } = btn.dataset;
+  if (!id) return;
+  btn.disabled = true;
+  try {
+    if (action === 'delete') {
+      if (!confirm('Remove this job from the queue?')) return;
+      await fetch(`/api/queue/${id}`, { method: 'DELETE' });
+    } else if (action === 'up' || action === 'down') {
+      await fetch(`/api/queue/${id}/reorder`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ direction: action }),
+      });
+    } else if (action === 'send') {
+      await fetch(`/api/queue/${id}/send`, { method: 'POST' });
+    }
+    await renderQueueView();
+  } catch (err) {
+    btn.disabled = false;
+    alert(`Failed: ${err.message}`);
   }
 }
 

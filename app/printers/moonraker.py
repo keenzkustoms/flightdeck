@@ -566,3 +566,22 @@ async def exclude_object(base_url: str, name: str) -> None:
             json={"script": gcode},
         )
         resp.raise_for_status()
+
+
+async def upload_and_start(base_url: str, file_path: str, filename: str) -> None:
+    """Upload a .gcode file to Moonraker and immediately start printing it."""
+    base = base_url.rstrip("/")
+    with open(file_path, "rb") as f:
+        data = f.read()
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        r = await client.post(
+            f"{base}/server/files/upload",
+            files={"file": (filename, data, "application/octet-stream")},
+            data={"root": "gcodes"},
+        )
+        r.raise_for_status()
+        r2 = await client.post(
+            f"{base}/printer/print/start",
+            json={"filename": filename},
+        )
+        r2.raise_for_status()
