@@ -887,7 +887,7 @@ async def move_spool(spool_id: int, body: SpoolMove):
 # ── Print queue ──────────────────────────────────────────────────────────
 
 _ALLOWED_BAMBU_EXT = {".3mf"}
-_ALLOWED_MOONRAKER_EXT = {".gcode"}
+_ALLOWED_MOONRAKER_EXT = {".gcode", ".gcode.gz", ".ufp"}
 
 
 def _printer_kind(printer_id: str) -> Optional[str]:
@@ -942,10 +942,15 @@ async def queue_upload(printer_id: str = Form(...), file: UploadFile = File(...)
         raise HTTPException(status_code=404, detail="printer not found")
 
     raw_name = (file.filename or "upload").rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
-    ext = "." + raw_name.split(".", 1)[-1] if "." in raw_name else ""
-    # Normalise double-extension .gcode.3mf → treat as .3mf
+    # Resolve multi-part extensions in priority order
     if raw_name.endswith(".gcode.3mf"):
         ext = ".3mf"
+    elif raw_name.endswith(".gcode.gz"):
+        ext = ".gcode.gz"
+    elif "." in raw_name:
+        ext = "." + raw_name.rsplit(".", 1)[-1]
+    else:
+        ext = ""
 
     allowed = _ALLOWED_BAMBU_EXT if kind == "bambu" else _ALLOWED_MOONRAKER_EXT
     if ext not in allowed:

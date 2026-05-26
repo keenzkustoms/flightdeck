@@ -1565,7 +1565,7 @@ function _queueJobCard(job, isFirst, isLast) {
 }
 
 function _queuePrinterSection(printerId, printerLabel, jobs, kind) {
-  const accept = kind === 'bambu' ? '.3mf,.gcode.3mf' : '.gcode';
+  const accept = kind === 'bambu' ? '.3mf,.gcode.3mf' : '.gcode,.gcode.gz,.ufp';
   const pending = jobs.filter(j => j.status === 'pending');
 
   const jobsHtml = jobs.length
@@ -1585,7 +1585,7 @@ function _queuePrinterSection(printerId, printerLabel, jobs, kind) {
         <input type="file" class="queue-file-input" accept="${accept}"
                data-printer-id="${printerId}" data-kind="${kind}">
         <span class="queue-upload-icon">⊕</span>
-        <span class="queue-upload-text">Drop ${accept} file or click to browse</span>
+        <span class="queue-upload-text">Drop ${kind === 'bambu' ? '.gcode.3mf' : '.gcode / .gcode.gz / .ufp'} or click to browse</span>
       </label>
       <div class="queue-upload-progress" hidden></div>
     </div>
@@ -1596,10 +1596,12 @@ function _queuePrinterSection(printerId, printerLabel, jobs, kind) {
 async function renderQueueView() {
   const el = document.getElementById('queue-page');
   try {
-    const [jobs, printers] = await Promise.all([
-      fetch('/api/queue').then(r => r.json()),
-      fetch('/api/printers').then(r => r.json()),
+    const [jobsRaw, printersRaw] = await Promise.all([
+      fetch('/api/queue').then(r => { if (!r.ok) throw new Error(`Queue API ${r.status}`); return r.json(); }),
+      fetch('/api/printers').then(r => { if (!r.ok) throw new Error(`Printers API ${r.status}`); return r.json(); }),
     ]);
+    const jobs = Array.isArray(jobsRaw) ? jobsRaw : [];
+    const printers = Array.isArray(printersRaw) ? printersRaw : [];
 
     const byPrinter = {};
     for (const p of printers) byPrinter[p.id] = { label: p.custom_name || p.model_name, kind: p.kind, jobs: [] };
