@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 26 May 2026 (post-session 17)_
+_Last updated 26 May 2026 (post-session 17, closing fixes)_
 
 ## Current state
 
@@ -215,14 +215,17 @@ Earlier add/remove stress testing used virtual printer instances pointing at rea
 
 ## Known issues
 
-| Issue | Severity | Notes |
-|---|---|---|
-| Bambu direct prints may lack filament metadata | Low | If `get_preview()` wasn't called during print, `filament_weight_g` stays unset. Relay path always populates. Self-fixing as queue becomes primary dispatch path. |
-| Spool snapshot persistence: not yet tested across full restart-mid-print scenario | Low | Mechanism in place; awaiting real mid-print restart to confirm survival end-to-end. |
+No open known issues.
 
 ---
 
 ## Next session priorities
+
+### Closing fixes (shipped same session)
+- **Bambu filament metadata**: `get_preview()` now called proactively on first poll of any new print (same trigger as AMS snapshot). One-shot FTP call per job; cached on `subtask_name`. Ensures `filament_weight_g` and `material` are always populated for spool deduction, even when nobody views the detail page.
+- **Spool snapshot overwrite on restart**: `write_slot_snapshot` now uses `WHERE ams_slot_snapshot IS NULL`. Post-restart the snapshot condition re-fires (in-memory state resets), but the original DB row is preserved. Spool deduction uses correct print-start slot assignments regardless of restarts.
+
+---
 
 ### Hardware integration (when Dymo M10 scale + Brother QL-700 arrive) — hardware not yet received
 - USB scale: read weight directly into Add Spool / re-weigh flows
