@@ -742,6 +742,7 @@ function parseRoute() {
   if (spoolMatch) return { view: 'spool', id: parseInt(spoolMatch[1], 10) };
   if (hash === '#/cameras') return { view: 'cameras' };
   if (hash === '#/queue') return { view: 'queue' };
+  if (hash === '#/failures') return { view: 'failures' };
   if (hash === '#/settings') return { view: 'settings' };
   return { view: 'dashboard' };
 }
@@ -768,6 +769,7 @@ function router() {
   document.getElementById('view-spool').hidden     = route.view !== 'spool';
   document.getElementById('view-cameras').hidden   = route.view !== 'cameras';
   document.getElementById('view-queue').hidden     = route.view !== 'queue';
+  document.getElementById('view-failures').hidden  = route.view !== 'failures';
   document.getElementById('view-settings').hidden  = route.view !== 'settings';
 
   document.querySelectorAll('#tab-strip .tab').forEach(tab => {
@@ -776,6 +778,7 @@ function router() {
       (route.view === 'printer'  && href === `#/printer/${route.id}`) ||
       (route.view === 'cameras'  && href === '#/cameras') ||
       (route.view === 'queue'    && href === '#/queue') ||
+      (route.view === 'failures' && href === '#/failures') ||
       (route.view === 'settings' && href === '#/settings')
     );
   });
@@ -784,6 +787,7 @@ function router() {
   if (route.view === 'spool') renderSpoolDetail(route.id);
   if (route.view === 'cameras') renderCamerasView();
   if (route.view === 'queue') renderQueueView();
+  if (route.view === 'failures') renderFailuresView();
   if (route.view === 'settings' && !wasOnSettings) renderSettingsView();
 }
 
@@ -796,6 +800,7 @@ function buildTabs(printers) {
     }),
     `<a class="tab" href="#/cameras">All Cameras</a>`,
     `<a class="tab" href="#/queue">Queue</a>`,
+    `<a class="tab" href="#/failures">Failures</a>`,
     `<a class="tab" href="#/settings">Settings</a>`,
   ].join('');
   _tabsBuilt = true;
@@ -1687,6 +1692,129 @@ async function renderSpoolDetail(spoolId) {
       ${trace.length ? trace.map(_spoolTraceRow).join('') : '<div class="print-empty">No print usage recorded for this spool yet.</div>'}
     </section>
   </div>`;
+}
+
+// ── Failure review ────────────────────────────────────────────────────────
+
+let _failureDays = 90;
+let _failureFilter = { printer: '', state: '', material: '' };
+
+const _FAIL_TIMING_LABELS = {
+  first_10m: 'First 10m',
+  first_25pct: 'First 25%',
+  mid_print: 'Mid-print',
+  late_print: 'Late print',
+  unknown: 'Unknown',
+};
+
+function _failureStatBlock(title, rows, formatter = x => x.key) {
+  const body = rows?.length
+    ? rows.slice(0, 5).map(r => `<div class="failure-stat-row"><span>${esc(formatter(r))}</span><strong>${r.count}</strong></div>`).join('')
+    : '<div class="failure-empty">No data</div>';
+  return `<section class="failure-stat">
+    <h3>${title}</h3>
+    ${body}
+  </section>`;
+}
+
+function _failureRow(item) {
+  const p = _latestPrinters.find(x => x.id === item.printer_id);
+  const raw = item.subtask_name || item.filename.replace(/.*[/\\]/, '');
+  const name = raw.replace(/\.gcode(\.3mf)?$/i, '').replace(/\.3mf$/i, '');
+  const { cls, label } = _printBadge(item.final_state);
+  const ts = item.started_at ? new Date(item.started_at.endsWith('Z') ? item.started_at : item.started_at + 'Z') : null;
+  const when = ts ? ts.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
+  const progress = item.progress_pct != null ? `${item.progress_pct}%` : '—';
+  const mat = item.material || 'Unknown material';
+  const spoolLinks = item.spool_usage?.length
+    ? item.spool_usage.map(u => `<a href="#/spool/${u.spool_id}">#${u.spool_id}</a>`).join(', ')
+    : '—';
+  const snapshot = item.has_snapshot
+    ? `<img src="/api/printers/${item.printer_id}/prints/${item.id}/snapshot" alt="" loading="lazy">`
+    : '<span>No snapshot</span>';
+  const error = item.error_message ? `<div class="failure-error">${esc(item.error_message)}</div>` : '';
+
+  return `<article class="failure-row">
+    <div class="failure-snapshot">${snapshot}</div>
+    <div class="failure-main">
+      <div class="failure-title-row">
+        <div class="failure-name" title="${esc(item.filename)}">${esc(name)}</div>
+        <span class="badge badge-${cls}" style="font-size:0.6rem;padding:0.15rem 0.5rem">${label}</span>
+      </div>
+      <div class="failure-meta">
+        ${esc(p?.custom_name ?? item.printer_id)} · ${when} · ${esc(mat)} · ${esc(_FAIL_TIMING_LABELS[item.timing_bucket] || item.timing_bucket)}
+      </div>
+      ${error}
+      <div class="failure-submeta">
+        <span>Progress ${progress}</span>
+        <span>Spools ${spoolLinks}</span>
+      </div>
+    </div>
+  </article>`;
+}
+
+function _failureOptions(items, key, label, selected = '') {
+  const vals = [...new Set(items.map(i => i[key]).filter(Boolean))].sort();
+  return `<option value="">${label}</option>` + vals.map(v =>
+    `<option value="${esc(v)}"${selected === v ? ' selected' : ''}>${esc(v)}</option>`
+  ).join('');
+}
+
+async function renderFailuresView() {
+  const el = document.getElementById('failures-page');
+  if (!el) return;
+  el.innerHTML = `<div class="detail-placeholder" style="min-height:40vh">Loading...</div>`;
+
+  let data = { total: 0, items: [], summary: {} };
+  try {
+    const r = await fetch(`/api/failures?days=${_failureDays}`);
+    if (r.ok) data = await r.json();
+  } catch {}
+
+  const all = data.items || [];
+  const filtered = all.filter(i =>
+    (!_failureFilter.printer || i.printer_id === _failureFilter.printer) &&
+    (!_failureFilter.state || i.final_state === _failureFilter.state) &&
+    (!_failureFilter.material || i.material === _failureFilter.material)
+  );
+
+  el.innerHTML = `<div class="failures-header">
+    <div>
+      <h1>Failure Review</h1>
+      <p>${data.total || 0} observed failure/cancel events in the last ${data.days || _failureDays} days</p>
+    </div>
+    <div class="failures-controls">
+      <select id="failure-days">
+        ${[30, 90, 180, 365].map(d => `<option value="${d}"${_failureDays === d ? ' selected' : ''}>${d} days</option>`).join('')}
+      </select>
+      <select data-failure-filter="printer">${_failureOptions(all, 'printer_id', 'All printers', _failureFilter.printer)}</select>
+      <select data-failure-filter="final_state">${_failureOptions(all, 'final_state', 'All states', _failureFilter.state)}</select>
+      <select data-failure-filter="material">${_failureOptions(all, 'material', 'All materials', _failureFilter.material)}</select>
+    </div>
+  </div>
+  <div class="failure-stats">
+    ${_failureStatBlock('By Printer', data.summary.by_printer || [], r => (_latestPrinters.find(p => p.id === r.key)?.custom_name ?? r.key))}
+    ${_failureStatBlock('By Material', data.summary.by_material || [])}
+    ${_failureStatBlock('By Timing', data.summary.by_timing || [], r => _FAIL_TIMING_LABELS[r.key] || r.key)}
+    ${_failureStatBlock('By Spool', data.summary.by_spool || [], r => r.spool_id ? `Spool #${r.spool_id}` : 'Unknown')}
+  </div>
+  <div class="failure-list">
+    ${filtered.length ? filtered.map(_failureRow).join('') : '<div class="failure-empty-panel">No matching failures.</div>'}
+  </div>`;
+
+  el.querySelector('#failure-days')?.addEventListener('change', e => {
+    _failureDays = parseInt(e.target.value, 10);
+    renderFailuresView();
+  });
+  el.querySelectorAll('[data-failure-filter]').forEach(sel => {
+    sel.addEventListener('change', () => {
+      const key = sel.dataset.failureFilter;
+      if (key === 'printer') _failureFilter.printer = sel.value;
+      if (key === 'final_state') _failureFilter.state = sel.value;
+      if (key === 'material') _failureFilter.material = sel.value;
+      renderFailuresView();
+    });
+  });
 }
 
 async function renderPrinterDetail(id, subtab = 'live') {

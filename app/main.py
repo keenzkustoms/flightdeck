@@ -606,6 +606,11 @@ async def get_history_day(printer_id: str, date: str):
     return db.get_prints_for_day(printer_id, date)
 
 
+@app.get("/api/failures")
+async def get_failures(days: int = 90):
+    return db.get_failure_review(days)
+
+
 def _clean_maintenance(body: MaintenanceRequest) -> dict:
     title = body.title.strip()
     if not title:

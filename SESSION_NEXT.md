@@ -1,9 +1,9 @@
 # Flightdeck — next session brief
-_Last updated 26 May 2026 (post-session 20, spool traceability + details button polish)_
+_Last updated 26 May 2026 (post-session 21, failure review)_
 
 ## Current state
 
-**Tier 1 complete. Tier 2 complete. Post-Tier-2 niceties complete. Spool inventory + Print queue + queue refinements + Maintenance schedule + Queue preflight + Spool traceability shipped.**
+**Tier 1 complete. Tier 2 complete. Post-Tier-2 niceties complete. Spool inventory + Print queue + queue refinements + Maintenance schedule + Queue preflight + Spool traceability + Failure review shipped.**
 
 Service running at:
 - `http://flightdeck.local:8000`
@@ -329,9 +329,47 @@ Spool-to-print traceability was added so physical filament inventory can be insp
 
 ---
 
+## What was built — Session 21 (Failure review — 26 May)
+
+Evidence-based failure review was added as a top-level operational view. It reports observed patterns without claiming causality.
+
+### Backend
+- New `GET /api/failures?days=N` endpoint.
+- New `db.get_failure_review(days)` helper returns:
+  - recent `ERROR`, `CANCELLED`, `ESTOP` prints
+  - decoded `spool_usage`
+  - snapshot availability
+  - progress percent where layer counts exist
+  - timing bucket: first 10m / first 25% / mid-print / late print / unknown
+  - summary buckets by printer, material, final state, timing, and spool
+- Query window is clamped to 1-365 days and returns up to 200 recent rows.
+
+### UI
+- New top-level `Failures` tab: `#/failures`
+- Failure Review page:
+  - 30/90/180/365 day selector
+  - filters for printer, state, material
+  - summary cards for observed patterns
+  - recent failure/cancel list with snapshot thumbnail when available
+  - print name, printer, timestamp, material, timing bucket, progress, spool links, error text
+- Static cache-bust bumped to `v=33`.
+
+### Verification
+- Python compile: `python -m py_compile app/db.py app/main.py`
+- FastAPI import smoke: `import app.main`
+- JS syntax: `node --check app/static/app.js` via `nvm`
+- Failure review DB smoke test against temporary SQLite DB:
+  - create failed print
+  - verify row appears
+  - verify progress/timing bucket
+  - verify printer/material summaries
+- Service restart still needs interactive sudo from user after deploy
+
+---
+
 ## Known issues
 
-- Service restart pending for Sessions 18/19/20 until user runs `sudo systemctl restart flightdeck.service`.
+- Service restart pending for Sessions 18/19/20/21 until user runs `sudo systemctl restart flightdeck.service`.
 - Non-fatal `spool_deducted` decision-log SQLite lock can occur during spool deduction; trace data still writes.
 
 ---
@@ -386,7 +424,7 @@ Spool-to-print traceability was added so physical filament inventory can be insp
 
 ## Repository
 - https://github.com/Kidabah/flightdeck (private)
-- Recent commits: spool inventory (session 14), per-printer identity colours + duplicate detection (session 15), print queue subsystem (session 16), queue refinements + format additions (session 17), maintenance schedule (session 18), queue preflight (session 19), spool traceability (session 20)
+- Recent commits: spool inventory (session 14), per-printer identity colours + duplicate detection (session 15), print queue subsystem (session 16), queue refinements + format additions (session 17), maintenance schedule (session 18), queue preflight (session 19), spool traceability (session 20), failure review (session 21)
 
 ---
 

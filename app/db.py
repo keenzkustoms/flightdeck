@@ -450,6 +450,93 @@ def get_prints_for_day(printer_id: str, date_str: str) -> list[dict]:
     return result
 
 
+def get_failure_review(days: int = 90) -> dict:
+    """Recent failed/cancelled prints plus aggregate buckets for review."""
+    import json
+    days = max(1, min(int(days or 90), 365))
+    with _conn() as conn:
+        rows = conn.execute(
+            """SELECT id, printer_id, filename, subtask_name, started_at, ended_at,
+                      duration_seconds, final_state, error_message,
+                      layers_total, layers_completed, filament_grams, material,
+                      snapshot_captured_at IS NOT NULL AS has_snapshot,
+                      spool_usage
+               FROM prints
+               WHERE final_state IN ('ERROR', 'CANCELLED', 'ESTOP')
+                 AND started_at >= datetime('now', ?)
+               ORDER BY started_at DESC
+               LIMIT 200""",
+            (f"-{days} days",),
+        ).fetchall()
+
+    items = []
+    by_printer: dict[str, int] = {}
+    by_material: dict[str, int] = {}
+    by_state: dict[str, int] = {}
+    by_timing = {"first_10m": 0, "first_25pct": 0, "mid_print": 0, "late_print": 0, "unknown": 0}
+    by_spool: dict[str, dict] = {}
+
+    for row in rows:
+        item = dict(row)
+        raw_usage = item.pop("spool_usage", None)
+        try:
+            usage = json.loads(raw_usage) if raw_usage else []
+        except Exception:
+            usage = []
+        item["spool_usage"] = usage
+
+        pct = None
+        if item["layers_completed"] is not None and item["layers_total"]:
+            pct = max(0, min(100, round(item["layers_completed"] * 100 / item["layers_total"])))
+        item["progress_pct"] = pct
+
+        if item["duration_seconds"] is not None and item["duration_seconds"] <= 600:
+            timing = "first_10m"
+        elif pct is None:
+            timing = "unknown"
+        elif pct <= 25:
+            timing = "first_25pct"
+        elif pct < 75:
+            timing = "mid_print"
+        else:
+            timing = "late_print"
+        item["timing_bucket"] = timing
+
+        by_printer[item["printer_id"]] = by_printer.get(item["printer_id"], 0) + 1
+        mat = item["material"] or "Unknown"
+        by_material[mat] = by_material.get(mat, 0) + 1
+        by_state[item["final_state"]] = by_state.get(item["final_state"], 0) + 1
+        by_timing[timing] = by_timing.get(timing, 0) + 1
+
+        for u in usage:
+            sid = str(u.get("spool_id") or "unknown")
+            rec = by_spool.setdefault(sid, {"spool_id": u.get("spool_id"), "count": 0, "grams": 0.0})
+            rec["count"] += 1
+            rec["grams"] += float(u.get("grams") or 0)
+
+        items.append(item)
+
+    def _pairs(d: dict) -> list[dict]:
+        return [{"key": k, "count": v} for k, v in sorted(d.items(), key=lambda x: (-x[1], str(x[0])))]
+
+    return {
+        "days": days,
+        "total": len(items),
+        "items": items,
+        "summary": {
+            "by_printer": _pairs(by_printer),
+            "by_material": _pairs(by_material),
+            "by_state": _pairs(by_state),
+            "by_timing": [{"key": k, "count": v} for k, v in by_timing.items() if v],
+            "by_spool": sorted(
+                [{"spool_id": v["spool_id"], "count": v["count"], "grams": round(v["grams"], 1)}
+                 for v in by_spool.values()],
+                key=lambda x: (-x["count"], str(x["spool_id"])),
+            ),
+        },
+    }
+
+
 def get_last_ended_at(printer_id: str) -> Optional[datetime]:
     """Return ended_at of the most recently ended print for this printer."""
     with _conn() as conn:
