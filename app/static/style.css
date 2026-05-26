@@ -3090,3 +3090,31 @@ select.settings-input { cursor: pointer; }
   .queue-job-thumb { width: 40px; height: 40px; }
   .queue-job-actions { flex-direction: row; }
 }
+
+.queue-section-summary {
+  font-size: 0.78rem;
+  color: var(--muted);
+  flex: 1;
+}
+.queue-header-right {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-left: auto;
+}
+.queue-clear-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  border-radius: 5px;
+  padding: 0.15rem 0.55rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity 0.12s, color 0.12s, border-color 0.12s;
+}
+.queue-clear-btn:hover { opacity: 1; color: #f87171; border-color: #f87171; }
+
+.queue-act-retry { color: #a78bfa; border-color: #a78bfa; }
+.queue-act-retry:hover:not(:disabled) { background: rgba(167,139,250,0.1); }

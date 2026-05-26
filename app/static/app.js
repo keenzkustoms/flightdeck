@@ -1530,6 +1530,7 @@ function _fmtSeconds(s) {
 function _queueJobCard(job, isFirst, isLast) {
   const isPending   = job.status === 'pending';
   const isActive    = job.status === 'printing' || job.status === 'uploading';
+  const isRecoverable = job.status === 'failed' || job.status === 'cancelled';
   const previewSrc  = job.has_preview ? `/api/queue/${job.id}/preview` : '';
   const meta = [
     job.filament_type || '',
@@ -1557,28 +1558,40 @@ function _queueJobCard(job, isFirst, isLast) {
         <button class="queue-act-btn" data-action="down" data-id="${job.id}" title="Move down" ${isLast  ? 'disabled' : ''}>▼</button>
         <button class="queue-act-btn queue-act-send" data-action="send"   data-id="${job.id}" title="Send now">▶</button>
         <button class="queue-act-btn queue-act-del"  data-action="delete" data-id="${job.id}" title="Remove">✕</button>
-      ` : (job.status === 'failed' || job.status === 'cancelled') ? `
-        <button class="queue-act-btn queue-act-del" data-action="delete" data-id="${job.id}" title="Remove">✕</button>
+      ` : isRecoverable ? `
+        <button class="queue-act-btn queue-act-retry" data-action="retry"  data-id="${job.id}" title="Retry">↺</button>
+        <button class="queue-act-btn queue-act-del"   data-action="delete" data-id="${job.id}" title="Remove">✕</button>
       ` : ''}
     </div>
   </div>`;
 }
 
 function _queuePrinterSection(printerId, printerLabel, jobs, kind) {
-  const accept = kind === 'bambu' ? '.3mf,.gcode.3mf' : '.gcode,.gcode.gz,.ufp';
-  const pending = jobs.filter(j => j.status === 'pending');
+  const accept   = kind === 'bambu' ? '.3mf,.gcode.3mf' : '.gcode,.gcode.gz,.ufp';
+  const pending  = jobs.filter(j => j.status === 'pending');
+  const active   = jobs.filter(j => j.status === 'printing' || j.status === 'uploading');
+  const completed = jobs.filter(j => ['done','failed','cancelled'].includes(j.status));
+
+  const totalSecs = pending.reduce((s, j) => s + (j.estimated_seconds || 0), 0);
+  const summary = pending.length
+    ? `${pending.length} pending${totalSecs ? ` · ~${_fmtSeconds(totalSecs)}` : ''}`
+    : active.length ? 'Printing…' : '';
 
   const jobsHtml = jobs.length
-    ? jobs.map((j, i) => {
-        const pendingIdx = pending.indexOf(j);
-        return _queueJobCard(j, pendingIdx === 0, pendingIdx === pending.length - 1);
+    ? jobs.map(j => {
+        const pIdx = pending.indexOf(j);
+        return _queueJobCard(j, pIdx === 0, pIdx === pending.length - 1);
       }).join('')
     : '<div class="queue-empty">No jobs queued</div>';
 
   return `<section class="queue-printer-section" data-printer-id="${printerId}">
     <div class="queue-printer-header">
       <h2 class="queue-printer-name">${printerLabel}</h2>
-      <span class="queue-printer-kind">${kind}</span>
+      ${summary ? `<span class="queue-section-summary">${summary}</span>` : ''}
+      <div class="queue-header-right">
+        ${completed.length ? `<button class="queue-clear-btn" data-action="clear-completed" data-printer-id="${printerId}">Clear done</button>` : ''}
+        <span class="queue-printer-kind">${kind}</span>
+      </div>
     </div>
     <div class="queue-upload-area" data-printer-id="${printerId}">
       <label class="queue-upload-label">
@@ -1670,12 +1683,11 @@ async function _queueHandleFileRaw(printerId, kind, file, area) {
 async function _queueHandleAction(e) {
   const btn = e.target.closest('[data-action]');
   if (!btn) return;
-  const { action, id } = btn.dataset;
-  if (!id) return;
+  const { action, id, printerId } = btn.dataset;
   btn.disabled = true;
   try {
     if (action === 'delete') {
-      if (!confirm('Remove this job from the queue?')) return;
+      if (!confirm('Remove this job from the queue?')) { btn.disabled = false; return; }
       await fetch(`/api/queue/${id}`, { method: 'DELETE' });
     } else if (action === 'up' || action === 'down') {
       await fetch(`/api/queue/${id}/reorder`, {
@@ -1684,6 +1696,12 @@ async function _queueHandleAction(e) {
       });
     } else if (action === 'send') {
       await fetch(`/api/queue/${id}/send`, { method: 'POST' });
+    } else if (action === 'retry') {
+      await fetch(`/api/queue/${id}/retry`, { method: 'POST' });
+    } else if (action === 'clear-completed') {
+      await fetch(`/api/queue/completed?printer_id=${encodeURIComponent(printerId)}`, { method: 'DELETE' });
+    } else {
+      btn.disabled = false; return;
     }
     await renderQueueView();
   } catch (err) {
@@ -1789,10 +1807,12 @@ function _detectTransitions(printers) {
     _notifSeeded = true;
     return;
   }
+  let anyTransition = false;
   printers.forEach(p => {
     const prev = _prevStates[p.id];
     _prevStates[p.id] = p.state;
     if (prev === p.state) return;
+    anyTransition = true;
 
     let title = null, toastMsg = null, toastType = 'info';
     if (p.state === 'finished' && prev === 'printing') {
@@ -1815,6 +1835,8 @@ function _detectTransitions(printers) {
       new Notification(title, { body: p.custom_name });
     }
   });
+  // Live-refresh queue page when a printer state changes (auto-advance may have fired)
+  if (anyTransition && parseRoute().view === 'queue') renderQueueView();
 }
 
 function initNotifBtn() {
@@ -1842,6 +1864,15 @@ function initNotifBtn() {
   });
 }
 
+async function _updateQueueBadge() {
+  try {
+    const counts = await fetch('/api/queue/summary').then(r => r.json());
+    const total = Object.values(counts).reduce((a, b) => a + b, 0);
+    const tab = document.querySelector('#tab-strip .tab[href="#/queue"]');
+    if (tab) tab.textContent = total > 0 ? `Queue (${total})` : 'Queue';
+  } catch {}
+}
+
 // ── Dashboard update ───────────────────────────────────────────────────────
 
 function updateDashboard(printers) {
@@ -1858,6 +1889,7 @@ function updateDashboard(printers) {
   _latestPrinters = printers;
   if (!_tabsBuilt) buildTabs(printers);
   else router();
+  _updateQueueBadge();
 
   // Refresh object exclusion panel on every tick when on live tab and printing
   const _route = parseRoute();

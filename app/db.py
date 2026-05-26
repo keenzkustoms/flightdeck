@@ -1155,6 +1155,41 @@ def queue_next_pending(printer_id: str) -> Optional[dict]:
     return dict(row) if row else None
 
 
+def queue_retry(job_id: int) -> bool:
+    """Reset a failed/cancelled job to pending."""
+    with _conn() as conn:
+        c = conn.execute(
+            """UPDATE print_queue SET status = 'pending', error_msg = NULL, started_at = NULL
+               WHERE id = ? AND status IN ('failed', 'cancelled')""",
+            (job_id,),
+        )
+    return c.rowcount > 0
+
+
+def queue_clear_completed(printer_id: str) -> list[str]:
+    """Delete done/failed/cancelled jobs for a printer. Returns file_paths deleted."""
+    with _conn() as conn:
+        rows = conn.execute(
+            """SELECT file_path FROM print_queue
+               WHERE printer_id = ? AND status IN ('done', 'failed', 'cancelled')""",
+            (printer_id,),
+        ).fetchall()
+        conn.execute(
+            "DELETE FROM print_queue WHERE printer_id = ? AND status IN ('done', 'failed', 'cancelled')",
+            (printer_id,),
+        )
+    return [r["file_path"] for r in rows]
+
+
+def queue_pending_counts() -> dict:
+    """Return {printer_id: pending_count} for all printers with queued pending jobs."""
+    with _conn() as conn:
+        rows = conn.execute(
+            "SELECT printer_id, COUNT(*) AS n FROM print_queue WHERE status = 'pending' GROUP BY printer_id"
+        ).fetchall()
+    return {r["printer_id"]: r["n"] for r in rows}
+
+
 def queue_reorder(job_id: int, direction: str) -> bool:
     with _conn() as conn:
         job = conn.execute(

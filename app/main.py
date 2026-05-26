@@ -930,6 +930,11 @@ async def _on_print_finished_queue(printer_id: str) -> None:
     await _advance_queue(printer_id)
 
 
+@app.get("/api/queue/summary")
+async def get_queue_summary():
+    return db.queue_pending_counts()
+
+
 @app.get("/api/queue")
 async def get_queue(printer_id: Optional[str] = None):
     return db.queue_list(printer_id)
@@ -1025,6 +1030,24 @@ async def reorder_queue_job(job_id: int, body: QueueReorderRequest):
     if not db.queue_reorder(job_id, body.direction):
         raise HTTPException(status_code=404, detail="Job not found or cannot reorder")
     return {"ok": True}
+
+
+@app.post("/api/queue/{job_id}/retry")
+async def retry_queue_job(job_id: int):
+    if not db.queue_retry(job_id):
+        raise HTTPException(status_code=404, detail="Job not found or not retryable")
+    return {"ok": True}
+
+
+@app.delete("/api/queue/completed")
+async def clear_completed_jobs(printer_id: str):
+    file_paths = db.queue_clear_completed(printer_id)
+    for fp in file_paths:
+        try:
+            Path(fp).unlink(missing_ok=True)
+        except Exception:
+            pass
+    return {"ok": True, "deleted": len(file_paths)}
 
 
 @app.post("/api/queue/{job_id}/send")
