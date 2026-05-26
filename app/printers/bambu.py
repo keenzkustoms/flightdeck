@@ -135,6 +135,11 @@ class BambuPrinter:
             if (state == "printing"
                     and self._current_print_id is not None
                     and self._ams_slot_snapshot_print_id != self._current_print_id):
+                # Proactively fetch preview so filament_weight_g is available at
+                # print-end even if nobody visits the detail page during the print.
+                # get_preview() caches on subtask_name so this is a one-shot FTP call.
+                if subtask and not self._preview_cache:
+                    self.get_preview()
                 raw_snap = _snapshot_ams_slots(dump.get("print", {}))
                 self._ams_slot_snapshot = raw_snap
                 self._ams_slot_snapshot_print_id = self._current_print_id

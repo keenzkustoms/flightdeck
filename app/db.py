@@ -937,11 +937,16 @@ def get_spool_at_slot(printer_id: str, slot: int) -> Optional[dict]:
 
 
 def write_slot_snapshot(print_id: int, snapshot: dict) -> None:
-    """Persist the enriched slot/gate snapshot (with spool_ids) to the prints row."""
+    """Persist the enriched slot/gate snapshot (with spool_ids) to the prints row.
+
+    No-op if a snapshot already exists — preserves the original print-start
+    snapshot across service restarts (the condition that triggers this fires
+    again after restart, but the original data must not be overwritten).
+    """
     import json
     with _conn() as conn:
         conn.execute(
-            "UPDATE prints SET ams_slot_snapshot = ? WHERE id = ?",
+            "UPDATE prints SET ams_slot_snapshot = ? WHERE id = ? AND ams_slot_snapshot IS NULL",
             (json.dumps(snapshot), print_id),
         )
 
