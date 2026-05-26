@@ -1733,6 +1733,8 @@ function _failureRow(item) {
     ? `<img src="/api/printers/${item.printer_id}/prints/${item.id}/snapshot" alt="" loading="lazy">`
     : '<span>No snapshot</span>';
   const error = item.error_message ? `<div class="failure-error">${esc(item.error_message)}</div>` : '';
+  const dateHash = item.started_at ? item.started_at.slice(0, 10) : '';
+  const historyLink = `#/printer/${item.printer_id}/history`;
 
   return `<article class="failure-row">
     <div class="failure-snapshot">${snapshot}</div>
@@ -1748,6 +1750,7 @@ function _failureRow(item) {
       <div class="failure-submeta">
         <span>Progress ${progress}</span>
         <span>Spools ${spoolLinks}</span>
+        <a href="${historyLink}" title="${dateHash ? `Open ${dateHash} in history` : 'Open printer history'}">History</a>
       </div>
     </div>
   </article>`;
@@ -1778,6 +1781,11 @@ async function renderFailuresView() {
     (!_failureFilter.material || i.material === _failureFilter.material)
   );
 
+  const spoolStats = data.summary.by_spool || [];
+  const spoolStatHtml = spoolStats.length
+    ? _failureStatBlock('By Spool', spoolStats, r => r.spool_id ? `Spool #${r.spool_id}` : 'Unknown')
+    : '';
+
   el.innerHTML = `<div class="failures-header">
     <div>
       <h1>Failure Review</h1>
@@ -1795,8 +1803,8 @@ async function renderFailuresView() {
   <div class="failure-stats">
     ${_failureStatBlock('By Printer', data.summary.by_printer || [], r => (_latestPrinters.find(p => p.id === r.key)?.custom_name ?? r.key))}
     ${_failureStatBlock('By Material', data.summary.by_material || [])}
-    ${_failureStatBlock('By Timing', data.summary.by_timing || [], r => _FAIL_TIMING_LABELS[r.key] || r.key)}
-    ${_failureStatBlock('By Spool', data.summary.by_spool || [], r => r.spool_id ? `Spool #${r.spool_id}` : 'Unknown')}
+    ${_failureStatBlock('Failure Timing', data.summary.by_timing || [], r => _FAIL_TIMING_LABELS[r.key] || r.key)}
+    ${spoolStatHtml}
   </div>
   <div class="failure-list">
     ${filtered.length ? filtered.map(_failureRow).join('') : '<div class="failure-empty-panel">No matching failures.</div>'}

@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 26 May 2026 (post-session 21, failure review)_
+_Last updated 26 May 2026 (post-session 21, failure review polish)_
 
 ## Current state
 
@@ -364,6 +364,13 @@ Evidence-based failure review was added as a top-level operational view. It repo
   - verify progress/timing bucket
   - verify printer/material summaries
 - Service restart still needs interactive sudo from user after deploy
+
+### UI polish follow-up
+- `By Timing` card renamed to `Failure Timing`.
+- Empty `By Spool` summary card is hidden until spool-linked failures exist.
+- Failure rows now include a subtle `History` link back to the printer history surface.
+- Failure stat grid now auto-fits, so three-card and four-card states both fill the row cleanly.
+- Static cache-bust bumped to `v=34`.
 
 ---
 
