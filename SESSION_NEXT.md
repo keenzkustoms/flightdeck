@@ -1,9 +1,9 @@
 # Flightdeck — next session brief
-_Last updated 26 May 2026 (post-session 17, closing fixes)_
+_Last updated 26 May 2026 (post-session 20, spool traceability)_
 
 ## Current state
 
-**Tier 1 complete. Tier 2 complete. Post-Tier-2 niceties complete. Spool inventory + Print queue + queue refinements shipped.**
+**Tier 1 complete. Tier 2 complete. Post-Tier-2 niceties complete. Spool inventory + Print queue + queue refinements + Maintenance schedule + Queue preflight + Spool traceability shipped.**
 
 Service running at:
 - `http://flightdeck.local:8000`
@@ -213,9 +213,123 @@ Earlier add/remove stress testing used virtual printer instances pointing at rea
 
 ---
 
+## What was built — Session 18 (Maintenance schedule — 26 May)
+
+Printer-specific maintenance scheduling was added as a third per-printer sub-tab after Live and History.
+
+### Backend
+- New `maintenance_items` table: `printer_id`, `title`, `notes`, `due_at`, `interval_days`, `interval_prints`, `interval_hours`, `last_completed_at`, timestamps, `archived_at`
+- API endpoints:
+  - `GET/POST /api/printers/{printer_id}/maintenance`
+  - `PUT /api/printers/{printer_id}/maintenance/{item_id}`
+  - `POST /api/printers/{printer_id}/maintenance/{item_id}/complete`
+  - `DELETE /api/printers/{printer_id}/maintenance/{item_id}` (archives)
+- Due status is computed server-side from due date, elapsed days, completed print count, and completed print hours since last completion / creation.
+- Completing a repeating day-based task rolls `due_at` forward; one-off date tasks clear `due_at`.
+- Decision log events: `maintenance_added`, `maintenance_completed`, `maintenance_archived`
+
+### UI
+- New per-printer `Maintenance` sub-tab: `#/printer/{id}/maintenance`
+- Add/edit form supports task title, notes, due date, repeat by days, repeat by prints, repeat by print hours
+- Task cards show Due/OK badge, schedule progress summary, notes, Done/Edit/Del controls
+- Archive confirmation uses existing confirmation modal
+- CSS added for responsive maintenance form/cards; cache-bust bumped to static `v=29`
+
+### Verification
+- Python compile: `python -m py_compile app/db.py app/main.py`
+- FastAPI import smoke: `import app.main`
+- JS syntax: `node --check app/static/app.js` via `nvm`
+- Maintenance DB smoke test against temporary SQLite DB
+- Service restart still needs interactive sudo from user after deploy
+
+---
+
+## What was built — Session 19 (Queue preflight — 26 May)
+
+Preflight readiness checks were added to the print queue. The goal is to prevent dispatch when Flightdeck already knows a job is unsafe or unready, without mutating the queue item into a failed state.
+
+### Backend
+- Queue jobs now receive computed `preflight` data from `GET /api/queue` for pending jobs.
+- Preflight states: `ready`, `warning`, `waiting`, `blocked`.
+- `can_start` is true for ready/warning jobs and false for waiting/blocked jobs.
+- Checks include:
+  - Printer telemetry available
+  - Printer state is idle/finished before dispatch
+  - Printer not offline/error/estop
+  - No due maintenance items for that printer
+  - Loaded spool inventory exists when filament metadata is known
+  - Loaded spool material matches job material when metadata is known
+  - Loaded spool remaining grams cover job filament grams when metadata is known
+  - Low filament margin warning when remaining grams are under 115% of required grams
+- Auto-dispatch checks preflight before starting the next pending job. Blocked jobs remain pending at the front of the queue instead of being marked failed or skipped.
+- Manual "send now" checks preflight and returns HTTP 409 with preflight details when blocked.
+- Decision log event: `queue_preflight_blocked`
+
+### UI
+- Queue cards now show a preflight badge beside the queue status badge.
+- Preflight issue text is shown inline under the job metadata.
+- Send-now button is disabled when preflight `can_start` is false.
+- Static cache-bust bumped to `v=30`.
+
+### Verification
+- Python compile: `python -m py_compile app/db.py app/main.py`
+- FastAPI import smoke: `import app.main`
+- JS syntax: `node --check app/static/app.js` via `nvm`
+- Preflight DB smoke test against temporary SQLite DB:
+  - ready PLA job with matching loaded spool
+  - material mismatch blocks
+  - overdue maintenance blocks
+- Service restart still needs interactive sudo from user after deploy
+
+---
+
+## What was built — Session 20 (Spool traceability — 26 May)
+
+Spool-to-print traceability was added so physical filament inventory can be inspected from both directions. This sets up the future Brother label / QR workflow cleanly: `#/spool/{id}` is now a real detail destination.
+
+### Backend
+- New `GET /api/spools/{spool_id}/trace` endpoint.
+- New `db.get_spool_trace(spool_id)` helper returns:
+  - spool identity and current location
+  - `usage_count`
+  - `usage_total_g`
+  - per-print usage rows derived from `prints.spool_usage`
+- `get_prints_for_day()` now includes decoded `spool_usage` JSON for history print detail views.
+
+### UI
+- New route: `#/spool/{id}`
+- New spool detail page:
+  - colour band, spool #, material/subtype, brand, location
+  - remaining weight and progress bar
+  - consumed/traced stats
+  - notes
+  - print usage list with print name, printer, date, slot, grams, final state
+- Spool inventory card/table rows now include a Details link.
+- Print history detail now shows a Spool usage block when a print has `spool_usage`, linking each spool to its detail page.
+- Static cache-bust bumped to `v=31`.
+
+### Verification
+- Python compile: `python -m py_compile app/db.py app/main.py`
+- FastAPI import smoke: `import app.main`
+- JS syntax: `node --check app/static/app.js` via `nvm`
+- Spool trace DB smoke test against temporary SQLite DB:
+  - create spool
+  - create finished print
+  - write slot snapshot
+  - deduct usage
+  - verify spool trace lists the print
+  - verify history day print includes decoded `spool_usage`
+- Service restart still needs interactive sudo from user after deploy
+
+### Follow-up note
+- Smoke testing surfaced an existing non-fatal SQLite lock warning in `log_decision()` during spool deduction (`spool_deducted` logging inside a write transaction). Spool deduction and `prints.spool_usage` still write correctly. Consider tidying decision logging around spool deduction in a small future cleanup.
+
+---
+
 ## Known issues
 
-No open known issues.
+- Service restart pending for Sessions 18/19/20 until user runs `sudo systemctl restart flightdeck.service`.
+- Non-fatal `spool_deducted` decision-log SQLite lock can occur during spool deduction; trace data still writes.
 
 ---
 
@@ -239,7 +353,6 @@ No open known issues.
 ### Other queued ideas (not yet scoped)
 - Print annotations (notes column on prints, "Add note" link in finish toast and history detail)
 - Thumbnail gallery view of past prints
-- Maintenance scheduler (per-printer items, due badges)
 - ETA accuracy report (scatter chart per printer)
 
 ---
@@ -270,7 +383,7 @@ No open known issues.
 
 ## Repository
 - https://github.com/Kidabah/flightdeck (private)
-- Recent commits: spool inventory (session 14), per-printer identity colours + duplicate detection (session 15), print queue subsystem (session 16), queue refinements + format additions (session 17)
+- Recent commits: spool inventory (session 14), per-printer identity colours + duplicate detection (session 15), print queue subsystem (session 16), queue refinements + format additions (session 17), maintenance schedule (session 18), queue preflight (session 19), spool traceability (session 20)
 
 ---
 

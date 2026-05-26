@@ -16,6 +16,11 @@ function _tempUnitLabel() { return _serverSettings.temp_unit === 'F' ? '°F' : '
 function _clockOpts(extra = {}) {
   return { hour: '2-digit', minute: '2-digit', hour12: _serverSettings.time_format !== '24h', ...extra };
 }
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
+}
 
 async function loadSettings() {
   // One-time migration: push any existing localStorage value to the server
@@ -731,8 +736,10 @@ document.getElementById('view-printer').addEventListener('click', e => {
 
 function parseRoute() {
   const hash = location.hash || '#/';
-  const printerMatch = hash.match(/^#\/printer\/([^/]+)(?:\/(history))?/);
+  const printerMatch = hash.match(/^#\/printer\/([^/]+)(?:\/(history|maintenance))?/);
   if (printerMatch) return { view: 'printer', id: printerMatch[1], subtab: printerMatch[2] || 'live' };
+  const spoolMatch = hash.match(/^#\/spool\/(\d+)/);
+  if (spoolMatch) return { view: 'spool', id: parseInt(spoolMatch[1], 10) };
   if (hash === '#/cameras') return { view: 'cameras' };
   if (hash === '#/queue') return { view: 'queue' };
   if (hash === '#/settings') return { view: 'settings' };
@@ -758,6 +765,7 @@ function router() {
 
   document.getElementById('view-dashboard').hidden = route.view !== 'dashboard';
   document.getElementById('view-printer').hidden   = route.view !== 'printer';
+  document.getElementById('view-spool').hidden     = route.view !== 'spool';
   document.getElementById('view-cameras').hidden   = route.view !== 'cameras';
   document.getElementById('view-queue').hidden     = route.view !== 'queue';
   document.getElementById('view-settings').hidden  = route.view !== 'settings';
@@ -773,6 +781,7 @@ function router() {
   });
 
   if (route.view === 'printer') renderPrinterDetail(route.id, route.subtab);
+  if (route.view === 'spool') renderSpoolDetail(route.id);
   if (route.view === 'cameras') renderCamerasView();
   if (route.view === 'queue') renderQueueView();
   if (route.view === 'settings' && !wasOnSettings) renderSettingsView();
@@ -799,6 +808,7 @@ function _detailSubTabs(id, active) {
   return `<div class="detail-sub-tabs">
     <a class="sub-tab ${active === 'live' ? 'active' : ''}" href="#/printer/${id}">Live</a>
     <a class="sub-tab ${active === 'history' ? 'active' : ''}" href="#/printer/${id}/history">History</a>
+    <a class="sub-tab ${active === 'maintenance' ? 'active' : ''}" href="#/printer/${id}/maintenance">Maintenance</a>
   </div>`;
 }
 
@@ -1229,6 +1239,17 @@ function _showPrintDetail(printerId, dateStr, print) {
     </div>
   </div>`;
 
+  const spoolUsageHtml = print.spool_usage?.length
+    ? `<div class="print-spool-usage">
+        <div class="print-spool-title">Spool usage</div>
+        ${print.spool_usage.map(u => `
+          <a class="print-spool-row" href="#/spool/${u.spool_id}">
+            <span>Spool #${u.spool_id}${u.slot != null ? ` · ${(_latestPrinters.find(x => x.id === printerId) ? _amsSlotLabel(_latestPrinters.find(x => x.id === printerId), u.slot) : `S${u.slot + 1}`)}` : ''}</span>
+            <strong>${Number(u.grams || 0).toFixed(1)}g</strong>
+          </a>`).join('')}
+      </div>`
+    : '';
+
   el.innerHTML = `<div class="history-day-panel">
     <div class="print-detail-nav">
       <button class="print-detail-back" data-back-date="${dateStr}">&larr; ${dateLabel}</button>
@@ -1240,6 +1261,7 @@ function _showPrintDetail(printerId, dateStr, print) {
     ${snapshotHtml}
     ${errorHtml}
     <div>${rows.join('')}</div>
+    ${spoolUsageHtml}
     ${notesHtml}
     ${decisionHtml}
   </div>`;
@@ -1375,6 +1397,298 @@ async function _renderHistoryBody(printerId) {
   });
 }
 
+// ── Maintenance tab ───────────────────────────────────────────────────────
+
+function _maintenanceBadge(item) {
+  if (item.archived_at) return `<span class="maint-badge maint-badge-archived">Archived</span>`;
+  if (item.is_due) return `<span class="maint-badge maint-badge-due">Due</span>`;
+  return `<span class="maint-badge maint-badge-ok">OK</span>`;
+}
+
+function _maintenanceMeta(item) {
+  const parts = [];
+  if (item.due_at) {
+    const days = item.days_until_due;
+    const label = days == null ? item.due_at
+      : days < 0 ? `${Math.abs(days)}d overdue`
+      : days === 0 ? 'due today'
+      : `${days}d left`;
+    parts.push(`Date: ${label}`);
+  }
+  if (item.interval_days) {
+    parts.push(`${item.days_since ?? 0}/${item.interval_days}d`);
+  }
+  if (item.interval_prints) {
+    parts.push(`${item.prints_since}/${item.interval_prints} prints`);
+  }
+  if (item.interval_hours) {
+    parts.push(`${item.hours_since}/${item.interval_hours}h`);
+  }
+  if (item.last_completed_at) {
+    const ts = item.last_completed_at.endsWith('Z') ? item.last_completed_at : item.last_completed_at + 'Z';
+    parts.push(`last done ${new Date(ts).toLocaleDateString()}`);
+  }
+  return parts.length ? parts.join(' · ') : 'No trigger set';
+}
+
+function _maintenanceCard(item) {
+  const notes = item.notes ? `<div class="maint-notes">${esc(item.notes)}</div>` : '';
+  const data = [
+    `data-id="${item.id}"`,
+    `data-title="${esc(item.title)}"`,
+    `data-notes="${esc(item.notes || '')}"`,
+    `data-due-at="${esc(item.due_at || '')}"`,
+    `data-interval-days="${item.interval_days || ''}"`,
+    `data-interval-prints="${item.interval_prints || ''}"`,
+    `data-interval-hours="${item.interval_hours || ''}"`,
+  ].join(' ');
+  return `<article class="maint-card ${item.is_due ? 'maint-card-due' : ''}" ${data}>
+    <div class="maint-card-main">
+      <div class="maint-card-head">
+        <h3>${esc(item.title)}</h3>
+        ${_maintenanceBadge(item)}
+      </div>
+      <div class="maint-meta">${esc(_maintenanceMeta(item))}</div>
+      ${notes}
+    </div>
+    <div class="maint-actions">
+      <button class="maint-btn maint-complete" data-maint-action="complete" title="Mark complete">Done</button>
+      <button class="maint-btn" data-maint-action="edit" title="Edit">Edit</button>
+      <button class="maint-btn maint-delete" data-maint-action="delete" title="Archive">Del</button>
+    </div>
+  </article>`;
+}
+
+function _maintenanceForm(printerId, item = null) {
+  const isEdit = !!item;
+  return `<form class="maint-form" data-maint-form data-printer-id="${printerId}" ${isEdit ? `data-id="${item.id}"` : ''}>
+    <div class="maint-form-grid">
+      <label class="maint-field maint-title-field">
+        <span>Task</span>
+        <input name="title" required maxlength="80" value="${esc(item?.title || '')}" placeholder="Clean rods, grease Z, inspect nozzle">
+      </label>
+      <label class="maint-field">
+        <span>Due date</span>
+        <input name="due_at" type="date" value="${esc(item?.due_at || '')}">
+      </label>
+      <label class="maint-field">
+        <span>Every days</span>
+        <input name="interval_days" type="number" min="1" step="1" value="${item?.interval_days || ''}">
+      </label>
+      <label class="maint-field">
+        <span>Every prints</span>
+        <input name="interval_prints" type="number" min="1" step="1" value="${item?.interval_prints || ''}">
+      </label>
+      <label class="maint-field">
+        <span>Every hours</span>
+        <input name="interval_hours" type="number" min="1" step="0.5" value="${item?.interval_hours || ''}">
+      </label>
+    </div>
+    <label class="maint-field">
+      <span>Notes</span>
+      <textarea name="notes" rows="2" placeholder="Parts, lubricant, torque notes">${esc(item?.notes || '')}</textarea>
+    </label>
+    <div class="maint-form-actions">
+      ${isEdit ? '<button type="button" class="maint-btn" data-maint-cancel>Cancel</button>' : ''}
+      <button type="submit" class="maint-primary">${isEdit ? 'Save' : 'Add task'}</button>
+    </div>
+  </form>`;
+}
+
+async function _renderMaintenanceBody(printerId) {
+  const el = document.getElementById('maintenance-body');
+  if (!el) return;
+
+  let items = [];
+  try {
+    const r = await fetch(`/api/printers/${printerId}/maintenance`);
+    if (r.ok) items = await r.json();
+  } catch {}
+
+  const due = items.filter(i => i.is_due).length;
+  const summary = items.length
+    ? `${items.length} task${items.length !== 1 ? 's' : ''}${due ? ` · ${due} due` : ''}`
+    : 'No maintenance tasks yet';
+
+  el.innerHTML = `<div class="maint-header">
+      <div class="maint-summary">${summary}</div>
+    </div>
+    ${_maintenanceForm(printerId)}
+    <div class="maint-list">
+      ${items.length ? items.map(_maintenanceCard).join('') : '<div class="maint-empty">No scheduled maintenance.</div>'}
+    </div>`;
+}
+
+async function _submitMaintenanceForm(form) {
+  const printerId = form.dataset.printerId;
+  const itemId = form.dataset.id;
+  const data = Object.fromEntries(new FormData(form).entries());
+  const body = {
+    title: data.title || '',
+    notes: data.notes || null,
+    due_at: data.due_at || null,
+    interval_days: data.interval_days ? parseInt(data.interval_days, 10) : null,
+    interval_prints: data.interval_prints ? parseInt(data.interval_prints, 10) : null,
+    interval_hours: data.interval_hours ? parseFloat(data.interval_hours) : null,
+  };
+  const url = itemId
+    ? `/api/printers/${printerId}/maintenance/${itemId}`
+    : `/api/printers/${printerId}/maintenance`;
+  const method = itemId ? 'PUT' : 'POST';
+  const r = await fetch(url, {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) throw new Error('save failed');
+  await _renderMaintenanceBody(printerId);
+}
+
+document.getElementById('view-printer').addEventListener('submit', e => {
+  const form = e.target.closest('[data-maint-form]');
+  if (!form) return;
+  e.preventDefault();
+  _submitMaintenanceForm(form).catch(() => showToast('Maintenance save failed', '', 'error'));
+});
+
+document.getElementById('view-printer').addEventListener('click', e => {
+  const cancel = e.target.closest('[data-maint-cancel]');
+  if (cancel) {
+    const printerId = cancel.closest('[data-maint-form]')?.dataset.printerId;
+    if (printerId) _renderMaintenanceBody(printerId);
+    return;
+  }
+
+  const btn = e.target.closest('[data-maint-action]');
+  if (!btn) return;
+  const card = btn.closest('.maint-card');
+  const body = document.getElementById('maintenance-body');
+  const printerId = body?.dataset.printerId;
+  if (!card || !printerId) return;
+  const id = card.dataset.id;
+  const action = btn.dataset.maintAction;
+
+  if (action === 'edit') {
+    const item = {
+      id,
+      title: card.dataset.title || '',
+      notes: card.dataset.notes || '',
+      due_at: card.dataset.dueAt || '',
+      interval_days: card.dataset.intervalDays || '',
+      interval_prints: card.dataset.intervalPrints || '',
+      interval_hours: card.dataset.intervalHours || '',
+    };
+    const form = body.querySelector('[data-maint-form]');
+    if (form) form.outerHTML = _maintenanceForm(printerId, item);
+    return;
+  }
+
+  const run = async () => {
+    const url = `/api/printers/${printerId}/maintenance/${id}${action === 'complete' ? '/complete' : ''}`;
+    const method = action === 'delete' ? 'DELETE' : 'POST';
+    const r = await fetch(url, { method });
+    if (!r.ok) throw new Error('maintenance action failed');
+    await _renderMaintenanceBody(printerId);
+  };
+
+  if (action === 'delete') {
+    _modal.show('Archive this maintenance task?', () => run().catch(() => showToast('Maintenance action failed', '', 'error')));
+  } else {
+    run().catch(() => showToast('Maintenance action failed', '', 'error'));
+  }
+});
+
+// ── Spool detail / traceability ───────────────────────────────────────────
+
+function _spoolLocationText(s) {
+  if (!s.location_printer_id) return 'Storage';
+  const p = _latestPrinters.find(x => x.id === s.location_printer_id);
+  const slot = p ? _amsSlotLabel(p, s.location_slot ?? 0) : `S${(s.location_slot ?? 0) + 1}`;
+  return `${p?.custom_name ?? s.location_printer_id} · ${slot}`;
+}
+
+function _spoolTraceRow(row) {
+  const p = _latestPrinters.find(x => x.id === row.printer_id);
+  const raw = row.subtask_name || row.filename.replace(/.*[/\\]/, '');
+  const name = raw.replace(/\.gcode(\.3mf)?$/i, '').replace(/\.3mf$/i, '');
+  const ts = row.started_at ? new Date(row.started_at.endsWith('Z') ? row.started_at : row.started_at + 'Z') : null;
+  const when = ts ? ts.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }) : '—';
+  const { cls, label } = _printBadge(row.final_state || 'FINISHED');
+  const slot = row.usage_slot != null ? ` · ${p ? _amsSlotLabel(p, row.usage_slot) : `S${row.usage_slot + 1}`}` : '';
+  return `<div class="spool-trace-row">
+    <div class="spool-trace-main">
+      <div class="spool-trace-name" title="${esc(row.filename)}">${esc(name)}</div>
+      <div class="spool-trace-meta">${esc(p?.custom_name ?? row.printer_id)} · ${when}${slot}</div>
+    </div>
+    <div class="spool-trace-side">
+      <span class="spool-trace-grams">${Number(row.usage_grams || 0).toFixed(1)}g</span>
+      <span class="badge badge-${cls}" style="font-size:0.6rem;padding:0.15rem 0.5rem">${label}</span>
+    </div>
+  </div>`;
+}
+
+async function renderSpoolDetail(spoolId) {
+  const el = document.getElementById('spool-detail');
+  if (!el) return;
+  el.innerHTML = `<div class="detail-placeholder" style="min-height:40vh">Loading...</div>`;
+
+  let data = null;
+  try {
+    const r = await fetch(`/api/spools/${spoolId}/trace`);
+    if (r.ok) data = await r.json();
+  } catch {}
+
+  if (!data) {
+    el.innerHTML = `<div class="detail-placeholder">Spool not found</div>`;
+    return;
+  }
+
+  const pct = data.label_weight_g > 0 ? Math.round(data.remaining_g * 100 / data.label_weight_g) : 0;
+  const used = Math.max(0, data.label_weight_g - data.remaining_g);
+  const bandColor = data.color_hex || '#404040';
+  const textColor = _spoolTextColor(bandColor);
+  const progressColor = _spoolProgressColor(pct);
+  const trace = data.usage || [];
+
+  el.innerHTML = `<div class="spool-detail-page">
+    <div class="spool-detail-top">
+      <button class="print-detail-back" onclick="history.back()">← Back</button>
+      <a class="print-detail-back" href="#/settings">Spools</a>
+    </div>
+    <section class="spool-detail-hero">
+      <div class="spool-detail-band" style="background:${bandColor};color:${textColor}">
+        <span class="spool-detail-colour">${esc(data.color_name || data.color_hex || 'Colour')}</span>
+        <span class="spool-detail-id">#${data.id}</span>
+      </div>
+      <div class="spool-detail-body">
+        <div>
+          <h1>${esc(data.material)}${data.subtype ? ` ${esc(data.subtype)}` : ''}</h1>
+          <div class="spool-detail-brand">${esc(data.brand || 'Unknown brand')}</div>
+          <div class="spool-detail-location">${esc(_spoolLocationText(data))}</div>
+        </div>
+        <div class="spool-detail-weight">
+          <span>${Math.round(data.remaining_g)}g</span>
+          <small>remaining of ${Math.round(data.label_weight_g)}g</small>
+        </div>
+      </div>
+      <div class="spool-progress-bar spool-detail-progress">
+        <div class="spool-progress-fill" style="width:${pct}%;background:${progressColor}"></div>
+      </div>
+      <div class="spool-detail-stats">
+        <span>${pct}% remaining</span>
+        <span>${Math.round(used)}g consumed</span>
+        <span>${Number(data.usage_total_g || 0).toFixed(1)}g traced</span>
+        <span>${data.usage_count || 0} print${data.usage_count === 1 ? '' : 's'}</span>
+      </div>
+      ${data.notes ? `<div class="spool-detail-notes">${esc(data.notes)}</div>` : ''}
+    </section>
+    <section class="spool-trace-panel">
+      <div class="history-day-header">Print Usage</div>
+      ${trace.length ? trace.map(_spoolTraceRow).join('') : '<div class="print-empty">No print usage recorded for this spool yet.</div>'}
+    </section>
+  </div>`;
+}
+
 async function renderPrinterDetail(id, subtab = 'live') {
   const el = document.getElementById('printer-detail');
   const p = _latestPrinters.find(x => x.id === id);
@@ -1402,6 +1716,17 @@ async function renderPrinterDetail(id, subtab = 'live') {
           <div class="detail-placeholder" style="min-height:40vh">Loading…</div>
         </div>`;
       _renderHistoryBody(id);
+    }
+    return;
+  }
+
+  if (subtab === 'maintenance') {
+    if (needsFullRender) {
+      el.innerHTML = _detailSubTabs(id, 'maintenance') +
+        `<div class="maintenance-body" id="maintenance-body" data-printer-id="${id}">
+          <div class="detail-placeholder" style="min-height:40vh">Loading...</div>
+        </div>`;
+      _renderMaintenanceBody(id);
     }
     return;
   }
@@ -1521,6 +1846,18 @@ function _queueStatusBadge(status) {
   return `<span class="queue-badge queue-badge-${status}">${_QUEUE_STATUS_LABEL[status] || status}</span>`;
 }
 
+function _queuePreflightBadge(preflight) {
+  if (!preflight) return '';
+  return `<span class="queue-preflight queue-preflight-${preflight.status}">${preflight.label}</span>`;
+}
+
+function _queuePreflightIssues(preflight) {
+  if (!preflight?.issues?.length) return '';
+  return `<div class="queue-preflight-issues">
+    ${preflight.issues.map(i => `<span class="queue-preflight-issue queue-preflight-${i.level}">${esc(i.message)}</span>`).join('')}
+  </div>`;
+}
+
 function _fmtSeconds(s) {
   if (!s) return '';
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
@@ -1532,6 +1869,8 @@ function _queueJobCard(job, isFirst, isLast) {
   const isActive    = job.status === 'printing' || job.status === 'uploading';
   const isRecoverable = job.status === 'failed' || job.status === 'cancelled';
   const previewSrc  = job.has_preview ? `/api/queue/${job.id}/preview` : '';
+  const preflight = job.preflight;
+  const canSend = !preflight || preflight.can_start;
   const meta = [
     job.filament_type || '',
     job.filament_weight_g ? `${Math.round(job.filament_weight_g)}g` : '',
@@ -1549,14 +1888,16 @@ function _queueJobCard(job, isFirst, isLast) {
       ${meta ? `<div class="queue-job-meta">${meta}</div>` : ''}
       <div class="queue-job-status-row">
         ${_queueStatusBadge(job.status)}
+        ${_queuePreflightBadge(preflight)}
         ${job.error_msg ? `<span class="queue-job-error" title="${job.error_msg}">⚠ ${job.error_msg}</span>` : ''}
       </div>
+      ${_queuePreflightIssues(preflight)}
     </div>
     <div class="queue-job-actions">
       ${isPending ? `
         <button class="queue-act-btn" data-action="up"   data-id="${job.id}" title="Move up"   ${isFirst ? 'disabled' : ''}>▲</button>
         <button class="queue-act-btn" data-action="down" data-id="${job.id}" title="Move down" ${isLast  ? 'disabled' : ''}>▼</button>
-        <button class="queue-act-btn queue-act-send" data-action="send"   data-id="${job.id}" title="Send now">▶</button>
+        <button class="queue-act-btn queue-act-send" data-action="send"   data-id="${job.id}" title="${canSend ? 'Send now' : 'Preflight blocked'}" ${canSend ? '' : 'disabled'}>▶</button>
         <button class="queue-act-btn queue-act-del"  data-action="delete" data-id="${job.id}" title="Remove">✕</button>
       ` : isRecoverable ? `
         <button class="queue-act-btn queue-act-retry" data-action="retry"  data-id="${job.id}" title="Retry">↺</button>
@@ -1893,7 +2234,7 @@ function updateDashboard(printers) {
 
   // Refresh object exclusion panel on every tick when on live tab and printing
   const _route = parseRoute();
-  if (_route.view === 'printer' && _route.subtab !== 'history') {
+  if (_route.view === 'printer' && _route.subtab === 'live') {
     const _rp = printers.find(x => x.id === _route.id);
     if (_rp?.state === 'printing' || _rp?.state === 'paused') refreshObjectsPanel(_route.id);
   }
@@ -2911,6 +3252,7 @@ function _spoolCardHtml(s) {
         <span class="spool-meta">Used: ${Math.round(used)}g</span>
       </div>
       <div class="spool-card-actions">
+        <a class="spool-action-btn" href="#/spool/${s.id}" title="Details">Details</a>
         <button class="spool-action-btn spool-action-edit" data-action="edit"      data-id="${s.id}" title="Edit">Edit</button>
         <button class="spool-action-btn" data-action="duplicate" data-id="${s.id}" title="Duplicate">📋</button>
         <button class="spool-action-btn" data-action="reset"     data-id="${s.id}" title="Reset weight">🔄</button>
@@ -2946,6 +3288,7 @@ function _spoolTableHtml(spools) {
       <td class="spool-td spool-td-num">${Math.round(s.label_weight_g)}g</td>
       <td class="spool-td spool-td-num"><span class="${pctCls}">${Math.round(s.remaining_g)}g (${pct}%)</span></td>
       <td class="spool-td spool-td-actions">
+        <a class="spool-action-btn" href="#/spool/${s.id}" title="Details">Details</a>
         <button class="spool-action-btn spool-action-edit" data-action="edit"      data-id="${s.id}" title="Edit">Edit</button>
         <button class="spool-action-btn" data-action="duplicate" data-id="${s.id}" title="Duplicate">📋</button>
         <button class="spool-action-btn" data-action="reset"     data-id="${s.id}" title="Reset">🔄</button>

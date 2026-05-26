@@ -42,6 +42,7 @@ _broadcast_task: asyncio.Task | None = None
 _ntfy: NtfyConfig | None = None
 _prev_states: dict[str, str] = {}  # printer_id → last known state
 _last_seen_cache: dict[str, datetime] = {}  # printer_id → last successful contact
+_latest_printers: dict[str, dict] = {}  # printer_id → most recent gathered status
 
 
 def _dt_default(obj):
@@ -85,6 +86,8 @@ async def _gather_all() -> list[dict]:
             log.warning("printer fetch failed: %s", r)
         else:
             out.append(r)
+    _latest_printers.clear()
+    _latest_printers.update({p["id"]: p for p in out})
     return out
 
 
@@ -558,6 +561,15 @@ class NotesRequest(BaseModel):
     notes: str = ""
 
 
+class MaintenanceRequest(BaseModel):
+    title: str
+    notes: Optional[str] = None
+    due_at: Optional[str] = None
+    interval_days: Optional[int] = None
+    interval_prints: Optional[int] = None
+    interval_hours: Optional[float] = None
+
+
 @app.patch("/api/printers/{printer_id}/prints/{print_id}/notes")
 async def update_print_notes(printer_id: str, print_id: int, body: NotesRequest):
     _assert_printer(printer_id)
@@ -592,6 +604,59 @@ async def get_history_day(printer_id: str, date: str):
         raise HTTPException(status_code=400, detail="date must be YYYY-MM-DD")
     _assert_printer(printer_id)
     return db.get_prints_for_day(printer_id, date)
+
+
+def _clean_maintenance(body: MaintenanceRequest) -> dict:
+    title = body.title.strip()
+    if not title:
+        raise HTTPException(status_code=422, detail="title is required")
+    if body.due_at and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", body.due_at):
+        raise HTTPException(status_code=422, detail="due_at must be YYYY-MM-DD")
+    return {
+        "title": title,
+        "notes": body.notes.strip() if body.notes else None,
+        "due_at": body.due_at or None,
+        "interval_days": body.interval_days if body.interval_days and body.interval_days > 0 else None,
+        "interval_prints": body.interval_prints if body.interval_prints and body.interval_prints > 0 else None,
+        "interval_hours": body.interval_hours if body.interval_hours and body.interval_hours > 0 else None,
+    }
+
+
+@app.get("/api/printers/{printer_id}/maintenance")
+async def get_maintenance(printer_id: str, include_archived: bool = False):
+    _assert_printer(printer_id)
+    return db.get_maintenance_items(printer_id, include_archived=include_archived)
+
+
+@app.post("/api/printers/{printer_id}/maintenance", status_code=201)
+async def create_maintenance(printer_id: str, body: MaintenanceRequest):
+    _assert_printer(printer_id)
+    item_id = db.create_maintenance_item(printer_id, **_clean_maintenance(body))
+    return {"ok": True, "id": item_id}
+
+
+@app.put("/api/printers/{printer_id}/maintenance/{item_id}")
+async def update_maintenance(printer_id: str, item_id: int, body: MaintenanceRequest):
+    _assert_printer(printer_id)
+    if not db.update_maintenance_item(item_id, printer_id, **_clean_maintenance(body)):
+        raise HTTPException(status_code=404, detail="maintenance item not found")
+    return {"ok": True}
+
+
+@app.post("/api/printers/{printer_id}/maintenance/{item_id}/complete")
+async def complete_maintenance(printer_id: str, item_id: int):
+    _assert_printer(printer_id)
+    if not db.complete_maintenance_item(item_id, printer_id):
+        raise HTTPException(status_code=404, detail="maintenance item not found")
+    return {"ok": True}
+
+
+@app.delete("/api/printers/{printer_id}/maintenance/{item_id}")
+async def delete_maintenance(printer_id: str, item_id: int):
+    _assert_printer(printer_id)
+    if not db.archive_maintenance_item(item_id, printer_id):
+        raise HTTPException(status_code=404, detail="maintenance item not found")
+    return {"ok": True}
 
 
 def _assert_printer(printer_id: str) -> None:
@@ -826,6 +891,13 @@ async def get_spool(spool_id: int):
         raise HTTPException(status_code=404, detail="Spool not found")
     return s
 
+@app.get("/api/spools/{spool_id}/trace")
+async def get_spool_trace(spool_id: int):
+    s = db.get_spool_trace(spool_id)
+    if not s:
+        raise HTTPException(status_code=404, detail="Spool not found")
+    return s
+
 @app.post("/api/spools")
 async def create_spool(body: SpoolCreate):
     remaining = body.remaining_g if body.remaining_g is not None else body.label_weight_g
@@ -900,11 +972,112 @@ def _printer_kind(printer_id: str) -> Optional[str]:
     return None
 
 
+async def _printer_status_map() -> dict[str, dict]:
+    if not _latest_printers:
+        await _gather_all()
+    return dict(_latest_printers)
+
+
+def _norm_material(value: Optional[str]) -> str:
+    return re.sub(r"[^a-z0-9]+", "", (value or "").lower())
+
+
+def _spool_matches_material(spool: dict, material: str) -> bool:
+    wanted = _norm_material(material)
+    if not wanted:
+        return False
+    haystack = " ".join([
+        str(spool.get("material") or ""),
+        str(spool.get("subtype") or ""),
+        str(spool.get("brand") or ""),
+    ])
+    got = _norm_material(haystack)
+    return bool(got) and (wanted in got or got in wanted)
+
+
+def _queue_preflight(job: dict, printer_status: Optional[dict]) -> dict:
+    issues: list[dict] = []
+    state = (printer_status or {}).get("state")
+
+    if not printer_status:
+        issues.append({"level": "wait", "message": "Waiting for printer telemetry"})
+    elif state in ("offline", "error", "estop"):
+        issues.append({"level": "block", "message": f"Printer is {state}"})
+    elif state not in ("idle", "finished"):
+        issues.append({"level": "wait", "message": f"Printer is {state}"})
+
+    due_maintenance = [m for m in db.get_maintenance_items(job["printer_id"]) if m.get("is_due")]
+    if due_maintenance:
+        names = ", ".join(m["title"] for m in due_maintenance[:3])
+        more = f" +{len(due_maintenance) - 3}" if len(due_maintenance) > 3 else ""
+        issues.append({"level": "block", "message": f"Maintenance due: {names}{more}"})
+
+    required_g = job.get("filament_weight_g")
+    material = job.get("filament_type")
+    loaded = db.get_spools_by_printer(job["printer_id"])
+    loaded_spools = list(loaded.values())
+    material_matches = [s for s in loaded_spools if _spool_matches_material(s, material)]
+
+    if material:
+        if not loaded_spools:
+            issues.append({"level": "block", "message": f"No loaded spool recorded for {material}"})
+        elif not material_matches:
+            issues.append({"level": "block", "message": f"No loaded spool matches {material}"})
+    else:
+        issues.append({"level": "warn", "message": "No material metadata; material check skipped"})
+
+    if required_g is not None:
+        candidates = material_matches if material and material_matches else loaded_spools
+        if not candidates:
+            issues.append({"level": "block", "message": f"No inventory spool available for {required_g:.0f}g check"})
+        else:
+            remaining_g = sum(float(s.get("remaining_g") or 0) for s in candidates)
+            if remaining_g + 0.1 < float(required_g):
+                issues.append({
+                    "level": "block",
+                    "message": f"Loaded filament short: {remaining_g:.0f}g available, {float(required_g):.0f}g needed",
+                })
+            elif remaining_g < float(required_g) * 1.15:
+                issues.append({
+                    "level": "warn",
+                    "message": f"Low filament margin: {remaining_g:.0f}g available, {float(required_g):.0f}g needed",
+                })
+    else:
+        issues.append({"level": "warn", "message": "No filament weight metadata; stock check skipped"})
+
+    has_block = any(i["level"] == "block" for i in issues)
+    has_wait = any(i["level"] == "wait" for i in issues)
+    has_warn = any(i["level"] == "warn" for i in issues)
+    status = "blocked" if has_block else "waiting" if has_wait else "warning" if has_warn else "ready"
+    return {
+        "status": status,
+        "label": {"ready": "Ready", "warning": "Warning", "waiting": "Waiting", "blocked": "Blocked"}[status],
+        "can_start": not has_block and not has_wait,
+        "issues": issues,
+    }
+
+
+def _apply_queue_preflight(jobs: list[dict], statuses: dict[str, dict]) -> list[dict]:
+    for job in jobs:
+        if job.get("status") == "pending":
+            job["preflight"] = _queue_preflight(job, statuses.get(job["printer_id"]))
+        else:
+            job["preflight"] = None
+    return jobs
+
+
 async def _advance_queue(printer_id: str) -> None:
     job = db.queue_next_pending(printer_id)
     if not job:
         return
     job_id, filename, file_path = job["id"], job["filename"], job["file_path"]
+    statuses = await _printer_status_map()
+    preflight = _queue_preflight(job, statuses.get(printer_id))
+    if not preflight["can_start"]:
+        reason = "; ".join(i["message"] for i in preflight["issues"] if i["level"] in ("block", "wait"))
+        log.info("queue: preflight blocked job %d on %s: %s", job_id, printer_id, reason)
+        db.log_decision(printer_id, "queue_preflight_blocked", f"Job #{job_id} {filename}: {reason}")
+        return
     db.queue_update_status(job_id, "uploading")
     try:
         for (pid, _, _, _, url) in _moonraker:
@@ -937,7 +1110,9 @@ async def get_queue_summary():
 
 @app.get("/api/queue")
 async def get_queue(printer_id: Optional[str] = None):
-    return db.queue_list(printer_id)
+    jobs = db.queue_list(printer_id)
+    statuses = await _printer_status_map()
+    return _apply_queue_preflight(jobs, statuses)
 
 
 @app.post("/api/queue/upload", status_code=201)
@@ -1057,6 +1232,10 @@ async def send_queue_job(job_id: int):
         raise HTTPException(status_code=404, detail="Job not found")
     if job["status"] != "pending":
         raise HTTPException(status_code=409, detail=f"Job status is '{job['status']}', must be pending")
+    statuses = await _printer_status_map()
+    preflight = _queue_preflight(job, statuses.get(job["printer_id"]))
+    if not preflight["can_start"]:
+        raise HTTPException(status_code=409, detail={"message": "Preflight blocked", "preflight": preflight})
     asyncio.create_task(_advance_queue_specific(job_id, job["printer_id"],
                                                 job["filename"], job["file_path"]))
     return {"ok": True}
@@ -1064,6 +1243,15 @@ async def send_queue_job(job_id: int):
 
 async def _advance_queue_specific(job_id: int, printer_id: str,
                                    filename: str, file_path: str) -> None:
+    job = db.queue_get(job_id)
+    if job:
+        statuses = await _printer_status_map()
+        preflight = _queue_preflight(job, statuses.get(printer_id))
+        if not preflight["can_start"]:
+            reason = "; ".join(i["message"] for i in preflight["issues"] if i["level"] in ("block", "wait"))
+            log.info("queue send: preflight blocked job %d on %s: %s", job_id, printer_id, reason)
+            db.log_decision(printer_id, "queue_preflight_blocked", f"Job #{job_id} {filename}: {reason}")
+            return
     db.queue_update_status(job_id, "uploading")
     try:
         for (pid, _, _, _, url) in _moonraker:

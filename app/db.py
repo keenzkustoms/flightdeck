@@ -2,7 +2,7 @@ from __future__ import annotations
 import sqlite3
 import logging
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -121,6 +121,24 @@ def init() -> None:
 
             CREATE INDEX IF NOT EXISTS idx_queue_printer_status
                 ON print_queue(printer_id, status, position);
+
+            CREATE TABLE IF NOT EXISTS maintenance_items (
+                id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+                printer_id            TEXT NOT NULL,
+                title                 TEXT NOT NULL,
+                notes                 TEXT,
+                due_at                TEXT,
+                interval_days         INTEGER,
+                interval_prints       INTEGER,
+                interval_hours        REAL,
+                last_completed_at     TEXT,
+                created_at            TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at            TEXT NOT NULL DEFAULT (datetime('now')),
+                archived_at           TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_maintenance_printer_active
+                ON maintenance_items(printer_id, archived_at, due_at);
         """)
     # Migrate existing DB: add columns if missing
     with _conn() as conn:
@@ -412,13 +430,24 @@ def get_prints_for_day(printer_id: str, date_str: str) -> list[dict]:
             """SELECT id, filename, subtask_name, started_at, ended_at,
                       duration_seconds, final_state, error_message,
                       layers_total, layers_completed, filament_grams, material,
-                      snapshot_captured_at IS NOT NULL AS has_snapshot, notes
+                      snapshot_captured_at IS NOT NULL AS has_snapshot, notes,
+                      spool_usage
                FROM prints
                WHERE printer_id = ? AND date(started_at) = ?
                ORDER BY started_at""",
             (printer_id, date_str),
         ).fetchall()
-    return [dict(r) for r in rows]
+    result = []
+    import json
+    for r in rows:
+        item = dict(r)
+        raw_usage = item.pop("spool_usage", None)
+        try:
+            item["spool_usage"] = json.loads(raw_usage) if raw_usage else []
+        except Exception:
+            item["spool_usage"] = []
+        result.append(item)
+    return result
 
 
 def get_last_ended_at(printer_id: str) -> Optional[datetime]:
@@ -624,6 +653,165 @@ def set_setting(key: str, value: str) -> None:
         )
 
 
+# ── maintenance schedule ─────────────────────────────────────────────────
+
+def _maintenance_usage(conn, printer_id: str, anchor: Optional[str]) -> dict:
+    params: list = [printer_id]
+    where = "printer_id = ? AND final_state = 'FINISHED'"
+    if anchor:
+        where += " AND ended_at > ?"
+        params.append(anchor)
+    row = conn.execute(
+        f"""SELECT COUNT(*) AS prints,
+                   COALESCE(SUM(duration_seconds), 0) AS seconds
+            FROM prints
+            WHERE {where}""",
+        params,
+    ).fetchone()
+    return {"prints": int(row["prints"] or 0), "hours": round((row["seconds"] or 0) / 3600, 2)}
+
+
+def _maintenance_enrich(conn, row) -> dict:
+    item = dict(row)
+    anchor = item["last_completed_at"] or item["created_at"]
+    usage = _maintenance_usage(conn, item["printer_id"], anchor)
+    item["prints_since"] = usage["prints"]
+    item["hours_since"] = usage["hours"]
+
+    reasons = []
+    now = datetime.utcnow()
+    if item.get("due_at"):
+        try:
+            due = datetime.fromisoformat(item["due_at"])
+            item["days_until_due"] = (due.date() - now.date()).days
+            if due <= now:
+                reasons.append("date")
+        except Exception:
+            item["days_until_due"] = None
+    else:
+        item["days_until_due"] = None
+
+    if item.get("interval_days"):
+        try:
+            started = datetime.fromisoformat(anchor)
+            item["days_since"] = max(0, (now.date() - started.date()).days)
+            if item["days_since"] >= int(item["interval_days"]):
+                reasons.append("days")
+        except Exception:
+            item["days_since"] = None
+    else:
+        item["days_since"] = None
+
+    if item.get("interval_prints") and usage["prints"] >= int(item["interval_prints"]):
+        reasons.append("prints")
+    if item.get("interval_hours") and usage["hours"] >= float(item["interval_hours"]):
+        reasons.append("hours")
+
+    item["due_reasons"] = reasons
+    item["is_due"] = bool(reasons)
+    return item
+
+
+def get_maintenance_items(printer_id: str, include_archived: bool = False) -> list[dict]:
+    with _conn() as conn:
+        where = "printer_id = ?"
+        if not include_archived:
+            where += " AND archived_at IS NULL"
+        rows = conn.execute(
+            f"""SELECT id, printer_id, title, notes, due_at, interval_days,
+                       interval_prints, interval_hours, last_completed_at,
+                       created_at, updated_at, archived_at
+                FROM maintenance_items
+                WHERE {where}
+                ORDER BY archived_at IS NOT NULL, due_at IS NULL, due_at, title""",
+            (printer_id,),
+        ).fetchall()
+        items = [_maintenance_enrich(conn, r) for r in rows]
+    return sorted(items, key=lambda x: (not x["is_due"], x.get("due_at") is None, x.get("due_at") or "", x["title"].lower()))
+
+
+def create_maintenance_item(
+    printer_id: str,
+    title: str,
+    *,
+    notes: Optional[str] = None,
+    due_at: Optional[str] = None,
+    interval_days: Optional[int] = None,
+    interval_prints: Optional[int] = None,
+    interval_hours: Optional[float] = None,
+) -> int:
+    with _conn() as conn:
+        cursor = conn.execute(
+            """INSERT INTO maintenance_items
+               (printer_id, title, notes, due_at, interval_days, interval_prints, interval_hours)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (printer_id, title, notes, due_at, interval_days, interval_prints, interval_hours),
+        )
+        item_id = cursor.lastrowid
+    log_decision(printer_id, "maintenance_added", f"Maintenance #{item_id}: {title}")
+    return item_id
+
+
+def update_maintenance_item(item_id: int, printer_id: str, **fields) -> bool:
+    allowed = {"title", "notes", "due_at", "interval_days", "interval_prints", "interval_hours"}
+    updates = {k: v for k, v in fields.items() if k in allowed}
+    if not updates:
+        return False
+    updates["updated_at"] = datetime.utcnow().isoformat()
+    cols = ", ".join(f"{k} = ?" for k in updates)
+    vals = list(updates.values()) + [item_id, printer_id]
+    with _conn() as conn:
+        c = conn.execute(
+            f"UPDATE maintenance_items SET {cols} WHERE id = ? AND printer_id = ? AND archived_at IS NULL",
+            vals,
+        )
+    return c.rowcount > 0
+
+
+def complete_maintenance_item(item_id: int, printer_id: str) -> bool:
+    now = datetime.utcnow()
+    with _conn() as conn:
+        row = conn.execute(
+            """SELECT title, due_at, interval_days
+               FROM maintenance_items
+               WHERE id = ? AND printer_id = ? AND archived_at IS NULL""",
+            (item_id, printer_id),
+        ).fetchone()
+        if not row:
+            return False
+        next_due = None
+        if row["interval_days"]:
+            today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            next_due = (today + timedelta(days=int(row["interval_days"]))).date().isoformat()
+        conn.execute(
+            """UPDATE maintenance_items
+               SET last_completed_at = ?,
+                   due_at = ?,
+                   updated_at = ?
+               WHERE id = ? AND printer_id = ?""",
+            (now.isoformat(), next_due, now.isoformat(), item_id, printer_id),
+        )
+    log_decision(printer_id, "maintenance_completed", f"Maintenance #{item_id}: {row['title']}")
+    return True
+
+
+def archive_maintenance_item(item_id: int, printer_id: str) -> bool:
+    with _conn() as conn:
+        row = conn.execute(
+            "SELECT title FROM maintenance_items WHERE id = ? AND printer_id = ?",
+            (item_id, printer_id),
+        ).fetchone()
+        c = conn.execute(
+            """UPDATE maintenance_items
+               SET archived_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+               WHERE id = ? AND printer_id = ? AND archived_at IS NULL""",
+            (item_id, printer_id),
+        )
+    if c.rowcount and row:
+        log_decision(printer_id, "maintenance_archived", f"Maintenance #{item_id}: {row['title']}")
+    return c.rowcount > 0
+
+
 # ── material costs ────────────────────────────────────────────────────────
 
 def get_material_costs() -> list:
@@ -796,6 +984,44 @@ def get_spool(spool_id: int) -> Optional[dict]:
             (spool_id,),
         ).fetchone()
     return dict(row) if row else None
+
+
+def get_spool_trace(spool_id: int) -> Optional[dict]:
+    """Return spool identity plus every print row that recorded usage for it."""
+    spool = get_spool(spool_id)
+    if not spool:
+        return None
+    import json
+    usage = []
+    with _conn() as conn:
+        rows = conn.execute(
+            """SELECT id, printer_id, filename, subtask_name, started_at, ended_at,
+                      duration_seconds, final_state, filament_grams, material,
+                      spool_usage
+               FROM prints
+               WHERE spool_usage IS NOT NULL
+               ORDER BY started_at DESC""",
+        ).fetchall()
+    total_used = 0.0
+    for row in rows:
+        try:
+            entries = json.loads(row["spool_usage"] or "[]")
+        except Exception:
+            entries = []
+        for entry in entries:
+            if int(entry.get("spool_id") or 0) != int(spool_id):
+                continue
+            grams = float(entry.get("grams") or 0)
+            total_used += grams
+            item = dict(row)
+            item.pop("spool_usage", None)
+            item["usage_grams"] = round(grams, 2)
+            item["usage_slot"] = entry.get("slot")
+            usage.append(item)
+    spool["usage"] = usage
+    spool["usage_count"] = len(usage)
+    spool["usage_total_g"] = round(total_used, 2)
+    return spool
 
 
 def update_spool(spool_id: int, **fields) -> bool:
@@ -1151,7 +1377,8 @@ def queue_delete(job_id: int) -> tuple[bool, Optional[str]]:
 def queue_next_pending(printer_id: str) -> Optional[dict]:
     with _conn() as conn:
         row = conn.execute(
-            """SELECT id, printer_id, filename, file_path
+            """SELECT id, printer_id, filename, file_path,
+                      estimated_seconds, filament_weight_g, filament_type
                FROM print_queue
                WHERE printer_id = ? AND status = 'pending'
                ORDER BY position ASC, id ASC LIMIT 1""",
