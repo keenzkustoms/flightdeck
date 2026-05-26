@@ -955,7 +955,7 @@ function _detailMmuPanel(p) {
   const title = `<div class="detail-panel-title">${unit.vendor || 'MMU'} · ${unit.num_gates} gates</div>`;
 
   const slots = unit.gates.map(gate => {
-    const style = (!gate.empty && gate.color) ? `style="background:${gate.color}"` : '';
+    const style = !gate.empty ? `style="background:${gate.color || 'var(--muted)'}"` : '';
     const activeCls = gate.active ? ' ams-active' : '';
     const emptyCls  = gate.empty  ? ' ams-empty'  : '';
     const bufferedCls = (!gate.empty && gate.status === 2) ? ' mmu-buffered' : '';
@@ -2688,7 +2688,7 @@ function _spoolCardHtml(s) {
         <span class="spool-meta">Used: ${Math.round(used)}g</span>
       </div>
       <div class="spool-card-actions">
-        <button class="spool-action-btn" data-action="edit"      data-id="${s.id}" title="Edit">✎</button>
+        <button class="spool-action-btn spool-action-edit" data-action="edit"      data-id="${s.id}" title="Edit">Edit</button>
         <button class="spool-action-btn" data-action="duplicate" data-id="${s.id}" title="Duplicate">📋</button>
         <button class="spool-action-btn" data-action="reset"     data-id="${s.id}" title="Reset weight">🔄</button>
         <button class="spool-action-btn" data-action="archive"   data-id="${s.id}" title="Archive">📦</button>
@@ -2723,7 +2723,7 @@ function _spoolTableHtml(spools) {
       <td class="spool-td spool-td-num">${Math.round(s.label_weight_g)}g</td>
       <td class="spool-td spool-td-num"><span class="${pctCls}">${Math.round(s.remaining_g)}g (${pct}%)</span></td>
       <td class="spool-td spool-td-actions">
-        <button class="spool-action-btn" data-action="edit"      data-id="${s.id}" title="Edit">✎</button>
+        <button class="spool-action-btn spool-action-edit" data-action="edit"      data-id="${s.id}" title="Edit">Edit</button>
         <button class="spool-action-btn" data-action="duplicate" data-id="${s.id}" title="Duplicate">📋</button>
         <button class="spool-action-btn" data-action="reset"     data-id="${s.id}" title="Reset">🔄</button>
         <button class="spool-action-btn" data-action="archive"   data-id="${s.id}" title="Archive">📦</button>
@@ -3070,10 +3070,20 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
   const slotSel   = overlay.querySelector('#sm-slot');
   const prevPicks = overlay.querySelector('#sm-prev-picks');
 
+  let _colorLock = false;
   function syncColor(hex) {
+    if (_colorLock) return;
+    _colorLock = true;
     const valid = /^#[0-9a-fA-F]{6}$/.test(hex);
     preview.style.background = valid ? hex : '#808080';
-    if (valid) { picker.value = hex; hexIn.value = hex; }
+    if (valid) {
+      picker.value = hex;
+      hexIn.value = hex;
+      overlay.querySelectorAll('.spool-swatch').forEach(s =>
+        s.classList.toggle('selected', s.dataset.hex === hex)
+      );
+    }
+    _colorLock = false;
   }
 
   function updatePrevPicks() {
@@ -3114,7 +3124,9 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
   }
 
   function populateBrands(mat) {
-    const brands = matBrands[mat] || [];
+    let brands = matBrands[mat] || [];
+    // Always include prefilled brand so edit/duplicate never silently fails validation
+    if (p0.brand && !brands.includes(p0.brand)) brands = [p0.brand, ...brands];
     brandSel.innerHTML = brands.length
       ? brands.map(b => `<option value="${b}"${p0.brand===b?' selected':''}>${b||'(unbranded)'}</option>`).join('')
       : '<option value="">— no brands in catalogue —</option>';
@@ -3145,11 +3157,27 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
   });
 
   picker.addEventListener('input', () => syncColor(picker.value));
+  picker.addEventListener('change', () => syncColor(picker.value));
   hexIn.addEventListener('input', () => syncColor(hexIn.value));
 
+  const _swatchNames = {
+    '#1a1a1a':'Black','#ffffff':'White','#c0c0c0':'Silver','#808080':'Grey',
+    '#ef4444':'Red','#f97316':'Orange','#eab308':'Yellow','#22c55e':'Green',
+    '#06b6d4':'Cyan','#3b82f6':'Blue','#a855f7':'Purple','#ec4899':'Pink',
+  };
+  const _knownSwatchNames = new Set(Object.values(_swatchNames));
+
   overlay.querySelectorAll('.spool-swatch').forEach(sw => {
-    sw.addEventListener('click', () => syncColor(sw.dataset.hex));
+    sw.addEventListener('click', () => {
+      syncColor(sw.dataset.hex);
+      const nameEl = overlay.querySelector('#sm-color-name');
+      if (!nameEl.value || _knownSwatchNames.has(nameEl.value)) {
+        nameEl.value = _swatchNames[sw.dataset.hex] || '';
+      }
+    });
   });
+
+  syncColor(initHex);
 
   labelG.addEventListener('input', () => {
     if (!remainG.dataset.touched) remainG.value = labelG.value;
@@ -3164,7 +3192,17 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
     const opt = printerSel.options[printerSel.selectedIndex];
     const kind = opt?.dataset.kind || 'bambu';
     if (kind === 'moonraker') {
-      slotSel.innerHTML = '<option value="0">Single extruder</option>';
+      const printer = _latestPrinters.find(x => x.id === printerSel.value);
+      const mmuUnit = printer?.mmu?.[0];
+      if (mmuUnit?.num_gates > 1) {
+        slotSel.innerHTML = Array.from({length: mmuUnit.num_gates}, (_, i) => {
+          const gate = mmuUnit.gates?.[i];
+          const label = gate?.material ? `Gate ${i} · ${gate.material}` : `Gate ${i}`;
+          return `<option value="${i}"${p0.location_slot === i ? ' selected' : ''}>${label}</option>`;
+        }).join('');
+      } else {
+        slotSel.innerHTML = '<option value="0">Single extruder</option>';
+      }
       return;
     }
     const printer = _latestPrinters.find(x => x.id === printerSel.value);
@@ -3226,31 +3264,39 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
     const btn = overlay.querySelector('#sm-submit');
     btn.disabled = true; btn.textContent = '…';
     try {
-      let r;
       if (isEdit) {
-        r = await fetch(`/api/spools/${prefill.id}`, {
+        const r = await fetch(`/api/spools/${prefill.id}`, {
           method: 'PUT', headers: {'Content-Type':'application/json'},
           body: JSON.stringify(body),
         });
-        if (r.ok && locMode === 'loaded') {
-          await fetch(`/api/spools/${prefill.id}/move`, {
-            method: 'POST', headers: {'Content-Type':'application/json'},
-            body: JSON.stringify({printer_id: body.location_printer_id, slot: body.location_slot}),
-          });
+        if (!r.ok) throw new Error();
+        // Always update location on edit — handles loaded→storage clearing too
+        const mr = await fetch(`/api/spools/${prefill.id}/move`, {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({
+            printer_id: locMode === 'loaded' ? printerSel.value : null,
+            slot:       locMode === 'loaded' ? parseInt(slotSel.value) : null,
+          }),
+        });
+        if (mr.status === 409) {
+          const err = await mr.json();
+          btn.textContent = `Slot occupied (#${err.detail?.conflict_spool_id ?? '?'})`;
+          setTimeout(() => { btn.textContent = submitLabel; btn.disabled = false; }, 3000);
+          return;
         }
       } else {
-        r = await fetch('/api/spools', {
+        const r = await fetch('/api/spools', {
           method: 'POST', headers: {'Content-Type':'application/json'},
           body: JSON.stringify(body),
         });
+        if (r.status === 409) {
+          const err = await r.json();
+          btn.textContent = `Slot occupied (#${err.detail?.conflict_spool_id ?? '?'})`;
+          setTimeout(() => { btn.textContent = submitLabel; btn.disabled = false; }, 3000);
+          return;
+        }
+        if (!r.ok) throw new Error();
       }
-      if (r.status === 409) {
-        const err = await r.json();
-        btn.textContent = `Slot occupied (#${err.detail?.conflict_spool_id ?? '?'})`;
-        setTimeout(() => { btn.textContent = submitLabel; btn.disabled = false; }, 3000);
-        return;
-      }
-      if (!r.ok) throw new Error();
       overlay.remove();
       onSaved();
     } catch {

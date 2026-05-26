@@ -491,9 +491,9 @@ def _parse_mmu(mmu: dict, mmu_machine: dict, _gate_map: dict) -> list:
             return default
 
     def _norm_color(raw: str) -> str:
-        # RRGGBBAA → take first 6 hex chars; skip black/transparent
+        # RRGGBBAA → take first 6 hex chars; skip transparent/unset only
         h = (raw or "").lstrip("#")[:6].upper()
-        return f"#{h}" if h and h not in ("000000", "FFFFFF") else ""
+        return f"#{h}" if len(h) == 6 else ""
 
     gates = []
     for i in range(num_gates):

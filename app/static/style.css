@@ -4,9 +4,12 @@
 :root {
   --bg:       #0a0a0f;
   --surface:  #13131a;
+  --card:     #1a1a24;
+  --hover:    #22222e;
   --border:   #2a2a3a;
   --text:     #e2e8f0;
   --muted:    #64748b;
+  --accent:   #3b82f6;
   --printing: #3b82f6;
   --idle:     #22c55e;
   --paused:   #f59e0b;
@@ -2218,6 +2221,8 @@ select.settings-input { cursor: pointer; }
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem;
   margin-bottom: 0.75rem;
 }
 
@@ -2225,6 +2230,12 @@ select.settings-input { cursor: pointer; }
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 640px) {
+  .spool-header-actions { justify-content: flex-end; }
+  .spool-search { min-width: 0; flex: 1 1 8rem; }
 }
 
 .spool-add-btn {
@@ -2420,6 +2431,16 @@ select.settings-input { cursor: pointer; }
   transition: opacity 0.15s;
 }
 .spool-action-btn:hover { opacity: 1; }
+.spool-action-edit {
+  opacity: 0.8;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--accent);
+  border: 1px solid currentColor !important;
+  padding: 0.1rem 0.45rem !important;
+}
+.spool-action-edit:hover { opacity: 1; }
 
 /* Add Spool modal */
 .spool-modal {
