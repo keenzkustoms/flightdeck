@@ -1284,6 +1284,28 @@ header {
   box-shadow: 0 0 0 2px rgba(34,197,94,0.25);
 }
 
+.ams-slot.ams-warning {
+  border-color: #f59e0b;
+  box-shadow: 0 0 0 2px rgba(245,158,11,0.28);
+  position: relative;
+}
+
+.ams-slot.ams-warning::after {
+  content: "!";
+  position: absolute;
+  right: -7px;
+  top: -8px;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: #f59e0b;
+  color: #111827;
+  font-size: 0.7rem;
+  font-weight: 900;
+  line-height: 16px;
+  text-align: center;
+}
+
 .ams-slot-type {
   font-size: 0.6rem;
   font-weight: 700;
@@ -1322,6 +1344,21 @@ header {
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+}
+
+.slot-printer-report {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.slot-warning {
+  border: 1px solid rgba(245,158,11,0.45);
+  background: rgba(245,158,11,0.11);
+  color: #fbbf24;
+  border-radius: 0.5rem;
+  padding: 0.65rem 0.75rem;
+  font-size: 0.82rem;
+  line-height: 1.35;
 }
 
 .slot-current-card {

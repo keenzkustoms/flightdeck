@@ -1100,17 +1100,19 @@ function _detailAmsPanel(p) {
     const slots = unit.slots.map(slot => {
       const flatSlot = unit.unit * 4 + slot.idx;
       const loaded = (_latestSpoolsByPrinter[p.id] || []).find(s => Number(s.location_slot) === flatSlot);
+      const mismatch = _slotMismatch(loaded, slot);
       const style = (!slot.empty && slot.color) ? `style="background:${slot.color}"` : '';
       const activeCls = slot.active ? ' ams-active' : '';
       const emptyCls  = slot.empty  ? ' ams-empty'  : '';
       const mappedCls = loaded ? ' ams-mapped' : '';
+      const warnCls = mismatch ? ' ams-warning' : '';
       const tip = slot.empty
         ? `Slot ${slot.idx + 1}: empty`
         : [slot.type, slot.brand].filter(Boolean).join(' · ');
       return `<div class="ams-slot-wrap">
-        <button class="ams-slot${activeCls}${emptyCls}${mappedCls}" ${style}
+        <button class="ams-slot${activeCls}${emptyCls}${mappedCls}${warnCls}" ${style}
           data-slot-edit data-printer-id="${p.id}" data-slot-index="${flatSlot}"
-          data-slot-label="${esc(_amsSlotLabel(p, flatSlot))}" title="${esc(tip)}"></button>
+          data-slot-label="${esc(_amsSlotLabel(p, flatSlot))}" title="${esc([tip, mismatch].filter(Boolean).join(' · '))}"></button>
         <span class="ams-slot-type">${loaded ? `#${loaded.id}` : (slot.empty ? '' : slot.type)}</span>
       </div>`;
     }).join('');
@@ -1134,19 +1136,21 @@ function _detailMmuPanel(p) {
 
   const slots = unit.gates.map(gate => {
     const loaded = (_latestSpoolsByPrinter[p.id] || []).find(s => Number(s.location_slot) === Number(gate.idx));
+    const mismatch = _slotMismatch(loaded, gate);
     const style = !gate.empty ? `style="background:${gate.color || 'var(--muted)'}"` : '';
     const activeCls = gate.active ? ' ams-active' : '';
     const emptyCls  = gate.empty  ? ' ams-empty'  : '';
     const bufferedCls = (!gate.empty && gate.status === 2) ? ' mmu-buffered' : '';
     const mappedCls = loaded ? ' ams-mapped' : '';
+    const warnCls = mismatch ? ' ams-warning' : '';
     const tip = gate.empty
       ? `T${gate.idx}: empty`
       : [gate.filament_name || gate.material, gate.status === 2 ? 'buffered' : 'available']
           .filter(Boolean).join(' · ');
     return `<div class="ams-slot-wrap">
-      <button class="ams-slot${activeCls}${emptyCls}${bufferedCls}${mappedCls}" ${style}
+      <button class="ams-slot${activeCls}${emptyCls}${bufferedCls}${mappedCls}${warnCls}" ${style}
         data-slot-edit data-printer-id="${p.id}" data-slot-index="${gate.idx}"
-        data-slot-label="${esc(_amsSlotLabel(p, gate.idx))}" title="${esc(tip)}"></button>
+        data-slot-label="${esc(_amsSlotLabel(p, gate.idx))}" title="${esc([tip, mismatch].filter(Boolean).join(' · '))}"></button>
       <span class="ams-slot-type">${loaded ? `#${loaded.id}` : (gate.empty ? '' : (gate.material || ''))}</span>
     </div>`;
   }).join('');
@@ -3640,6 +3644,61 @@ async function _refreshSpoolsByPrinter() {
   } catch {}
 }
 
+function _normMat(value) {
+  return String(value || '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9+]/g, '');
+}
+
+function _normHex(value) {
+  const h = String(value || '').trim().replace(/^#/, '');
+  return /^[0-9A-Fa-f]{6}$/.test(h) ? `#${h.toUpperCase()}` : '';
+}
+
+function _hexDistance(a, b) {
+  const ha = _normHex(a), hb = _normHex(b);
+  if (!ha || !hb) return 0;
+  const pa = [1, 3, 5].map(i => parseInt(ha.slice(i, i + 2), 16));
+  const pb = [1, 3, 5].map(i => parseInt(hb.slice(i, i + 2), 16));
+  return Math.sqrt(pa.reduce((sum, v, i) => sum + Math.pow(v - pb[i], 2), 0));
+}
+
+function _slotReportedMaterial(report) {
+  return report?.type || report?.material || report?.filament_type || report?.filament_name || '';
+}
+
+function _slotMismatch(spool, report) {
+  const printerLoaded = report && !report.empty;
+  if (!spool && printerLoaded) return 'Printer reports filament but no Flightdeck spool is assigned';
+  if (spool && report?.empty) return `Flightdeck has spool #${spool.id} assigned but printer reports empty`;
+  if (!spool || !printerLoaded) return '';
+
+  const reportedMat = _normMat(_slotReportedMaterial(report));
+  const spoolMat = _normMat(`${spool.material || ''}${spool.subtype ? ' ' + spool.subtype : ''}`);
+  if (reportedMat && spoolMat && !spoolMat.includes(reportedMat) && !reportedMat.includes(spoolMat)) {
+    return `Material mismatch: printer ${_slotReportedMaterial(report)}, Flightdeck ${spool.material}${spool.subtype ? ' ' + spool.subtype : ''}`;
+  }
+  if (_hexDistance(report.color, spool.color_hex) > 95) {
+    return `Colour mismatch: printer ${report.color}, Flightdeck ${spool.color_hex}`;
+  }
+  return '';
+}
+
+function _slotReport(printer, slotIndex) {
+  if (!printer) return null;
+  for (const unit of printer.ams || []) {
+    for (const slot of unit.slots || []) {
+      if (unit.unit * 4 + slot.idx === Number(slotIndex)) return slot;
+    }
+  }
+  for (const unit of printer.mmu || []) {
+    for (const gate of unit.gates || []) {
+      if (Number(gate.idx) === Number(slotIndex)) return gate;
+    }
+  }
+  return null;
+}
+
 async function _openSlotEditor(printerId, slotIndex, slotLabel) {
   const printer = _latestPrinters.find(p => p.id === printerId);
   const title = `${printer?.custom_name || printerId} · ${slotLabel}`;
@@ -3676,6 +3735,11 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
     const current = spools.find(s =>
       s.location_printer_id === printerId && Number(s.location_slot) === Number(slotIndex) && !s.archived_at
     );
+    const report = _slotReport(printer, slotIndex);
+    const mismatch = _slotMismatch(current, report);
+    const reportLine = report
+      ? (report.empty ? 'Printer reports empty' : `Printer reports ${[_slotReportedMaterial(report), report.color].filter(Boolean).join(' · ') || 'filament loaded'}`)
+      : 'No printer slot report available';
     const candidates = spools
       .filter(s => !s.archived_at && !s.location_printer_id)
       .sort((a, b) =>
@@ -3693,6 +3757,8 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
     body.innerHTML = `
       <div class="slot-current">
         <div class="slot-current-label">Current assignment</div>
+        <div class="slot-printer-report">${esc(reportLine)}</div>
+        ${mismatch ? `<div class="slot-warning">${esc(mismatch)}</div>` : ''}
         ${current ? `
           <div class="slot-current-card">
             <span class="location-spool-swatch" style="background:${current.color_hex || '#808080'}"></span>

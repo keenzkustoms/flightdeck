@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 27 May 2026 (Session 27 interactive AMS/MMU slots)_
+_Last updated 27 May 2026 (Session 27.1 AMS/MMU mismatch warnings)_
 
 ## Current state
 
@@ -586,6 +586,12 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Assigned slots show the mapped spool ID under the slot and receive a subtle green mapped ring.
 - Empty AMS/MMU slots remain visible and clickable so spools can be assigned before the printer reports filament.
 - Static cache-bust bumped to `v=50`.
+
+### Session 27.1 AMS/MMU mismatch warnings
+- AMS/MMU slots now show an amber warning marker when the printer-reported filament and Flightdeck assignment disagree.
+- Warnings cover unassigned printer-loaded filament, assigned spool while printer reports empty, material mismatch, and large colour mismatch.
+- Slot editor now shows the printer-reported slot state and a plain-text warning when a mismatch is detected.
+- Static cache-bust bumped to `v=51`.
 
 ---
 
