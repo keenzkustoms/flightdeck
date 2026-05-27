@@ -1259,6 +1259,8 @@ header {
   border-radius: 0.5rem;
   border: 2px solid var(--border);
   flex-shrink: 0;
+  cursor: pointer;
+  padding: 0;
 }
 
 .ams-slot.ams-active {
@@ -1270,6 +1272,16 @@ header {
   background: transparent !important;
   border-style: dashed;
   opacity: 0.3;
+}
+
+.ams-slot.ams-empty:hover,
+.ams-slot:hover {
+  opacity: 1;
+  border-color: var(--printing);
+}
+
+.ams-slot.ams-mapped {
+  box-shadow: 0 0 0 2px rgba(34,197,94,0.25);
 }
 
 .ams-slot-type {
@@ -1287,6 +1299,53 @@ header {
 .mmu-buffered {
   border-color: rgba(255,255,255,0.35);
   border-style: dashed;
+}
+
+.slot-modal {
+  max-width: 620px;
+}
+
+.slot-modal-body {
+  display: grid;
+  gap: 1rem;
+}
+
+.slot-current,
+.slot-assign {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.slot-current-label {
+  color: #7aa2d8;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.slot-current-card {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr);
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--surface);
+}
+
+.slot-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.slot-empty-state {
+  color: var(--muted);
+  border: 1px dashed var(--border);
+  border-radius: 0.5rem;
+  padding: 0.85rem;
 }
 
 /* ── Object exclusion panel ── */

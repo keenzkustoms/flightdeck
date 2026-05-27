@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 27 May 2026 (Session 26 location overview)_
+_Last updated 27 May 2026 (Session 27 interactive AMS/MMU slots)_
 
 ## Current state
 
@@ -578,6 +578,14 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Stored spool rows show colour, material/subtype, brand, spool ID, remaining grams, and quick actions for Details, Label, and Edit.
 - Added an Unassigned Storage card for stored spools without a named location.
 - Static cache-bust bumped to `v=49`.
+
+### Session 27 interactive AMS/MMU slots
+- AMS and MMU slots/gates on printer Live pages are now clickable slot editors.
+- Slot editor shows the current Flightdeck spool assignment, with quick Details, Label, Weigh, and Clear slot actions.
+- Stored spools can be assigned directly into the clicked printer slot/gate from the slot editor.
+- Assigned slots show the mapped spool ID under the slot and receive a subtle green mapped ring.
+- Empty AMS/MMU slots remain visible and clickable so spools can be assigned before the printer reports filament.
+- Static cache-bust bumped to `v=50`.
 
 ---
 

@@ -849,6 +849,18 @@ document.getElementById('view-printer').addEventListener('click', e => {
   }
 });
 
+document.getElementById('view-printer').addEventListener('click', e => {
+  const slot = e.target.closest('[data-slot-edit]');
+  if (!slot) return;
+  e.preventDefault();
+  e.stopPropagation();
+  _openSlotEditor(
+    slot.dataset.printerId,
+    Number(slot.dataset.slotIndex),
+    slot.dataset.slotLabel || `S${Number(slot.dataset.slotIndex) + 1}`
+  );
+});
+
 // ── Routing ────────────────────────────────────────────────────────────────
 
 function parseRoute() {
@@ -1082,21 +1094,24 @@ async function sendTempSet(id, heater, target) {
 
 function _detailAmsPanel(p) {
   if (!p.ams?.length) return '';
-  const hasLoaded = p.ams.some(u => u.slots.some(s => !s.empty));
-  if (!hasLoaded) return '';
 
   const title = `<div class="detail-panel-title">AMS</div>`;
   const units = p.ams.map(unit => {
     const slots = unit.slots.map(slot => {
+      const flatSlot = unit.unit * 4 + slot.idx;
+      const loaded = (_latestSpoolsByPrinter[p.id] || []).find(s => Number(s.location_slot) === flatSlot);
       const style = (!slot.empty && slot.color) ? `style="background:${slot.color}"` : '';
       const activeCls = slot.active ? ' ams-active' : '';
       const emptyCls  = slot.empty  ? ' ams-empty'  : '';
+      const mappedCls = loaded ? ' ams-mapped' : '';
       const tip = slot.empty
         ? `Slot ${slot.idx + 1}: empty`
         : [slot.type, slot.brand].filter(Boolean).join(' · ');
       return `<div class="ams-slot-wrap">
-        <div class="ams-slot${activeCls}${emptyCls}" ${style} title="${tip}"></div>
-        <span class="ams-slot-type">${slot.empty ? '' : slot.type}</span>
+        <button class="ams-slot${activeCls}${emptyCls}${mappedCls}" ${style}
+          data-slot-edit data-printer-id="${p.id}" data-slot-index="${flatSlot}"
+          data-slot-label="${esc(_amsSlotLabel(p, flatSlot))}" title="${esc(tip)}"></button>
+        <span class="ams-slot-type">${loaded ? `#${loaded.id}` : (slot.empty ? '' : slot.type)}</span>
       </div>`;
     }).join('');
     return `<div class="ams-unit">
@@ -1118,17 +1133,21 @@ function _detailMmuPanel(p) {
   const title = `<div class="detail-panel-title">${unit.vendor || 'MMU'} · ${unit.num_gates} gates</div>`;
 
   const slots = unit.gates.map(gate => {
+    const loaded = (_latestSpoolsByPrinter[p.id] || []).find(s => Number(s.location_slot) === Number(gate.idx));
     const style = !gate.empty ? `style="background:${gate.color || 'var(--muted)'}"` : '';
     const activeCls = gate.active ? ' ams-active' : '';
     const emptyCls  = gate.empty  ? ' ams-empty'  : '';
     const bufferedCls = (!gate.empty && gate.status === 2) ? ' mmu-buffered' : '';
+    const mappedCls = loaded ? ' ams-mapped' : '';
     const tip = gate.empty
       ? `T${gate.idx}: empty`
       : [gate.filament_name || gate.material, gate.status === 2 ? 'buffered' : 'available']
           .filter(Boolean).join(' · ');
     return `<div class="ams-slot-wrap">
-      <div class="ams-slot${activeCls}${emptyCls}${bufferedCls}" ${style} title="${tip}"></div>
-      <span class="ams-slot-type">${gate.empty ? '' : (gate.material || '')}</span>
+      <button class="ams-slot${activeCls}${emptyCls}${bufferedCls}${mappedCls}" ${style}
+        data-slot-edit data-printer-id="${p.id}" data-slot-index="${gate.idx}"
+        data-slot-label="${esc(_amsSlotLabel(p, gate.idx))}" title="${esc(tip)}"></button>
+      <span class="ams-slot-type">${loaded ? `#${loaded.id}` : (gate.empty ? '' : (gate.material || ''))}</span>
     </div>`;
   }).join('');
 
@@ -3619,6 +3638,151 @@ async function _refreshSpoolsByPrinter() {
     }
     _latestSpoolsByPrinter = byPrinter;
   } catch {}
+}
+
+async function _openSlotEditor(printerId, slotIndex, slotLabel) {
+  const printer = _latestPrinters.find(p => p.id === printerId);
+  const title = `${printer?.custom_name || printerId} · ${slotLabel}`;
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal-box slot-modal">
+      <div class="modal-header">
+        <span class="modal-title">${esc(title)}</span>
+        <button class="modal-close-btn">✕</button>
+      </div>
+      <div class="slot-modal-body">
+        <div class="detail-placeholder" style="min-height:8rem">Loading...</div>
+      </div>
+      <div class="modal-actions">
+        <button class="modal-btn" data-slot-close>Close</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+
+  const body = overlay.querySelector('.slot-modal-body');
+  const close = () => overlay.remove();
+  overlay.querySelector('.modal-close-btn').addEventListener('click', close);
+  overlay.querySelector('[data-slot-close]').addEventListener('click', close);
+  overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+
+  async function load() {
+    const [spools, locations] = await Promise.all([
+      fetch('/api/spools').then(r => r.json()).catch(() => []),
+      fetch('/api/spool-locations').then(r => r.json()).catch(() => []),
+    ]);
+    _allSpools = spools;
+    _spoolLocations = locations;
+    const current = spools.find(s =>
+      s.location_printer_id === printerId && Number(s.location_slot) === Number(slotIndex) && !s.archived_at
+    );
+    const candidates = spools
+      .filter(s => !s.archived_at && !s.location_printer_id)
+      .sort((a, b) =>
+        _spoolStorageLocationName(a.storage_location_id).localeCompare(_spoolStorageLocationName(b.storage_location_id)) ||
+        (a.material || '').localeCompare(b.material || '') ||
+        (a.color_name || '').localeCompare(b.color_name || '')
+      );
+    const options = candidates.length
+      ? candidates.map(s => {
+          const pct = s.label_weight_g > 0 ? Math.round(s.remaining_g * 100 / s.label_weight_g) : 0;
+          const name = `#${s.id} ${s.color_name || s.color_hex || ''} · ${s.material}${s.subtype ? ' ' + s.subtype : ''} · ${s.brand || ''} · ${Math.round(s.remaining_g || 0)}g (${pct}%) · ${_spoolStorageLocationName(s.storage_location_id)}`;
+          return `<option value="${s.id}">${esc(name)}</option>`;
+        }).join('')
+      : '<option value="">No stored spools available</option>';
+    body.innerHTML = `
+      <div class="slot-current">
+        <div class="slot-current-label">Current assignment</div>
+        ${current ? `
+          <div class="slot-current-card">
+            <span class="location-spool-swatch" style="background:${current.color_hex || '#808080'}"></span>
+            <div class="location-spool-main">
+              <div class="location-spool-title">${esc(current.color_name || current.color_hex || 'Colour')} · ${esc(current.material)}${current.subtype ? ` ${esc(current.subtype)}` : ''}</div>
+              <div class="location-spool-sub">${esc(current.brand || 'Unknown brand')} · #${current.id} · ${Math.round(current.remaining_g || 0)}g</div>
+            </div>
+          </div>
+          <div class="slot-actions">
+            <a class="spool-action-btn spool-action-detail" href="#/spool/${current.id}">Details</a>
+            <button class="spool-action-btn spool-action-label" data-slot-label-print="${current.id}">Label</button>
+            <button class="spool-action-btn spool-action-weigh" data-slot-weigh="${current.id}">Weigh</button>
+            <button class="spool-action-btn spool-action-danger" data-slot-clear="${current.id}">Clear slot</button>
+          </div>` : `<div class="slot-empty-state">No Flightdeck spool assigned to this slot.</div>`}
+      </div>
+      <div class="slot-assign">
+        <label class="spool-form-label" for="slot-spool-select">Assign stored spool</label>
+        <select id="slot-spool-select" class="spool-form-input"${candidates.length ? '' : ' disabled'}>${options}</select>
+        <button class="modal-btn modal-btn-confirm" data-slot-assign${candidates.length ? '' : ' disabled'}>Assign to ${esc(slotLabel)}</button>
+      </div>`;
+
+    body.querySelector('[data-slot-assign]')?.addEventListener('click', async btnEvt => {
+      const btn = btnEvt.currentTarget;
+      const id = body.querySelector('#slot-spool-select')?.value;
+      if (!id) return;
+      btn.disabled = true;
+      btn.textContent = 'Assigning...';
+      const r = await fetch(`/api/spools/${id}/move`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ printer_id: printerId, slot: Number(slotIndex) }),
+      });
+      if (!r.ok) {
+        btn.textContent = 'Slot occupied';
+        setTimeout(load, 1200);
+        return;
+      }
+      await _refreshSpoolsByPrinter();
+      load();
+    });
+
+    body.querySelector('[data-slot-clear]')?.addEventListener('click', async e => {
+      const id = e.currentTarget.dataset.slotClear;
+      const storageId = _spoolLocations[0]?.id || null;
+      await fetch(`/api/spools/${id}/move`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ printer_id: null, slot: null, storage_location_id: storageId }),
+      });
+      await _refreshSpoolsByPrinter();
+      load();
+    });
+
+    body.querySelector('[data-slot-label-print]')?.addEventListener('click', async e => {
+      const btn = e.currentTarget;
+      const old = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = '...';
+      try {
+        const r = await fetch(`/api/label_printer/print/${btn.dataset.slotLabelPrint}`, { method: 'POST' });
+        if (!r.ok) throw new Error((await r.json()).detail || 'Print failed');
+        btn.textContent = 'Done';
+      } catch (err) {
+        alert(err.message || 'Label print failed');
+        btn.textContent = old;
+      } finally {
+        setTimeout(() => { btn.disabled = false; btn.textContent = old; }, 1400);
+      }
+    });
+
+    body.querySelector('[data-slot-weigh]')?.addEventListener('click', async e => {
+      const id = e.currentTarget.dataset.slotWeigh;
+      const spool = _allSpools.find(s => String(s.id) === String(id));
+      const emptyText = prompt('Empty spool weight in grams (leave blank for 0)', spool?.empty_spool_weight_g ?? '');
+      if (emptyText === null) return;
+      const empty = emptyText.trim() === '' ? null : parseFloat(emptyText);
+      if (emptyText.trim() !== '' && (isNaN(empty) || empty < 0)) return;
+      await fetch(`/api/spools/${id}/correct_weight`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ empty_spool_weight_g: empty }),
+      });
+      await _refreshSpoolsByPrinter();
+      load();
+    });
+  }
+
+  load().catch(() => {
+    body.innerHTML = '<div class="detail-placeholder">Unable to load slot editor.</div>';
+  });
 }
 
 // ── AMS slot label helper ─────────────────────────────────────────────────
