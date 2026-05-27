@@ -24,6 +24,37 @@ body {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+}
+
+.app-shell {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.app-sidebar {
+  width: 184px;
+  flex: 0 0 184px;
+  border-right: 1px solid var(--border);
+  background: rgba(255,255,255,0.015);
+  padding: 1rem 0.75rem;
+  overflow-y: auto;
+}
+
+.app-views {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.view {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
 }
 
 #view-dashboard, #view-cameras { flex: 1; }
@@ -56,6 +87,7 @@ header {
   display: flex;
   align-items: center;
   gap: 1rem;
+  margin-left: auto;
 }
 
 .notif-btn {
@@ -103,17 +135,19 @@ header {
 
 #tab-strip {
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 0.25rem;
-  flex: 1;
 }
 
 .tab {
-  font-size: 0.8rem;
+  display: flex;
+  align-items: center;
+  min-height: 2rem;
+  font-size: 0.84rem;
   font-weight: 500;
   color: var(--muted);
   text-decoration: none;
-  padding: 0.35rem 0.75rem;
+  padding: 0.35rem 0.65rem;
   border-radius: 0.375rem;
   transition: color 0.15s, background 0.15s, box-shadow 0.15s;
   white-space: nowrap;
@@ -127,7 +161,46 @@ header {
 .tab.active {
   color: var(--text);
   background: rgba(255,255,255,0.08);
-  box-shadow: 0 2px 0 var(--tab-accent, var(--accent));
+  box-shadow: inset 3px 0 0 var(--tab-accent, var(--accent));
+}
+
+.tab-section {
+  margin: 0.75rem 0 0.2rem;
+  padding: 0 0.65rem;
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+}
+
+.tab-printer {
+  padding-left: 1rem;
+  font-size: 0.78rem;
+}
+
+@media (max-width: 760px) {
+  body { overflow: auto; }
+  header { padding: 0.9rem 1rem; flex-wrap: wrap; }
+  .app-shell { flex-direction: column; overflow: visible; }
+  .app-sidebar {
+    width: auto;
+    flex: none;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    padding: 0.6rem 0.75rem;
+    overflow-x: auto;
+  }
+  #tab-strip {
+    flex-direction: row;
+    align-items: center;
+    gap: 0.35rem;
+    min-width: max-content;
+  }
+  .tab-section { display: none; }
+  .tab-printer { padding-left: 0.65rem; }
+  .app-views { overflow: visible; }
+  .view { overflow: visible; }
 }
 
 #refresh-time {
@@ -1798,7 +1871,8 @@ header {
 .settings-body {
   flex: 1;
   display: flex;
-  gap: 0;
+  flex-direction: column;
+  gap: 1rem;
   overflow: hidden;
   max-width: min(1480px, calc(100vw - 1.5rem));
   width: 100%;
@@ -1807,19 +1881,18 @@ header {
 }
 
 .settings-nav {
-  width: 150px;
+  width: auto;
   flex-shrink: 0;
   display: flex;
-  flex-direction: column;
-  gap: 0.125rem;
-  padding-right: 1rem;
-  padding-top: 0.125rem;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  padding: 0;
 }
 
 .settings-nav-item {
-  display: block;
-  width: 100%;
-  text-align: left;
+  width: auto;
+  text-align: center;
   padding: 0.45rem 0.75rem;
   border-radius: 0.4rem;
   border: none;

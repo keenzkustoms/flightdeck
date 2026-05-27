@@ -758,12 +758,21 @@ function parseRoute() {
   if (hash === '#/cameras') return { view: 'cameras' };
   if (hash === '#/queue') return { view: 'queue' };
   if (hash === '#/failures') return { view: 'failures' };
+  const settingsMatch = hash.match(/^#\/settings\/([^/]+)/);
+  if (settingsMatch) return { view: 'settings', category: settingsMatch[1] };
+  if (hash === '#/spools') return { view: 'settings', category: 'spools' };
   if (hash === '#/settings') return { view: 'settings' };
   return { view: 'dashboard' };
 }
 
 function router() {
   const route = parseRoute();
+  const categoryBeforeRoute = _settingsCategory;
+  if (route.view === 'settings' && route.category) {
+    _settingsCategory = _SETTINGS_CATEGORIES.some(c => c.id === route.category)
+      ? route.category
+      : 'printers';
+  }
 
   // Abort MJPEG streams when leaving their view — mobile browsers don't close
   // orphaned <img> connections automatically, which exhausts connection pool slots.
@@ -792,11 +801,16 @@ function router() {
   document.querySelectorAll('#tab-strip .tab').forEach(tab => {
     const href = tab.getAttribute('href');
     tab.classList.toggle('active',
+      (route.view === 'dashboard' && href === '#/') ||
       (route.view === 'printer'  && href === `#/printer/${route.id}`) ||
       (route.view === 'cameras'  && href === '#/cameras') ||
       (route.view === 'queue'    && href === '#/queue') ||
       (route.view === 'failures' && href === '#/failures') ||
-      (route.view === 'settings' && href === '#/settings')
+      (route.view === 'settings' && (
+        href === '#/settings' ||
+        href === `#/settings/${_settingsCategory}` ||
+        (href === '#/spools' && _settingsCategory === 'spools')
+      ))
     );
   });
 
@@ -805,20 +819,25 @@ function router() {
   if (route.view === 'cameras') renderCamerasView();
   if (route.view === 'queue') renderQueueView();
   if (route.view === 'failures' && !wasOnFailures) renderFailuresView();
-  if (route.view === 'settings' && !wasOnSettings) renderSettingsView();
+  if (route.view === 'settings' && (!wasOnSettings || categoryBeforeRoute !== _settingsCategory)) renderSettingsView();
 }
 
 function buildTabs(printers) {
   const nav = document.getElementById('tab-strip');
   nav.innerHTML = [
+    `<a class="tab" href="#/">Dashboard</a>`,
+    `<div class="tab-section">Printers</div>`,
     ...printers.map((p, i) => {
       const color = _PRINTER_ACCENT_PALETTE[i % _PRINTER_ACCENT_PALETTE.length];
-      return `<a class="tab" href="#/printer/${p.id}" style="--tab-accent:${color}">${p.model_name}</a>`;
+      return `<a class="tab tab-printer" href="#/printer/${p.id}" style="--tab-accent:${color}">${p.custom_name || p.model_name}</a>`;
     }),
-    `<a class="tab" href="#/cameras">All Cameras</a>`,
+    `<div class="tab-section">Operations</div>`,
+    `<a class="tab" href="#/cameras">Cameras</a>`,
     `<a class="tab" href="#/queue">Queue</a>`,
     `<a class="tab" href="#/failures">Failures</a>`,
-    `<a class="tab" href="#/settings">Settings</a>`,
+    `<a class="tab" href="#/spools">Spools</a>`,
+    `<div class="tab-section">System</div>`,
+    `<a class="tab" href="#/settings/printers">Settings</a>`,
   ].join('');
   _tabsBuilt = true;
   router();
@@ -4324,9 +4343,19 @@ async function renderSettingsView() {
   body.querySelectorAll('.settings-nav-item').forEach(item => {
     item.addEventListener('click', () => {
       _settingsCategory = item.dataset.category;
+      const targetHash = _settingsCategory === 'spools' ? '#/spools' : `#/settings/${_settingsCategory}`;
+      if (location.hash !== targetHash) history.replaceState(null, '', targetHash);
       body.querySelectorAll('.settings-nav-item').forEach(i =>
         i.classList.toggle('active', i === item)
       );
+      document.querySelectorAll('#tab-strip .tab').forEach(tab => {
+        const href = tab.getAttribute('href');
+        tab.classList.toggle('active',
+          (href === '#/spools' && _settingsCategory === 'spools') ||
+          (href === `#/settings/${_settingsCategory}`) ||
+          (href === '#/settings' && _settingsCategory === 'printers')
+        );
+      });
       _renderSettingsContent(_settingsCategory);
     });
   });

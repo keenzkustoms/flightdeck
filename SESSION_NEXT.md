@@ -518,6 +518,19 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Spool summary cards, filter spacing, and table row padding tightened slightly.
 - Static cache-bust bumped to `v=43`.
 
+### Session 24 navigation refactor
+- Primary app navigation moved from the crowded top tab strip to a persistent left sidebar.
+- Sidebar groups:
+  - Dashboard
+  - Printers
+  - Operations: Cameras, Queue, Failures, Spools
+  - System: Settings
+- Printer-specific Live / History / Maintenance tabs remain horizontal inside each printer page.
+- Settings categories now render as horizontal section tabs inside Settings instead of another left rail.
+- Added deep links for Settings categories, including `#/settings/spools`; `#/spools` routes directly to the Spools settings category.
+- Mobile keeps the primary nav as a horizontal scroll strip.
+- Static cache-bust bumped to `v=44`.
+
 ---
 
 ## Known issues

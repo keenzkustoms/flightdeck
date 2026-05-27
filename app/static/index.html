@@ -8,7 +8,7 @@
   <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
   <link rel="manifest" href="/static/manifest.json">
   <meta name="theme-color" content="#0a0a0f">
-  <link rel="stylesheet" href="/static/style.css?v=43">
+  <link rel="stylesheet" href="/static/style.css?v=44">
 </head>
 <body>
   <header>
@@ -25,7 +25,6 @@
         <span class="deck-text">DECK</span>
       </span>
     </a>
-    <nav id="tab-strip"></nav>
     <div class="header-right">
       <button id="notif-btn" class="notif-btn" title="Enable print notifications">🔔</button>
       <span id="status-pill" class="status-pill"></span>
@@ -37,41 +36,48 @@
     </div>
   </header>
 
-  <section id="view-dashboard" class="view">
-    <main id="printer-grid"></main>
-    <footer id="dash-footer"></footer>
-  </section>
+  <div class="app-shell">
+    <aside class="app-sidebar">
+      <nav id="tab-strip"></nav>
+    </aside>
+    <div class="app-views">
+      <section id="view-dashboard" class="view">
+        <main id="printer-grid"></main>
+        <footer id="dash-footer"></footer>
+      </section>
 
-  <section id="view-printer" class="view" hidden>
-    <div id="printer-detail"></div>
-  </section>
+      <section id="view-printer" class="view" hidden>
+        <div id="printer-detail"></div>
+      </section>
 
-  <section id="view-spool" class="view" hidden>
-    <div id="spool-detail"></div>
-  </section>
+      <section id="view-spool" class="view" hidden>
+        <div id="spool-detail"></div>
+      </section>
 
-  <section id="view-cameras" class="view" hidden>
-    <div id="cameras-grid"></div>
-  </section>
+      <section id="view-cameras" class="view" hidden>
+        <div id="cameras-grid"></div>
+      </section>
 
-  <section id="view-queue" class="view" hidden>
-    <div class="queue-page" id="queue-page">
-      <div class="detail-placeholder">Loading…</div>
+      <section id="view-queue" class="view" hidden>
+        <div class="queue-page" id="queue-page">
+          <div class="detail-placeholder">Loading…</div>
+        </div>
+      </section>
+
+      <section id="view-failures" class="view" hidden>
+        <div class="failures-page" id="failures-page">
+          <div class="detail-placeholder">Loading…</div>
+        </div>
+      </section>
+
+      <section id="view-settings" class="view" hidden>
+        <div class="settings-body" id="settings-body">
+          <div class="detail-placeholder">Loading…</div>
+        </div>
+      </section>
     </div>
-  </section>
+  </div>
 
-  <section id="view-failures" class="view" hidden>
-    <div class="failures-page" id="failures-page">
-      <div class="detail-placeholder">Loading…</div>
-    </div>
-  </section>
-
-  <section id="view-settings" class="view" hidden>
-    <div class="settings-body" id="settings-body">
-      <div class="detail-placeholder">Loading…</div>
-    </div>
-  </section>
-
-  <script type="module" src="/static/app.js?v=43"></script>
+  <script type="module" src="/static/app.js?v=44"></script>
 </body>
 </html>
