@@ -3309,6 +3309,14 @@ function _hardwareStatusPill(ok, text) {
   return `<span class="hardware-pill ${ok ? 'hardware-ok' : 'hardware-warn'}">${text}</span>`;
 }
 
+function _scaleFriendlyMessage(message) {
+  const text = message || 'Scale read failed';
+  if (/not detected|not found|unavailable|stabilis/i.test(text)) {
+    return `${text}. Wake the scale and retry.`;
+  }
+  return text;
+}
+
 function _hardwareCategoryHtml(scale, labelPrinter) {
   const scaleOk = !!scale?.available;
   const labelOk = !!labelPrinter?.available;
@@ -3336,7 +3344,7 @@ function _hardwareCategoryHtml(scale, labelPrinter) {
         <div class="hardware-card-main">
           <div>
             <div class="hardware-title">Brother QL-700</div>
-            <div class="hardware-sub">${labelOk ? `Ready for ${labelPrinter.label_size || '40x30'} labels` : (labelPrinter?.last_error || 'Not detected')}</div>
+            <div class="hardware-sub">${labelOk ? `Ready for ${labelPrinter.label_size || 'DK-22212'} labels` : (labelPrinter?.last_error || 'Not detected')}</div>
           </div>
           ${_hardwareStatusPill(labelOk, labelOk ? 'Ready' : 'Unavailable')}
         </div>
@@ -3368,7 +3376,7 @@ function _attachHardwareEvents(el) {
       const reading = await r.json();
       out.textContent = `${Math.round(reading.grams)}g`;
     } catch (err) {
-      out.textContent = err.message || 'Unavailable';
+      out.textContent = _scaleFriendlyMessage(err.message || 'Unavailable');
     } finally {
       btn.disabled = false;
       btn.textContent = old;
@@ -3727,10 +3735,10 @@ function _attachSpoolListEvents(el, listEl) {
             headers: {'Content-Type':'application/json'},
             body: JSON.stringify({ empty_spool_weight_g: empty }),
           });
-          if (!r.ok) throw new Error((await r.json()).detail || 'Scale read failed');
+          if (!r.ok) throw new Error(_scaleFriendlyMessage((await r.json()).detail || 'Scale read failed'));
           await _renderSettingsContent('spools');
         } catch (err) {
-          alert(err.message || 'Scale read failed');
+          alert(_scaleFriendlyMessage(err.message || 'Scale read failed'));
           btn.textContent = old;
         } finally {
           btn.disabled = false;
@@ -4066,14 +4074,14 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
     weighBtn.textContent = '...';
     try {
       const r = await fetch('/api/scale/read');
-      if (!r.ok) throw new Error((await r.json()).detail || 'Scale read failed');
+      if (!r.ok) throw new Error(_scaleFriendlyMessage((await r.json()).detail || 'Scale read failed'));
       const reading = await r.json();
       const empty = parseFloat(emptyG.value) || 0;
       remainG.value = Math.max(0, Math.round((reading.grams - empty) * 10) / 10);
       remainG.dataset.touched = '1';
       weighBtn.textContent = 'Done';
     } catch (err) {
-      alert(err.message || 'Scale read failed');
+      alert(_scaleFriendlyMessage(err.message || 'Scale read failed'));
       weighBtn.textContent = old;
     } finally {
       setTimeout(() => { weighBtn.disabled = false; weighBtn.textContent = old; }, 1200);

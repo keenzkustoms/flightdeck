@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 27 May 2026 (post-session 23, scale + label hardware integration)_
+_Last updated 27 May 2026 (post-session 23.1, DK-22212 label + scale wake UX)_
 
 ## Current state
 
@@ -461,6 +461,14 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Brother was previously detected as `04f9:2049` (Editor Lite mass-storage mode). Printing requires printer mode, expected `04f9:2042`.
 - Scale was not visible during the first preflight; verify USB, udev rules, and permissions after plugging it in.
 - Service restart still needs interactive sudo from user after deploy.
+
+### Session 23.1 refinement
+- Label renderer switched from fixed `40x30` to DK-22212 / 62mm continuous roll support.
+- Brother print conversion now uses label type `62`.
+- Spool label render size is now 696x520 px, roughly a compact 62mm x 44mm cut on the continuous roll.
+- Hardware tab reports DK-22212 readiness when the printer is available.
+- Scale read failures now tell the operator to wake the scale and retry when the Dymo is asleep/not detected.
+- Static cache-bust bumped to `v=38`.
 
 ---
 
