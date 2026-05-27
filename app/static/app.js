@@ -3918,8 +3918,8 @@ function _spoolCardHtml(s) {
   const used = Math.max(0, s.label_weight_g - s.remaining_g);
   const p = _latestPrinters.find(x => x.id === s.location_printer_id);
   const locBadge = s.location_printer_id
-    ? `<span class="spool-location-badge" title="${(p?.custom_name ?? s.location_printer_id)} ${_amsSlotLabel(p, s.location_slot)}">📍 ${p?.custom_name ?? s.location_printer_id}</span>`
-    : `<span class="spool-location-badge spool-location-storage" title="${esc(_spoolStorageLocationName(s.storage_location_id))}">📍 ${esc(_spoolStorageLocationName(s.storage_location_id))}</span>`;
+    ? `<span class="spool-location-badge" title="${(p?.custom_name ?? s.location_printer_id)} ${_amsSlotLabel(p, s.location_slot)}">${p?.custom_name ?? s.location_printer_id}</span>`
+    : `<span class="spool-location-badge spool-location-storage" title="${esc(_spoolStorageLocationName(s.storage_location_id))}">${esc(_spoolStorageLocationName(s.storage_location_id))}</span>`;
   return `<div class="spool-card" data-spool-id="${s.id}">
     <div class="spool-card-band" style="background:${bandColor};color:${textColor}">
       <span class="spool-color-name">${s.color_name || '—'}</span>
@@ -3939,20 +3939,16 @@ function _spoolCardHtml(s) {
       <div class="spool-progress-bar">
         <div class="spool-progress-fill" style="width:${pct}%;background:${barColor}"></div>
       </div>
-      <div class="spool-meta-row">
-        <span class="spool-meta">Label: ${Math.round(s.label_weight_g)}g</span>
-        <span class="spool-meta">Used: ${Math.round(used)}g</span>
-      </div>
+      <div class="spool-meta-row"><span class="spool-meta">${Math.round(s.label_weight_g)}g label</span><span class="spool-meta">${Math.round(used)}g used</span></div>
       <div class="spool-card-actions">
-        <a class="spool-action-btn spool-action-detail" href="#/spool/${s.id}" title="Details">Details</a>
+        <a class="spool-action-btn spool-action-detail" href="#/spool/${s.id}" title="Details">Info</a>
         <button class="spool-action-btn spool-action-label" data-action="label"    data-id="${s.id}" title="Print label">Label</button>
         <button class="spool-action-btn spool-action-weigh" data-action="weigh"    data-id="${s.id}" title="Weigh from scale">Weigh</button>
         <button class="spool-action-btn spool-action-edit" data-action="edit"      data-id="${s.id}" title="Edit">Edit</button>
-        <span class="spool-action-spacer"></span>
         <button class="spool-action-btn spool-action-utility" data-action="duplicate" data-id="${s.id}" title="Duplicate">Copy</button>
         <button class="spool-action-btn spool-action-utility" data-action="reset"     data-id="${s.id}" title="Reset weight">Reset</button>
-        <button class="spool-action-btn spool-action-utility" data-action="archive"   data-id="${s.id}" title="Archive">Archive</button>
-        <button class="spool-action-btn spool-action-utility spool-action-danger" data-action="delete" data-id="${s.id}" title="Delete">Delete</button>
+        <button class="spool-action-btn spool-action-utility" data-action="archive"   data-id="${s.id}" title="Archive">Arch</button>
+        <button class="spool-action-btn spool-action-utility spool-action-danger" data-action="delete" data-id="${s.id}" title="Delete">Del</button>
       </div>
     </div>
   </div>`;
@@ -4055,7 +4051,7 @@ function _renderSpoolList(el) {
     });
   } else {
     listEl.className = 'spool-card-grid';
-    listEl.innerHTML = filtered.map(_spoolCardHtml).join('');
+    listEl.innerHTML = [...filtered].sort((a, b) => Number(a.id || 0) - Number(b.id || 0)).map(_spoolCardHtml).join('');
   }
   _attachSpoolListEvents(el, listEl);
 }

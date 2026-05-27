@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 27 May 2026 (Session 27.3 spool colour paint chart)_
+_Last updated 27 May 2026 (Session 27.4 spool inventory paint chart)_
 
 ## Current state
 
@@ -604,6 +604,12 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Swatches use square paint chips with stable sizing and vertical scrolling when needed.
 - Previously-used colour picks now render as a compact paint chart sorted by spool number and include the spool ID.
 - Static cache-bust bumped to `v=53`.
+
+### Session 27.4 spool inventory paint chart
+- Main Spools `Cards` view now behaves like a compact paint chart instead of large inventory cards.
+- Colour tile cards are smaller, colour-led, and ordered by spool number.
+- Card metadata and actions were tightened to fit many more spools on screen while preserving Info, Label, Weigh, Edit, Copy, Reset, Archive, and Delete.
+- Static cache-bust bumped to `v=54`.
 
 ---
 
