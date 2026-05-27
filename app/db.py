@@ -1420,6 +1420,164 @@ def get_spools_summary() -> dict:
     }
 
 
+def get_spool_intelligence(days: int = 30) -> dict:
+    """Operational spool signals for the Spools dashboard."""
+    import json
+    days = max(1, min(int(days or 30), 365))
+    since = f"-{days} days"
+    with _conn() as conn:
+        threshold_row = conn.execute(
+            "SELECT value FROM settings WHERE key = 'spool_low_stock_pct'"
+        ).fetchone()
+        low_pct = float(threshold_row["value"]) if threshold_row else 20.0
+
+        loaded_rows = conn.execute(
+            """SELECT id, material, brand, subtype, color_hex, color_name,
+                      label_weight_g, remaining_g, location_printer_id, location_slot
+               FROM spools
+               WHERE archived_at IS NULL AND location_printer_id IS NOT NULL
+               ORDER BY location_printer_id, location_slot"""
+        ).fetchall()
+
+        unattributed = conn.execute(
+            """SELECT COUNT(*) AS n,
+                      COALESCE(SUM(filament_grams), 0) AS grams
+               FROM prints
+               WHERE final_state = 'FINISHED'
+                 AND filament_grams IS NOT NULL
+                 AND filament_grams > 0
+                 AND spool_usage IS NULL
+                 AND ended_at >= datetime('now', ?)""",
+            (since,),
+        ).fetchone()
+
+        recent_prints = conn.execute(
+            """SELECT id, printer_id, filename, subtask_name, ended_at, final_state, spool_usage
+               FROM prints
+               WHERE spool_usage IS NOT NULL
+                 AND ended_at >= datetime('now', ?)
+               ORDER BY ended_at DESC
+               LIMIT 80""",
+            (since,),
+        ).fetchall()
+
+        spool_rows = conn.execute(
+            """SELECT id, material, brand, subtype, color_hex, color_name,
+                      remaining_g, label_weight_g
+               FROM spools"""
+        ).fetchall()
+
+        overdraw_rows = conn.execute(
+            """SELECT print_id, printer_id, detail, logged_at
+               FROM decisions
+               WHERE event = 'spool_overdrawn'
+                 AND logged_at >= datetime('now', ?)
+               ORDER BY logged_at DESC
+               LIMIT 8""",
+            (since,),
+        ).fetchall()
+
+    spools = {int(r["id"]): dict(r) for r in spool_rows}
+
+    loaded = []
+    loaded_low = []
+    for row in loaded_rows:
+        item = dict(row)
+        pct = (float(item["remaining_g"] or 0) * 100 / float(item["label_weight_g"] or 1)) if item.get("label_weight_g") else None
+        item["remaining_pct"] = round(pct, 1) if pct is not None else None
+        loaded.append(item)
+        if pct is not None and pct < low_pct:
+            loaded_low.append(item)
+
+    usage_events = []
+    total_deducted = 0.0
+    usage_print_ids: set[int] = set()
+    by_spool: dict[int, dict] = {}
+    for row in recent_prints:
+        try:
+            entries = json.loads(row["spool_usage"] or "[]")
+        except Exception:
+            entries = []
+        for entry in entries:
+            spool_id = int(entry.get("spool_id") or 0)
+            grams = float(entry.get("grams") or 0)
+            if not spool_id or grams <= 0:
+                continue
+            spool = spools.get(spool_id, {})
+            total_deducted += grams
+            usage_print_ids.add(int(row["id"]))
+            rec = by_spool.setdefault(spool_id, {
+                "spool_id": spool_id,
+                "grams": 0.0,
+                "count": 0,
+                "material": spool.get("material"),
+                "brand": spool.get("brand"),
+                "color_name": spool.get("color_name"),
+                "color_hex": spool.get("color_hex"),
+            })
+            rec["grams"] += grams
+            rec["count"] += 1
+            usage_events.append({
+                "print_id": row["id"],
+                "printer_id": row["printer_id"],
+                "filename": row["filename"],
+                "subtask_name": row["subtask_name"],
+                "ended_at": row["ended_at"],
+                "spool_id": spool_id,
+                "slot": entry.get("slot"),
+                "grams": round(grams, 1),
+                "material": spool.get("material"),
+                "brand": spool.get("brand"),
+                "color_name": spool.get("color_name"),
+                "color_hex": spool.get("color_hex"),
+            })
+
+    usage_events.sort(key=lambda x: x.get("ended_at") or "", reverse=True)
+
+    alerts = []
+    if loaded_low:
+        alerts.append({
+            "level": "warn",
+            "message": f"{len(loaded_low)} loaded spool{'s' if len(loaded_low) != 1 else ''} below {low_pct:.0f}%",
+        })
+    unattributed_count = int(unattributed["n"] or 0) if unattributed else 0
+    if unattributed_count:
+        alerts.append({
+            "level": "watch",
+            "message": f"{unattributed_count} finished print{'s' if unattributed_count != 1 else ''} had filament grams but no spool deduction",
+        })
+    overdraws = [dict(r) for r in overdraw_rows]
+    if overdraws:
+        alerts.append({
+            "level": "warn",
+            "message": f"{len(overdraws)} spool overdraw event{'s' if len(overdraws) != 1 else ''} in {days}d",
+        })
+    if not alerts:
+        alerts.append({"level": "ok", "message": "Spool tracking is clean"})
+
+    return {
+        "days": days,
+        "summary": {
+            "deducted_g": round(total_deducted, 1),
+            "deducted_prints": len(usage_print_ids),
+            "usage_events": len(usage_events),
+            "loaded_spools": len(loaded),
+            "loaded_low": len(loaded_low),
+            "unattributed_prints": unattributed_count,
+            "unattributed_g": round(float(unattributed["grams"] or 0), 1) if unattributed else 0.0,
+            "low_stock_pct": low_pct,
+        },
+        "alerts": alerts,
+        "loaded_low": loaded_low,
+        "recent_usage": usage_events[:10],
+        "by_spool": sorted(
+            [{**v, "grams": round(v["grams"], 1)} for v in by_spool.values()],
+            key=lambda x: (-x["grams"], x["spool_id"]),
+        )[:8],
+        "overdraws": overdraws,
+    }
+
+
 def get_spools_by_printer(printer_id: str) -> dict:
     """Returns {slot_index: spool_dict} for active spools loaded on this printer."""
     with _conn() as conn:

@@ -4107,7 +4107,55 @@ function _renderSpoolList(el) {
   _attachSpoolListEvents(el, listEl);
 }
 
-function _spoolsCategoryHtml(spools, summary, costs) {
+function _spoolIntelligenceHtml(intel = {}) {
+  const s = intel.summary || {};
+  const alerts = intel.alerts || [];
+  const recent = intel.recent_usage || [];
+  const top = intel.by_spool || [];
+  const fmtKg = g => g != null ? `${(Number(g) / 1000).toFixed(2)}kg` : '—';
+  const printerName = id => _latestPrinters.find(p => p.id === id)?.custom_name || id || 'Unknown printer';
+  const dateLabel = ts => ts ? new Date(ts.endsWith('Z') ? ts : ts + 'Z').toLocaleDateString([], { month: 'short', day: 'numeric' }) : '—';
+  return `<section class="spool-intel-panel">
+    <div class="spool-intel-head">
+      <div>
+        <div class="settings-section-title">Spool Intelligence</div>
+        <div class="spool-intel-sub">${intel.days || 30} day tracking window</div>
+      </div>
+      <a class="spool-intel-link" href="#/settings/filament">Filament stats</a>
+    </div>
+    <div class="spool-intel-stats">
+      <div class="spool-intel-stat"><strong>${fmtKg(s.deducted_g)}</strong><span>auto-deducted</span></div>
+      <div class="spool-intel-stat"><strong>${s.deducted_prints ?? 0}</strong><span>tracked prints</span></div>
+      <div class="spool-intel-stat${(s.unattributed_prints || 0) ? ' spool-intel-warn' : ''}"><strong>${s.unattributed_prints ?? 0}</strong><span>unattributed</span></div>
+      <div class="spool-intel-stat${(s.loaded_low || 0) ? ' spool-intel-warn' : ''}"><strong>${s.loaded_low ?? 0}</strong><span>loaded low</span></div>
+    </div>
+    <div class="spool-intel-body">
+      <div class="spool-intel-alerts">
+        ${alerts.map(a => `<div class="spool-intel-alert spool-intel-${a.level || 'watch'}">${esc(a.message || '')}</div>`).join('')}
+      </div>
+      <div class="spool-intel-lists">
+        <div>
+          <div class="spool-intel-list-title">Recent deductions</div>
+          ${recent.length ? recent.slice(0, 5).map(u => `<a class="spool-intel-row" href="#/spool/${u.spool_id}">
+            <span><b>#${u.spool_id}</b> ${esc(u.color_name || u.material || 'Spool')}</span>
+            <small>${esc(printerName(u.printer_id))} · ${dateLabel(u.ended_at)}</small>
+            <strong>${Number(u.grams || 0).toFixed(1)}g</strong>
+          </a>`).join('') : `<div class="spool-intel-empty">No spool deductions yet.</div>`}
+        </div>
+        <div>
+          <div class="spool-intel-list-title">Most used spools</div>
+          ${top.length ? top.slice(0, 5).map(u => `<a class="spool-intel-row" href="#/spool/${u.spool_id}">
+            <span><b>#${u.spool_id}</b> ${esc(u.color_name || u.material || 'Spool')}</span>
+            <small>${esc(u.brand || '')}</small>
+            <strong>${Number(u.grams || 0).toFixed(1)}g</strong>
+          </a>`).join('') : `<div class="spool-intel-empty">Usage will appear after tracked prints finish.</div>`}
+        </div>
+      </div>
+    </div>
+  </section>`;
+}
+
+function _spoolsCategoryHtml(spools, summary, costs, intelligence = {}) {
   _allSpools = spools;
   _latestLowStockPct = summary.low_stock_pct ?? 20;
 
@@ -4136,6 +4184,7 @@ function _spoolsCategoryHtml(spools, summary, costs) {
         <button class="spool-add-btn">+ Add Spool</button>
       </div>
     </div>
+    ${_spoolIntelligenceHtml(intelligence)}
     <div class="spool-summary-strip">
       <div class="spool-stat">
         <span class="spool-stat-value">${summary.total_remaining_g != null ? (summary.total_remaining_g/1000).toFixed(2)+'kg' : '—'}</span>
@@ -4967,14 +5016,15 @@ async function _renderSettingsContent(category) {
     _attachLocationsEvents(el, locations);
   } else if (category === 'spools') {
     el.innerHTML = `<div class="detail-placeholder" style="min-height:10rem">Loading…</div>`;
-    const [spools, summary, costs, locations] = await Promise.all([
+    const [spools, summary, costs, locations, intelligence] = await Promise.all([
       fetch('/api/spools').then(r => r.json()).catch(() => []),
       fetch('/api/spools/summary').then(r => r.json()).catch(() => ({})),
       fetch('/api/filament/costs').then(r => r.json()).catch(() => []),
       fetch('/api/spool-locations').then(r => r.json()).catch(() => []),
+      fetch('/api/spools/intelligence').then(r => r.json()).catch(() => ({})),
     ]);
     _spoolLocations = locations;
-    el.innerHTML = _spoolsCategoryHtml(spools, summary, costs);
+    el.innerHTML = _spoolsCategoryHtml(spools, summary, costs, intelligence);
     _attachSpoolsEvents(el, costs);
   }
 }

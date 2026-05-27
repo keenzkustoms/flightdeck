@@ -949,6 +949,10 @@ class SpoolWeightCorrection(BaseModel):
 async def get_spools_summary():
     return db.get_spools_summary()
 
+@app.get("/api/spools/intelligence")
+async def get_spool_intelligence(days: int = 30):
+    return db.get_spool_intelligence(days)
+
 @app.get("/api/spools/by-printer/{printer_id}")
 async def get_spools_by_printer(printer_id: str):
     return db.get_spools_by_printer(printer_id)

@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 27 May 2026 (Session 27.8 columns menu spacing)_
+_Last updated 27 May 2026 (Session 28.1 spool intelligence panel)_
 
 ## Current state
 
@@ -631,6 +631,12 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Spools now adds temporary vertical space below the header while the `Columns` menu is open.
 - This keeps the summary/cards from sitting underneath the open columns checklist.
 - Static cache-bust bumped to `v=58`.
+
+### Session 28.1 spool intelligence panel
+- Added `/api/spools/intelligence`, aggregating recent spool deductions, unattributed finished prints, loaded low-stock risk, overdraw events, and most-used spools.
+- Spools page now has a `Spool Intelligence` panel showing the last 30 days of auto-deduct tracking and recent usage.
+- This surfaces the existing print-finish deduction engine instead of leaving `spool_usage` hidden in history/detail views.
+- Static cache-bust bumped to `v=59`.
 
 ---
 
