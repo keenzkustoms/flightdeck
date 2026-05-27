@@ -4928,6 +4928,7 @@ function _attachLocationsEvents(el, locations) {
 async function _renderSettingsContent(category) {
   const el = document.getElementById('settings-content');
   if (!el) return;
+  el.classList.toggle('settings-content-spools', category === 'spools');
 
   if (category === 'printers') {
     el.innerHTML = `<div class="detail-placeholder" style="min-height:10rem">Loading…</div>`;

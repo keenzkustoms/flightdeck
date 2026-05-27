@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 28 May 2026 (Session 28.2 simplified spool card actions)_
+_Last updated 28 May 2026 (Session 28.3 fixed spool cockpit)_
 
 ## Current state
 
@@ -644,6 +644,12 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - The `Actions` dropdown still exposes the full function set: Info, Label, Weigh, Edit, Copy, Reset, Archive, and Delete.
 - Removed the temporary spacing behavior that existed only for the old `Columns` menu.
 - Static cache-bust bumped to `v=60`.
+
+### Session 28.3 fixed spool cockpit
+- Spools page now keeps the inventory controls, intelligence panel, summary cards, and filter chips fixed while the card/table list scrolls underneath.
+- Both Cards and Table views use the same dedicated `#spool-list` scroll region.
+- Table headers now stay visible inside the scrolling list.
+- Static cache-bust bumped to `v=61`.
 
 ---
 

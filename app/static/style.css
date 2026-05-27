@@ -21,6 +21,7 @@ body {
   background: var(--bg);
   color: var(--text);
   font-family: system-ui, sans-serif;
+  height: 100vh;
   min-height: 100vh;
   display: flex;
   flex-direction: column;
@@ -186,7 +187,7 @@ header {
 }
 
 @media (max-width: 760px) {
-  body { overflow: auto; }
+  body { height: auto; overflow: auto; }
   header { padding: 0.9rem 1rem; flex-wrap: wrap; }
   .app-shell { flex-direction: column; overflow: visible; }
   .app-sidebar {
@@ -2198,6 +2199,7 @@ header {
 
 .settings-body {
   flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 1rem;
@@ -2241,6 +2243,35 @@ header {
   gap: 1.5rem;
   padding-bottom: 2rem;
   min-width: 0;
+}
+
+.settings-content.settings-content-spools {
+  min-height: 0;
+  overflow: hidden;
+  gap: 0;
+  padding-bottom: 0;
+}
+
+.settings-content-spools .spool-page-header,
+.settings-content-spools .spool-intel-panel,
+.settings-content-spools .spool-summary-strip,
+.settings-content-spools .spool-filter-bar {
+  flex-shrink: 0;
+}
+
+.settings-content-spools #spool-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 0.15rem 2rem 0;
+}
+
+.settings-content-spools #spool-list.spool-card-grid {
+  align-content: start;
+}
+
+.settings-content-spools .spool-table-wrap {
+  overflow: visible;
 }
 
 .settings-section {
@@ -3780,6 +3811,9 @@ select.settings-input { cursor: pointer; }
 }
 
 .spool-table th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
   background: var(--header-bg, var(--card));
   color: var(--muted);
   font-weight: 500;
