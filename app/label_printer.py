@@ -79,7 +79,8 @@ class LabelPrinter:
         draw.text((x, 258), f"Spool #{spool.get('id', '-')}", fill="black", font=font_badge)
 
         if location_line:
-            draw.text((x, 318), _ellipsize(draw, location_line, font_body, 420), fill="black", font=font_body)
+            draw.text((506, 42), "Loc:", fill="black", font=font_small)
+            draw.text((506, 72), _ellipsize(draw, location_line[5:], font_body, 150), fill="black", font=font_body)
 
         added = str(spool.get("added_at") or "")[:10]
         try:

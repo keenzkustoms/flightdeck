@@ -568,6 +568,10 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Location text is drawn larger and higher on the label so it is more visible on DK-22212 prints.
 - Location fallback now accepts either `storage_location_name`, `storage_location`, or `Storage`.
 
+### Session 25.5 spool label location placement
+- Stored-spool location moved to the top-right of the label above the QR code.
+- Printer-loaded spools still omit location text entirely.
+
 ---
 
 ## Known issues
