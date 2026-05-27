@@ -513,6 +513,11 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Utility actions remain visually secondary; delete is styled as a muted danger action.
 - Static cache-bust bumped to `v=42`.
 
+### Session 23.8 table action + density polish
+- Spool table actions now use the same compact text button language as card actions.
+- Spool summary cards, filter spacing, and table row padding tightened slightly.
+- Static cache-bust bumped to `v=43`.
+
 ---
 
 ## Known issues
