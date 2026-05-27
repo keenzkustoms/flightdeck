@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 27 May 2026 (Session 28.1 spool intelligence panel)_
+_Last updated 28 May 2026 (Session 28.2 simplified spool card actions)_
 
 ## Current state
 
@@ -637,6 +637,13 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Spools page now has a `Spool Intelligence` panel showing the last 30 days of auto-deduct tracking and recent usage.
 - This surfaces the existing print-finish deduction engine instead of leaving `spool_usage` hidden in history/detail views.
 - Static cache-bust bumped to `v=59`.
+
+### Session 28.2 simplified spool card actions
+- Removed the Spools `Columns` button and per-browser quick-action chooser.
+- Spool cards now always show only `Label`, `Edit`, and `Actions` on the card footer.
+- The `Actions` dropdown still exposes the full function set: Info, Label, Weigh, Edit, Copy, Reset, Archive, and Delete.
+- Removed the temporary spacing behavior that existed only for the old `Columns` menu.
+- Static cache-bust bumped to `v=60`.
 
 ---
 

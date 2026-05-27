@@ -3637,7 +3637,6 @@ const _SPOOL_ACTIONS = [
   { key: 'archive', label: 'Arch', title: 'Archive', cls: 'spool-action-utility' },
   { key: 'delete', label: 'Del', title: 'Delete', cls: 'spool-action-utility spool-action-danger' },
 ];
-let _spoolVisibleActions = _loadSpoolVisibleActions();
 
 async function _refreshSpoolsByPrinter() {
   try {
@@ -3921,20 +3920,6 @@ const _SWATCH_COLORS = [
   '#06b6d4','#3b82f6','#a855f7','#ec4899',
 ];
 
-function _loadSpoolVisibleActions() {
-  const defaults = ['label', 'weigh', 'edit'];
-  try {
-    const saved = JSON.parse(localStorage.getItem('fd_spool_visible_actions') || 'null');
-    const allowed = new Set(_SPOOL_ACTIONS.map(a => a.key));
-    if (Array.isArray(saved)) return saved.filter(k => allowed.has(k));
-  } catch {}
-  return defaults;
-}
-
-function _saveSpoolVisibleActions() {
-  try { localStorage.setItem('fd_spool_visible_actions', JSON.stringify(_spoolVisibleActions)); } catch {}
-}
-
 function _spoolActionControl(action, spoolId, compact = false) {
   const label = compact && action.key === 'archive' ? 'Archive' : compact && action.key === 'delete' ? 'Delete' : action.label;
   const cls = `spool-action-btn ${action.cls}`;
@@ -3945,8 +3930,9 @@ function _spoolActionControl(action, spoolId, compact = false) {
 }
 
 function _spoolCardActionsHtml(spoolId) {
-  const visible = new Set(_spoolVisibleActions);
-  const quick = _SPOOL_ACTIONS.filter(a => visible.has(a.key)).map(a => _spoolActionControl(a, spoolId)).join('');
+  const quick = _SPOOL_ACTIONS
+    .filter(a => a.key === 'label' || a.key === 'edit')
+    .map(a => _spoolActionControl(a, spoolId)).join('');
   const menu = _SPOOL_ACTIONS.map(a => _spoolActionControl(a, spoolId, true)).join('');
   return `<div class="spool-card-actions">
     ${quick}
@@ -3955,19 +3941,6 @@ function _spoolCardActionsHtml(spoolId) {
       <div class="spool-action-menu-panel">${menu}</div>
     </details>
   </div>`;
-}
-
-function _spoolColumnsMenuHtml() {
-  const visible = new Set(_spoolVisibleActions);
-  return `<details class="spool-columns-menu">
-    <summary class="spool-view-btn spool-columns-summary">Columns</summary>
-    <div class="spool-columns-panel">
-      ${_SPOOL_ACTIONS.map(a => `<label class="spool-column-option">
-        <input type="checkbox" data-spool-action-toggle="${a.key}"${visible.has(a.key) ? ' checked' : ''}>
-        <span>${a.key === 'archive' ? 'Archive' : a.key === 'delete' ? 'Delete' : a.label}</span>
-      </label>`).join('')}
-    </div>
-  </details>`;
 }
 
 function _spoolCardHtml(s) {
@@ -4177,7 +4150,6 @@ function _spoolsCategoryHtml(spools, summary, costs, intelligence = {}) {
           <button class="spool-view-btn${_spoolsViewMode==='cards'?' active':''}" data-view="cards">Cards</button>
           <button class="spool-view-btn${_spoolsViewMode==='table'?' active':''}" data-view="table">Table</button>
         </div>
-        ${_spoolColumnsMenuHtml()}
         <select class="spool-filter-sel" data-fkey="material">${matOpts}</select>
         <select class="spool-filter-sel" data-fkey="brand">${brandOpts}</select>
         <input class="spool-search" type="search" placeholder="Search…" value="${_spoolsFilter.search}">
@@ -4332,22 +4304,6 @@ function _attachSpoolsEvents(el, costs) {
       _renderSpoolList(el);
     });
   });
-
-  el.querySelectorAll('[data-spool-action-toggle]').forEach(input => {
-    input.addEventListener('change', () => {
-      const selected = [...el.querySelectorAll('[data-spool-action-toggle]:checked')].map(x => x.dataset.spoolActionToggle);
-      _spoolVisibleActions = selected;
-      _saveSpoolVisibleActions();
-      _renderSpoolList(el);
-    });
-  });
-
-  const columnsMenu = el.querySelector('.spool-columns-menu');
-  if (columnsMenu) {
-    const syncColumnsOpen = () => el.classList.toggle('spool-columns-open', columnsMenu.open);
-    columnsMenu.addEventListener('toggle', syncColumnsOpen);
-    syncColumnsOpen();
-  }
 
   _renderSpoolList(el);
 }

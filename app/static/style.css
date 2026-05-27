@@ -3100,10 +3100,6 @@ select.settings-input { cursor: pointer; }
   gap: 0.45rem;
   flex-wrap: wrap;
   margin-bottom: 0.95rem;
-  transition: margin-top 0.12s ease;
-}
-.settings-content.spool-columns-open .spool-summary-strip {
-  margin-top: 11.5rem;
 }
 
 .spool-stat {
@@ -3334,28 +3330,23 @@ select.settings-input { cursor: pointer; }
 }
 .spool-action-edit:hover { opacity: 1; }
 
-.spool-action-menu,
-.spool-columns-menu {
+.spool-action-menu {
   position: relative;
 }
 .spool-action-menu {
   margin-left: auto;
 }
-.spool-action-menu[open],
-.spool-columns-menu[open] {
+.spool-action-menu[open] {
   z-index: 40;
 }
-.spool-action-more,
-.spool-columns-summary {
+.spool-action-more {
   list-style: none;
   user-select: none;
 }
-.spool-action-more::-webkit-details-marker,
-.spool-columns-summary::-webkit-details-marker {
+.spool-action-more::-webkit-details-marker {
   display: none;
 }
-.spool-action-menu-panel,
-.spool-columns-panel {
+.spool-action-menu-panel {
   position: absolute;
   right: 0;
   top: calc(100% + 0.25rem);
@@ -3376,23 +3367,6 @@ select.settings-input { cursor: pointer; }
   text-align: left;
   justify-content: flex-start;
   padding: 0.16rem 0.35rem !important;
-}
-.spool-columns-panel {
-  display: grid;
-  gap: 0.2rem;
-  min-width: 8.5rem;
-}
-.spool-column-option {
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
-  padding: 0.2rem 0.25rem;
-  color: var(--text);
-  font-size: 0.72rem;
-  cursor: pointer;
-}
-.spool-column-option input {
-  accent-color: var(--accent);
 }
 
 /* Add Spool modal */
