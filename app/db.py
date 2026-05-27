@@ -1169,6 +1169,7 @@ def get_spools(include_archived: bool = False) -> list:
             f"""SELECT id, material, brand, subtype, color_hex, color_name,
                        label_weight_g, remaining_g, empty_spool_weight_g,
                        location_printer_id, location_slot, storage_location_id,
+                       (SELECT name FROM spool_locations WHERE id = spools.storage_location_id) AS storage_location_name,
                        notes, added_at, archived_at
                 FROM spools {where}
                 ORDER BY material, brand, id"""
@@ -1182,6 +1183,7 @@ def get_spool(spool_id: int) -> Optional[dict]:
             """SELECT id, material, brand, subtype, color_hex, color_name,
                       label_weight_g, remaining_g, empty_spool_weight_g,
                       location_printer_id, location_slot, storage_location_id,
+                      (SELECT name FROM spool_locations WHERE id = spools.storage_location_id) AS storage_location_name,
                       notes, added_at, archived_at
                FROM spools WHERE id = ?""",
             (spool_id,),

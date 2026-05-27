@@ -65,9 +65,14 @@ class LabelPrinter:
         color_hex = (spool.get("color_hex") or "").upper()
         draw.text((x, 42), _ellipsize(draw, material, font_bold, 420), fill="black", font=font_bold)
         draw.text((x, 116), _ellipsize(draw, brand, font_body, 420), fill="black", font=font_body)
-        color_line = f"{color_name}  {color_hex}".strip()
-        draw.text((x, 168), _ellipsize(draw, color_line, font_body, 420), fill="black", font=font_body)
-        draw.text((x, 236), f"Spool #{spool.get('id', '-')}", fill="black", font=font_badge)
+        draw.text((x, 168), _ellipsize(draw, color_name, font_body, 300), fill="black", font=font_body)
+        if color_hex:
+            draw.text((x, 210), color_hex, fill="black", font=font_badge)
+        draw.text((x, 258), f"Spool #{spool.get('id', '-')}", fill="black", font=font_badge)
+
+        if not spool.get("location_printer_id"):
+            location = spool.get("storage_location_name") or "Storage"
+            draw.text((x, 326), _ellipsize(draw, f"Loc: {location}", font_small, 420), fill="black", font=font_small)
 
         added = str(spool.get("added_at") or "")[:10]
         try:

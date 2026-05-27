@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 27 May 2026 (Session 25.2 stats + spool locations)_
+_Last updated 27 May 2026 (Session 25.3 spool label hex/location polish)_
 
 ## Current state
 
@@ -557,6 +557,11 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Spool add/edit now lets a spool be stored at one of those named locations or loaded on a printer slot.
 - Spool cards, table rows, and detail text now show the named storage location instead of generic `Storage`.
 - Static cache-bust bumped to `v=48`.
+
+### Session 25.3 spool label hex/location polish
+- Spool labels now print the colour hex code on its own dedicated line so it cannot be crowded out by longer colour names.
+- Spool labels now include `Loc: <storage location>` only when the spool is stored, not when it is loaded on a printer.
+- Spool API records now include `storage_location_name` for label rendering and UI display.
 
 ---
 
