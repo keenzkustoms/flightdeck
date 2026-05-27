@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 27 May 2026 (Session 27.6 spool menu clipping fix)_
+_Last updated 27 May 2026 (Session 27.7 previous colour pills)_
 
 ## Current state
 
@@ -621,6 +621,11 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Fixed the Spools `Columns` dropdown being painted underneath the spool cards.
 - Settings content now allows Spools dropdown overlays to render above the page content.
 - Static cache-bust bumped to `v=56`.
+
+### Session 27.7 previous colour pills
+- Reverted the Add/Edit Spool modal `Previously used` colour picks back to the compact pill buttons.
+- Main Spools card paint-chart view was left unchanged.
+- Static cache-bust bumped to `v=57`.
 
 ---
 
