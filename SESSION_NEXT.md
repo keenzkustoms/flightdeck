@@ -531,6 +531,11 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Mobile keeps the primary nav as a horizontal scroll strip.
 - Static cache-bust bumped to `v=44`.
 
+### Session 24.1 sidebar heading polish
+- Sidebar section headings now use a soft blue accent (`#7aa2d8`) instead of muted grey.
+- Added subtle divider lines above sidebar sections to improve scan structure.
+- Static cache-bust bumped to `v=45`.
+
 ---
 
 ## Known issues
