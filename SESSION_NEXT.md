@@ -476,6 +476,13 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Current Pi permissions showed `/dev/hidraw0` and `/dev/usb/hiddev0` as `root:root` `0600`; user still needs udev rule / plugdev setup for service access.
 - Brother still reports as `04f9:2049` Editor Lite mass-storage mode; printing requires switching it to printer mode.
 
+### Session 23.3 spool inventory layout polish
+- Settings layout widened from 1140px to a viewport-aware 1480px max and side-nav footprint tightened.
+- Spool card grid now uses wider responsive cards (`minmax(320px, 1fr)`) instead of forcing three narrow columns.
+- Spool card action rows wrap cleanly instead of crowding.
+- Spool table padding/action spacing tightened to reduce horizontal scrolling.
+- Static cache-bust bumped to `v=39`.
+
 ---
 
 ## Known issues
