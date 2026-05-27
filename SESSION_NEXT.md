@@ -1,9 +1,9 @@
 # Flightdeck — next session brief
-_Last updated 27 May 2026 (post-session 23.1, DK-22212 label + scale wake UX)_
+_Last updated 27 May 2026 (Session 25 dashboard command overview)_
 
 ## Current state
 
-**Tier 1 complete. Tier 2 complete. Post-Tier-2 niceties complete. Spool inventory + Print queue + queue refinements + Maintenance schedule + Queue preflight + Spool traceability + Failure review + Printer health score + Scale/label hardware integration shipped.**
+**Tier 1 complete. Tier 2 complete. Post-Tier-2 niceties complete. Spool inventory + Print queue + queue refinements + Maintenance schedule + Queue preflight + Spool traceability + Failure review + Printer health score + Scale/label hardware integration + dashboard command overview shipped.**
 
 Service running at:
 - `http://flightdeck.local:8000`
@@ -535,6 +535,13 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Sidebar section headings now use a soft blue accent (`#7aa2d8`) instead of muted grey.
 - Added subtle divider lines above sidebar sections to improve scan structure.
 - Static cache-bust bumped to `v=45`.
+
+### Session 25 dashboard command overview
+- Dashboard now opens with a compact fleet overview strip before the printer cards.
+- Added live KPI tiles for total printers, printing, paused, faults, health warnings, and offline printers.
+- Added a "Needs attention" panel that links directly to affected printer pages.
+- Dashboard printer cards now sort by urgency first: E-stop/error, health attention, paused/watch, printing, offline, finished, idle.
+- Static cache-bust bumped to `v=46`.
 
 ---
 

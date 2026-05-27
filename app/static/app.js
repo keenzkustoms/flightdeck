@@ -452,6 +452,108 @@ function _healthLine(health) {
   return `<div class="health-line">${esc(health.reasons[0].message)}</div>`;
 }
 
+function _dashboardStateRank(p) {
+  const stateRank = {
+    estop: 0,
+    error: 1,
+    paused: 2,
+    printing: 3,
+    offline: 4,
+    finished: 5,
+    idle: 6
+  };
+  let rank = stateRank[p.state] ?? 7;
+  if (p.health?.status === 'attention') rank = Math.min(rank, 1);
+  if (p.health?.status === 'watch') rank = Math.min(rank, 2);
+  return rank;
+}
+
+function _dashboardPrinterName(p) {
+  return p.custom_name || p.model_name || p.id;
+}
+
+function _dashboardIssueText(p) {
+  if (p.state === 'estop') return 'Emergency stop active';
+  if (p.state === 'error') return p.error || 'Printer error';
+  if (p.state === 'paused') return 'Paused mid-print';
+  if (p.health?.reasons?.length) return p.health.reasons[0].message;
+  if (p.state === 'offline') return `Offline ${fmtLastSeen(p.last_seen)}`;
+  if (p.state === 'printing') {
+    const pct = p.job?.progress != null ? `${Math.round(p.job.progress * 100)}%` : 'active';
+    return `Printing ${pct}`;
+  }
+  return p.state || 'idle';
+}
+
+function _renderDashboardOverview(printers) {
+  const counts = printers.reduce((acc, p) => {
+    acc[p.state] = (acc[p.state] || 0) + 1;
+    if (p.health?.status === 'attention' || p.health?.status === 'watch') acc.health += 1;
+    return acc;
+  }, { health: 0 });
+  const printing = counts.printing || 0;
+  const paused = counts.paused || 0;
+  const hardStops = (counts.error || 0) + (counts.estop || 0);
+  const offline = counts.offline || 0;
+  const attention = printers
+    .filter(p => ['estop', 'error', 'paused', 'offline'].includes(p.state) || ['attention', 'watch'].includes(p.health?.status))
+    .sort((a, b) => _dashboardStateRank(a) - _dashboardStateRank(b) || _dashboardPrinterName(a).localeCompare(_dashboardPrinterName(b)))
+    .slice(0, 5);
+
+  const attentionHtml = attention.length ? attention.map(p => {
+    const severity = p.state === 'error' || p.state === 'estop' || p.health?.status === 'attention'
+      ? 'critical'
+      : p.state === 'paused' || p.health?.status === 'watch'
+        ? 'warn'
+        : 'muted';
+    return `<a class="dash-attention-item dash-attention-${severity}" href="#/printer/${encodeURIComponent(p.id)}">
+      <span class="dash-attention-name">${esc(_dashboardPrinterName(p))}</span>
+      <span class="dash-attention-text">${esc(_dashboardIssueText(p))}</span>
+    </a>`;
+  }).join('') : `
+    <div class="dash-attention-empty">
+      <span>All printers clear</span>
+      <span>No active faults or health warnings</span>
+    </div>`;
+
+  return `
+    <section class="dashboard-overview" aria-label="Dashboard overview">
+      <div class="dashboard-kpis">
+        <div class="dash-kpi">
+          <span class="dash-kpi-value">${printers.length}</span>
+          <span class="dash-kpi-label">Printers</span>
+        </div>
+        <div class="dash-kpi">
+          <span class="dash-kpi-value">${printing}</span>
+          <span class="dash-kpi-label">Printing</span>
+        </div>
+        <div class="dash-kpi ${paused ? 'dash-kpi-warn' : ''}">
+          <span class="dash-kpi-value">${paused}</span>
+          <span class="dash-kpi-label">Paused</span>
+        </div>
+        <div class="dash-kpi ${hardStops ? 'dash-kpi-critical' : ''}">
+          <span class="dash-kpi-value">${hardStops}</span>
+          <span class="dash-kpi-label">Faults</span>
+        </div>
+        <div class="dash-kpi ${counts.health ? 'dash-kpi-warn' : ''}">
+          <span class="dash-kpi-value">${counts.health}</span>
+          <span class="dash-kpi-label">Health</span>
+        </div>
+        <div class="dash-kpi ${offline ? 'dash-kpi-muted' : ''}">
+          <span class="dash-kpi-value">${offline}</span>
+          <span class="dash-kpi-label">Offline</span>
+        </div>
+      </div>
+      <div class="dashboard-attention">
+        <div class="dashboard-attention-head">
+          <span>Needs attention</span>
+          <span>${attention.length ? `${attention.length} active` : 'clear'}</span>
+        </div>
+        <div class="dash-attention-list">${attentionHtml}</div>
+      </div>
+    </section>`;
+}
+
 function jobDisplayName(job) {
   const raw = job.filename || '';
   const subtask = (job.subtask_name || '').trim();
@@ -2411,8 +2513,16 @@ function updateDashboard(printers) {
     if (_rp?.state === 'printing' || _rp?.state === 'paused') refreshObjectsPanel(_route.id);
   }
 
+  const sortedPrinters = [...printers].sort((a, b) =>
+    _dashboardStateRank(a) - _dashboardStateRank(b) ||
+    _dashboardPrinterName(a).localeCompare(_dashboardPrinterName(b))
+  );
+
+  const overview = document.getElementById('dashboard-overview');
+  if (overview) overview.innerHTML = _renderDashboardOverview(printers);
+
   const grid = document.getElementById('printer-grid');
-  grid.innerHTML = printers.map(renderCard).join('');
+  grid.innerHTML = sortedPrinters.map(renderCard).join('');
 
   grid.querySelectorAll('[data-printer-id]').forEach(card => {
     const p = printers.find(x => x.id === card.dataset.printerId);
