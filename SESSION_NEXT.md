@@ -470,6 +470,12 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Scale read failures now tell the operator to wake the scale and retry when the Dymo is asleep/not detected.
 - Static cache-bust bumped to `v=38`.
 
+### Session 23.2 hardware detection note
+- Real scale identified on the Pi as `0922:8009 Dymo-CoStar Corp. S250 Digital Postal Scale` / `DYMO M25 25 lb`.
+- Scale detector now accepts both `0922:8004` and `0922:8009`.
+- Current Pi permissions showed `/dev/hidraw0` and `/dev/usb/hiddev0` as `root:root` `0600`; user still needs udev rule / plugdev setup for service access.
+- Brother still reports as `04f9:2049` Editor Lite mass-storage mode; printing requires switching it to printer mode.
+
 ---
 
 ## Known issues

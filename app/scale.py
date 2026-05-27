@@ -18,7 +18,7 @@ class ScaleReading:
 
 class Scale:
     VENDOR = "0922"
-    PRODUCT = "8004"
+    PRODUCTS = {"8004", "8009"}
 
     def __init__(self, device_path: str = "/dev/usb/hiddev0"):
         self.device_path = device_path
@@ -64,7 +64,7 @@ class Scale:
         except Exception as exc:
             self.last_error = str(exc)
             return False
-        return f"{self.VENDOR}:{self.PRODUCT}" in out
+        return any(f"{self.VENDOR}:{product}" in out for product in self.PRODUCTS)
 
     def read_stable(self, timeout_s: float = 5.0) -> Optional[ScaleReading]:
         deadline = time.time() + timeout_s

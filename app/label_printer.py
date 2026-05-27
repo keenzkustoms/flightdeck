@@ -40,7 +40,7 @@ class LabelPrinter:
         if f"{self.VENDOR}:{self.PRODUCT_PRINTER}" in out:
             return LabelStatus(True)
         if f"{self.VENDOR}:{self.PRODUCT_EDITOR_LITE}" in out:
-            return LabelStatus(False, last_error="QL-700 is in Editor Lite mass-storage mode")
+            return LabelStatus(False, last_error="QL-700 is in Editor Lite mass-storage mode; turn Editor Lite off on the printer")
         return LabelStatus(False, last_error="Brother QL-700 not detected")
 
     def render_spool_label(self, spool: dict) -> Image.Image:
