@@ -3515,7 +3515,7 @@ function _spoolCardHtml(s) {
   const used = Math.max(0, s.label_weight_g - s.remaining_g);
   const p = _latestPrinters.find(x => x.id === s.location_printer_id);
   const locBadge = s.location_printer_id
-    ? `<span class="spool-location-badge" title="${(p?.custom_name ?? s.location_printer_id)} slot ${s.location_slot}">📍 ${p?.custom_name ?? s.location_printer_id}</span>`
+    ? `<span class="spool-location-badge" title="${(p?.custom_name ?? s.location_printer_id)} ${_amsSlotLabel(p, s.location_slot)}">📍 ${p?.custom_name ?? s.location_printer_id}</span>`
     : '';
   return `<div class="spool-card" data-spool-id="${s.id}">
     <div class="spool-card-band" style="background:${bandColor};color:${textColor}">
@@ -3542,9 +3542,10 @@ function _spoolCardHtml(s) {
       </div>
       <div class="spool-card-actions">
         <a class="spool-action-btn spool-action-detail" href="#/spool/${s.id}" title="Details">Details</a>
-        <button class="spool-action-btn spool-action-edit" data-action="edit"      data-id="${s.id}" title="Edit">Edit</button>
         <button class="spool-action-btn spool-action-label" data-action="label"    data-id="${s.id}" title="Print label">Label</button>
         <button class="spool-action-btn spool-action-weigh" data-action="weigh"    data-id="${s.id}" title="Weigh from scale">Weigh</button>
+        <button class="spool-action-btn spool-action-edit" data-action="edit"      data-id="${s.id}" title="Edit">Edit</button>
+        <span class="spool-action-spacer"></span>
         <button class="spool-action-btn" data-action="duplicate" data-id="${s.id}" title="Duplicate">📋</button>
         <button class="spool-action-btn" data-action="reset"     data-id="${s.id}" title="Reset weight">🔄</button>
         <button class="spool-action-btn" data-action="archive"   data-id="${s.id}" title="Archive">📦</button>

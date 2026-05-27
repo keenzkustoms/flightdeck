@@ -62,9 +62,11 @@ class LabelPrinter:
         material = " ".join([spool.get("material") or "Material", spool.get("subtype") or ""]).strip()
         brand = spool.get("brand") or "-"
         color_name = spool.get("color_name") or "-"
+        color_hex = (spool.get("color_hex") or "").upper()
         draw.text((x, 42), _ellipsize(draw, material, font_bold, 420), fill="black", font=font_bold)
         draw.text((x, 116), _ellipsize(draw, brand, font_body, 420), fill="black", font=font_body)
-        draw.text((x, 168), _ellipsize(draw, color_name, font_body, 420), fill="black", font=font_body)
+        color_line = f"{color_name}  {color_hex}".strip()
+        draw.text((x, 168), _ellipsize(draw, color_line, font_body, 420), fill="black", font=font_body)
         draw.text((x, 236), f"Spool #{spool.get('id', '-')}", fill="black", font=font_badge)
 
         added = str(spool.get("added_at") or "")[:10]

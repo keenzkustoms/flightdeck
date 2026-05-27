@@ -499,6 +499,15 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Label render height reduced from 520px to 430px to waste less continuous tape.
 - Static cache-bust bumped to `v=40`.
 
+### Session 23.6 compact spool cards + colour hex on labels
+- Spool cards changed to a denser preview layout:
+  - grid minimum width reduced from 320px to 260px
+  - card header height reduced from 60px to 42px
+  - card padding/type/actions tightened
+  - primary actions ordered as Details / Label / Weigh / Edit, with utility icon actions pushed right
+- Printed labels now include the colour hex code beside the colour name.
+- Static cache-bust bumped to `v=41`.
+
 ---
 
 ## Known issues
