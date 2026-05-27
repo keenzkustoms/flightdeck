@@ -543,6 +543,11 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Dashboard printer cards now sort by urgency first: E-stop/error, health attention, paused/watch, printing, offline, finished, idle.
 - Static cache-bust bumped to `v=46`.
 
+### Session 25.1 dashboard density polish
+- Dashboard KPI tiles were shortened and capped to compact widths so the top overview stops dominating the page.
+- Printer card status badges now wrap and use slightly tighter sizing, preventing `Idle` from clipping when health and filament badges are also shown.
+- Static cache-bust bumped to `v=47`.
+
 ---
 
 ## Known issues
