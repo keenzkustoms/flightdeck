@@ -2989,30 +2989,31 @@ select.settings-input { cursor: pointer; }
 /* Card grid */
 .spool-card-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(126px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
   gap: 0.45rem;
 }
-@media (max-width: 740px) { .spool-card-grid { grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); } }
+@media (max-width: 740px) { .spool-card-grid { grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); } }
 @media (max-width: 420px) { .spool-card-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 
 .spool-card {
   background: var(--card-bg);
   border: 1px solid var(--border);
   border-radius: 0.45rem;
-  overflow: hidden;
+  overflow: visible;
   display: flex;
   flex-direction: column;
   min-width: 0;
 }
 
 .spool-card-band {
-  min-height: 54px;
+  min-height: 48px;
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 0.4rem;
-  padding: 0.45rem 0.5rem;
+  padding: 0.4rem 0.45rem;
   font-weight: 700;
+  border-radius: 0.45rem 0.45rem 0 0;
 }
 
 .spool-color-name {
@@ -3030,7 +3031,7 @@ select.settings-input { cursor: pointer; }
 }
 
 .spool-card-body {
-  padding: 0.38rem 0.45rem;
+  padding: 0.34rem 0.42rem;
   display: flex;
   flex-direction: column;
   gap: 0.22rem;
@@ -3066,7 +3067,7 @@ select.settings-input { cursor: pointer; }
 .spool-location-badge {
   font-size: 0.6rem;
   color: var(--printing);
-  max-width: 4.6rem;
+  max-width: 4.2rem;
   text-align: right;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3125,9 +3126,10 @@ select.settings-input { cursor: pointer; }
 }
 
 .spool-card-actions {
+  position: relative;
   display: flex;
   gap: 0.16rem;
-  justify-content: flex-start;
+  justify-content: space-between;
   flex-wrap: wrap;
   margin-top: 0.18rem;
   padding-top: 0.24rem;
@@ -3149,6 +3151,7 @@ select.settings-input { cursor: pointer; }
 .spool-action-edit,
 .spool-action-label,
 .spool-action-weigh,
+.spool-action-more,
 .spool-action-utility {
   opacity: 0.8;
   font-size: 0.6rem;
@@ -3173,6 +3176,67 @@ select.settings-input { cursor: pointer; }
   color: var(--text);
 }
 .spool-action-edit:hover { opacity: 1; }
+
+.spool-action-menu,
+.spool-columns-menu {
+  position: relative;
+}
+.spool-action-menu {
+  margin-left: auto;
+}
+.spool-action-menu[open],
+.spool-columns-menu[open] {
+  z-index: 40;
+}
+.spool-action-more,
+.spool-columns-summary {
+  list-style: none;
+  user-select: none;
+}
+.spool-action-more::-webkit-details-marker,
+.spool-columns-summary::-webkit-details-marker {
+  display: none;
+}
+.spool-action-menu-panel,
+.spool-columns-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 0.25rem);
+  z-index: 30;
+  min-width: 7.5rem;
+  padding: 0.35rem;
+  border: 1px solid var(--border);
+  border-radius: 0.45rem;
+  background: var(--card-bg);
+  box-shadow: 0 14px 30px rgba(0,0,0,0.35);
+}
+.spool-action-menu-panel {
+  display: grid;
+  gap: 0.2rem;
+}
+.spool-action-menu-panel .spool-action-btn {
+  width: 100%;
+  text-align: left;
+  justify-content: flex-start;
+  padding: 0.16rem 0.35rem !important;
+}
+.spool-columns-panel {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 8.5rem;
+}
+.spool-column-option {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.2rem 0.25rem;
+  color: var(--text);
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+.spool-column-option input {
+  accent-color: var(--accent);
+}
 
 /* Add Spool modal */
 .spool-modal {

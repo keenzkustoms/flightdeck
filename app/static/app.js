@@ -3627,6 +3627,17 @@ let _spoolsFilter = { search: '', status: 'active', slotFilter: 'all', material:
 let _spoolLocations = [];
 let _latestSpoolsByPrinter = {};   // printer_id → [spool, ...]
 let _latestLowStockPct = 20;
+const _SPOOL_ACTIONS = [
+  { key: 'detail', label: 'Info', title: 'Details', kind: 'link', cls: 'spool-action-detail' },
+  { key: 'label', label: 'Label', title: 'Print label', cls: 'spool-action-label' },
+  { key: 'weigh', label: 'Weigh', title: 'Weigh from scale', cls: 'spool-action-weigh' },
+  { key: 'edit', label: 'Edit', title: 'Edit', cls: 'spool-action-edit' },
+  { key: 'duplicate', label: 'Copy', title: 'Duplicate', cls: 'spool-action-utility' },
+  { key: 'reset', label: 'Reset', title: 'Reset weight', cls: 'spool-action-utility' },
+  { key: 'archive', label: 'Arch', title: 'Archive', cls: 'spool-action-utility' },
+  { key: 'delete', label: 'Del', title: 'Delete', cls: 'spool-action-utility spool-action-danger' },
+];
+let _spoolVisibleActions = _loadSpoolVisibleActions();
 
 async function _refreshSpoolsByPrinter() {
   try {
@@ -3910,6 +3921,55 @@ const _SWATCH_COLORS = [
   '#06b6d4','#3b82f6','#a855f7','#ec4899',
 ];
 
+function _loadSpoolVisibleActions() {
+  const defaults = ['label', 'weigh', 'edit'];
+  try {
+    const saved = JSON.parse(localStorage.getItem('fd_spool_visible_actions') || 'null');
+    const allowed = new Set(_SPOOL_ACTIONS.map(a => a.key));
+    if (Array.isArray(saved)) return saved.filter(k => allowed.has(k));
+  } catch {}
+  return defaults;
+}
+
+function _saveSpoolVisibleActions() {
+  try { localStorage.setItem('fd_spool_visible_actions', JSON.stringify(_spoolVisibleActions)); } catch {}
+}
+
+function _spoolActionControl(action, spoolId, compact = false) {
+  const label = compact && action.key === 'archive' ? 'Archive' : compact && action.key === 'delete' ? 'Delete' : action.label;
+  const cls = `spool-action-btn ${action.cls}`;
+  if (action.kind === 'link') {
+    return `<a class="${cls}" href="#/spool/${spoolId}" title="${action.title}">${label}</a>`;
+  }
+  return `<button class="${cls}" data-action="${action.key}" data-id="${spoolId}" title="${action.title}">${label}</button>`;
+}
+
+function _spoolCardActionsHtml(spoolId) {
+  const visible = new Set(_spoolVisibleActions);
+  const quick = _SPOOL_ACTIONS.filter(a => visible.has(a.key)).map(a => _spoolActionControl(a, spoolId)).join('');
+  const menu = _SPOOL_ACTIONS.map(a => _spoolActionControl(a, spoolId, true)).join('');
+  return `<div class="spool-card-actions">
+    ${quick}
+    <details class="spool-action-menu">
+      <summary class="spool-action-btn spool-action-more" title="More actions">Actions</summary>
+      <div class="spool-action-menu-panel">${menu}</div>
+    </details>
+  </div>`;
+}
+
+function _spoolColumnsMenuHtml() {
+  const visible = new Set(_spoolVisibleActions);
+  return `<details class="spool-columns-menu">
+    <summary class="spool-view-btn spool-columns-summary">Columns</summary>
+    <div class="spool-columns-panel">
+      ${_SPOOL_ACTIONS.map(a => `<label class="spool-column-option">
+        <input type="checkbox" data-spool-action-toggle="${a.key}"${visible.has(a.key) ? ' checked' : ''}>
+        <span>${a.key === 'archive' ? 'Archive' : a.key === 'delete' ? 'Delete' : a.label}</span>
+      </label>`).join('')}
+    </div>
+  </details>`;
+}
+
 function _spoolCardHtml(s) {
   const pct = s.label_weight_g > 0 ? Math.round(s.remaining_g * 100 / s.label_weight_g) : 0;
   const barColor = _spoolProgressColor(pct);
@@ -3940,16 +4000,7 @@ function _spoolCardHtml(s) {
         <div class="spool-progress-fill" style="width:${pct}%;background:${barColor}"></div>
       </div>
       <div class="spool-meta-row"><span class="spool-meta">${Math.round(s.label_weight_g)}g label</span><span class="spool-meta">${Math.round(used)}g used</span></div>
-      <div class="spool-card-actions">
-        <a class="spool-action-btn spool-action-detail" href="#/spool/${s.id}" title="Details">Info</a>
-        <button class="spool-action-btn spool-action-label" data-action="label"    data-id="${s.id}" title="Print label">Label</button>
-        <button class="spool-action-btn spool-action-weigh" data-action="weigh"    data-id="${s.id}" title="Weigh from scale">Weigh</button>
-        <button class="spool-action-btn spool-action-edit" data-action="edit"      data-id="${s.id}" title="Edit">Edit</button>
-        <button class="spool-action-btn spool-action-utility" data-action="duplicate" data-id="${s.id}" title="Duplicate">Copy</button>
-        <button class="spool-action-btn spool-action-utility" data-action="reset"     data-id="${s.id}" title="Reset weight">Reset</button>
-        <button class="spool-action-btn spool-action-utility" data-action="archive"   data-id="${s.id}" title="Archive">Arch</button>
-        <button class="spool-action-btn spool-action-utility spool-action-danger" data-action="delete" data-id="${s.id}" title="Delete">Del</button>
-      </div>
+      ${_spoolCardActionsHtml(s.id)}
     </div>
   </div>`;
 }
@@ -4078,6 +4129,7 @@ function _spoolsCategoryHtml(spools, summary, costs) {
           <button class="spool-view-btn${_spoolsViewMode==='cards'?' active':''}" data-view="cards">Cards</button>
           <button class="spool-view-btn${_spoolsViewMode==='table'?' active':''}" data-view="table">Table</button>
         </div>
+        ${_spoolColumnsMenuHtml()}
         <select class="spool-filter-sel" data-fkey="material">${matOpts}</select>
         <select class="spool-filter-sel" data-fkey="brand">${brandOpts}</select>
         <input class="spool-search" type="search" placeholder="Search…" value="${_spoolsFilter.search}">
@@ -4220,7 +4272,7 @@ function _attachSpoolsEvents(el, costs) {
   });
 
   // View toggle
-  el.querySelectorAll('.spool-view-btn').forEach(btn => {
+  el.querySelectorAll('.spool-view-btn[data-view]').forEach(btn => {
     btn.addEventListener('click', async () => {
       _spoolsViewMode = btn.dataset.view;
       el.querySelectorAll('.spool-view-btn').forEach(b => b.classList.toggle('active', b === btn));
@@ -4228,6 +4280,15 @@ function _attachSpoolsEvents(el, costs) {
         method: 'PUT', headers: {'Content-Type':'application/json'},
         body: JSON.stringify({value: _spoolsViewMode}),
       }).catch(() => {});
+      _renderSpoolList(el);
+    });
+  });
+
+  el.querySelectorAll('[data-spool-action-toggle]').forEach(input => {
+    input.addEventListener('change', () => {
+      const selected = [...el.querySelectorAll('[data-spool-action-toggle]:checked')].map(x => x.dataset.spoolActionToggle);
+      _spoolVisibleActions = selected;
+      _saveSpoolVisibleActions();
       _renderSpoolList(el);
     });
   });

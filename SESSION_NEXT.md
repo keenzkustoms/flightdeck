@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 27 May 2026 (Session 27.4 spool inventory paint chart)_
+_Last updated 27 May 2026 (Session 27.5 spool action columns)_
 
 ## Current state
 
@@ -610,6 +610,12 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Colour tile cards are smaller, colour-led, and ordered by spool number.
 - Card metadata and actions were tightened to fit many more spools on screen while preserving Info, Label, Weigh, Edit, Copy, Reset, Archive, and Delete.
 - Static cache-bust bumped to `v=54`.
+
+### Session 27.5 spool action columns
+- Added a `Columns` menu to the Spools header so card quick actions can be toggled on/off per browser.
+- Spool cards now keep selected quick actions visible and move the full action list into a compact `Actions` dropdown on each card.
+- Paint-chart cards were tightened again so more colour tiles fit per row while still keeping all functions available.
+- Static cache-bust bumped to `v=55`.
 
 ---
 
