@@ -3747,13 +3747,22 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
         (a.material || '').localeCompare(b.material || '') ||
         (a.color_name || '').localeCompare(b.color_name || '')
       );
-    const options = candidates.length
-      ? candidates.map(s => {
-          const pct = s.label_weight_g > 0 ? Math.round(s.remaining_g * 100 / s.label_weight_g) : 0;
-          const name = `#${s.id} ${s.color_name || s.color_hex || ''} · ${s.material}${s.subtype ? ' ' + s.subtype : ''} · ${s.brand || ''} · ${Math.round(s.remaining_g || 0)}g (${pct}%) · ${_spoolStorageLocationName(s.storage_location_id)}`;
-          return `<option value="${s.id}">${esc(name)}</option>`;
-        }).join('')
-      : '<option value="">No stored spools available</option>';
+    const pickerRows = candidates.length ? candidates.map(s => {
+      const pct = s.label_weight_g > 0 ? Math.round(s.remaining_g * 100 / s.label_weight_g) : 0;
+      const loc = _spoolStorageLocationName(s.storage_location_id);
+      const searchable = `${loc} ${s.material || ''} ${s.subtype || ''} ${s.brand || ''} ${s.color_name || ''} ${s.color_hex || ''} #${s.id}`.toLowerCase();
+      return `<button type="button" class="slot-spool-option" data-slot-spool-id="${s.id}" data-search="${esc(searchable)}">
+        <span class="location-spool-swatch" style="background:${s.color_hex || '#808080'}"></span>
+        <span class="slot-spool-option-main">
+          <strong>${esc(s.color_name || s.color_hex || 'Colour')} · ${esc(s.material)}${s.subtype ? ` ${esc(s.subtype)}` : ''}</strong>
+          <small>${esc(s.brand || 'Unknown brand')} · #${s.id} · ${Math.round(s.remaining_g || 0)}g (${pct}%)</small>
+        </span>
+        <span class="slot-spool-location">${esc(loc)}</span>
+      </button>`;
+    }).join('') : '<div class="slot-empty-state">No stored spools available.</div>';
+    const locationOptions = _spoolLocations.length
+      ? _spoolLocations.map(loc => `<option value="${loc.id}">${esc(loc.name)}</option>`).join('')
+      : '<option value="">Storage</option>';
     body.innerHTML = `
       <div class="slot-current">
         <div class="slot-current-label">Current assignment</div>
@@ -3771,38 +3780,48 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
             <a class="spool-action-btn spool-action-detail" href="#/spool/${current.id}">Details</a>
             <button class="spool-action-btn spool-action-label" data-slot-label-print="${current.id}">Label</button>
             <button class="spool-action-btn spool-action-weigh" data-slot-weigh="${current.id}">Weigh</button>
-            <button class="spool-action-btn spool-action-danger" data-slot-clear="${current.id}">Clear slot</button>
+            <select class="slot-clear-location" data-slot-clear-location>${locationOptions}</select>
+            <button class="spool-action-btn spool-action-danger" data-slot-clear="${current.id}">Clear to storage</button>
           </div>` : `<div class="slot-empty-state">No Flightdeck spool assigned to this slot.</div>`}
       </div>
       <div class="slot-assign">
-        <label class="spool-form-label" for="slot-spool-select">Assign stored spool</label>
-        <select id="slot-spool-select" class="spool-form-input"${candidates.length ? '' : ' disabled'}>${options}</select>
-        <button class="modal-btn modal-btn-confirm" data-slot-assign${candidates.length ? '' : ' disabled'}>Assign to ${esc(slotLabel)}</button>
+        <label class="spool-form-label" for="slot-spool-filter">Assign stored spool</label>
+        <input id="slot-spool-filter" class="spool-form-input" type="search" placeholder="Filter by location, material, brand, colour..."${candidates.length ? '' : ' disabled'}>
+        <div class="slot-spool-picker">${pickerRows}</div>
       </div>`;
 
-    body.querySelector('[data-slot-assign]')?.addEventListener('click', async btnEvt => {
-      const btn = btnEvt.currentTarget;
-      const id = body.querySelector('#slot-spool-select')?.value;
-      if (!id) return;
+    body.querySelectorAll('[data-slot-spool-id]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const id = btn.dataset.slotSpoolId;
       btn.disabled = true;
-      btn.textContent = 'Assigning...';
+      btn.classList.add('assigning');
       const r = await fetch(`/api/spools/${id}/move`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ printer_id: printerId, slot: Number(slotIndex) }),
       });
       if (!r.ok) {
-        btn.textContent = 'Slot occupied';
+        btn.classList.remove('assigning');
+        btn.classList.add('slot-spool-error');
         setTimeout(load, 1200);
         return;
       }
       await _refreshSpoolsByPrinter();
       load();
+      });
+    });
+
+    body.querySelector('#slot-spool-filter')?.addEventListener('input', e => {
+      const q = e.target.value.trim().toLowerCase();
+      body.querySelectorAll('[data-slot-spool-id]').forEach(row => {
+        row.classList.toggle('hidden', q && !row.dataset.search.includes(q));
+      });
     });
 
     body.querySelector('[data-slot-clear]')?.addEventListener('click', async e => {
       const id = e.currentTarget.dataset.slotClear;
-      const storageId = _spoolLocations[0]?.id || null;
+      const rawStorageId = body.querySelector('[data-slot-clear-location]')?.value || '';
+      const storageId = rawStorageId ? Number(rawStorageId) : null;
       await fetch(`/api/spools/${id}/move`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

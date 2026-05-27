@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 27 May 2026 (Session 27.1 AMS/MMU mismatch warnings)_
+_Last updated 27 May 2026 (Session 27.2 slot editor picker polish)_
 
 ## Current state
 
@@ -592,6 +592,12 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Warnings cover unassigned printer-loaded filament, assigned spool while printer reports empty, material mismatch, and large colour mismatch.
 - Slot editor now shows the printer-reported slot state and a plain-text warning when a mismatch is detected.
 - Static cache-bust bumped to `v=51`.
+
+### Session 27.2 slot editor picker polish
+- Slot editor now uses a searchable stored-spool picker instead of a long plain dropdown.
+- Stored spool choices show colour, material/subtype, brand, spool ID, remaining weight, percent, and storage location.
+- Clearing a slot now lets the user choose the storage location to return the spool to.
+- Static cache-bust bumped to `v=52`.
 
 ---
 
