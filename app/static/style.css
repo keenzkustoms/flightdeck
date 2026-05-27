@@ -2705,7 +2705,7 @@ select.settings-input { cursor: pointer; }
 
 .spool-card-actions {
   display: flex;
-  gap: 0.28rem;
+  gap: 0.3rem;
   justify-content: flex-start;
   flex-wrap: wrap;
   margin-top: 0.3rem;
@@ -2727,7 +2727,8 @@ select.settings-input { cursor: pointer; }
 .spool-action-detail,
 .spool-action-edit,
 .spool-action-label,
-.spool-action-weigh {
+.spool-action-weigh,
+.spool-action-utility {
   opacity: 0.8;
   font-size: 0.76rem;
   font-weight: 600;
@@ -2737,6 +2738,11 @@ select.settings-input { cursor: pointer; }
   padding: 0.08rem 0.34rem !important;
 }
 .spool-action-spacer { flex: 1; min-width: 0.25rem; }
+.spool-action-utility {
+  color: var(--muted);
+  background: rgba(255,255,255,0.03);
+}
+.spool-action-danger { color: #fca5a5; }
 .spool-action-detail {
   color: var(--muted);
   text-decoration: none;

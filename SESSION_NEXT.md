@@ -508,6 +508,11 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Printed labels now include the colour hex code beside the colour name.
 - Static cache-bust bumped to `v=41`.
 
+### Session 23.7 card action polish
+- Spool card utility icon actions are now compact text buttons (`Copy`, `Reset`, `Archive`, `Delete`) matching the rest of the card action language.
+- Utility actions remain visually secondary; delete is styled as a muted danger action.
+- Static cache-bust bumped to `v=42`.
+
 ---
 
 ## Known issues

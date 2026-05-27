@@ -3546,10 +3546,10 @@ function _spoolCardHtml(s) {
         <button class="spool-action-btn spool-action-weigh" data-action="weigh"    data-id="${s.id}" title="Weigh from scale">Weigh</button>
         <button class="spool-action-btn spool-action-edit" data-action="edit"      data-id="${s.id}" title="Edit">Edit</button>
         <span class="spool-action-spacer"></span>
-        <button class="spool-action-btn" data-action="duplicate" data-id="${s.id}" title="Duplicate">📋</button>
-        <button class="spool-action-btn" data-action="reset"     data-id="${s.id}" title="Reset weight">🔄</button>
-        <button class="spool-action-btn" data-action="archive"   data-id="${s.id}" title="Archive">📦</button>
-        <button class="spool-action-btn" data-action="delete"    data-id="${s.id}" title="Delete">🗑</button>
+        <button class="spool-action-btn spool-action-utility" data-action="duplicate" data-id="${s.id}" title="Duplicate">Copy</button>
+        <button class="spool-action-btn spool-action-utility" data-action="reset"     data-id="${s.id}" title="Reset weight">Reset</button>
+        <button class="spool-action-btn spool-action-utility" data-action="archive"   data-id="${s.id}" title="Archive">Archive</button>
+        <button class="spool-action-btn spool-action-utility spool-action-danger" data-action="delete" data-id="${s.id}" title="Delete">Delete</button>
       </div>
     </div>
   </div>`;
