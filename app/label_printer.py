@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import io
+import os
+import re
 import subprocess
 from dataclasses import dataclass
 from datetime import datetime
@@ -37,7 +39,11 @@ class LabelPrinter:
         except Exception as exc:
             self.last_error = str(exc)
             return LabelStatus(False, last_error=self.last_error)
-        if f"{self.VENDOR}:{self.PRODUCT_PRINTER}" in out:
+        printer_line = next((line for line in out.splitlines() if f"{self.VENDOR}:{self.PRODUCT_PRINTER}" in line), "")
+        if printer_line:
+            node = _usb_device_node(printer_line)
+            if node and not os.access(node, os.R_OK | os.W_OK):
+                return LabelStatus(False, last_error=f"QL-700 detected but USB permission denied for {node}")
             return LabelStatus(True)
         if f"{self.VENDOR}:{self.PRODUCT_EDITOR_LITE}" in out:
             return LabelStatus(False, last_error="QL-700 is in Editor Lite mass-storage mode; turn Editor Lite off on the printer")
@@ -102,7 +108,10 @@ class LabelPrinter:
             send(instructions=instructions, printer_identifier="usb://0x04f9:0x2042", backend_identifier="pyusb", blocking=True)
             return True
         except Exception as exc:
-            self.last_error = str(exc)
+            message = str(exc)
+            if "Access denied" in message or "insufficient permissions" in message:
+                message = "QL-700 USB permission denied; add the flightdeck user to lp or apply the Brother udev rule"
+            self.last_error = message
             return False
 
     def print_test_label(self) -> bool:
@@ -151,3 +160,10 @@ def _qr_image(url: str) -> Optional[Image.Image]:
         return qr.make_image(fill_color="black", back_color="white").convert("RGB")
     except Exception:
         return None
+
+
+def _usb_device_node(lsusb_line: str) -> Optional[str]:
+    match = re.match(r"Bus\s+(\d+)\s+Device\s+(\d+):", lsusb_line)
+    if not match:
+        return None
+    return f"/dev/bus/usb/{match.group(1)}/{match.group(2)}"

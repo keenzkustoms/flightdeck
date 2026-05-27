@@ -483,6 +483,13 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Spool table padding/action spacing tightened to reduce horizontal scrolling.
 - Static cache-bust bumped to `v=39`.
 
+### Session 23.4 Brother USB permission detection
+- Brother QL-700 now correctly detected in printer mode as `04f9:2042`.
+- Actual print failed with `[Errno 13] Access denied (insufficient permissions)`.
+- Device node observed as `/dev/bus/usb/003/004` owned by `root:lp` with `0664`; `flightdeck` was not in `lp`.
+- Label printer status now checks USB node read/write access and reports permission denied instead of showing READY when print access will fail.
+- Print errors now give an operator-facing permission hint.
+
 ---
 
 ## Known issues
