@@ -3001,12 +3001,13 @@ function _filamentCategoryHtml(summary, costs) {
         </div>`;
       }).join('')}</div>` : '';
 
-  // costs is a list [{material, brand, cost_per_gram, comment}]
+  // costs is a list [{material, brand, cost_per_gram, comment, empty_spool_weight_g}]
   // normalise old dict format in case service hasn't restarted yet
   const costsList = Array.isArray(costs)
     ? costs
     : Object.entries(costs).map(([material, v]) => ({
         material, brand: v.brand || '', cost_per_gram: v.cost_per_gram, comment: v.comment,
+        empty_spool_weight_g: v.empty_spool_weight_g,
       }));
 
   const grouped = {};
@@ -3029,6 +3030,7 @@ function _filamentCategoryHtml(summary, costs) {
       <tr class="cost-brand-row" data-material="${_esc(mat)}" data-brand="${_esc(e.brand)}">
         <td class="cost-brand-cell">${e.brand || '<span class="cost-brand-empty">—</span>'}</td>
         <td class="cost-cpg-cell">$${e.cost_per_gram.toFixed(3)}/g</td>
+        <td class="cost-tare-cell">${e.empty_spool_weight_g != null ? Math.round(e.empty_spool_weight_g) + 'g' : '—'}</td>
         <td class="cost-comment-cell">${e.comment || ''}</td>
         <td class="cost-brand-actions">
           <button class="cost-brand-edit-btn" title="Edit">✎</button>
@@ -3046,6 +3048,7 @@ function _filamentCategoryHtml(summary, costs) {
         <tr class="cost-add-brand-row">
           <td><input class="cost-new-brand" type="text" placeholder="Brand *" data-material="${_esc(mat)}"></td>
           <td><input class="cost-new-cpg" type="number" min="0" step="0.001" placeholder="$/g *" data-material="${_esc(mat)}"></td>
+          <td><input class="cost-new-tare" type="number" min="0" step="1" placeholder="Tare g" data-material="${_esc(mat)}"></td>
           <td><input class="cost-new-comment" type="text" placeholder="Notes" data-material="${_esc(mat)}"></td>
           <td><button class="cost-add-brand-btn" data-material="${_esc(mat)}">Add</button></td>
         </tr>
@@ -3079,6 +3082,10 @@ function _filamentCategoryHtml(summary, costs) {
             <label class="cost-label">$/g *</label>
             <input id="new-mat-cost" type="number" class="cost-input" min="0" step="0.001" placeholder="0.000">
           </div>
+          <div class="cost-field-group cost-field-narrow">
+            <label class="cost-label">Tare g</label>
+            <input id="new-mat-tare" type="number" class="cost-input" min="0" step="1" placeholder="0">
+          </div>
         </div>
         <div class="cost-field-group">
           <label class="cost-label">Notes</label>
@@ -3090,11 +3097,15 @@ function _filamentCategoryHtml(summary, costs) {
 }
 
 function _attachFilamentEvents(el) {
-  async function _putBrand(mat, brand, cpg, comment) {
+  async function _putBrand(mat, brand, cpg, comment, emptySpoolWeightG = null) {
     const r = await fetch(
       `/api/filament/costs/${encodeURIComponent(mat)}/${encodeURIComponent(brand)}`,
       { method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cost_per_gram: cpg, comment: comment || null }) }
+        body: JSON.stringify({
+          cost_per_gram: cpg,
+          comment: comment || null,
+          empty_spool_weight_g: emptySpoolWeightG,
+        }) }
     );
     if (!r.ok) throw new Error();
   }
@@ -3114,15 +3125,18 @@ function _attachFilamentEvents(el) {
       const row     = btn.closest('.cost-add-brand-row');
       const brandEl = row.querySelector('.cost-new-brand');
       const cpgEl   = row.querySelector('.cost-new-cpg');
+      const tareEl  = row.querySelector('.cost-new-tare');
       const noteEl  = row.querySelector('.cost-new-comment');
       const brand   = brandEl.value.trim();
       const cpg     = parseFloat(cpgEl.value);
+      const tare    = tareEl.value.trim() === '' ? null : parseFloat(tareEl.value);
       if (!brand) { brandEl.focus(); return; }
       if (isNaN(cpg) || cpg < 0) { cpgEl.focus(); return; }
+      if (tare !== null && (isNaN(tare) || tare < 0)) { tareEl.focus(); return; }
       btn.disabled = true; btn.textContent = '…';
       try {
-        await _putBrand(mat, brand, cpg, noteEl.value.trim());
-        brandEl.value = ''; cpgEl.value = ''; noteEl.value = '';
+        await _putBrand(mat, brand, cpg, noteEl.value.trim(), tare);
+        brandEl.value = ''; cpgEl.value = ''; tareEl.value = ''; noteEl.value = '';
         btn.textContent = 'Add'; btn.disabled = false;
         _renderSettingsContent('filament');
       } catch {
@@ -3139,10 +3153,12 @@ function _attachFilamentEvents(el) {
       const mat   = tr.dataset.material;
       const brand = tr.dataset.brand;
       const cpgText = tr.querySelector('.cost-cpg-cell').textContent.replace(/[^0-9.]/g, '');
+      const tareText = tr.querySelector('.cost-tare-cell').textContent.replace(/[^0-9.]/g, '');
       const note    = tr.querySelector('.cost-comment-cell').textContent;
       tr.innerHTML = `
         <td><input class="cost-new-brand" type="text" value="${brand}" readonly style="color:var(--muted)"></td>
         <td><input class="cost-new-cpg" type="number" min="0" step="0.001" value="${cpgText}"></td>
+        <td><input class="cost-new-tare" type="number" min="0" step="1" value="${tareText}"></td>
         <td><input class="cost-new-comment" type="text" value="${note}"></td>
         <td style="display:flex;gap:0.25rem">
           <button class="cost-add-brand-btn cost-edit-save-btn">Save</button>
@@ -3153,10 +3169,13 @@ function _attachFilamentEvents(el) {
       );
       tr.querySelector('.cost-edit-save-btn').addEventListener('click', async () => {
         const cpg  = parseFloat(tr.querySelector('.cost-new-cpg').value);
+        const tareEl = tr.querySelector('.cost-new-tare');
+        const tare = tareEl.value.trim() === '' ? null : parseFloat(tareEl.value);
         const note = tr.querySelector('.cost-new-comment').value.trim();
         if (isNaN(cpg) || cpg < 0) return;
+        if (tare !== null && (isNaN(tare) || tare < 0)) return;
         try {
-          await _putBrand(mat, brand, cpg, note);
+          await _putBrand(mat, brand, cpg, note, tare);
           _renderSettingsContent('filament');
         } catch {}
       });
@@ -3200,17 +3219,20 @@ function _attachFilamentEvents(el) {
       const nameEl    = el.querySelector('#new-mat-name');
       const brandEl   = el.querySelector('#new-mat-brand');
       const costEl    = el.querySelector('#new-mat-cost');
+      const tareEl    = el.querySelector('#new-mat-tare');
       const commentEl = el.querySelector('#new-mat-comment');
       const mat   = nameEl.value.trim().toUpperCase();
       const brand = brandEl.value.trim();
       const cpg   = parseFloat(costEl.value);
+      const tare  = tareEl.value.trim() === '' ? null : parseFloat(tareEl.value);
       if (!mat)   { nameEl.focus();  return; }
       if (!brand) { brandEl.focus(); return; }
       if (isNaN(cpg) || cpg < 0) { costEl.focus(); return; }
+      if (tare !== null && (isNaN(tare) || tare < 0)) { tareEl.focus(); return; }
       addBtn.disabled = true; addBtn.textContent = '…';
       try {
-        await _putBrand(mat, brand, cpg, commentEl.value.trim());
-        nameEl.value = ''; brandEl.value = ''; costEl.value = ''; commentEl.value = '';
+        await _putBrand(mat, brand, cpg, commentEl.value.trim(), tare);
+        nameEl.value = ''; brandEl.value = ''; costEl.value = ''; tareEl.value = ''; commentEl.value = '';
         addBtn.textContent = 'Add'; addBtn.disabled = false;
         _renderSettingsContent('filament');
       } catch {
@@ -3820,9 +3842,11 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
 
   // Build material → brands map
   const matBrands = {};
+  const costLookup = {};
   for (const e of (costs || [])) {
     if (!matBrands[e.material]) matBrands[e.material] = [];
     if (e.brand) matBrands[e.material].push(e.brand);
+    costLookup[`${e.material}|||${e.brand || ''}`] = e;
   }
   const materials = Object.keys(matBrands).sort();
 
@@ -3955,6 +3979,8 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
   const slotSel   = overlay.querySelector('#sm-slot');
   const prevPicks = overlay.querySelector('#sm-prev-picks');
 
+  let matNewMode = false;
+  let brandNewMode = false;
   let _colorLock = false;
   function syncColor(hex) {
     if (_colorLock) return;
@@ -4016,29 +4042,50 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
       ? brands.map(b => `<option value="${b}"${p0.brand===b?' selected':''}>${b||'(unbranded)'}</option>`).join('')
       : '<option value="">— no brands in catalogue —</option>';
     brandSel.disabled = brands.length === 0;
+    applyDefaultTare();
     updatePrevPicks();
   }
   if (p0.material) populateBrands(p0.material);
 
+  function selectedMaterialBrand() {
+    const mat = matNewMode ? matNewIn.value.trim().toUpperCase() : matSel.value;
+    const brand = brandNewMode ? brandNewIn.value.trim() : brandSel.value;
+    return { mat, brand };
+  }
+
+  function applyDefaultTare(force = false) {
+    if (isEdit && !force) return;
+    if (emptyG.dataset.touched && !force) return;
+    const { mat, brand } = selectedMaterialBrand();
+    const match = costLookup[`${mat}|||${brand || ''}`];
+    if (match?.empty_spool_weight_g != null) {
+      emptyG.value = Math.round(match.empty_spool_weight_g);
+    } else if (!emptyG.dataset.touched && !p0.empty_spool_weight_g) {
+      emptyG.value = '';
+    }
+  }
+
   matSel.addEventListener('change', () => populateBrands(matSel.value));
-  brandSel.addEventListener('change', updatePrevPicks);
+  brandSel.addEventListener('change', () => { applyDefaultTare(); updatePrevPicks(); });
+  matNewIn.addEventListener('input', updatePrevPicks);
+  brandNewIn.addEventListener('input', updatePrevPicks);
 
   // New material toggle
-  let matNewMode = false;
   matToggle.addEventListener('click', () => {
     matNewMode = !matNewMode;
     matSel.classList.toggle('hidden', matNewMode);
     matNewIn.classList.toggle('hidden', !matNewMode);
     matToggle.textContent = matNewMode ? '✕' : '+';
+    applyDefaultTare();
   });
 
   // New brand toggle
-  let brandNewMode = false;
   brandToggle.addEventListener('click', () => {
     brandNewMode = !brandNewMode;
     brandSel.classList.toggle('hidden', brandNewMode);
     brandNewIn.classList.toggle('hidden', !brandNewMode);
     brandToggle.textContent = brandNewMode ? '✕' : '+';
+    applyDefaultTare();
   });
 
   picker.addEventListener('input', () => syncColor(picker.value));
@@ -4068,6 +4115,7 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
     if (!remainG.dataset.touched) remainG.value = labelG.value;
   });
   remainG.addEventListener('input', () => { remainG.dataset.touched = '1'; });
+  emptyG.addEventListener('input', () => { emptyG.dataset.touched = '1'; });
   weighBtn.addEventListener('click', async () => {
     const old = weighBtn.textContent;
     weighBtn.disabled = true;

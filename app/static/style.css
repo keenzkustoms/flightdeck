@@ -2394,6 +2394,7 @@ select.settings-input { cursor: pointer; }
 
 .cost-new-brand,
 .cost-new-cpg,
+.cost-new-tare,
 .cost-new-comment {
   background: var(--bg);
   border: 1px solid var(--border);
@@ -2407,10 +2408,14 @@ select.settings-input { cursor: pointer; }
 }
 .cost-new-brand:focus,
 .cost-new-cpg:focus,
+.cost-new-tare:focus,
 .cost-new-comment:focus { border-color: var(--printing); }
-.cost-new-cpg { -moz-appearance: textfield; }
+.cost-new-cpg,
+.cost-new-tare { -moz-appearance: textfield; }
 .cost-new-cpg::-webkit-outer-spin-button,
-.cost-new-cpg::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.cost-new-cpg::-webkit-inner-spin-button,
+.cost-new-tare::-webkit-outer-spin-button,
+.cost-new-tare::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 
 .cost-add-brand-btn {
   background: rgba(255,255,255,0.05);

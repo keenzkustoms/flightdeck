@@ -490,6 +490,15 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Label printer status now checks USB node read/write access and reports permission denied instead of showing READY when print access will fail.
 - Print errors now give an operator-facing permission hint.
 
+### Session 23.5 tare defaults + label text layout
+- Settings > Filament catalogue now exposes `Tare g` per material/brand.
+- Add/Edit Spool now auto-fills `Empty spool` from the selected material/brand tare default for new spools.
+- Existing per-spool tare overrides are preserved when editing.
+- Scale-backed weigh flow continues to calculate remaining filament as gross scale weight minus tare.
+- DK-22212 label layout no longer prints a heavy colour swatch; it uses material/subtype, brand, colour name, spool number, QR, label weight, and date as text.
+- Label render height reduced from 520px to 430px to waste less continuous tape.
+- Static cache-bust bumped to `v=40`.
+
 ---
 
 ## Known issues

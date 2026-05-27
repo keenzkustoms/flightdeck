@@ -50,26 +50,22 @@ class LabelPrinter:
         return LabelStatus(False, last_error="Brother QL-700 not detected")
 
     def render_spool_label(self, spool: dict) -> Image.Image:
-        img = Image.new("RGB", (self.LABEL_WIDTH_PX, self.LABEL_HEIGHT_PX), "white")
+        img = Image.new("RGB", (self.LABEL_WIDTH_PX, 430), "white")
         draw = ImageDraw.Draw(img)
-        swatch = spool.get("color_hex") or "#888888"
-        draw.rectangle((0, 0, 112, self.LABEL_HEIGHT_PX), fill=swatch)
-        if _luminance(swatch) > 0.85:
-            draw.rectangle((0, 0, 111, self.LABEL_HEIGHT_PX - 1), outline="black")
 
-        font_bold = _font("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 44)
+        font_bold = _font("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 46)
         font_body = _font("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 32)
-        font_small = _font("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 22)
-        font_badge = _font("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 28)
+        font_small = _font("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 21)
+        font_badge = _font("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 30)
 
-        x = 136
+        x = 46
         material = " ".join([spool.get("material") or "Material", spool.get("subtype") or ""]).strip()
         brand = spool.get("brand") or "-"
         color_name = spool.get("color_name") or "-"
-        draw.text((x, 54), _ellipsize(draw, material, font_bold, 390), fill="black", font=font_bold)
-        draw.text((x, 124), _ellipsize(draw, brand, font_body, 390), fill="black", font=font_body)
-        draw.text((x, 176), _ellipsize(draw, color_name, font_body, 390), fill="black", font=font_body)
-        draw.text((x, 246), f"Spool #{spool.get('id', '-')}", fill="black", font=font_badge)
+        draw.text((x, 42), _ellipsize(draw, material, font_bold, 420), fill="black", font=font_bold)
+        draw.text((x, 116), _ellipsize(draw, brand, font_body, 420), fill="black", font=font_body)
+        draw.text((x, 168), _ellipsize(draw, color_name, font_body, 420), fill="black", font=font_body)
+        draw.text((x, 236), f"Spool #{spool.get('id', '-')}", fill="black", font=font_badge)
 
         added = str(spool.get("added_at") or "")[:10]
         try:
@@ -77,15 +73,15 @@ class LabelPrinter:
         except Exception:
             added = datetime.utcnow().strftime("%d/%m/%y")
         bottom = f"{round(float(spool.get('label_weight_g') or 0))}g label weight  |  {added}"
-        draw.text((x, 454), bottom, fill="black", font=font_small)
+        draw.text((x, 372), bottom, fill="black", font=font_small)
 
         qr_url = f"https://flightdeck.tail7de73e.ts.net/#/spool/{spool.get('id')}"
         qr = _qr_image(qr_url)
         if qr:
-            img.paste(qr.resize((156, 156)), (510, 320))
+            img.paste(qr.resize((152, 152)), (506, 218))
         else:
-            draw.rectangle((510, 320, 666, 476), outline="black")
-            draw.text((562, 378), "QR", fill="black", font=font_body)
+            draw.rectangle((506, 218, 658, 370), outline="black")
+            draw.text((558, 276), "QR", fill="black", font=font_body)
         return img
 
     def print_spool_label(self, spool: dict) -> bool:
