@@ -4268,7 +4268,7 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
   ).join('');
 
   const swatches = _SWATCH_COLORS.map(c =>
-    `<span class="spool-swatch" style="background:${c}" data-hex="${c}" title="${c}"></span>`
+    `<button type="button" class="spool-swatch" style="background:${c}" data-hex="${c}" title="${c}" aria-label="${c}"></button>`
   ).join('');
 
   const overlay = document.createElement('div');
@@ -4424,13 +4424,15 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
       picks.push(s);
     }
     if (!picks.length) { prevPicks.classList.add('hidden'); return; }
+    picks.sort((a, b) => Number(a.id || 0) - Number(b.id || 0));
     prevPicks.innerHTML =
       `<span class="spool-prev-label">Previously used:</span>` +
-      `<div class="spool-prev-swatches">` +
-      picks.slice(0, 6).map(s =>
+      `<div class="spool-prev-chart">` +
+      picks.map(s =>
         `<button type="button" class="spool-prev-swatch" data-hex="${s.color_hex||'#808080'}" data-name="${s.color_name||''}" data-subtype="${s.subtype||''}" data-weight="${s.label_weight_g}" title="${s.color_name||s.color_hex}${s.subtype?' · '+s.subtype:''}">` +
         `<span class="spool-prev-dot" style="background:${s.color_hex||'#808080'}"></span>` +
         `<span class="spool-prev-name">${s.color_name || s.color_hex}</span>` +
+        `<span class="spool-prev-id">#${s.id}</span>` +
         `</button>`
       ).join('') +
       `</div>`;

@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 27 May 2026 (Session 27.2 slot editor picker polish)_
+_Last updated 27 May 2026 (Session 27.3 spool colour paint chart)_
 
 ## Current state
 
@@ -598,6 +598,12 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Stored spool choices show colour, material/subtype, brand, spool ID, remaining weight, percent, and storage location.
 - Clearing a slot now lets the user choose the storage location to return the spool to.
 - Static cache-bust bumped to `v=52`.
+
+### Session 27.3 spool colour paint chart
+- Spool modal fixed colour swatches now render as a bounded paint-chart grid instead of a long wrapping toolbar.
+- Swatches use square paint chips with stable sizing and vertical scrolling when needed.
+- Previously-used colour picks now render as a compact paint chart sorted by spool number and include the spool ID.
+- Static cache-bust bumped to `v=53`.
 
 ---
 

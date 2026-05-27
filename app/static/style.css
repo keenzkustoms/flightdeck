@@ -3621,26 +3621,30 @@ select.settings-input { cursor: pointer; }
 /* ── Colour swatch picker in modal ─────────────────────────────────────────── */
 
 .spool-swatches {
-  display: flex;
-  gap: 0.35rem;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(1.8rem, 1fr));
+  gap: 0.4rem;
+  width: min(100%, 28rem);
+  max-height: 8.25rem;
+  overflow-y: auto;
   background: rgba(255,255,255,0.08);
   border: 1px solid var(--border);
   border-radius: 0.4rem;
-  padding: 0.4rem 0.5rem;
+  padding: 0.5rem;
 }
 
 .spool-swatch {
-  width: 1.35rem;
-  height: 1.35rem;
-  border-radius: 50%;
+  width: 100%;
+  aspect-ratio: 1;
+  min-width: 1.65rem;
+  border-radius: 0.28rem;
   border: 2px solid rgba(255,255,255,0.3);
   cursor: pointer;
-  transition: transform 0.1s, border-color 0.1s;
+  transition: border-color 0.1s, box-shadow 0.1s;
   outline: none;
   box-shadow: 0 1px 3px rgba(0,0,0,0.4);
 }
-.spool-swatch:hover { transform: scale(1.18); }
+.spool-swatch:hover { border-color: rgba(255,255,255,0.75); }
 .spool-swatch.selected {
   border-color: var(--accent);
   box-shadow: 0 0 0 2px var(--accent);
@@ -3656,10 +3660,8 @@ select.settings-input { cursor: pointer; }
 /* ── Inline brand/material add in modal ────────────────────────────────────── */
 
 .spool-prev-picks {
-  display: flex;
-  align-items: center;
+  display: grid;
   gap: 0.5rem;
-  flex-wrap: wrap;
   padding: 0.15rem 0;
 }
 .spool-prev-label {
@@ -3667,17 +3669,21 @@ select.settings-input { cursor: pointer; }
   color: var(--muted);
   white-space: nowrap;
 }
-.spool-prev-swatches {
-  display: flex;
-  gap: 0.3rem;
-  flex-wrap: wrap;
+.spool-prev-chart {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(8rem, 1fr));
+  gap: 0.35rem;
+  max-height: 8.5rem;
+  overflow-y: auto;
+  padding-right: 0.2rem;
 }
 .spool-prev-swatch {
-  display: flex;
+  display: grid;
+  grid-template-columns: 0.85rem minmax(0, 1fr) auto;
   align-items: center;
-  gap: 0.3rem;
-  padding: 0.15rem 0.45rem;
-  border-radius: 1rem;
+  gap: 0.4rem;
+  padding: 0.3rem 0.45rem;
+  border-radius: 0.45rem;
   border: 1px solid var(--border);
   background: var(--card);
   color: var(--text);
@@ -3687,17 +3693,21 @@ select.settings-input { cursor: pointer; }
 }
 .spool-prev-swatch:hover { background: var(--hover); border-color: var(--muted); }
 .spool-prev-dot {
-  width: 0.7rem;
-  height: 0.7rem;
-  border-radius: 50%;
+  width: 0.85rem;
+  height: 0.85rem;
+  border-radius: 0.18rem;
   flex-shrink: 0;
   border: 1px solid rgba(255,255,255,0.15);
 }
 .spool-prev-name {
-  max-width: 6rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.spool-prev-id {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
 }
 
 .spool-mat-block {
