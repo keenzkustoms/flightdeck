@@ -8,7 +8,7 @@
   <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
   <link rel="manifest" href="/static/manifest.json">
   <meta name="theme-color" content="#0a0a0f">
-  <link rel="stylesheet" href="/static/style.css?v=47">
+  <link rel="stylesheet" href="/static/style.css?v=48">
 </head>
 <body>
   <header>
@@ -42,9 +42,12 @@
     </aside>
     <div class="app-views">
       <section id="view-dashboard" class="view">
-        <div id="dashboard-overview"></div>
         <main id="printer-grid"></main>
         <footer id="dash-footer"></footer>
+      </section>
+
+      <section id="view-stats" class="view" hidden>
+        <div id="stats-page"></div>
       </section>
 
       <section id="view-printer" class="view" hidden>
@@ -79,6 +82,6 @@
     </div>
   </div>
 
-  <script type="module" src="/static/app.js?v=47"></script>
+  <script type="module" src="/static/app.js?v=48"></script>
 </body>
 </html>

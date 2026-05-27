@@ -858,6 +858,7 @@ function parseRoute() {
   const spoolMatch = hash.match(/^#\/spool\/(\d+)/);
   if (spoolMatch) return { view: 'spool', id: parseInt(spoolMatch[1], 10) };
   if (hash === '#/cameras') return { view: 'cameras' };
+  if (hash === '#/stats') return { view: 'stats' };
   if (hash === '#/queue') return { view: 'queue' };
   if (hash === '#/failures') return { view: 'failures' };
   const settingsMatch = hash.match(/^#\/settings\/([^/]+)/);
@@ -893,6 +894,7 @@ function router() {
   _onFailures = route.view === 'failures';
 
   document.getElementById('view-dashboard').hidden = route.view !== 'dashboard';
+  document.getElementById('view-stats').hidden     = route.view !== 'stats';
   document.getElementById('view-printer').hidden   = route.view !== 'printer';
   document.getElementById('view-spool').hidden     = route.view !== 'spool';
   document.getElementById('view-cameras').hidden   = route.view !== 'cameras';
@@ -904,6 +906,7 @@ function router() {
     const href = tab.getAttribute('href');
     tab.classList.toggle('active',
       (route.view === 'dashboard' && href === '#/') ||
+      (route.view === 'stats'     && href === '#/stats') ||
       (route.view === 'printer'  && href === `#/printer/${route.id}`) ||
       (route.view === 'cameras'  && href === '#/cameras') ||
       (route.view === 'queue'    && href === '#/queue') ||
@@ -917,6 +920,7 @@ function router() {
   });
 
   if (route.view === 'printer') renderPrinterDetail(route.id, route.subtab);
+  if (route.view === 'stats') renderStatsView();
   if (route.view === 'spool') renderSpoolDetail(route.id);
   if (route.view === 'cameras') renderCamerasView();
   if (route.view === 'queue') renderQueueView();
@@ -928,6 +932,7 @@ function buildTabs(printers) {
   const nav = document.getElementById('tab-strip');
   nav.innerHTML = [
     `<a class="tab" href="#/">Dashboard</a>`,
+    `<a class="tab" href="#/stats">Stats</a>`,
     `<div class="tab-section">Printers</div>`,
     ...printers.map((p, i) => {
       const color = _PRINTER_ACCENT_PALETTE[i % _PRINTER_ACCENT_PALETTE.length];
@@ -939,7 +944,7 @@ function buildTabs(printers) {
     `<a class="tab" href="#/failures">Failures</a>`,
     `<a class="tab" href="#/spools">Spools</a>`,
     `<div class="tab-section">System</div>`,
-    `<a class="tab" href="#/settings/printers">Settings</a>`,
+    `<a class="tab" href="#/settings">Settings</a>`,
   ].join('');
   _tabsBuilt = true;
   router();
@@ -1744,10 +1749,15 @@ document.getElementById('view-printer').addEventListener('click', e => {
 // ── Spool detail / traceability ───────────────────────────────────────────
 
 function _spoolLocationText(s) {
-  if (!s.location_printer_id) return 'Storage';
+  if (!s.location_printer_id) return _spoolStorageLocationName(s.storage_location_id);
   const p = _latestPrinters.find(x => x.id === s.location_printer_id);
   const slot = p ? _amsSlotLabel(p, s.location_slot ?? 0) : `S${(s.location_slot ?? 0) + 1}`;
   return `${p?.custom_name ?? s.location_printer_id} · ${slot}`;
+}
+
+function _spoolStorageLocationName(id) {
+  const loc = _spoolLocations.find(l => String(l.id) === String(id));
+  return loc?.name || 'Storage';
 }
 
 function _spoolTraceRow(row) {
@@ -1777,8 +1787,12 @@ async function renderSpoolDetail(spoolId) {
 
   let data = null;
   try {
-    const r = await fetch(`/api/spools/${spoolId}/trace`);
+    const [r, locs] = await Promise.all([
+      fetch(`/api/spools/${spoolId}/trace`),
+      _spoolLocations.length ? Promise.resolve(null) : fetch('/api/spool-locations').catch(() => null),
+    ]);
     if (r.ok) data = await r.json();
+    if (locs?.ok) _spoolLocations = await locs.json();
   } catch {}
 
   if (!data) {
@@ -2518,8 +2532,7 @@ function updateDashboard(printers) {
     _dashboardPrinterName(a).localeCompare(_dashboardPrinterName(b))
   );
 
-  const overview = document.getElementById('dashboard-overview');
-  if (overview) overview.innerHTML = _renderDashboardOverview(printers);
+  if (parseRoute().view === 'stats') renderStatsView();
 
   const grid = document.getElementById('printer-grid');
   grid.innerHTML = sortedPrinters.map(renderCard).join('');
@@ -2539,6 +2552,16 @@ function updateDashboard(printers) {
   document.getElementById('dash-footer').innerHTML =
     `<span>flightdeck · 192.168.4.127</span>` +
     `<span>${printers.length} printers · ${active} active · ${idle} idle</span>`;
+}
+
+function renderStatsView() {
+  const el = document.getElementById('stats-page');
+  if (!el) return;
+  el.innerHTML = `
+    <div class="stats-page">
+      <div class="settings-section-title">Fleet Stats</div>
+      ${_renderDashboardOverview(_latestPrinters || [])}
+    </div>`;
 }
 
 // ── WebSocket client ───────────────────────────────────────────────────────
@@ -2592,6 +2615,7 @@ const _SETTINGS_CATEGORIES = [
   { id: 'appearance', label: 'Appearance' },
   { id: 'slicer',     label: 'Slicer'     },
   { id: 'filament',   label: 'Filament'   },
+  { id: 'locations',  label: 'Locations'  },
   { id: 'spools',     label: 'Spools'     },
 ];
 
@@ -3577,6 +3601,7 @@ let _spoolsViewMode = 'cards';
 let _spoolsSortKey = 'material';
 let _spoolsSortDir = 1;
 let _spoolsFilter = { search: '', status: 'active', slotFilter: 'all', material: '', brand: '' };
+let _spoolLocations = [];
 let _latestSpoolsByPrinter = {};   // printer_id → [spool, ...]
 let _latestLowStockPct = 20;
 
@@ -3645,7 +3670,7 @@ function _spoolCardHtml(s) {
   const p = _latestPrinters.find(x => x.id === s.location_printer_id);
   const locBadge = s.location_printer_id
     ? `<span class="spool-location-badge" title="${(p?.custom_name ?? s.location_printer_id)} ${_amsSlotLabel(p, s.location_slot)}">📍 ${p?.custom_name ?? s.location_printer_id}</span>`
-    : '';
+    : `<span class="spool-location-badge spool-location-storage" title="${esc(_spoolStorageLocationName(s.storage_location_id))}">📍 ${esc(_spoolStorageLocationName(s.storage_location_id))}</span>`;
   return `<div class="spool-card" data-spool-id="${s.id}">
     <div class="spool-card-band" style="background:${bandColor};color:${textColor}">
       <span class="spool-color-name">${s.color_name || '—'}</span>
@@ -3697,7 +3722,7 @@ function _spoolTableHtml(spools) {
     const p = _latestPrinters.find(x => x.id === s.location_printer_id);
     const loc = s.location_printer_id
       ? `${p?.custom_name ?? s.location_printer_id} ${_amsSlotLabel(p, s.location_slot)}`
-      : '—';
+      : _spoolStorageLocationName(s.storage_location_id);
     return `<tr class="spool-tr" data-spool-id="${s.id}">
       <td class="spool-td">#${s.id}</td>
       <td class="spool-td">${added}</td>
@@ -3985,6 +4010,9 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
   const printerOpts = _latestPrinters.map(p =>
     `<option value="${p.id}" data-kind="${p.kind}"${p0.location_printer_id===p.id?' selected':''}>${p.custom_name}</option>`
   ).join('');
+  const storageOpts = (_spoolLocations.length ? _spoolLocations : [{ id: '', name: 'Storage' }]).map(loc =>
+    `<option value="${loc.id}"${String(p0.storage_location_id ?? '')===String(loc.id)?' selected':''}>${esc(loc.name)}</option>`
+  ).join('');
 
   const matOpts = `<option value="">— select —</option>` + materials.map(m =>
     `<option value="${m}"${p0.material===m?' selected':''}>${m}</option>`
@@ -4067,8 +4095,11 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
           <label class="spool-form-label">Location</label>
           <div class="spool-location-block">
             <label class="spool-radio-label">
-              <input type="radio" name="sm-loc" value="storage"${!p0.location_printer_id?' checked':''}> In storage
+              <input type="radio" name="sm-loc" value="storage"${!p0.location_printer_id?' checked':''}> Stored at:
             </label>
+            <div id="sm-storage-selects" class="spool-location-selects${p0.location_printer_id?' hidden':''}">
+              <select id="sm-storage-location" class="spool-form-input">${storageOpts}</select>
+            </div>
             <label class="spool-radio-label">
               <input type="radio" name="sm-loc" value="loaded"${p0.location_printer_id?' checked':''}> Loaded on:
             </label>
@@ -4105,6 +4136,8 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
   const emptyG    = overlay.querySelector('#sm-empty-g');
   const weighBtn  = overlay.querySelector('#sm-weigh-btn');
   const locSels   = overlay.querySelector('#sm-location-selects');
+  const storageSels = overlay.querySelector('#sm-storage-selects');
+  const storageSel = overlay.querySelector('#sm-storage-location');
   const printerSel= overlay.querySelector('#sm-printer');
   const slotSel   = overlay.querySelector('#sm-slot');
   const prevPicks = overlay.querySelector('#sm-prev-picks');
@@ -4267,7 +4300,11 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
   });
 
   overlay.querySelectorAll('input[name="sm-loc"]').forEach(r => {
-    r.addEventListener('change', () => locSels.classList.toggle('hidden', r.value === 'storage'));
+    r.addEventListener('change', () => {
+      const isStorage = overlay.querySelector('input[name="sm-loc"]:checked').value === 'storage';
+      locSels.classList.toggle('hidden', isStorage);
+      storageSels.classList.toggle('hidden', !isStorage);
+    });
   });
 
   function updateSlots() {
@@ -4336,6 +4373,7 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
       notes:          overlay.querySelector('#sm-notes').value.trim()      || null,
       location_printer_id: locMode === 'loaded' ? printerSel.value : null,
       location_slot:       locMode === 'loaded' ? parseInt(slotSel.value) : null,
+      storage_location_id: locMode === 'storage' && storageSel.value ? parseInt(storageSel.value, 10) : null,
     };
 
     // Auto-create new brand in catalogue if needed
@@ -4361,6 +4399,7 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
           body: JSON.stringify({
             printer_id: locMode === 'loaded' ? printerSel.value : null,
             slot:       locMode === 'loaded' ? parseInt(slotSel.value) : null,
+            storage_location_id: locMode === 'storage' && storageSel.value ? parseInt(storageSel.value, 10) : null,
           }),
         });
         if (mr.status === 409) {
@@ -4388,6 +4427,110 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
       btn.textContent = 'Error';
       setTimeout(() => { btn.textContent = submitLabel; btn.disabled = false; }, 2000);
     }
+  });
+}
+
+function _locationsCategoryHtml(locations) {
+  const rows = locations.length ? locations.map(loc => `
+    <div class="spool-location-row" data-location-id="${loc.id}">
+      <div>
+        <div class="spool-location-name">${esc(loc.name)}</div>
+        <div class="spool-location-notes">${esc(loc.notes || 'No notes')}</div>
+      </div>
+      <div class="spool-location-actions">
+        <button class="spool-action-btn spool-action-edit" data-location-action="edit" data-id="${loc.id}">Edit</button>
+        <button class="spool-action-btn spool-action-danger" data-location-action="delete" data-id="${loc.id}">Archive</button>
+      </div>
+    </div>`).join('') : `<div class="settings-empty">No storage locations yet.</div>`;
+
+  return `
+    <div class="settings-section">
+      <div class="settings-section-title">Storage Locations</div>
+      <div class="settings-subtitle">Create the shelves, dry boxes, tubs, or bays where spools live when they are not loaded in a printer.</div>
+      <form id="spool-location-form" class="settings-form spool-location-form" novalidate>
+        <input id="loc-id" type="hidden" value="">
+        <div class="settings-form-row">
+          <label class="settings-label" for="loc-name">Name</label>
+          <input class="settings-input" id="loc-name" type="text" placeholder="e.g. Dry box A, Shelf 2, AMS spare tub" required>
+        </div>
+        <div class="settings-form-row">
+          <label class="settings-label" for="loc-notes">Notes</label>
+          <input class="settings-input" id="loc-notes" type="text" placeholder="Optional">
+        </div>
+        <div class="settings-form-actions">
+          <button type="submit" class="settings-save-btn" id="loc-submit">Add Location</button>
+          <button type="button" class="settings-delete-btn hidden" id="loc-cancel">Cancel edit</button>
+        </div>
+      </form>
+    </div>
+    <div class="settings-section">
+      <div class="settings-section-title">Current Locations</div>
+      <div class="spool-location-list">${rows}</div>
+    </div>`;
+}
+
+function _attachLocationsEvents(el, locations) {
+  const form = el.querySelector('#spool-location-form');
+  const idIn = el.querySelector('#loc-id');
+  const nameIn = el.querySelector('#loc-name');
+  const notesIn = el.querySelector('#loc-notes');
+  const submit = el.querySelector('#loc-submit');
+  const cancel = el.querySelector('#loc-cancel');
+
+  function resetForm() {
+    idIn.value = '';
+    nameIn.value = '';
+    notesIn.value = '';
+    submit.textContent = 'Add Location';
+    cancel.classList.add('hidden');
+  }
+
+  form?.addEventListener('submit', async e => {
+    e.preventDefault();
+    const name = nameIn.value.trim();
+    if (!name) { nameIn.focus(); return; }
+    const body = { name, notes: notesIn.value.trim() || null };
+    const id = idIn.value;
+    const url = id ? `/api/spool-locations/${id}` : '/api/spool-locations';
+    const method = id ? 'PUT' : 'POST';
+    submit.disabled = true;
+    try {
+      const r = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) throw new Error();
+      await _renderSettingsContent('locations');
+    } catch {
+      submit.textContent = 'Error';
+      setTimeout(() => { submit.textContent = id ? 'Save Location' : 'Add Location'; submit.disabled = false; }, 1500);
+      return;
+    }
+    submit.disabled = false;
+  });
+
+  cancel?.addEventListener('click', resetForm);
+
+  el.querySelectorAll('[data-location-action]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.id;
+      const loc = locations.find(l => String(l.id) === String(id));
+      if (!loc) return;
+      if (btn.dataset.locationAction === 'edit') {
+        idIn.value = loc.id;
+        nameIn.value = loc.name || '';
+        notesIn.value = loc.notes || '';
+        submit.textContent = 'Save Location';
+        cancel.classList.remove('hidden');
+        nameIn.focus();
+        return;
+      }
+      _modal.show(`Archive ${loc.name}?`, async () => {
+        await fetch(`/api/spool-locations/${id}`, { method: 'DELETE' });
+        await _renderSettingsContent('locations');
+      });
+    });
   });
 }
 
@@ -4426,13 +4569,21 @@ async function _renderSettingsContent(category) {
     ]);
     el.innerHTML = _filamentCategoryHtml(summary, costs);
     _attachFilamentEvents(el);
+  } else if (category === 'locations') {
+    el.innerHTML = `<div class="detail-placeholder" style="min-height:10rem">Loading…</div>`;
+    const locations = await fetch('/api/spool-locations').then(r => r.json()).catch(() => []);
+    _spoolLocations = locations;
+    el.innerHTML = _locationsCategoryHtml(locations);
+    _attachLocationsEvents(el, locations);
   } else if (category === 'spools') {
     el.innerHTML = `<div class="detail-placeholder" style="min-height:10rem">Loading…</div>`;
-    const [spools, summary, costs] = await Promise.all([
+    const [spools, summary, costs, locations] = await Promise.all([
       fetch('/api/spools').then(r => r.json()).catch(() => []),
       fetch('/api/spools/summary').then(r => r.json()).catch(() => ({})),
       fetch('/api/filament/costs').then(r => r.json()).catch(() => []),
+      fetch('/api/spool-locations').then(r => r.json()).catch(() => []),
     ]);
+    _spoolLocations = locations;
     el.innerHTML = _spoolsCategoryHtml(spools, summary, costs);
     _attachSpoolsEvents(el, costs);
   }

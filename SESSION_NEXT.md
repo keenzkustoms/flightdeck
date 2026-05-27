@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 27 May 2026 (Session 25 dashboard command overview)_
+_Last updated 27 May 2026 (Session 25.2 stats + spool locations)_
 
 ## Current state
 
@@ -547,6 +547,16 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Dashboard KPI tiles were shortened and capped to compact widths so the top overview stops dominating the page.
 - Printer card status badges now wrap and use slightly tighter sizing, preventing `Idle` from clipping when health and filament badges are also shown.
 - Static cache-bust bumped to `v=47`.
+
+### Session 25.2 stats page + real spool locations
+- Dashboard is printer-first again: fleet KPI/attention overview moved to a dedicated `#/stats` page and sidebar item.
+- Printer card health lines remain underneath the related printer, keeping attention information beside the affected machine.
+- Added backend `spool_locations` storage model and `storage_location_id` on spools.
+- Added `/api/spool-locations` endpoints for list/create/update/archive.
+- Added Settings > Locations screen for defining real storage locations such as shelves, dry boxes, tubs, or bays.
+- Spool add/edit now lets a spool be stored at one of those named locations or loaded on a printer slot.
+- Spool cards, table rows, and detail text now show the named storage location instead of generic `Storage`.
+- Static cache-bust bumped to `v=48`.
 
 ---
 

@@ -916,6 +916,7 @@ class SpoolCreate(BaseModel):
     color_name: Optional[str] = None
     location_printer_id: Optional[str] = None
     location_slot: Optional[int] = None
+    storage_location_id: Optional[int] = None
     notes: Optional[str] = None
     empty_spool_weight_g: Optional[float] = None
 
@@ -933,6 +934,11 @@ class SpoolUpdate(BaseModel):
 class SpoolMove(BaseModel):
     printer_id: Optional[str] = None
     slot: Optional[int] = None
+    storage_location_id: Optional[int] = None
+
+class SpoolLocationBody(BaseModel):
+    name: str
+    notes: Optional[str] = None
 
 class SpoolWeightCorrection(BaseModel):
     remaining_g: Optional[float] = None
@@ -950,6 +956,39 @@ async def get_spools_by_printer(printer_id: str):
 @app.get("/api/spools")
 async def get_spools(include_archived: bool = False):
     return db.get_spools(include_archived=include_archived)
+
+@app.get("/api/spool-locations")
+async def get_spool_locations(include_archived: bool = False):
+    return db.get_spool_locations(include_archived=include_archived)
+
+@app.post("/api/spool-locations")
+async def create_spool_location(body: SpoolLocationBody):
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Location name required")
+    try:
+        return {"id": db.create_spool_location(name, body.notes)}
+    except Exception as exc:
+        raise HTTPException(status_code=409, detail="Location already exists") from exc
+
+@app.put("/api/spool-locations/{location_id}")
+async def update_spool_location(location_id: int, body: SpoolLocationBody):
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Location name required")
+    try:
+        ok = db.update_spool_location(location_id, name, body.notes)
+    except Exception as exc:
+        raise HTTPException(status_code=409, detail="Location already exists") from exc
+    if not ok:
+        raise HTTPException(status_code=404, detail="Location not found")
+    return {"ok": True}
+
+@app.delete("/api/spool-locations/{location_id}")
+async def archive_spool_location(location_id: int):
+    if not db.archive_spool_location(location_id):
+        raise HTTPException(status_code=404, detail="Location not found")
+    return {"ok": True}
 
 @app.get("/api/spools/{spool_id}")
 async def get_spool(spool_id: int):
@@ -978,7 +1017,9 @@ async def create_spool(body: SpoolCreate):
         label_weight_g=body.label_weight_g, remaining_g=remaining,
         subtype=body.subtype, color_name=body.color_name,
         location_printer_id=body.location_printer_id,
-        location_slot=body.location_slot, notes=body.notes,
+        location_slot=body.location_slot,
+        storage_location_id=None if body.location_printer_id else body.storage_location_id,
+        notes=body.notes,
         empty_spool_weight_g=body.empty_spool_weight_g,
     )
     if db.get_all_settings().get("label_auto_print") == "true":
@@ -1057,7 +1098,7 @@ async def correct_spool_weight(spool_id: int, body: SpoolWeightCorrection):
 
 @app.post("/api/spools/{spool_id}/move")
 async def move_spool(spool_id: int, body: SpoolMove):
-    result = db.move_spool(spool_id, body.printer_id, body.slot)
+    result = db.move_spool(spool_id, body.printer_id, body.slot, body.storage_location_id)
     if not result["ok"]:
         conflict = db.get_spool(result["conflict_spool_id"])
         raise HTTPException(status_code=409, detail={
