@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 27 May 2026 (Session 27.7 previous colour pills)_
+_Last updated 27 May 2026 (Session 27.8 columns menu spacing)_
 
 ## Current state
 
@@ -626,6 +626,11 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Reverted the Add/Edit Spool modal `Previously used` colour picks back to the compact pill buttons.
 - Main Spools card paint-chart view was left unchanged.
 - Static cache-bust bumped to `v=57`.
+
+### Session 27.8 columns menu spacing
+- Spools now adds temporary vertical space below the header while the `Columns` menu is open.
+- This keeps the summary/cards from sitting underneath the open columns checklist.
+- Static cache-bust bumped to `v=58`.
 
 ---
 

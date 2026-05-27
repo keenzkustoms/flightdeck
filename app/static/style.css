@@ -2951,6 +2951,10 @@ select.settings-input { cursor: pointer; }
   gap: 0.45rem;
   flex-wrap: wrap;
   margin-bottom: 0.95rem;
+  transition: margin-top 0.12s ease;
+}
+.settings-content.spool-columns-open .spool-summary-strip {
+  margin-top: 11.5rem;
 }
 
 .spool-stat {

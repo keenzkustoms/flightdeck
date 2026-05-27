@@ -4293,6 +4293,13 @@ function _attachSpoolsEvents(el, costs) {
     });
   });
 
+  const columnsMenu = el.querySelector('.spool-columns-menu');
+  if (columnsMenu) {
+    const syncColumnsOpen = () => el.classList.toggle('spool-columns-open', columnsMenu.open);
+    columnsMenu.addEventListener('toggle', syncColumnsOpen);
+    syncColumnsOpen();
+  }
+
   _renderSpoolList(el);
 }
 
