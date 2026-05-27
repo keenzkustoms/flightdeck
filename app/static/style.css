@@ -3171,6 +3171,134 @@ select.settings-input { cursor: pointer; }
   color: #93c5fd;
 }
 
+.location-overview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 1rem;
+}
+
+.location-card {
+  border: 1px solid var(--border);
+  border-radius: 0.65rem;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.location-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.9rem 1rem;
+  background: rgba(255,255,255,0.025);
+  border-bottom: 1px solid rgba(255,255,255,0.045);
+}
+
+.location-card-name {
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: var(--text);
+}
+
+.location-card-notes {
+  margin-top: 0.2rem;
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.location-card-stats {
+  min-width: 70px;
+  text-align: right;
+  color: var(--muted);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+
+.location-card-stats strong {
+  display: block;
+  color: var(--text);
+  font-size: 1.25rem;
+  line-height: 1;
+}
+
+.location-card-stats small {
+  display: block;
+  margin-top: 0.25rem;
+  color: #7aa2d8;
+  font-size: 0.72rem;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.location-spool-list {
+  display: grid;
+  gap: 0;
+}
+
+.location-spool-row {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) auto auto;
+  gap: 0.65rem;
+  align-items: center;
+  padding: 0.7rem 1rem;
+  border-top: 1px solid rgba(255,255,255,0.04);
+}
+
+.location-spool-row:first-child {
+  border-top: none;
+}
+
+.location-spool-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1px solid rgba(255,255,255,0.3);
+}
+
+.location-spool-main {
+  min-width: 0;
+}
+
+.location-spool-title {
+  color: var(--text);
+  font-weight: 700;
+  font-size: 0.82rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.location-spool-sub {
+  margin-top: 0.15rem;
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.location-spool-weight {
+  color: var(--text);
+  font-weight: 800;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.location-spool-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.35rem;
+}
+
+.location-spool-empty {
+  padding: 1rem;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.location-card-unassigned {
+  border-style: dashed;
+}
+
 /* ── Spool filter bar ──────────────────────────────────────────────────────── */
 
 .spool-filter-bar {

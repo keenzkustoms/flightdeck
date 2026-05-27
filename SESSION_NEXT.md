@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 27 May 2026 (Session 25.4 spool label location reliability)_
+_Last updated 27 May 2026 (Session 26 location overview)_
 
 ## Current state
 
@@ -571,6 +571,13 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 ### Session 25.5 spool label location placement
 - Stored-spool location moved to the top-right of the label above the QR code.
 - Printer-loaded spools still omit location text entirely.
+
+### Session 26 location overview
+- Settings > Locations now includes a physical overview grouped by storage location.
+- Each location card shows spool count, remaining kg, notes, and the spools currently stored there.
+- Stored spool rows show colour, material/subtype, brand, spool ID, remaining grams, and quick actions for Details, Label, and Edit.
+- Added an Unassigned Storage card for stored spools without a named location.
+- Static cache-bust bumped to `v=49`.
 
 ---
 

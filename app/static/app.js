@@ -3873,15 +3873,15 @@ function _spoolsCategoryHtml(spools, summary, costs) {
     <div id="spool-list"></div>`;
 }
 
-function _attachSpoolListEvents(el, listEl) {
-  listEl.querySelectorAll('.spool-action-btn').forEach(btn => {
+function _attachSpoolListEvents(el, listEl, refreshCategory = 'spools') {
+  listEl.querySelectorAll('.spool-action-btn[data-action]').forEach(btn => {
     btn.addEventListener('click', async e => {
       e.stopPropagation();
       const { action, id } = btn.dataset;
       const costs = await fetch('/api/filament/costs').then(r => r.json()).catch(() => []);
       if (action === 'edit') {
         const spool = _allSpools.find(s => s.id == id);
-        if (spool) _openSpoolModal(costs, () => _renderSettingsContent('spools'), spool);
+        if (spool) _openSpoolModal(costs, () => _renderSettingsContent(refreshCategory), spool);
       } else if (action === 'label') {
         btn.disabled = true;
         const old = btn.textContent;
@@ -3913,7 +3913,7 @@ function _attachSpoolListEvents(el, listEl) {
             body: JSON.stringify({ empty_spool_weight_g: empty }),
           });
           if (!r.ok) throw new Error(_scaleFriendlyMessage((await r.json()).detail || 'Scale read failed'));
-          await _renderSettingsContent('spools');
+          await _renderSettingsContent(refreshCategory);
         } catch (err) {
           alert(_scaleFriendlyMessage(err.message || 'Scale read failed'));
           btn.textContent = old;
@@ -3922,19 +3922,19 @@ function _attachSpoolListEvents(el, listEl) {
         }
       } else if (action === 'duplicate') {
         const spool = _allSpools.find(s => s.id == id);
-        if (spool) _openSpoolModal(costs, () => _renderSettingsContent('spools'), {...spool, id: null, location_printer_id: null, location_slot: null});
+        if (spool) _openSpoolModal(costs, () => _renderSettingsContent(refreshCategory), {...spool, id: null, location_printer_id: null, location_slot: null});
       } else if (action === 'archive') {
         if (!confirm('Archive this spool?')) return;
         await fetch(`/api/spools/${id}/archive`, { method: 'POST' });
-        _renderSettingsContent('spools');
+        _renderSettingsContent(refreshCategory);
       } else if (action === 'reset') {
         if (!confirm('Reset remaining weight to label weight?')) return;
         await fetch(`/api/spools/${id}/reset_weight`, { method: 'POST' });
-        _renderSettingsContent('spools');
+        _renderSettingsContent(refreshCategory);
       } else if (action === 'delete') {
         if (!confirm('Permanently delete this spool?')) return;
         await fetch(`/api/spools/${id}`, { method: 'DELETE' });
-        _renderSettingsContent('spools');
+        _renderSettingsContent(refreshCategory);
       }
     });
   });
@@ -4431,6 +4431,73 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
 }
 
 function _locationsCategoryHtml(locations) {
+  const storedSpools = _allSpools.filter(s => !s.archived_at && !s.location_printer_id);
+  const locationCards = locations.length ? locations.map(loc => {
+    const spools = storedSpools.filter(s => String(s.storage_location_id || '') === String(loc.id));
+    const grams = spools.reduce((sum, s) => sum + Number(s.remaining_g || 0), 0);
+    const spoolRows = spools.length ? spools.map(s => {
+      const pct = s.label_weight_g > 0 ? Math.round(s.remaining_g * 100 / s.label_weight_g) : 0;
+      const pctCls = pct < 20 ? ' spool-low' : pct < 50 ? ' spool-amber' : '';
+      const color = s.color_hex || '#808080';
+      return `<div class="location-spool-row" data-spool-id="${s.id}">
+        <span class="location-spool-swatch" style="background:${color}"></span>
+        <div class="location-spool-main">
+          <div class="location-spool-title">${esc(s.color_name || color)} · ${esc(s.material)}${s.subtype ? ` ${esc(s.subtype)}` : ''}</div>
+          <div class="location-spool-sub">${esc(s.brand || 'Unknown brand')} · #${s.id}</div>
+        </div>
+        <div class="location-spool-weight${pctCls}">${Math.round(s.remaining_g || 0)}g</div>
+        <div class="location-spool-actions">
+          <a class="spool-action-btn spool-action-detail" href="#/spool/${s.id}">Details</a>
+          <button class="spool-action-btn spool-action-label" data-action="label" data-id="${s.id}">Label</button>
+          <button class="spool-action-btn spool-action-edit" data-action="edit" data-id="${s.id}">Edit</button>
+        </div>
+      </div>`;
+    }).join('') : `<div class="location-spool-empty">No spools stored here.</div>`;
+    return `<section class="location-card" data-location-id="${loc.id}">
+      <div class="location-card-head">
+        <div>
+          <div class="location-card-name">${esc(loc.name)}</div>
+          <div class="location-card-notes">${esc(loc.notes || 'No notes')}</div>
+        </div>
+        <div class="location-card-stats">
+          <strong>${spools.length}</strong>
+          <span>${spools.length === 1 ? 'spool' : 'spools'}</span>
+          <small>${(grams / 1000).toFixed(2)}kg</small>
+        </div>
+      </div>
+      <div class="location-spool-list">${spoolRows}</div>
+    </section>`;
+  }).join('') : `<div class="settings-empty">Add a location to start organising stored spools.</div>`;
+
+  const unassigned = storedSpools.filter(s => !s.storage_location_id);
+  const unassignedCard = unassigned.length ? `<section class="location-card location-card-unassigned">
+    <div class="location-card-head">
+      <div>
+        <div class="location-card-name">Unassigned Storage</div>
+        <div class="location-card-notes">Stored spools without a named location yet.</div>
+      </div>
+      <div class="location-card-stats">
+        <strong>${unassigned.length}</strong>
+        <span>${unassigned.length === 1 ? 'spool' : 'spools'}</span>
+      </div>
+    </div>
+    <div class="location-spool-list">
+      ${unassigned.map(s => `<div class="location-spool-row" data-spool-id="${s.id}">
+        <span class="location-spool-swatch" style="background:${s.color_hex || '#808080'}"></span>
+        <div class="location-spool-main">
+          <div class="location-spool-title">${esc(s.color_name || s.color_hex || 'Colour')} · ${esc(s.material)}</div>
+          <div class="location-spool-sub">${esc(s.brand || 'Unknown brand')} · #${s.id}</div>
+        </div>
+        <div class="location-spool-weight">${Math.round(s.remaining_g || 0)}g</div>
+        <div class="location-spool-actions">
+          <a class="spool-action-btn spool-action-detail" href="#/spool/${s.id}">Details</a>
+          <button class="spool-action-btn spool-action-label" data-action="label" data-id="${s.id}">Label</button>
+          <button class="spool-action-btn spool-action-edit" data-action="edit" data-id="${s.id}">Edit</button>
+        </div>
+      </div>`).join('')}
+    </div>
+  </section>` : '';
+
   const rows = locations.length ? locations.map(loc => `
     <div class="spool-location-row" data-location-id="${loc.id}">
       <div>
@@ -4444,6 +4511,11 @@ function _locationsCategoryHtml(locations) {
     </div>`).join('') : `<div class="settings-empty">No storage locations yet.</div>`;
 
   return `
+    <div class="settings-section">
+      <div class="settings-section-title">Location Overview</div>
+      <div class="settings-subtitle">Stored spools grouped by where they physically live.</div>
+      <div class="location-overview-grid">${locationCards}${unassignedCard}</div>
+    </div>
     <div class="settings-section">
       <div class="settings-section-title">Storage Locations</div>
       <div class="settings-subtitle">Create the shelves, dry boxes, tubs, or bays where spools live when they are not loaded in a printer.</div>
@@ -4470,6 +4542,7 @@ function _locationsCategoryHtml(locations) {
 }
 
 function _attachLocationsEvents(el, locations) {
+  _attachSpoolListEvents(el, el, 'locations');
   const form = el.querySelector('#spool-location-form');
   const idIn = el.querySelector('#loc-id');
   const nameIn = el.querySelector('#loc-name');
@@ -4571,8 +4644,12 @@ async function _renderSettingsContent(category) {
     _attachFilamentEvents(el);
   } else if (category === 'locations') {
     el.innerHTML = `<div class="detail-placeholder" style="min-height:10rem">Loading…</div>`;
-    const locations = await fetch('/api/spool-locations').then(r => r.json()).catch(() => []);
+    const [locations, spools] = await Promise.all([
+      fetch('/api/spool-locations').then(r => r.json()).catch(() => []),
+      fetch('/api/spools').then(r => r.json()).catch(() => []),
+    ]);
     _spoolLocations = locations;
+    _allSpools = spools;
     el.innerHTML = _locationsCategoryHtml(locations);
     _attachLocationsEvents(el, locations);
   } else if (category === 'spools') {
