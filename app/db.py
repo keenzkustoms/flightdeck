@@ -73,6 +73,7 @@ def init() -> None:
                 brand         TEXT NOT NULL DEFAULT '',
                 cost_per_gram REAL NOT NULL,
                 comment       TEXT,
+                empty_spool_weight_g REAL,
                 updated_at    TEXT NOT NULL,
                 PRIMARY KEY (material, brand)
             );
@@ -87,6 +88,7 @@ def init() -> None:
                 -- REAL so partial-spool additions and gram-precision deductions don't lose precision
                 label_weight_g      REAL NOT NULL,
                 remaining_g         REAL NOT NULL,
+                empty_spool_weight_g REAL,
                 location_printer_id TEXT,
                 location_slot       INTEGER,
                 notes               TEXT,
@@ -151,9 +153,11 @@ def init() -> None:
             "ALTER TABLE prints ADD COLUMN material TEXT",
             "ALTER TABLE material_costs ADD COLUMN brand TEXT",
             "ALTER TABLE material_costs ADD COLUMN comment TEXT",
+            "ALTER TABLE material_costs ADD COLUMN empty_spool_weight_g REAL",
             "ALTER TABLE prints ADD COLUMN notes TEXT",
             "ALTER TABLE prints ADD COLUMN spool_usage TEXT",
             "ALTER TABLE prints ADD COLUMN ams_slot_snapshot TEXT",
+            "ALTER TABLE spools ADD COLUMN empty_spool_weight_g REAL",
         ):
             try:
                 conn.execute(stmt)
@@ -170,12 +174,13 @@ def init() -> None:
                     brand         TEXT NOT NULL DEFAULT '',
                     cost_per_gram REAL NOT NULL,
                     comment       TEXT,
+                    empty_spool_weight_g REAL,
                     updated_at    TEXT NOT NULL,
                     PRIMARY KEY (material, brand)
                 )""")
             conn.execute("""
-                INSERT INTO _mat_new (material, brand, cost_per_gram, comment, updated_at)
-                SELECT material, COALESCE(brand, ''), cost_per_gram, comment,
+                INSERT INTO _mat_new (material, brand, cost_per_gram, comment, empty_spool_weight_g, updated_at)
+                SELECT material, COALESCE(brand, ''), cost_per_gram, comment, empty_spool_weight_g,
                        COALESCE(updated_at, datetime('now'))
                 FROM material_costs""")
             conn.execute("DROP TABLE material_costs")
@@ -984,11 +989,12 @@ def archive_maintenance_item(item_id: int, printer_id: str) -> bool:
 def get_material_costs() -> list:
     with _conn() as conn:
         rows = conn.execute(
-            "SELECT material, brand, cost_per_gram, comment FROM material_costs ORDER BY material, brand"
+            "SELECT material, brand, cost_per_gram, comment, empty_spool_weight_g FROM material_costs ORDER BY material, brand"
         ).fetchall()
     return [
         {"material": r["material"], "brand": r["brand"],
-         "cost_per_gram": r["cost_per_gram"], "comment": r["comment"]}
+         "cost_per_gram": r["cost_per_gram"], "comment": r["comment"],
+         "empty_spool_weight_g": r["empty_spool_weight_g"]}
         for r in rows
     ]
 
@@ -998,16 +1004,18 @@ def set_material_cost(
     brand: str,
     cost_per_gram: float,
     comment: Optional[str] = None,
+    empty_spool_weight_g: Optional[float] = None,
 ) -> None:
     with _conn() as conn:
         conn.execute(
-            """INSERT INTO material_costs (material, brand, cost_per_gram, comment, updated_at)
-               VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+            """INSERT INTO material_costs (material, brand, cost_per_gram, comment, empty_spool_weight_g, updated_at)
+               VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                ON CONFLICT(material, brand) DO UPDATE
                SET cost_per_gram = excluded.cost_per_gram,
                    comment       = excluded.comment,
+                   empty_spool_weight_g = excluded.empty_spool_weight_g,
                    updated_at    = excluded.updated_at""",
-            (material, brand, cost_per_gram, comment),
+            (material, brand, cost_per_gram, comment, empty_spool_weight_g),
         )
 
 
@@ -1111,15 +1119,18 @@ def create_spool(
     location_printer_id: Optional[str] = None,
     location_slot: Optional[int] = None,
     notes: Optional[str] = None,
+    empty_spool_weight_g: Optional[float] = None,
 ) -> int:
     with _conn() as conn:
         cursor = conn.execute(
             """INSERT INTO spools
                (material, brand, subtype, color_hex, color_name,
-                label_weight_g, remaining_g, location_printer_id, location_slot, notes)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                label_weight_g, remaining_g, empty_spool_weight_g,
+                location_printer_id, location_slot, notes)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (material, brand, subtype, color_hex, color_name,
-             label_weight_g, remaining_g, location_printer_id, location_slot, notes),
+             label_weight_g, remaining_g, empty_spool_weight_g,
+             location_printer_id, location_slot, notes),
         )
         spool_id = cursor.lastrowid
     printer = location_printer_id or "none"
@@ -1133,7 +1144,8 @@ def get_spools(include_archived: bool = False) -> list:
         where = "" if include_archived else "WHERE archived_at IS NULL"
         rows = conn.execute(
             f"""SELECT id, material, brand, subtype, color_hex, color_name,
-                       label_weight_g, remaining_g, location_printer_id, location_slot,
+                       label_weight_g, remaining_g, empty_spool_weight_g,
+                       location_printer_id, location_slot,
                        notes, added_at, archived_at
                 FROM spools {where}
                 ORDER BY material, brand, id"""
@@ -1145,7 +1157,8 @@ def get_spool(spool_id: int) -> Optional[dict]:
     with _conn() as conn:
         row = conn.execute(
             """SELECT id, material, brand, subtype, color_hex, color_name,
-                      label_weight_g, remaining_g, location_printer_id, location_slot,
+                      label_weight_g, remaining_g, empty_spool_weight_g,
+                      location_printer_id, location_slot,
                       notes, added_at, archived_at
                FROM spools WHERE id = ?""",
             (spool_id,),
@@ -1193,7 +1206,7 @@ def get_spool_trace(spool_id: int) -> Optional[dict]:
 
 def update_spool(spool_id: int, **fields) -> bool:
     allowed = {"material", "brand", "subtype", "color_hex", "color_name",
-               "label_weight_g", "remaining_g", "notes"}
+               "label_weight_g", "remaining_g", "empty_spool_weight_g", "notes"}
     updates = {k: v for k, v in fields.items() if k in allowed}
     if not updates:
         return False
@@ -1240,6 +1253,28 @@ def reset_spool_weight(spool_id: int) -> bool:
         )
     if c.rowcount:
         log_decision("system", "spool_weight_reset", f"Spool #{spool_id} weight reset to label weight")
+    return c.rowcount > 0
+
+
+def correct_spool_weight(
+    spool_id: int,
+    remaining_g: float,
+    *,
+    reading_g: Optional[float] = None,
+    empty_spool_weight_g: Optional[float] = None,
+) -> bool:
+    updates = {"remaining_g": max(0.0, float(remaining_g))}
+    if empty_spool_weight_g is not None:
+        updates["empty_spool_weight_g"] = float(empty_spool_weight_g)
+    cols = ", ".join(f"{k} = ?" for k in updates)
+    vals = list(updates.values()) + [spool_id]
+    with _conn() as conn:
+        c = conn.execute(f"UPDATE spools SET {cols} WHERE id = ?", vals)
+    if c.rowcount:
+        detail = f"Spool #{spool_id} corrected to {updates['remaining_g']:.1f}g"
+        if reading_g is not None:
+            detail += f" from scale reading {float(reading_g):.1f}g"
+        log_decision("system", "spool_weight_corrected", detail)
     return c.rowcount > 0
 
 

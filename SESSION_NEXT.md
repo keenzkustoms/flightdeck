@@ -1,9 +1,9 @@
 # Flightdeck — next session brief
-_Last updated 26 May 2026 (post-session 22, printer health score)_
+_Last updated 27 May 2026 (post-session 23, scale + label hardware integration)_
 
 ## Current state
 
-**Tier 1 complete. Tier 2 complete. Post-Tier-2 niceties complete. Spool inventory + Print queue + queue refinements + Maintenance schedule + Queue preflight + Spool traceability + Failure review + Printer health score shipped.**
+**Tier 1 complete. Tier 2 complete. Post-Tier-2 niceties complete. Spool inventory + Print queue + queue refinements + Maintenance schedule + Queue preflight + Spool traceability + Failure review + Printer health score + Scale/label hardware integration shipped.**
 
 Service running at:
 - `http://flightdeck.local:8000`
@@ -420,9 +420,56 @@ Compact, explainable printer health was added to the main dashboard cards.
 
 ---
 
+## What was built — Session 23 (Scale + label hardware integration — 27 May)
+
+First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer.
+
+### Backend
+- Added `app/scale.py` for Dymo M10 reads via Linux HID device paths (`/dev/usb/hiddev0`, `/dev/hidraw*`), with stable-read sampling.
+- Added `app/label_printer.py` for Brother QL-700 status detection, 40x30 label rendering, optional QR code generation, and USB print dispatch through `brother_ql`.
+- New API endpoints:
+  - `GET /api/scale/status`
+  - `GET /api/scale/read`
+  - `GET /api/label_printer/status`
+  - `POST /api/label_printer/print/{spool_id}`
+  - `POST /api/label_printer/test`
+  - `POST /api/spools/{spool_id}/correct_weight`
+- Added `empty_spool_weight_g` to spool and material cost records.
+- Added decision log events for `scale_read`, `scale_unavailable`, `spool_weight_corrected`, `label_printed`, `label_print_failed`, and `label_printer_unavailable`.
+- Added optional auto-label setting: `label_auto_print`.
+
+### UI
+- New Settings → Hardware tab with live status cards for:
+  - Dymo M10 scale
+  - Brother QL-700 label printer
+- Hardware tab can read the scale and print a test label.
+- Spool inventory cards/tables now include:
+  - `Label` button to print a spool label
+  - `Weigh` button to correct remaining grams from the scale
+- Add/Edit Spool modal now includes:
+  - `Empty spool` tare weight
+  - `Weigh` button that reads scale grams and subtracts the tare
+- Static cache-bust bumped to `v=37`.
+
+### Dependencies
+- Added to `requirements.txt`:
+  - `pyusb==1.3.1`
+  - `qrcode[pil]==8.2`
+  - `brother-ql==0.9.4`
+
+### Hardware setup notes
+- Brother was previously detected as `04f9:2049` (Editor Lite mass-storage mode). Printing requires printer mode, expected `04f9:2042`.
+- Scale was not visible during the first preflight; verify USB, udev rules, and permissions after plugging it in.
+- Service restart still needs interactive sudo from user after deploy.
+
+---
+
 ## Known issues
 
-- Service restart pending for Sessions 18/19/20/21/22 until user runs `sudo systemctl restart flightdeck.service`.
+- Service restart pending for Sessions 18/19/20/21/22/23 until user runs `sudo systemctl restart flightdeck.service`.
+- Hardware setup still needs real-device confirmation after deploy:
+  - Brother QL-700 must be switched out of Editor Lite mass-storage mode before printing (`lsusb` should show `04f9:2042`, not `04f9:2049`).
+  - Dymo M10 scale was not detected in the last preflight; plug/wake it and apply udev rules if `/dev/hidraw*` or `/dev/usb/hiddev*` is inaccessible.
 - Non-fatal `spool_deducted` decision-log SQLite lock can occur during spool deduction; trace data still writes.
 
 ---
@@ -435,13 +482,12 @@ Compact, explainable printer health was added to the main dashboard cards.
 
 ---
 
-### Hardware integration (when Dymo M10 scale + Brother QL-700 arrive) — hardware not yet received
-- USB scale: read weight directly into Add Spool / re-weigh flows
-- Brother QL-700: 40×30mm thermal labels with colour swatch + material + brand + spool # + QR code linking to spool detail
-- Spec drafted: see `scale_label_integration_spec.md`
-- Devices independently usable; either can be present without the other
-- Pre-flight: udev rules + plugdev group + smoke test before any feature code
-- Library choice: `luxardolabs/brother_ql` fork (Python 3.13+ compatible); `pyusb` for scale
+### Hardware integration follow-up
+- Physical device validation now remains:
+  - disable Brother Editor Lite mode and confirm `lsusb` shows printer mode
+  - plug/wake Dymo M10 and confirm readable HID node
+  - install new requirements and restart service
+- Once both devices are confirmed live, print a real spool label and do one scale-backed spool correction.
 - QR codes via `qrcode[pil]` → `https://flightdeck.tail7de73e.ts.net/#/spool/{id}`
 
 ### Other queued ideas (not yet scoped)
@@ -477,7 +523,7 @@ Compact, explainable printer health was added to the main dashboard cards.
 
 ## Repository
 - https://github.com/Kidabah/flightdeck (private)
-- Recent commits: spool inventory (session 14), per-printer identity colours + duplicate detection (session 15), print queue subsystem (session 16), queue refinements + format additions (session 17), maintenance schedule (session 18), queue preflight (session 19), spool traceability (session 20), failure review (session 21), printer health score (session 22)
+- Recent commits: spool inventory (session 14), per-printer identity colours + duplicate detection (session 15), print queue subsystem (session 16), queue refinements + format additions (session 17), maintenance schedule (session 18), queue preflight (session 19), spool traceability (session 20), failure review (session 21), printer health score (session 22), scale + label hardware integration (session 23)
 
 ---
 

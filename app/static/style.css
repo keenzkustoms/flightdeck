@@ -2452,6 +2452,56 @@ select.settings-input { cursor: pointer; }
   .settings-printer-type { display: none; }
 }
 
+.hardware-card {
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--card-bg);
+  padding: 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.hardware-card-main {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.hardware-title {
+  color: var(--text);
+  font-weight: 650;
+  font-size: 0.95rem;
+}
+
+.hardware-sub,
+.hardware-reading {
+  color: var(--muted);
+  font-size: 0.82rem;
+  margin-top: 0.15rem;
+}
+
+.hardware-pill {
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.18rem 0.55rem;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.hardware-ok { background: rgba(34,197,94,0.18); color: #86efac; }
+.hardware-warn { background: rgba(245,158,11,0.18); color: #fbbf24; }
+
+.hardware-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  flex-wrap: wrap;
+}
+
+.hardware-toggle-row { margin: 0; }
+
 /* ── Spool inventory ───────────────────────────────────────────────────── */
 
 .spool-page-header {
@@ -2669,7 +2719,9 @@ select.settings-input { cursor: pointer; }
 }
 .spool-action-btn:hover { opacity: 1; }
 .spool-action-detail,
-.spool-action-edit {
+.spool-action-edit,
+.spool-action-label,
+.spool-action-weigh {
   opacity: 0.8;
   font-size: 0.8rem;
   font-weight: 600;
@@ -2682,6 +2734,8 @@ select.settings-input { cursor: pointer; }
   color: var(--muted);
   text-decoration: none;
 }
+.spool-action-label { color: #22c55e; }
+.spool-action-weigh { color: #f59e0b; }
 .spool-action-detail:hover {
   color: var(--text);
 }
@@ -2774,6 +2828,17 @@ select.settings-input { cursor: pointer; }
   font-size: 0.85rem;
   color: var(--muted);
 }
+
+.spool-inline-btn {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid var(--border);
+  border-radius: 0.35rem;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.78rem;
+  padding: 0.28rem 0.55rem;
+}
+.spool-inline-btn:hover { background: rgba(255,255,255,0.12); }
 
 .spool-form-hint {
   font-size: 0.75rem;

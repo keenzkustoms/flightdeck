@@ -27,10 +27,12 @@ import httpx
 
 from . import db, relay
 from .camera import BambuCameraProxy
+from .label_printer import LabelPrinter
 from .models import PrintPreview
 from .printer_config import BambuConnection, BambuRtspCamera, MjpegDirectCamera, MoonrakerConnection, NtfyConfig, PrinterEntry, load, save
 from .printers import moonraker
 from .printers.bambu import BambuPrinter
+from .scale import Scale
 
 _bambu: list[BambuPrinter] = []
 _moonraker: list[tuple[str, str, str, str, str]] = []  # (id, model_name, custom_name, icon, url)
@@ -43,6 +45,8 @@ _ntfy: NtfyConfig | None = None
 _prev_states: dict[str, str] = {}  # printer_id → last known state
 _last_seen_cache: dict[str, datetime] = {}  # printer_id → last successful contact
 _latest_printers: dict[str, dict] = {}  # printer_id → most recent gathered status
+_scale = Scale()
+_label_printer = LabelPrinter()
 
 
 def _dt_default(obj):
@@ -822,11 +826,60 @@ async def put_setting(key: str, body: SettingUpdate):
     return {"ok": True}
 
 
+# ── Scale and label hardware ──────────────────────────────────────────────
+
+@app.get("/api/scale/status")
+async def get_scale_status():
+    available = _scale.is_available()
+    return {"available": available, "model": "Dymo M10", "last_error": None if available else _scale.last_error}
+
+
+@app.get("/api/scale/read")
+async def read_scale():
+    reading = _scale.read_stable()
+    if not reading:
+        db.log_decision("system", "scale_unavailable", _scale.last_error or "Scale read failed")
+        raise HTTPException(status_code=503, detail=_scale.last_error or "Scale unavailable")
+    db.log_decision("system", "scale_read", f"{reading.grams:.1f}g")
+    return asdict(reading)
+
+
+@app.get("/api/label_printer/status")
+async def get_label_printer_status():
+    return asdict(_label_printer.status())
+
+
+@app.post("/api/label_printer/print/{spool_id}")
+async def print_spool_label(spool_id: int):
+    spool = db.get_spool(spool_id)
+    if not spool:
+        raise HTTPException(status_code=404, detail="Spool not found")
+    ok = await asyncio.to_thread(_label_printer.print_spool_label, spool)
+    if not ok:
+        message = _label_printer.last_error or "Label printer unavailable"
+        db.log_decision("system", "label_print_failed", f"Spool #{spool_id}: {message}")
+        raise HTTPException(status_code=503, detail=message)
+    db.log_decision("system", "label_printed", f"Spool #{spool_id}")
+    return {"ok": True}
+
+
+@app.post("/api/label_printer/test")
+async def print_test_label():
+    ok = await asyncio.to_thread(_label_printer.print_test_label)
+    if not ok:
+        message = _label_printer.last_error or "Label printer unavailable"
+        db.log_decision("system", "label_printer_unavailable", message)
+        raise HTTPException(status_code=503, detail=message)
+    db.log_decision("system", "label_printed", "Test label")
+    return {"ok": True}
+
+
 # ── Filament tracking ─────────────────────────────────────────────────────
 
 class CostUpdate(BaseModel):
     cost_per_gram: float
     comment: Optional[str] = None
+    empty_spool_weight_g: Optional[float] = None
 
 @app.get("/api/filament/costs")
 async def get_filament_costs():
@@ -834,7 +887,7 @@ async def get_filament_costs():
 
 @app.put("/api/filament/costs/{material}/{brand}")
 async def put_filament_cost(material: str, brand: str, body: CostUpdate):
-    db.set_material_cost(material, brand, body.cost_per_gram, body.comment)
+    db.set_material_cost(material, brand, body.cost_per_gram, body.comment, body.empty_spool_weight_g)
     return {"ok": True}
 
 @app.delete("/api/filament/costs/{material}/{brand}")
@@ -864,6 +917,7 @@ class SpoolCreate(BaseModel):
     location_printer_id: Optional[str] = None
     location_slot: Optional[int] = None
     notes: Optional[str] = None
+    empty_spool_weight_g: Optional[float] = None
 
 class SpoolUpdate(BaseModel):
     material: Optional[str] = None
@@ -873,11 +927,17 @@ class SpoolUpdate(BaseModel):
     color_name: Optional[str] = None
     label_weight_g: Optional[float] = None
     remaining_g: Optional[float] = None
+    empty_spool_weight_g: Optional[float] = None
     notes: Optional[str] = None
 
 class SpoolMove(BaseModel):
     printer_id: Optional[str] = None
     slot: Optional[int] = None
+
+class SpoolWeightCorrection(BaseModel):
+    remaining_g: Optional[float] = None
+    reading_g: Optional[float] = None
+    empty_spool_weight_g: Optional[float] = None
 
 @app.get("/api/spools/summary")
 async def get_spools_summary():
@@ -919,7 +979,15 @@ async def create_spool(body: SpoolCreate):
         subtype=body.subtype, color_name=body.color_name,
         location_printer_id=body.location_printer_id,
         location_slot=body.location_slot, notes=body.notes,
+        empty_spool_weight_g=body.empty_spool_weight_g,
     )
+    if db.get_all_settings().get("label_auto_print") == "true":
+        spool = db.get_spool(spool_id)
+        ok = await asyncio.to_thread(_label_printer.print_spool_label, spool)
+        if ok:
+            db.log_decision("system", "label_printed", f"Spool #{spool_id} auto-print")
+        else:
+            db.log_decision("system", "label_print_failed", f"Spool #{spool_id}: {_label_printer.last_error}")
     return {"id": spool_id}
 
 @app.put("/api/spools/{spool_id}")
@@ -949,6 +1017,43 @@ async def restore_spool(spool_id: int):
 async def reset_spool_weight(spool_id: int):
     db.reset_spool_weight(spool_id)
     return {"ok": True}
+
+@app.post("/api/spools/{spool_id}/correct_weight")
+async def correct_spool_weight(spool_id: int, body: SpoolWeightCorrection):
+    spool = db.get_spool(spool_id)
+    if not spool:
+        raise HTTPException(status_code=404, detail="Spool not found")
+
+    empty_g = body.empty_spool_weight_g
+    if empty_g is None:
+        empty_g = spool.get("empty_spool_weight_g")
+    if empty_g is None:
+        costs = db.get_material_costs()
+        for cost in costs:
+            if cost.get("material") == spool.get("material") and cost.get("brand") == spool.get("brand"):
+                empty_g = cost.get("empty_spool_weight_g")
+                break
+
+    if body.remaining_g is not None:
+        remaining = body.remaining_g
+    elif body.reading_g is not None:
+        remaining = float(body.reading_g) - float(empty_g or 0)
+    else:
+        reading = _scale.read_stable()
+        if not reading:
+            db.log_decision("system", "scale_unavailable", _scale.last_error or "Scale read failed")
+            raise HTTPException(status_code=503, detail=_scale.last_error or "Scale unavailable")
+        remaining = float(reading.grams or 0) - float(empty_g or 0)
+        body.reading_g = reading.grams
+
+    if not db.correct_spool_weight(
+        spool_id,
+        remaining,
+        reading_g=body.reading_g,
+        empty_spool_weight_g=body.empty_spool_weight_g,
+    ):
+        raise HTTPException(status_code=404, detail="Spool not found")
+    return {"ok": True, "remaining_g": max(0.0, round(float(remaining), 1)), "empty_spool_weight_g": empty_g}
 
 @app.post("/api/spools/{spool_id}/move")
 async def move_spool(spool_id: int, body: SpoolMove):

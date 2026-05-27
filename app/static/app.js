@@ -2459,6 +2459,7 @@ let _settingsCategory = 'printers';
 
 const _SETTINGS_CATEGORIES = [
   { id: 'printers',   label: 'Printers'   },
+  { id: 'hardware',   label: 'Hardware'   },
   { id: 'appearance', label: 'Appearance' },
   { id: 'slicer',     label: 'Slicer'     },
   { id: 'filament',   label: 'Filament'   },
@@ -3304,6 +3305,111 @@ function _attachAppearanceEvents(el) {
   });
 }
 
+function _hardwareStatusPill(ok, text) {
+  return `<span class="hardware-pill ${ok ? 'hardware-ok' : 'hardware-warn'}">${text}</span>`;
+}
+
+function _hardwareCategoryHtml(scale, labelPrinter) {
+  const scaleOk = !!scale?.available;
+  const labelOk = !!labelPrinter?.available;
+  const autoPrint = (_serverSettings.label_auto_print ?? 'false') === 'true';
+  return `
+    <div class="settings-section">
+      <div class="settings-section-title">Scale</div>
+      <div class="hardware-card">
+        <div class="hardware-card-main">
+          <div>
+            <div class="hardware-title">Dymo M10 USB scale</div>
+            <div class="hardware-sub">${scaleOk ? 'Ready for spool weighing' : (scale?.last_error || 'Not detected')}</div>
+          </div>
+          ${_hardwareStatusPill(scaleOk, scaleOk ? 'Ready' : 'Unavailable')}
+        </div>
+        <div class="hardware-actions">
+          <button class="modal-btn" id="scale-read-btn">Read Scale</button>
+          <span class="hardware-reading" id="scale-reading">--</span>
+        </div>
+      </div>
+    </div>
+    <div class="settings-section">
+      <div class="settings-section-title">Label Printer</div>
+      <div class="hardware-card">
+        <div class="hardware-card-main">
+          <div>
+            <div class="hardware-title">Brother QL-700</div>
+            <div class="hardware-sub">${labelOk ? `Ready for ${labelPrinter.label_size || '40x30'} labels` : (labelPrinter?.last_error || 'Not detected')}</div>
+          </div>
+          ${_hardwareStatusPill(labelOk, labelOk ? 'Ready' : 'Unavailable')}
+        </div>
+        <div class="settings-form-row hardware-toggle-row">
+          <label class="settings-label">Auto print</label>
+          <div class="setting-toggle-group">
+            ${_settingToggle('label_auto_print', [{ value: 'false', label: 'Off' }, { value: 'true', label: 'On' }], autoPrint ? 'true' : 'false')}
+          </div>
+        </div>
+        <div class="hardware-actions">
+          <button class="modal-btn" id="label-test-btn">Print Test</button>
+          <span class="hardware-reading" id="label-test-result">--</span>
+        </div>
+      </div>
+    </div>`;
+}
+
+function _attachHardwareEvents(el) {
+  el.querySelector('#scale-read-btn')?.addEventListener('click', async e => {
+    const btn = e.currentTarget;
+    const out = el.querySelector('#scale-reading');
+    const old = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Reading...';
+    out.textContent = '--';
+    try {
+      const r = await fetch('/api/scale/read');
+      if (!r.ok) throw new Error((await r.json()).detail || 'Scale read failed');
+      const reading = await r.json();
+      out.textContent = `${Math.round(reading.grams)}g`;
+    } catch (err) {
+      out.textContent = err.message || 'Unavailable';
+    } finally {
+      btn.disabled = false;
+      btn.textContent = old;
+    }
+  });
+
+  el.querySelector('#label-test-btn')?.addEventListener('click', async e => {
+    const btn = e.currentTarget;
+    const out = el.querySelector('#label-test-result');
+    const old = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Printing...';
+    out.textContent = '--';
+    try {
+      const r = await fetch('/api/label_printer/test', { method: 'POST' });
+      if (!r.ok) throw new Error((await r.json()).detail || 'Print failed');
+      out.textContent = 'Sent';
+    } catch (err) {
+      out.textContent = err.message || 'Unavailable';
+    } finally {
+      btn.disabled = false;
+      btn.textContent = old;
+    }
+  });
+
+  el.querySelectorAll('.setting-toggle-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const { settingKey: key, settingValue: value } = btn.dataset;
+      _serverSettings[key] = value;
+      fetch(`/api/settings/${key}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value }),
+      }).catch(() => {});
+      el.querySelectorAll(`.setting-toggle-btn[data-setting-key="${key}"]`).forEach(b =>
+        b.classList.toggle('setting-toggle-active', b === btn)
+      );
+    });
+  });
+}
+
 // ── Settings layout ────────────────────────────────────────────────────────
 
 // ── Spool state ───────────────────────────────────────────────────────────
@@ -3407,6 +3513,8 @@ function _spoolCardHtml(s) {
       <div class="spool-card-actions">
         <a class="spool-action-btn spool-action-detail" href="#/spool/${s.id}" title="Details">Details</a>
         <button class="spool-action-btn spool-action-edit" data-action="edit"      data-id="${s.id}" title="Edit">Edit</button>
+        <button class="spool-action-btn spool-action-label" data-action="label"    data-id="${s.id}" title="Print label">Label</button>
+        <button class="spool-action-btn spool-action-weigh" data-action="weigh"    data-id="${s.id}" title="Weigh from scale">Weigh</button>
         <button class="spool-action-btn" data-action="duplicate" data-id="${s.id}" title="Duplicate">📋</button>
         <button class="spool-action-btn" data-action="reset"     data-id="${s.id}" title="Reset weight">🔄</button>
         <button class="spool-action-btn" data-action="archive"   data-id="${s.id}" title="Archive">📦</button>
@@ -3443,6 +3551,8 @@ function _spoolTableHtml(spools) {
       <td class="spool-td spool-td-actions">
         <a class="spool-action-btn spool-action-detail" href="#/spool/${s.id}" title="Details">Details</a>
         <button class="spool-action-btn spool-action-edit" data-action="edit"      data-id="${s.id}" title="Edit">Edit</button>
+        <button class="spool-action-btn spool-action-label" data-action="label"    data-id="${s.id}" title="Print label">Label</button>
+        <button class="spool-action-btn spool-action-weigh" data-action="weigh"    data-id="${s.id}" title="Weigh from scale">Weigh</button>
         <button class="spool-action-btn" data-action="duplicate" data-id="${s.id}" title="Duplicate">📋</button>
         <button class="spool-action-btn" data-action="reset"     data-id="${s.id}" title="Reset">🔄</button>
         <button class="spool-action-btn" data-action="archive"   data-id="${s.id}" title="Archive">📦</button>
@@ -3587,6 +3697,44 @@ function _attachSpoolListEvents(el, listEl) {
       if (action === 'edit') {
         const spool = _allSpools.find(s => s.id == id);
         if (spool) _openSpoolModal(costs, () => _renderSettingsContent('spools'), spool);
+      } else if (action === 'label') {
+        btn.disabled = true;
+        const old = btn.textContent;
+        btn.textContent = '...';
+        try {
+          const r = await fetch(`/api/label_printer/print/${id}`, { method: 'POST' });
+          if (!r.ok) throw new Error((await r.json()).detail || 'Print failed');
+          btn.textContent = 'Done';
+        } catch (err) {
+          alert(err.message || 'Label print failed');
+          btn.textContent = old;
+        } finally {
+          setTimeout(() => { btn.disabled = false; btn.textContent = old; }, 1400);
+        }
+      } else if (action === 'weigh') {
+        const spool = _allSpools.find(s => s.id == id);
+        const currentEmpty = spool?.empty_spool_weight_g ?? '';
+        const emptyText = prompt('Empty spool weight in grams (leave blank for 0)', currentEmpty);
+        if (emptyText === null) return;
+        const empty = emptyText.trim() === '' ? null : parseFloat(emptyText);
+        if (emptyText.trim() !== '' && (isNaN(empty) || empty < 0)) return;
+        btn.disabled = true;
+        const old = btn.textContent;
+        btn.textContent = '...';
+        try {
+          const r = await fetch(`/api/spools/${id}/correct_weight`, {
+            method: 'POST',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({ empty_spool_weight_g: empty }),
+          });
+          if (!r.ok) throw new Error((await r.json()).detail || 'Scale read failed');
+          await _renderSettingsContent('spools');
+        } catch (err) {
+          alert(err.message || 'Scale read failed');
+          btn.textContent = old;
+        } finally {
+          btn.disabled = false;
+        }
       } else if (action === 'duplicate') {
         const spool = _allSpools.find(s => s.id == id);
         if (spool) _openSpoolModal(costs, () => _renderSettingsContent('spools'), {...spool, id: null, location_printer_id: null, location_slot: null});
@@ -3742,7 +3890,15 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
           <label class="spool-form-label">Remaining</label>
           <div class="spool-inline-row">
             <input id="sm-remaining-g" class="spool-form-input spool-weight-input" type="number" min="0" value="${p0.remaining_g??p0.label_weight_g??1000}"> g
+            <button type="button" class="spool-inline-btn" id="sm-weigh-btn">Weigh</button>
             <span class="spool-form-hint">(defaults to label weight)</span>
+          </div>
+        </div>
+        <div class="spool-form-row">
+          <label class="spool-form-label">Empty spool</label>
+          <div class="spool-inline-row">
+            <input id="sm-empty-g" class="spool-form-input spool-weight-input" type="number" min="0" value="${p0.empty_spool_weight_g??''}" placeholder="0"> g
+            <span class="spool-form-hint">tare weight</span>
           </div>
         </div>
         <div class="spool-form-row">
@@ -3784,6 +3940,8 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
   const preview   = overlay.querySelector('#sm-color-preview');
   const labelG    = overlay.querySelector('#sm-label-g');
   const remainG   = overlay.querySelector('#sm-remaining-g');
+  const emptyG    = overlay.querySelector('#sm-empty-g');
+  const weighBtn  = overlay.querySelector('#sm-weigh-btn');
   const locSels   = overlay.querySelector('#sm-location-selects');
   const printerSel= overlay.querySelector('#sm-printer');
   const slotSel   = overlay.querySelector('#sm-slot');
@@ -3902,6 +4060,25 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
     if (!remainG.dataset.touched) remainG.value = labelG.value;
   });
   remainG.addEventListener('input', () => { remainG.dataset.touched = '1'; });
+  weighBtn.addEventListener('click', async () => {
+    const old = weighBtn.textContent;
+    weighBtn.disabled = true;
+    weighBtn.textContent = '...';
+    try {
+      const r = await fetch('/api/scale/read');
+      if (!r.ok) throw new Error((await r.json()).detail || 'Scale read failed');
+      const reading = await r.json();
+      const empty = parseFloat(emptyG.value) || 0;
+      remainG.value = Math.max(0, Math.round((reading.grams - empty) * 10) / 10);
+      remainG.dataset.touched = '1';
+      weighBtn.textContent = 'Done';
+    } catch (err) {
+      alert(err.message || 'Scale read failed');
+      weighBtn.textContent = old;
+    } finally {
+      setTimeout(() => { weighBtn.disabled = false; weighBtn.textContent = old; }, 1200);
+    }
+  });
 
   overlay.querySelectorAll('input[name="sm-loc"]').forEach(r => {
     r.addEventListener('change', () => locSels.classList.toggle('hidden', r.value === 'storage'));
@@ -3960,11 +4137,14 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
     if (!brand)    { (brandNewMode ? brandNewIn : brandSel).focus(); return; }
     if (!/^#[0-9a-fA-F]{6}$/.test(hex)) { hexIn.focus(); return; }
     if (isNaN(labelW) || labelW <= 0)    { labelG.focus(); return; }
+    const emptyW = emptyG.value.trim() === '' ? null : parseFloat(emptyG.value);
+    if (emptyW !== null && (isNaN(emptyW) || emptyW < 0)) { emptyG.focus(); return; }
 
     const locMode = overlay.querySelector('input[name="sm-loc"]:checked').value;
     const body = {
       material, brand, color_hex: hex, label_weight_g: labelW,
       remaining_g:    parseFloat(remainG.value) || labelW,
+      empty_spool_weight_g: emptyW,
       subtype:        overlay.querySelector('#sm-subtype').value.trim()    || null,
       color_name:     overlay.querySelector('#sm-color-name').value.trim() || null,
       notes:          overlay.querySelector('#sm-notes').value.trim()      || null,
@@ -4038,6 +4218,14 @@ async function _renderSettingsContent(category) {
     } catch {}
     el.innerHTML = _printersCategoryHtml(printers);
     _attachPrintersEvents(el);
+  } else if (category === 'hardware') {
+    el.innerHTML = `<div class="detail-placeholder" style="min-height:10rem">Loading…</div>`;
+    const [scale, labelPrinter] = await Promise.all([
+      fetch('/api/scale/status').then(r => r.json()).catch(() => ({})),
+      fetch('/api/label_printer/status').then(r => r.json()).catch(() => ({})),
+    ]);
+    el.innerHTML = _hardwareCategoryHtml(scale, labelPrinter);
+    _attachHardwareEvents(el);
   } else if (category === 'appearance') {
     el.innerHTML = _appearanceCategoryHtml();
     _attachAppearanceEvents(el);
