@@ -136,7 +136,26 @@ body {
 
 .mission-lanes {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 0.9rem;
+  min-width: 0;
+}
+
+.mission-page-dense {
+  max-width: none;
+}
+
+.mission-page-dense .mission-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.mission-page-dense .mission-lanes {
+  grid-template-columns: repeat(auto-fill, minmax(19rem, 1fr));
+}
+
+.mission-page-dense .mission-sidebar-panel {
+  position: static;
+  order: -1;
 }
 
 .mission-lane,
@@ -148,6 +167,8 @@ body {
 
 .mission-lane {
   padding: 1rem;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .mission-lane-head {
@@ -203,12 +224,14 @@ body {
   min-height: 3.3rem;
   margin-top: 0.9rem;
   overflow-x: auto;
+  overflow-y: hidden;
   padding-bottom: 0.15rem;
+  max-width: 100%;
 }
 
 .mission-timeline-block {
-  min-width: calc(var(--w) * 1rem);
-  max-width: 30rem;
+  flex: 0 1 clamp(10rem, calc(var(--w) * 1rem), 24rem);
+  min-width: 0;
   border: 1px solid rgba(59,130,246,0.35);
   border-radius: 0.45rem;
   background: rgba(59,130,246,0.08);
@@ -217,9 +240,27 @@ body {
   text-decoration: none;
 }
 
+.mission-page-dense .mission-timeline-block {
+  flex-basis: clamp(8rem, calc(var(--w) * 0.72rem), 14rem);
+}
+
+.mission-timeline-more {
+  flex: 0 0 auto;
+  align-self: center;
+  border: 1px solid rgba(122,162,216,0.25);
+  border-radius: 999px;
+  color: #93c5fd;
+  padding: 0.35rem 0.6rem;
+  font-size: 0.7rem;
+  font-weight: 800;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
 .mission-timeline-block span,
 .mission-job-row span {
   display: block;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -315,6 +356,7 @@ body {
 }
 
 .mission-job-row {
+  min-width: 0;
   border: 1px solid var(--border);
   border-radius: 0.45rem;
   background: rgba(255,255,255,0.025);

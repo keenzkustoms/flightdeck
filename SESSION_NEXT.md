@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 28 May 2026 (Session 28.20 Mission Control anti-flicker)_
+_Last updated 28 May 2026 (Session 28.21 Mission Control fleet scaling)_
 
 ## Current state
 
@@ -754,6 +754,12 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Added an in-flight render guard so websocket ticks cannot stack overlapping Mission Control refreshes.
 - Mission Control now only swaps DOM markup when the generated view actually changes.
 - Static cache-bust bumped to `v=76`.
+
+### Session 28.21 Mission Control fleet scaling
+- Fixed Mission Control queue detail overflow by constraining long queue blocks and filenames inside their lane.
+- Added automatic dense fleet mode for Mission Control once the printer count reaches 8+ printers.
+- Dense mode changes lanes into a multi-column fleet board and limits visible queue blocks per printer with a `+N more` queue link.
+- Static cache-bust bumped to `v=77`.
 
 ---
 

@@ -2571,19 +2571,27 @@ async function renderMissionControl() {
     const caution = jobs.filter(j => _missionJobReadiness(j).cls === 'warn').length;
     const forecastSeconds = pendingJobs.reduce((sum, j) => sum + _missionJobEta(j), 0);
     const forecast = forecastSeconds ? new Date(Date.now() + forecastSeconds * 1000).toLocaleTimeString([], _clockOpts()) : 'Clear';
+    const denseFleet = printers.length >= 8;
+    const laneJobLimit = denseFleet ? 3 : 6;
+    el.classList.toggle('mission-page-dense', denseFleet);
 
     const lanes = printers.map(p => {
       const laneJobs = _missionQueueForPrinter(jobs, p.id);
       const signals = _missionPrinterSignals(p, laneJobs, spools, maint);
       const activeJob = p.job ? jobDisplayName(p.job) : '';
-      const queueBlocks = laneJobs.slice(0, 6).map(j => {
+      const visibleLaneJobs = laneJobs.slice(0, laneJobLimit);
+      const queueBlocks = visibleLaneJobs.map(j => {
         const ready = _missionJobReadiness(j);
         const width = Math.max(16, Math.min(46, _missionJobEta(j) / 900));
         return `<a class="mission-timeline-block mission-${ready.cls}" href="#/queue" style="--w:${width}">
           <span>${esc(j.filename.replace(/.*[\\/]/, ''))}</span>
           <small>${ready.label}</small>
         </a>`;
-      }).join('') || '<div class="mission-empty-lane">No queued work</div>';
+      }).join('');
+      const queueMore = laneJobs.length > laneJobLimit
+        ? `<a class="mission-timeline-more" href="#/queue">+${laneJobs.length - laneJobLimit} more</a>`
+        : '';
+      const queueHtml = queueBlocks || '<div class="mission-empty-lane">No queued work</div>';
       return `<section class="mission-lane">
         <div class="mission-lane-head">
           <div>
@@ -2596,7 +2604,7 @@ async function renderMissionControl() {
           <span>Now</span>
           <strong>${activeJob ? esc(activeJob) : esc(_missionRecommendation(p, laneJobs, signals))}</strong>
         </div>
-        <div class="mission-timeline">${queueBlocks}</div>
+        <div class="mission-timeline">${queueHtml}${queueMore}</div>
         <div class="mission-loaded">${_missionLoadedLine(p, spools)}</div>
         <div class="mission-signals">
           ${signals.map(s => `<span class="mission-signal mission-signal-${s.level}">${esc(s.text)}</span>`).join('')}
