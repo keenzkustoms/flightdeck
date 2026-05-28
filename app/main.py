@@ -1314,6 +1314,23 @@ def _colour_label(color: Optional[str]) -> str:
     return name if dist <= 115 else color
 
 
+def _coverage_label(coverage: dict) -> str:
+    brands = sorted({
+        str(s.get("brand") or "").strip()
+        for s in coverage.get("spools") or []
+        if str(s.get("brand") or "").strip()
+    })
+    brand_text = ", ".join(brands[:2])
+    if len(brands) > 2:
+        brand_text += f" +{len(brands) - 2}"
+    if not brand_text:
+        brand_text = "no loaded spool"
+    return (
+        f"{_colour_label(coverage['color'])} ({brand_text}) "
+        f"{coverage['available_g']:.0f}g/{coverage['used_g']:.0f}g"
+    )
+
+
 def _spool_matches_color(spool: dict, color: Optional[str]) -> bool:
     if not color:
         return True
@@ -1381,19 +1398,13 @@ def _queue_preflight(job: dict, printer_status: Optional[dict]) -> dict:
         if color_reqs:
             missing = [c for c in color_coverage if not c["ok"]]
             if missing:
-                detail = "; ".join(
-                    f"{_colour_label(c['color'])} {c['available_g']:.0f}g/{c['used_g']:.0f}g"
-                    for c in missing
-                )
+                detail = "; ".join(_coverage_label(c) for c in missing)
                 issues.append({
                     "level": "block",
                     "message": f"Loaded colour coverage short: {detail}",
                 })
             elif any(c["available_g"] < float(c["used_g"] or 0) * 1.15 for c in color_coverage):
-                detail = "; ".join(
-                    f"{_colour_label(c['color'])} {c['available_g']:.0f}g/{c['used_g']:.0f}g"
-                    for c in color_coverage
-                )
+                detail = "; ".join(_coverage_label(c) for c in color_coverage)
                 issues.append({
                     "level": "warn",
                     "message": f"Low colour margin: {detail}",

@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 28 May 2026 (Session 28.32 Friendly colour names)_
+_Last updated 28 May 2026 (Session 28.33 Brand-aware colour coverage)_
 
 ## Current state
 
@@ -831,6 +831,12 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Mission Control Dispatch Intel now shows required colour names like `White / Brown` instead of `#FFFFFF / #7C4B00`.
 - Colour matching still uses hex distance tolerance under the hood so near-white/off-white slicer values can match a white spool.
 - Static cache-bust bumped to `v=87`.
+
+### Session 28.33 Brand-aware colour coverage
+- Queue preflight colour shortfall messages now include matching loaded inventory brands, e.g. `White (3DFillies) 118g/280g`.
+- If no loaded spool matches the required colour/material, preflight says `White (no loaded spool) 0g/280g`.
+- Mission Control missing-colour rescue text now includes candidate brand and grams where possible.
+- Static cache-bust bumped to `v=88`.
 
 ---
 

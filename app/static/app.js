@@ -2704,6 +2704,10 @@ function _missionCoverageForRequirements(requirements, spools, printer) {
   const picks = [];
   const missing = [];
   requirements.forEach(req => {
+    const candidates = spools
+      .filter(s => !s.archived_at)
+      .filter(s => String(s.material || '').toUpperCase() === req.type)
+      .filter(s => _missionSpoolMatchesColour(s, req.colour));
     const pick = spools
       .filter(s => !s.archived_at && !usedIds.has(s.id))
       .filter(s => String(s.material || '').toUpperCase() === req.type)
@@ -2714,7 +2718,7 @@ function _missionCoverageForRequirements(requirements, spools, printer) {
       usedIds.add(pick.id);
       picks.push(pick);
     } else {
-      missing.push(req);
+      missing.push({ ...req, candidates });
     }
   });
   return {
@@ -2723,6 +2727,14 @@ function _missionCoverageForRequirements(requirements, spools, printer) {
     missing,
     text: picks.map(s => _missionSpoolLabel(s, printer)).join(' + '),
   };
+}
+
+function _missionRequirementLabel(req) {
+  const brands = [...new Set((req.candidates || []).map(s => String(s.brand || '').trim()).filter(Boolean))];
+  const brandText = brands.length ? brands.slice(0, 2).join(', ') + (brands.length > 2 ? ` +${brands.length - 2}` : '') : 'no loaded spool';
+  const available = (req.candidates || []).reduce((sum, s) => sum + Number(s.remaining_g || 0), 0);
+  const grams = req.used_g ? ` ${Math.round(available)}g/${Math.round(req.used_g)}g` : '';
+  return `${_missionColourLabel(req.colour)} (${brandText})${grams}`;
 }
 
 function _missionMaterialRescue(job, target, printers, spools) {
@@ -2755,7 +2767,7 @@ function _missionMaterialRescue(job, target, printers, spools) {
     if (mixedCoverage.ok) {
       return { kind: 'shelf', text: `Use ${mixedCoverage.text}` };
     }
-    const missing = mixedCoverage.missing.map(r => _missionColourLabel(r.colour)).join(' / ');
+    const missing = mixedCoverage.missing.map(r => _missionRequirementLabel(r)).join(' / ');
     return { kind: 'none', text: `Missing ${_missionMaterial(job)} colour coverage: ${missing}` };
   }
   const ready = loaded.find(s => _missionSpoolEnough(job, s));
