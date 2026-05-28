@@ -1286,6 +1286,34 @@ def _hex_dist(a: Optional[str], b: Optional[str]) -> float:
     return sum((x - y) ** 2 for x, y in zip(va, vb)) ** 0.5
 
 
+_COLOUR_NAMES = [
+    ("Black", "#000000"),
+    ("White", "#FFFFFF"),
+    ("Grey", "#808080"),
+    ("Silver", "#C0C0C0"),
+    ("Red", "#EF4444"),
+    ("Orange", "#F97316"),
+    ("Yellow", "#EAB308"),
+    ("Green", "#22C55E"),
+    ("Teal", "#14B8A6"),
+    ("Blue", "#3B82F6"),
+    ("Dark Blue", "#1D4ED8"),
+    ("Purple", "#8B5CF6"),
+    ("Pink", "#EC4899"),
+    ("Brown", "#7C4B00"),
+    ("Gold", "#B8860B"),
+]
+
+
+def _colour_label(color: Optional[str]) -> str:
+    color = _norm_hex(color)
+    if not color:
+        return "Unknown colour"
+    name, ref = min(_COLOUR_NAMES, key=lambda item: _hex_dist(color, item[1]))
+    dist = _hex_dist(color, ref)
+    return name if dist <= 115 else color
+
+
 def _spool_matches_color(spool: dict, color: Optional[str]) -> bool:
     if not color:
         return True
@@ -1344,7 +1372,7 @@ def _queue_preflight(job: dict, printer_status: Optional[dict]) -> dict:
         elif not material_matches:
             issues.append({"level": "block", "message": f"No loaded spool matches {material}"})
         elif color_reqs and not color_matches:
-            wanted = ", ".join(c["color"] for c in color_reqs)
+            wanted = ", ".join(_colour_label(c["color"]) for c in color_reqs)
             issues.append({"level": "block", "message": f"No loaded spool matches required colour {wanted}"})
     else:
         issues.append({"level": "warn", "message": "No material metadata; material check skipped"})
@@ -1354,7 +1382,7 @@ def _queue_preflight(job: dict, printer_status: Optional[dict]) -> dict:
             missing = [c for c in color_coverage if not c["ok"]]
             if missing:
                 detail = "; ".join(
-                    f"{c['color']} {c['available_g']:.0f}g/{c['used_g']:.0f}g"
+                    f"{_colour_label(c['color'])} {c['available_g']:.0f}g/{c['used_g']:.0f}g"
                     for c in missing
                 )
                 issues.append({
@@ -1363,7 +1391,7 @@ def _queue_preflight(job: dict, printer_status: Optional[dict]) -> dict:
                 })
             elif any(c["available_g"] < float(c["used_g"] or 0) * 1.15 for c in color_coverage):
                 detail = "; ".join(
-                    f"{c['color']} {c['available_g']:.0f}g/{c['used_g']:.0f}g"
+                    f"{_colour_label(c['color'])} {c['available_g']:.0f}g/{c['used_g']:.0f}g"
                     for c in color_coverage
                 )
                 issues.append({

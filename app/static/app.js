@@ -2640,6 +2640,33 @@ function _missionSpoolMatchesColour(spool, colour) {
   return _hexDistance(spool.color_hex, colour) <= 95;
 }
 
+const MISSION_COLOUR_NAMES = [
+  ['Black', '#000000'],
+  ['White', '#FFFFFF'],
+  ['Grey', '#808080'],
+  ['Silver', '#C0C0C0'],
+  ['Red', '#EF4444'],
+  ['Orange', '#F97316'],
+  ['Yellow', '#EAB308'],
+  ['Green', '#22C55E'],
+  ['Teal', '#14B8A6'],
+  ['Blue', '#3B82F6'],
+  ['Dark Blue', '#1D4ED8'],
+  ['Purple', '#8B5CF6'],
+  ['Pink', '#EC4899'],
+  ['Brown', '#7C4B00'],
+  ['Gold', '#B8860B'],
+];
+
+function _missionColourLabel(colour) {
+  const hex = _normHex(colour);
+  if (!hex) return 'Unknown colour';
+  const best = MISSION_COLOUR_NAMES
+    .map(([name, ref]) => ({ name, dist: _hexDistance(hex, ref) }))
+    .sort((a, b) => a.dist - b.dist)[0];
+  return best && best.dist <= 115 ? best.name : hex;
+}
+
 function _missionColourSummary(job) {
   const colours = _missionJobColours(job)
     .map(c => _normHex(c.color))
@@ -2728,7 +2755,7 @@ function _missionMaterialRescue(job, target, printers, spools) {
     if (mixedCoverage.ok) {
       return { kind: 'shelf', text: `Use ${mixedCoverage.text}` };
     }
-    const missing = mixedCoverage.missing.map(r => r.colour).join(' / ');
+    const missing = mixedCoverage.missing.map(r => _missionColourLabel(r.colour)).join(' / ');
     return { kind: 'none', text: `Missing ${_missionMaterial(job)} colour coverage: ${missing}` };
   }
   const ready = loaded.find(s => _missionSpoolEnough(job, s));
@@ -2838,9 +2865,10 @@ function _missionDispatchIntel(jobs, printers, spools, maint) {
       ? `${_dashboardPrinterName(best.printer)} · ${best.reasons.slice(0, 3).join(' · ')}`
       : 'No suitable printer right now';
     const changed = best?.printer && target && best.printer.id !== target.id;
+    const colourText = colours.map(c => _missionColourLabel(c)).join(' / ');
     return `<a class="mission-intel-row mission-${ready.cls}" href="#/queue">
       <span>${esc(name)}</span>
-      <small>${esc(material)}${j.filament_weight_g ? ` · ${Math.round(j.filament_weight_g)}g` : ''}${colours.length ? ` · ${colours.join(' / ')}` : ''}</small>
+      <small>${esc(material)}${j.filament_weight_g ? ` · ${Math.round(j.filament_weight_g)}g` : ''}${colourText ? ` · ${esc(colourText)}` : ''}</small>
       <strong>${changed ? 'Recommend ' : ''}${esc(recommendation)}</strong>
       ${rescue ? `<em class="mission-rescue mission-rescue-${rescue.kind}">${esc(rescue.text)}</em>` : ''}
     </a>`;

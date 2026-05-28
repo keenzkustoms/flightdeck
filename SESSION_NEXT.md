@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 28 May 2026 (Session 28.31 Queue preflight colour coverage)_
+_Last updated 28 May 2026 (Session 28.32 Friendly colour names)_
 
 ## Current state
 
@@ -825,6 +825,12 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Multi-colour queued jobs now check each loaded colour independently instead of summing all matching-material loaded spools.
 - Preflight block messages now identify the short colour directly, e.g. `Loaded colour coverage short: #FFFFFF 118g/280g`.
 - Restarted `flightdeck.service`; API health is OK after startup.
+
+### Session 28.32 Friendly colour names
+- Preflight colour shortfall messages now display nearest plain colour names such as `White 118g/280g` instead of raw hex values.
+- Mission Control Dispatch Intel now shows required colour names like `White / Brown` instead of `#FFFFFF / #7C4B00`.
+- Colour matching still uses hex distance tolerance under the hood so near-white/off-white slicer values can match a white spool.
+- Static cache-bust bumped to `v=87`.
 
 ---
 
