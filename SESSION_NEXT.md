@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 28 May 2026 (Session 28.33 Brand-aware colour coverage)_
+_Last updated 28 May 2026 (Session 28.34 Dispatch Intel duplicate grouping)_
 
 ## Current state
 
@@ -837,6 +837,12 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - If no loaded spool matches the required colour/material, preflight says `White (no loaded spool) 0g/280g`.
 - Mission Control missing-colour rescue text now includes candidate brand and grams where possible.
 - Static cache-bust bumped to `v=88`.
+
+### Session 28.34 Dispatch Intel duplicate grouping
+- Mission Control Dispatch Intel now groups duplicate pending jobs by filename, material, grams, and required colours.
+- Duplicate queue copies are shown as one advisory row with a `N queue copies` note instead of repeated recommendations.
+- Recommendation change detection now treats any duplicate target as already represented, avoiding noisy `Recommend H2D` wording for a copy already queued to H2D.
+- Static cache-bust bumped to `v=89`.
 
 ---
 

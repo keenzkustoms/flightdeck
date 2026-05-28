@@ -2862,8 +2862,35 @@ function _missionBestPrinter(job, printers, spools, maint) {
   return fits[0] || null;
 }
 
+function _missionJobKey(job) {
+  const name = String(job.filename || '').replace(/.*[\\/]/, '').toLowerCase();
+  const material = _missionMaterial(job) || '';
+  const colours = _missionColourSummary(job).join(',');
+  const grams = Math.round(Number(job.filament_weight_g || 0));
+  return `${name}|${material}|${grams}|${colours}`;
+}
+
+function _missionDedupPendingJobs(jobs) {
+  const grouped = new Map();
+  jobs.filter(j => j.status === 'pending').forEach(job => {
+    const key = _missionJobKey(job);
+    const existing = grouped.get(key);
+    if (!existing) {
+      grouped.set(key, { ...job, _missionCopies: [job] });
+    } else {
+      existing._missionCopies.push(job);
+      const existingReady = existing.preflight?.can_start === true;
+      const jobReady = job.preflight?.can_start === true;
+      if (jobReady && !existingReady) {
+        grouped.set(key, { ...job, _missionCopies: existing._missionCopies });
+      }
+    }
+  });
+  return [...grouped.values()];
+}
+
 function _missionDispatchIntel(jobs, printers, spools, maint) {
-  const pending = jobs.filter(j => j.status === 'pending').slice(0, 8);
+  const pending = _missionDedupPendingJobs(jobs).slice(0, 8);
   if (!pending.length) return '<div class="mission-empty-list">No queued work to advise on.</div>';
   return pending.map(j => {
     const ready = _missionJobReadiness(j);
@@ -2876,11 +2903,13 @@ function _missionDispatchIntel(jobs, printers, spools, maint) {
     const recommendation = best && best.score > -100
       ? `${_dashboardPrinterName(best.printer)} · ${best.reasons.slice(0, 3).join(' · ')}`
       : 'No suitable printer right now';
-    const changed = best?.printer && target && best.printer.id !== target.id;
+    const targetIds = new Set((j._missionCopies || [j]).map(copy => copy.printer_id));
+    const changed = best?.printer && target && !targetIds.has(best.printer.id);
+    const copies = (j._missionCopies?.length || 1) > 1 ? ` · ${j._missionCopies.length} queue copies` : '';
     const colourText = colours.map(c => _missionColourLabel(c)).join(' / ');
     return `<a class="mission-intel-row mission-${ready.cls}" href="#/queue">
       <span>${esc(name)}</span>
-      <small>${esc(material)}${j.filament_weight_g ? ` · ${Math.round(j.filament_weight_g)}g` : ''}${colourText ? ` · ${esc(colourText)}` : ''}</small>
+      <small>${esc(material)}${j.filament_weight_g ? ` · ${Math.round(j.filament_weight_g)}g` : ''}${colourText ? ` · ${esc(colourText)}` : ''}${copies}</small>
       <strong>${changed ? 'Recommend ' : ''}${esc(recommendation)}</strong>
       ${rescue ? `<em class="mission-rescue mission-rescue-${rescue.kind}">${esc(rescue.text)}</em>` : ''}
     </a>`;
