@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 28 May 2026 (Session 28.25 Simulated camera wall)_
+_Last updated 28 May 2026 (Session 28.26 Dispatch intelligence v1)_
 
 ## Current state
 
@@ -787,6 +787,12 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Added `#/cameras?sim=30`, which renders thirty simulated camera tiles using the existing real camera sources instead of opening thirty unique feeds.
 - Simulated camera tiles are clearly labelled and use a denser grid for wall-scale layout testing.
 - Static cache-bust bumped to `v=81`.
+
+### Session 28.26 Dispatch intelligence v1
+- Added advisory Dispatch Intel to Mission Control's side panel.
+- Dispatch Intel scores queued pending jobs against each real printer by availability, loaded matching material, stock level, health, maintenance, and current queue target.
+- Recommendations are read-only and do not move, start, or retarget queue jobs.
+- Static cache-bust bumped to `v=82`.
 
 ---
 

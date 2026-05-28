@@ -421,7 +421,8 @@ body {
   gap: 0.5rem;
 }
 
-.mission-job-row {
+.mission-job-row,
+.mission-intel-row {
   min-width: 0;
   border: 1px solid var(--border);
   border-radius: 0.45rem;
@@ -429,6 +430,19 @@ body {
   color: var(--text);
   padding: 0.65rem;
   text-decoration: none;
+}
+
+.mission-intel-list {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.mission-intel-row strong {
+  display: block;
+  margin-top: 0.4rem;
+  color: #bfdbfe;
+  font-size: 0.72rem;
+  line-height: 1.3;
 }
 
 .mission-note {

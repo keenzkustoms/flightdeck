@@ -2605,6 +2605,97 @@ function _missionSimPrinters(printers) {
   });
 }
 
+function _missionMaterial(job) {
+  return String(job.filament_type || '').trim().toUpperCase();
+}
+
+function _missionLoadedSpools(printerId, spools) {
+  return spools.filter(s => s.location_printer_id === printerId && !s.archived_at);
+}
+
+function _missionPrinterFit(job, p, spools, maint) {
+  const reasons = [];
+  let score = 0;
+  if (['offline', 'error', 'estop'].includes(p.state)) {
+    return { printer: p, score: -999, blocked: true, reasons: [p.state === 'offline' ? 'offline' : 'fault active'] };
+  }
+  if (p.state === 'printing') {
+    score -= 30;
+    reasons.push('busy');
+  } else if (p.state === 'paused') {
+    score -= 45;
+    reasons.push('paused');
+  } else {
+    score += 30;
+    reasons.push('available');
+  }
+
+  const material = _missionMaterial(job);
+  const required = Number(job.filament_weight_g || 0);
+  const loaded = _missionLoadedSpools(p.id, spools);
+  const matching = material ? loaded.filter(s => String(s.material || '').toUpperCase() === material) : [];
+  const matchingStock = matching.reduce((sum, s) => sum + Number(s.remaining_g || 0), 0);
+  if (material && matching.length) {
+    score += 45;
+    reasons.push(`${material} loaded`);
+    if (required && matchingStock >= required) {
+      score += 25;
+      reasons.push('stock ok');
+    } else if (required) {
+      score -= 35;
+      reasons.push('low stock');
+    }
+  } else if (material) {
+    score -= 40;
+    reasons.push(`no ${material} loaded`);
+  } else {
+    score -= 8;
+    reasons.push('metadata missing');
+  }
+
+  if (p.health?.status === 'attention') {
+    score -= 20;
+    reasons.push('health attention');
+  }
+  const dueMaint = (maint[p.id] || []).some(i => !i.archived_at && (i.status === 'due' || i.due));
+  if (dueMaint) {
+    score -= 15;
+    reasons.push('maintenance due');
+  }
+  if (job.printer_id === p.id) {
+    score += 12;
+    reasons.push('current target');
+  }
+  return { printer: p, score, blocked: false, reasons };
+}
+
+function _missionBestPrinter(job, printers, spools, maint) {
+  const fits = printers.map(p => _missionPrinterFit(job, p, spools, maint))
+    .sort((a, b) => b.score - a.score || _dashboardPrinterName(a.printer).localeCompare(_dashboardPrinterName(b.printer)));
+  return fits[0] || null;
+}
+
+function _missionDispatchIntel(jobs, printers, spools, maint) {
+  const pending = jobs.filter(j => j.status === 'pending').slice(0, 8);
+  if (!pending.length) return '<div class="mission-empty-list">No queued work to advise on.</div>';
+  return pending.map(j => {
+    const ready = _missionJobReadiness(j);
+    const best = _missionBestPrinter(j, printers, spools, maint);
+    const target = printers.find(p => p.id === j.printer_id);
+    const name = j.filename.replace(/.*[\\/]/, '');
+    const material = _missionMaterial(j) || 'Unknown material';
+    const recommendation = best && best.score > -100
+      ? `${_dashboardPrinterName(best.printer)} · ${best.reasons.slice(0, 3).join(' · ')}`
+      : 'No suitable printer right now';
+    const changed = best?.printer && target && best.printer.id !== target.id;
+    return `<a class="mission-intel-row mission-${ready.cls}" href="#/queue">
+      <span>${esc(name)}</span>
+      <small>${esc(material)}${j.filament_weight_g ? ` · ${Math.round(j.filament_weight_g)}g` : ''}</small>
+      <strong>${changed ? 'Recommend ' : ''}${esc(recommendation)}</strong>
+    </a>`;
+  }).join('');
+}
+
 async function renderMissionControl() {
   const el = document.getElementById('mission-page');
   if (!el) return;
@@ -2753,8 +2844,10 @@ async function renderMissionControl() {
           <div class="mission-job-list">${dispatchReady}</div>
           <div class="mission-panel-title">Blocked</div>
           <div class="mission-job-list">${blockedJobs}</div>
+          <div class="mission-panel-title">Dispatch Intel</div>
+          <div class="mission-intel-list">${_missionDispatchIntel(jobs, printers, spools, maint)}</div>
           <div class="mission-panel-title">Operator Notes</div>
-          <div class="mission-note">Readiness is calculated from queue preflight, printer state, loaded spool stock, health warnings, and maintenance due flags. Simulation mode only clones the display.</div>
+          <div class="mission-note">Dispatch intel is advisory only. It scores printers by availability, loaded matching filament, stock, health, maintenance, and current queue target.</div>
         </aside>
       </section>`;
     if (html !== _missionLastHtml) {
