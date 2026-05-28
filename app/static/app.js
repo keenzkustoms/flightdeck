@@ -5366,6 +5366,17 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
         <button class="modal-close-btn">✕</button>
       </div>
       <div class="spool-modal-form">
+        <div class="spool-form-row spool-catalogue-row">
+          <div class="spool-catalogue-block">
+            <div class="spool-catalogue-title">
+              <span>Filament catalogue</span>
+              <button type="button" class="spool-inline-btn" id="sm-catalogue-sync">Sync</button>
+            </div>
+            <input id="sm-catalogue-search" class="spool-form-input" type="search" placeholder="Search brand, material, colour...">
+            <div id="sm-catalogue-picked" class="spool-catalogue-picked hidden"></div>
+            <div id="sm-catalogue-results" class="spool-catalogue-results hidden"></div>
+          </div>
+        </div>
         <div class="spool-form-row">
           <label class="spool-form-label">Material *</label>
           <div class="spool-mat-block">
@@ -5385,16 +5396,6 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
         <div class="spool-form-row">
           <span class="spool-form-label"></span>
           <div id="sm-prev-picks" class="spool-prev-picks hidden"></div>
-        </div>
-        <div class="spool-form-row">
-          <label class="spool-form-label">Catalogue</label>
-          <div class="spool-catalogue-block">
-            <div class="spool-inline-row">
-              <input id="sm-catalogue-search" class="spool-form-input" type="search" placeholder="Search brand, material, colour...">
-              <button type="button" class="spool-inline-btn" id="sm-catalogue-sync">Sync</button>
-            </div>
-            <div id="sm-catalogue-results" class="spool-catalogue-results hidden"></div>
-          </div>
         </div>
         <div class="spool-form-row">
           <label class="spool-form-label">Subtype</label>
@@ -5488,6 +5489,7 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
   const prevPicks = overlay.querySelector('#sm-prev-picks');
   const catalogueSearch = overlay.querySelector('#sm-catalogue-search');
   const catalogueResults = overlay.querySelector('#sm-catalogue-results');
+  const cataloguePicked = overlay.querySelector('#sm-catalogue-picked');
   const catalogueSync = overlay.querySelector('#sm-catalogue-sync');
 
   let matNewMode = false;
@@ -5592,6 +5594,11 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
       emptyG.value = Math.round(Number(item.empty_spool_weight_g));
     }
     catalogueResults.classList.add('hidden');
+    cataloguePicked.innerHTML = `
+      <span class="spool-catalogue-swatch" style="background:${item.color_hex || '#808080'}"></span>
+      <span><b>${esc(item.color_name || 'Colour')}</b><small>${esc(brand)} · ${esc(material)}${item.subtype ? ` · ${esc(item.subtype)}` : ''}${item.filament_weight_g ? ` · ${Math.round(item.filament_weight_g)}g` : ''}</small></span>
+    `;
+    cataloguePicked.classList.remove('hidden');
     catalogueSearch.value = `${brand} ${material} ${item.color_name || ''}`.trim();
   }
 
@@ -5608,12 +5615,12 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
       catalogueResults.classList.remove('hidden');
       return;
     }
-    catalogueResults.innerHTML = `<div class="spool-catalogue-hint">Showing ${rows.length} matches. Add material or colour to narrow.</div>` + rows.map((item, idx) => `
+    catalogueResults.innerHTML = `<div class="spool-catalogue-hint">Showing ${rows.length} matches. Add material or colour to narrow.</div><div class="spool-catalogue-grid">` + rows.map((item, idx) => `
       <button type="button" class="spool-catalogue-result" data-idx="${idx}">
         <span class="spool-catalogue-swatch" style="background:${item.color_hex || '#808080'}"></span>
         <span><b>${esc(item.color_name || 'Colour')}</b><small>${esc(item.brand || '')} · ${esc(item.material || '')}${item.subtype ? ` · ${esc(item.subtype)}` : ''}${item.filament_weight_g ? ` · ${Math.round(item.filament_weight_g)}g` : ''}</small></span>
       </button>
-    `).join('');
+    `).join('') + '</div>';
     catalogueResults.classList.remove('hidden');
     catalogueResults.querySelectorAll('.spool-catalogue-result').forEach(btn => {
       btn.addEventListener('click', () => applyCatalogueEntry(rows[Number(btn.dataset.idx)]));

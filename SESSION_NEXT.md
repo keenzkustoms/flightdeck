@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 28 May 2026 (Session 28.36 Filament catalogue import)_
+_Last updated 28 May 2026 (Session 28.37 Catalogue-first spool modal)_
 
 ## Current state
 
@@ -866,6 +866,14 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Add Spool catalogue search now asks for 30 results instead of 12.
 - Add Spool catalogue results panel is taller and includes a hint when broad searches return many matches.
 - Static cache-bust bumped to `v=93`.
+
+### Session 28.37 Catalogue-first spool modal
+- Reworked Add Spool into a wider two-column modal.
+- Left column is now a pinned catalogue browser with large searchable result cards.
+- Right column is the spool confirmation/edit panel for material, brand, colour, weight, tare, location, and notes.
+- Selecting a catalogue entry now shows a selected-source card while filling the spool fields.
+- Mobile/narrow screens fall back to the stacked single-column flow.
+- Static cache-bust bumped to `v=94`.
 
 ---
 
