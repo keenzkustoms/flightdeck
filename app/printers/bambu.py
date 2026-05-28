@@ -444,18 +444,25 @@ class BambuPrinter:
         self._set_light("off")
 
     def _set_light(self, mode: str) -> None:
-        ok = self._printer.mqtt_client._PrinterMQTTClient__publish_command({
-            "system": {
-                "command": "ledctrl",
-                "led_node": "chamber_light",
-                "led_mode": mode,
-                "led_on_time": 500,
-                "led_off_time": 500,
-                "loop_times": 1,
-                "interval_time": 1000,
-            }
-        })
-        if not ok:
+        nodes = ["chamber_light"]
+        if self.model_name.upper() == "H2D":
+            nodes = ["chamber_light", "chamber_light2", "work_light"]
+
+        ok_any = False
+        for node in nodes:
+            ok = self._printer.mqtt_client._PrinterMQTTClient__publish_command({
+                "system": {
+                    "command": "ledctrl",
+                    "led_node": node,
+                    "led_mode": mode,
+                    "led_on_time": 500,
+                    "led_off_time": 500,
+                    "loop_times": 1,
+                    "interval_time": 1000,
+                }
+            })
+            ok_any = ok_any or ok
+        if not ok_any:
             raise RuntimeError(f"Bambu light command failed: {mode}")
 
     def set_temp(self, heater: str, target: int) -> None:
@@ -584,8 +591,13 @@ def _read_light_state(print_data: dict) -> str:
     report = print_data.get("lights_report") or []
     if not report:
         return "unknown"
-    mode = str((report[0] or {}).get("mode", "unknown")).lower()
-    return mode if mode in {"on", "off"} else "unknown"
+    modes = [str((r or {}).get("mode", "unknown")).lower() for r in report]
+    known = [m for m in modes if m in {"on", "off"}]
+    if not known:
+        return "unknown"
+    if any(m == "on" for m in known):
+        return "on"
+    return "off"
 
 
 def _parse_ams(dump: dict) -> list[dict]:

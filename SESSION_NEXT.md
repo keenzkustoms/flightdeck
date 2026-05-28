@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 28 May 2026 (Session 28.11 printer label cleanup)_
+_Last updated 28 May 2026 (Session 28.12 H2D paired light control)_
 
 ## Current state
 
@@ -697,6 +697,12 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Queue printer group labels now use the same machine names.
 - Shop/custom names remain unchanged as secondary labels on cards/detail/camera surfaces.
 - Static cache-bust bumped to `v=68`.
+
+### Session 28.12 H2D paired light control
+- H2D light on/off now publishes the same MQTT command to `chamber_light`, `chamber_light2`, and `work_light` so both light bars move together.
+- Bambu light state now reads all reported light modes and treats the printer as lit if any known channel is on.
+- Removed the duplicate Bambu light click path on the printer detail view so one click sends one toggle command.
+- Static cache-bust bumped to `v=69`.
 
 ---
 

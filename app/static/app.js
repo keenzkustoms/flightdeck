@@ -878,7 +878,6 @@ document.getElementById('view-printer').addEventListener('click', e => {
   if (lightToggle) {
     e.preventDefault();
     e.stopPropagation();
-    toggleBambuLight(lightToggle.dataset.lightToggle);
     return;
   }
 
