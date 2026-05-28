@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 28 May 2026 (Session 28.24 Mission Control dispatch board)_
+_Last updated 28 May 2026 (Session 28.25 Simulated camera wall)_
 
 ## Current state
 
@@ -781,6 +781,12 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Added a 30-printer simulation toggle on Mission Control to stress-test dense fleet layout without changing real printer config.
 - Added lane bucket styling and empty-filter states for the dispatch board.
 - Static cache-bust bumped to `v=80`.
+
+### Session 28.25 Simulated camera wall
+- Added a `View 30 cameras` link when Mission Control's 30-printer simulation is active.
+- Added `#/cameras?sim=30`, which renders thirty simulated camera tiles using the existing real camera sources instead of opening thirty unique feeds.
+- Simulated camera tiles are clearly labelled and use a denser grid for wall-scale layout testing.
+- Static cache-bust bumped to `v=81`.
 
 ---
 

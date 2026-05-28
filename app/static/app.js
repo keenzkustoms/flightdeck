@@ -137,6 +137,7 @@ const _objectsCache = {};       // printer_id → { supported, objects }
 const _historyYear = {};        // printer_id → selected year (int)
 const _dayPrintsCache = {};     // `${printerId}:${dateStr}` → prints[]
 let _camerasFull = false;       // true once cameras grid has been fully rendered
+let _camerasMode = 'live';       // live | sim30
 let _camZoom = 0;               // 0=normal, 1=wide, 2=fullscreen
 let _onSettings = false;        // true while settings view is active
 let _onFailures = false;        // true while failure review is active
@@ -2662,7 +2663,10 @@ async function renderMissionControl() {
     ].map(([id, label, count]) =>
       `<a class="mission-filter ${prefs.filter === id ? 'active' : ''}" href="${_missionHref(id, prefs.sim)}">${label}<b>${count}</b></a>`
     ).join('');
-    const simToggle = `<a class="mission-sim-toggle ${prefs.sim ? 'active' : ''}" href="${_missionHref(prefs.filter, !prefs.sim)}">${prefs.sim ? '30-printer sim on' : 'Sim 30 printers'}</a>`;
+    const simToggle = `<div class="mission-sim-actions">
+      <a class="mission-sim-toggle ${prefs.sim ? 'active' : ''}" href="${_missionHref(prefs.filter, !prefs.sim)}">${prefs.sim ? '30-printer sim on' : 'Sim 30 printers'}</a>
+      ${prefs.sim ? '<a class="mission-sim-toggle" href="#/cameras?sim=30">View 30 cameras</a>' : ''}
+    </div>`;
 
     const lanes = filteredContexts.map(({ p, laneJobs, signals, bucket }) => {
       const activeJob = p.job ? jobDisplayName(p.job) : '';
@@ -2990,33 +2994,44 @@ function _attachCameraRetries(root) {
 }
 
 function _camTileHtml(p) {
-  const camSrc = _cameraStreamSrc(p.id);
+  const cameraId = p._camera_id || p.id;
+  const camSrc = _cameraStreamSrc(cameraId);
   const feed = (camSrc && p.state !== 'offline')
-    ? `<img src="${camSrc}" alt="${p.custom_name}" data-camera-id="${p.id}">`
+    ? `<img src="${camSrc}" alt="${p.custom_name}" data-camera-id="${cameraId}">`
     : `<div class="cam-tile-offline">${p.state === 'offline' ? 'Offline' : 'No camera'}</div>`;
-  return `<div class="cam-tile" data-printer-id="${p.id}" tabindex="0">
+  return `<div class="cam-tile ${p._simulated ? 'cam-tile-sim' : ''}" data-printer-id="${p.id}" data-target-id="${p._source_id || p.id}" tabindex="0">
     <div class="cam-tile-header">${_camHeaderInner(p)}</div>
+    ${p._simulated ? '<div class="cam-sim-ribbon">Simulated camera</div>' : ''}
     <div class="cam-tile-feed">${feed}</div>
   </div>`;
 }
 
 async function renderCamerasView() {
   const el = document.getElementById('cameras-grid');
+  const sim = (location.hash || '').includes('sim=30');
+  const mode = sim ? 'sim30' : 'live';
+  const sourcePrinters = _latestPrinters || [];
+  const cameraPrinters = sim
+    ? _missionSimPrinters(sourcePrinters).map(p => {
+        const source = sourcePrinters.find(x => p.id.startsWith(`${x.id}-sim-`)) || sourcePrinters[0];
+        return { ...p, _simulated: true, _source_id: source?.id || p.id, _camera_id: source?.id || p.id };
+      })
+    : sourcePrinters;
 
-  if (_camerasFull) {
-    _latestPrinters.forEach(p => {
+  if (_camerasFull && _camerasMode === mode) {
+    cameraPrinters.forEach(p => {
       const header = el.querySelector(`.cam-tile[data-printer-id="${p.id}"] .cam-tile-header`);
       if (header) header.innerHTML = _camHeaderInner(p);
     });
     return;
   }
 
-  if (!_latestPrinters.length) {
+  if (!sourcePrinters.length) {
     el.innerHTML = `<div class="detail-placeholder">Connecting…</div>`;
     return;
   }
 
-  await Promise.all(_latestPrinters.map(async p => {
+  await Promise.all(sourcePrinters.map(async p => {
     if (_cameraUrlCache[p.id] === undefined) {
       try {
         const r = await fetch(`/api/printers/${p.id}/camera`);
@@ -3025,20 +3040,22 @@ async function renderCamerasView() {
     }
   }));
 
-  el.innerHTML = _latestPrinters.map(_camTileHtml).join('');
+  el.classList.toggle('cameras-grid-sim', sim);
+  el.innerHTML = cameraPrinters.map(_camTileHtml).join('');
   _attachCameraRetries(el);
 
   el.querySelectorAll('.cam-tile[data-printer-id]').forEach(tile => {
-    tile.addEventListener('click', () => location.hash = `#/printer/${tile.dataset.printerId}`);
+    tile.addEventListener('click', () => location.hash = `#/printer/${tile.dataset.targetId || tile.dataset.printerId}`);
     tile.addEventListener('keydown', e => {
       if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault();
-        location.hash = `#/printer/${tile.dataset.printerId}`;
+        location.hash = `#/printer/${tile.dataset.targetId || tile.dataset.printerId}`;
       }
     });
   });
 
   _camerasFull = true;
+  _camerasMode = mode;
 }
 
 // ── Tab title ─────────────────────────────────────────────────────────────
