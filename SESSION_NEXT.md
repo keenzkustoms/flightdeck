@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 28 May 2026 (Session 28.18 safe restart helper)_
+_Last updated 28 May 2026 (Session 28.19 Mission Control v1)_
 
 ## Current state
 
@@ -740,6 +740,14 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Added `scripts/safe-restart-flightdeck.sh` for restarts that hang on lingering Bambu RTSP `ffmpeg` or Flightdeck `uvicorn` processes.
 - Helper stops `flightdeck.service` with a timeout, terminates only Flightdeck-owned leftovers, starts the service, and prints a compact `/api/printers` health check.
 - README now documents `sudo ./scripts/safe-restart-flightdeck.sh`.
+
+### Session 28.19 Mission Control v1
+- Added a new top-level `Mission Control` navigation screen (`#/mission`).
+- Mission Control combines printer state, queue jobs, spool inventory, health reasons, and maintenance data into a fleet forecast view.
+- Added fleet KPIs for pending jobs, blocked jobs, caution jobs, and queued time forecast.
+- Added per-printer mission lanes with current action, queue timeline blocks, loaded spool pills, and operator signals.
+- Added a right-side Next Dispatch panel that ranks upcoming queued/blocked work.
+- Static cache-bust bumped to `v=75`.
 
 ---
 

@@ -985,6 +985,7 @@ function parseRoute() {
   if (printerMatch) return { view: 'printer', id: printerMatch[1], subtab: printerMatch[2] || 'live' };
   const spoolMatch = hash.match(/^#\/spool\/(\d+)/);
   if (spoolMatch) return { view: 'spool', id: parseInt(spoolMatch[1], 10) };
+  if (hash === '#/mission') return { view: 'mission' };
   if (hash === '#/cameras') return { view: 'cameras' };
   if (hash === '#/stats') return { view: 'stats' };
   if (hash === '#/queue') return { view: 'queue' };
@@ -1025,6 +1026,7 @@ function router() {
   _onSpools = route.view === 'spools';
 
   document.getElementById('view-dashboard').hidden = route.view !== 'dashboard';
+  document.getElementById('view-mission').hidden   = route.view !== 'mission';
   document.getElementById('view-stats').hidden     = route.view !== 'stats';
   document.getElementById('view-printer').hidden   = route.view !== 'printer';
   document.getElementById('view-spool').hidden     = route.view !== 'spool';
@@ -1038,6 +1040,7 @@ function router() {
     const href = tab.getAttribute('href');
     tab.classList.toggle('active',
       (route.view === 'dashboard' && href === '#/') ||
+      (route.view === 'mission'   && href === '#/mission') ||
       (route.view === 'stats'     && href === '#/stats') ||
       (route.view === 'printer'  && href === `#/printer/${route.id}`) ||
       (route.view === 'cameras'  && href === '#/cameras') ||
@@ -1052,6 +1055,7 @@ function router() {
   });
 
   if (route.view === 'printer') renderPrinterDetail(route.id, route.subtab);
+  if (route.view === 'mission') renderMissionControl();
   if (route.view === 'stats') renderStatsView();
   if (route.view === 'spool') renderSpoolDetail(route.id);
   if (route.view === 'cameras') renderCamerasView();
@@ -1065,6 +1069,7 @@ function buildTabs(printers) {
   const nav = document.getElementById('tab-strip');
   nav.innerHTML = [
     `<a class="tab" href="#/">Dashboard</a>`,
+    `<a class="tab" href="#/mission">Mission Control</a>`,
     `<a class="tab" href="#/stats">Stats</a>`,
     `<div class="tab-section">Printers</div>`,
     ...printers.map((p, i) => {
@@ -2472,6 +2477,166 @@ function _fmtSeconds(s) {
   if (!s) return '';
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
   return h ? `${h}h ${m}m` : `${m}m`;
+}
+
+// ── Mission Control ───────────────────────────────────────────────────────
+
+function _missionJobEta(job) {
+  if (job.estimated_seconds) return Number(job.estimated_seconds);
+  if (job.filament_weight_g) return Math.max(1800, Number(job.filament_weight_g) * 180);
+  return 3600;
+}
+
+function _missionJobReadiness(job) {
+  if (job.status === 'failed') return { cls: 'blocked', label: 'Failed', ok: false };
+  if (job.status === 'cancelled') return { cls: 'blocked', label: 'Cancelled', ok: false };
+  if (job.preflight?.can_start === false) return { cls: 'blocked', label: 'Blocked', ok: false };
+  if (job.preflight?.status === 'warning') return { cls: 'warn', label: 'Caution', ok: true };
+  if (!job.filament_type || !job.filament_weight_g) return { cls: 'warn', label: 'Metadata', ok: true };
+  return { cls: 'ready', label: 'Ready', ok: true };
+}
+
+function _missionPrinterSignals(p, jobs, spools, maint) {
+  const signals = [];
+  if (p.state === 'offline') signals.push({ level: 'bad', text: 'Offline' });
+  if (p.state === 'error' || p.state === 'estop') signals.push({ level: 'bad', text: p.error || 'Fault active' });
+  if (p.state === 'paused') signals.push({ level: 'warn', text: 'Paused print' });
+  if (p.health?.reasons?.length) signals.push({ level: p.health.status === 'attention' ? 'bad' : 'warn', text: p.health.reasons[0].message });
+  const loaded = spools.filter(s => s.location_printer_id === p.id && !s.archived_at);
+  const low = loaded.filter(s => s.label_weight_g > 0 && (s.remaining_g / s.label_weight_g * 100) < _latestLowStockPct);
+  if (low.length) signals.push({ level: 'warn', text: `${low.length} loaded spool${low.length === 1 ? '' : 's'} low` });
+  const dueMaint = (maint[p.id] || []).filter(i => !i.archived_at && (i.status === 'due' || i.due));
+  if (dueMaint.length) signals.push({ level: 'warn', text: `${dueMaint.length} maintenance item${dueMaint.length === 1 ? '' : 's'} due` });
+  if (!jobs.length && p.state === 'idle') signals.push({ level: 'ok', text: 'Idle and available' });
+  return signals.slice(0, 4);
+}
+
+function _missionQueueForPrinter(jobs, printerId) {
+  return jobs
+    .filter(j => j.printer_id === printerId && !['done'].includes(j.status))
+    .sort((a, b) => (a.position ?? 999) - (b.position ?? 999) || a.id - b.id);
+}
+
+function _missionLoadedLine(p, spools) {
+  const loaded = spools.filter(s => s.location_printer_id === p.id && !s.archived_at);
+  if (!loaded.length) return '<span class="mission-muted">No Flightdeck spools loaded</span>';
+  return loaded.slice(0, 4).map(s => {
+    const pct = s.label_weight_g > 0 ? Math.round(s.remaining_g / s.label_weight_g * 100) : 0;
+    return `<span class="mission-spool-pill">
+      <i style="background:${s.color_hex || '#808080'}"></i>
+      ${esc(s.material)} ${esc(s.brand || '')} <b>${pct}%</b>
+    </span>`;
+  }).join('');
+}
+
+function _missionRecommendation(p, laneJobs, signals) {
+  if (signals.some(s => s.level === 'bad')) return 'Hold for operator check';
+  if (p.state === 'printing') return 'Monitor active print';
+  if (p.state === 'paused') return 'Resolve paused print';
+  if (laneJobs.some(j => _missionJobReadiness(j).cls === 'blocked')) return 'Clear blocked queue item';
+  if (laneJobs.length) return 'Ready for next dispatch';
+  return 'Available for new work';
+}
+
+async function renderMissionControl() {
+  const el = document.getElementById('mission-page');
+  if (!el) return;
+  el.innerHTML = `<div class="detail-placeholder">Loading Mission Control…</div>`;
+  try {
+    const [printers, jobs, spools] = await Promise.all([
+      fetch('/api/printers').then(r => { if (!r.ok) throw new Error('printers'); return r.json(); }),
+      fetch('/api/queue').then(r => { if (!r.ok) throw new Error('queue'); return r.json(); }),
+      fetch('/api/spools').then(r => { if (!r.ok) throw new Error('spools'); return r.json(); }),
+    ]);
+    _latestPrinters = printers;
+    _allSpools = spools;
+    const maintPairs = await Promise.all(printers.map(async p => {
+      try {
+        const r = await fetch(`/api/printers/${p.id}/maintenance`);
+        return [p.id, r.ok ? await r.json() : []];
+      } catch {
+        return [p.id, []];
+      }
+    }));
+    const maint = Object.fromEntries(maintPairs);
+    const active = printers.filter(p => p.state === 'printing' || p.state === 'paused').length;
+    const pendingJobs = jobs.filter(j => j.status === 'pending');
+    const blocked = jobs.filter(j => _missionJobReadiness(j).cls === 'blocked').length;
+    const caution = jobs.filter(j => _missionJobReadiness(j).cls === 'warn').length;
+    const forecastSeconds = pendingJobs.reduce((sum, j) => sum + _missionJobEta(j), 0);
+    const forecast = forecastSeconds ? new Date(Date.now() + forecastSeconds * 1000).toLocaleTimeString([], _clockOpts()) : 'Clear';
+
+    const lanes = printers.map(p => {
+      const laneJobs = _missionQueueForPrinter(jobs, p.id);
+      const signals = _missionPrinterSignals(p, laneJobs, spools, maint);
+      const activeJob = p.job ? jobDisplayName(p.job) : '';
+      const queueBlocks = laneJobs.slice(0, 6).map(j => {
+        const ready = _missionJobReadiness(j);
+        const width = Math.max(16, Math.min(46, _missionJobEta(j) / 900));
+        return `<a class="mission-timeline-block mission-${ready.cls}" href="#/queue" style="--w:${width}">
+          <span>${esc(j.filename.replace(/.*[\\/]/, ''))}</span>
+          <small>${ready.label}</small>
+        </a>`;
+      }).join('') || '<div class="mission-empty-lane">No queued work</div>';
+      return `<section class="mission-lane">
+        <div class="mission-lane-head">
+          <div>
+            <a class="mission-printer-name" href="#/printer/${p.id}">${esc(_dashboardPrinterName(p))}</a>
+            <div class="mission-printer-sub">${esc(p.custom_name || '')}</div>
+          </div>
+          <span class="badge badge-${p.state}">${esc(p.state || 'unknown')}</span>
+        </div>
+        <div class="mission-now">
+          <span>Now</span>
+          <strong>${activeJob ? esc(activeJob) : esc(_missionRecommendation(p, laneJobs, signals))}</strong>
+        </div>
+        <div class="mission-timeline">${queueBlocks}</div>
+        <div class="mission-loaded">${_missionLoadedLine(p, spools)}</div>
+        <div class="mission-signals">
+          ${signals.map(s => `<span class="mission-signal mission-signal-${s.level}">${esc(s.text)}</span>`).join('')}
+        </div>
+      </section>`;
+    }).join('');
+
+    const nextJobs = jobs
+      .filter(j => ['pending', 'failed', 'cancelled'].includes(j.status))
+      .sort((a, b) => (a.status === 'pending' ? 0 : 1) - (b.status === 'pending' ? 0 : 1) || (a.position ?? 999) - (b.position ?? 999))
+      .slice(0, 8)
+      .map(j => {
+        const ready = _missionJobReadiness(j);
+        const p = printers.find(x => x.id === j.printer_id);
+        return `<a class="mission-job-row mission-${ready.cls}" href="#/queue">
+          <span>${esc(j.filename.replace(/.*[\\/]/, ''))}</span>
+          <small>${esc(p ? _dashboardPrinterName(p) : j.printer_id)} · ${ready.label}</small>
+        </a>`;
+      }).join('') || '<div class="mission-empty-list">Queue is clear.</div>';
+
+    el.innerHTML = `
+      <section class="mission-hero">
+        <div>
+          <div class="mission-eyebrow">Mission Control</div>
+          <h1>Farm forecast</h1>
+          <p>${printers.length} printers · ${active} active · ${pendingJobs.length} pending · finish forecast ${esc(forecast)}</p>
+        </div>
+        <div class="mission-kpis">
+          <div><strong>${pendingJobs.length}</strong><span>Pending</span></div>
+          <div class="${blocked ? 'mission-kpi-bad' : ''}"><strong>${blocked}</strong><span>Blocked</span></div>
+          <div class="${caution ? 'mission-kpi-warn' : ''}"><strong>${caution}</strong><span>Caution</span></div>
+          <div><strong>${_fmtSeconds(forecastSeconds) || '0m'}</strong><span>Queued time</span></div>
+        </div>
+      </section>
+      <section class="mission-grid">
+        <div class="mission-lanes">${lanes}</div>
+        <aside class="mission-sidebar-panel">
+          <div class="mission-panel-title">Next Dispatch</div>
+          <div class="mission-job-list">${nextJobs}</div>
+          <div class="mission-panel-title">Operator Notes</div>
+          <div class="mission-note">Readiness is calculated from queue preflight, printer state, loaded spool stock, health warnings, and maintenance due flags.</div>
+        </aside>
+      </section>`;
+  } catch (err) {
+    el.innerHTML = `<div class="detail-placeholder">Mission Control unavailable.</div>`;
+  }
 }
 
 function _queueJobCard(job, isFirst, isLast) {
