@@ -1294,6 +1294,10 @@ function _openAmsDryDialog(printerId, amsId) {
   const preset = _AMS_DRY_PRESETS[startFilament] || _AMS_DRY_PRESETS.PLA;
   const startTemp = current.temperature > 0 ? current.temperature : preset.temp;
   const startDuration = current.duration > 0 ? current.duration : preset.duration;
+  const rh = unit?.humidity != null ? `${unit.humidity}% RH` : 'RH --';
+  const tempNow = unit?.temperature != null ? `${Math.round(unit.temperature * 10) / 10}°C` : '--°C';
+  const drying = !!unit?.drying;
+  const dryTime = unit?.dry_time ? formatEta(unit.dry_time * 60) : '';
   const options = Object.keys(_AMS_DRY_PRESETS).map(f =>
     `<option value="${f}"${f === startFilament ? ' selected' : ''}>${f}</option>`
   ).join('');
@@ -1301,31 +1305,47 @@ function _openAmsDryDialog(printerId, amsId) {
   overlay.className = 'modal-overlay';
   overlay.innerHTML = `
     <div class="modal-box ams-dry-modal">
-      <div class="modal-header">
-        <span class="modal-title">AMS drying</span>
+      <div class="modal-header ams-dry-header">
+        <div>
+          <span class="modal-title">AMS drying</span>
+          <div class="ams-dry-subtitle">${esc(unit?.label || `AMS ${amsId}`)} · ${esc(p?.custom_name || p?.model_name || printerId)}</div>
+        </div>
         <button class="modal-close-btn">×</button>
       </div>
+      <div class="ams-dry-status">
+        <span class="ams-dry-status-chip">${esc(rh)}</span>
+        <span class="ams-dry-status-chip">${esc(tempNow)}</span>
+        <span class="ams-dry-status-chip ${drying ? 'ams-dry-running' : ''}">${drying ? `Drying${dryTime ? ` · ${dryTime} left` : ''}` : 'Idle'}</span>
+      </div>
       <div class="ams-dry-form">
-        <label class="spool-form-label" for="ams-dry-filament">Filament</label>
-        <select id="ams-dry-filament" class="spool-form-input">${options}</select>
-        <label class="spool-form-label" for="ams-dry-temp">Temperature</label>
-        <div class="ams-dry-inline">
-          <input id="ams-dry-temp" class="spool-form-input spool-weight-input" type="number" min="45" max="85" value="${startTemp}">
-          <span>°C</span>
-        </div>
-        <label class="spool-form-label" for="ams-dry-duration">Duration</label>
-        <div class="ams-dry-inline">
-          <input id="ams-dry-duration" class="spool-form-input spool-weight-input" type="number" min="1" max="24" value="${startDuration}">
-          <span>hours</span>
-        </div>
-        <label class="ams-dry-check">
+        <label class="ams-dry-field" for="ams-dry-filament">
+          <span>Filament</span>
+          <select id="ams-dry-filament" class="spool-form-input">${options}</select>
+        </label>
+        <label class="ams-dry-field" for="ams-dry-temp">
+          <span>Temperature</span>
+          <strong><output id="ams-dry-temp-out">${startTemp}</output>°C</strong>
+          <input id="ams-dry-temp" class="ams-dry-range" type="range" min="45" max="85" value="${startTemp}">
+          <small><span>45°C</span><span>85°C</span></small>
+        </label>
+        <label class="ams-dry-field" for="ams-dry-duration">
+          <span>Duration</span>
+          <strong><output id="ams-dry-duration-out">${startDuration}</output>h</strong>
+          <input id="ams-dry-duration" class="ams-dry-range" type="range" min="1" max="24" value="${startDuration}">
+          <small><span>1h</span><span>24h</span></small>
+        </label>
+        <label class="ams-dry-toggle">
           <input id="ams-dry-rotate" type="checkbox">
           <span>Rotate spool during drying</span>
         </label>
+        <div class="ams-dry-note">
+          Flightdeck will send the selected dry profile to the printer's AMS controller.
+        </div>
       </div>
-      <div class="modal-actions">
+      <div class="modal-actions ams-dry-actions">
+        ${drying ? '<button class="modal-btn ams-dry-stop" id="ams-dry-stop">Stop drying</button>' : ''}
         <button class="modal-btn" id="ams-dry-cancel">Cancel</button>
-        <button class="modal-btn modal-btn-primary" id="ams-dry-start">Start drying</button>
+        <button class="modal-btn modal-btn-primary ams-dry-start" id="ams-dry-start">Start drying</button>
       </div>
     </div>`;
   document.body.appendChild(overlay);
@@ -1334,13 +1354,36 @@ function _openAmsDryDialog(printerId, amsId) {
   const filament = overlay.querySelector('#ams-dry-filament');
   const temp = overlay.querySelector('#ams-dry-temp');
   const duration = overlay.querySelector('#ams-dry-duration');
+  const tempOut = overlay.querySelector('#ams-dry-temp-out');
+  const durationOut = overlay.querySelector('#ams-dry-duration-out');
+  const updateOutputs = () => {
+    tempOut.textContent = temp.value;
+    durationOut.textContent = duration.value;
+  };
+  temp.addEventListener('input', updateOutputs);
+  duration.addEventListener('input', updateOutputs);
   filament.addEventListener('change', () => {
     const p = _AMS_DRY_PRESETS[filament.value] || _AMS_DRY_PRESETS.PLA;
     temp.value = p.temp;
     duration.value = p.duration;
+    updateOutputs();
   });
   overlay.querySelector('.modal-close-btn').addEventListener('click', close);
   overlay.querySelector('#ams-dry-cancel').addEventListener('click', close);
+  overlay.querySelector('#ams-dry-stop')?.addEventListener('click', async e => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    btn.textContent = 'Stopping...';
+    try {
+      await sendAmsDry({ printerId, amsId, enabled: false });
+      close();
+      setTimeout(() => refreshPrinters(), 900);
+    } catch (err) {
+      alert(err.message || 'AMS drying command failed');
+      btn.disabled = false;
+      btn.textContent = 'Stop drying';
+    }
+  });
   overlay.querySelector('#ams-dry-start').addEventListener('click', async e => {
     const btn = e.currentTarget;
     btn.disabled = true;

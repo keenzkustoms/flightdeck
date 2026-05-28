@@ -1343,30 +1343,117 @@ header {
 }
 
 .ams-dry-modal {
-  width: min(22rem, calc(100vw - 2rem));
+  width: min(25rem, calc(100vw - 2rem));
+  border-color: rgba(245,158,11,0.28);
+}
+
+.ams-dry-header {
+  align-items: flex-start;
+}
+
+.ams-dry-subtitle {
+  margin-top: 0.2rem;
+  color: #7aa2d8;
+  font-size: 0.74rem;
 }
 
 .ams-dry-form {
   display: grid;
-  gap: 0.55rem;
-  padding: 0.25rem 0 0.9rem;
+  gap: 0.9rem;
+  padding: 0.8rem 0 1rem;
 }
 
-.ams-dry-inline {
+.ams-dry-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  padding: 0.75rem;
+  border: 1px solid rgba(245,158,11,0.18);
+  border-radius: 0.5rem;
+  background: rgba(245,158,11,0.05);
+}
+
+.ams-dry-status-chip {
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 999px;
+  background: rgba(255,255,255,0.04);
+  color: var(--text);
+  font-size: 0.72rem;
+  font-weight: 800;
+  padding: 0.25rem 0.5rem;
+}
+
+.ams-dry-status-chip.ams-dry-running {
+  border-color: rgba(34,197,94,0.35);
+  color: #86efac;
+  background: rgba(34,197,94,0.08);
+}
+
+.ams-dry-field {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.4rem 0.75rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.ams-dry-field > select,
+.ams-dry-field > input[type="range"],
+.ams-dry-field > small {
+  grid-column: 1 / -1;
+}
+
+.ams-dry-field > span {
+  color: var(--muted);
+}
+
+.ams-dry-field > strong {
+  color: var(--text);
+  font-size: 0.88rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.ams-dry-field > small {
+  display: flex;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: 0.68rem;
+}
+
+.ams-dry-range {
+  accent-color: #f59e0b;
+}
+
+.ams-dry-toggle {
   display: flex;
   align-items: center;
   gap: 0.5rem;
   color: var(--muted);
   font-size: 0.8rem;
+  padding: 0.2rem 0;
 }
 
-.ams-dry-check {
-  display: flex;
+.ams-dry-note {
+  color: #7aa2d8;
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
+.ams-dry-actions {
   align-items: center;
-  gap: 0.5rem;
-  color: var(--muted);
-  font-size: 0.8rem;
-  margin-top: 0.25rem;
+}
+
+.ams-dry-start {
+  background: #f59e0b;
+  border-color: #f59e0b;
+  color: #111827;
+}
+
+.ams-dry-stop {
+  margin-right: auto;
+  border-color: rgba(239,68,68,0.45);
+  color: #fca5a5;
+  background: rgba(239,68,68,0.08);
 }
 
 .ams-slots { display: flex; gap: 0.625rem; flex-wrap: wrap; }

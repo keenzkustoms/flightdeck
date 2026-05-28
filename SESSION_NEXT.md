@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 28 May 2026 (Session 28.16 AMS drying presets)_
+_Last updated 28 May 2026 (Session 28.17 AMS drying screen polish)_
 
 ## Current state
 
@@ -730,6 +730,11 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Drying payload now includes Bambu's reported setting fields: `dry_filament`, `dry_temperature`, and `dry_duration`.
 - Drying now opens a Flightdeck dialog with filament presets (`PLA`, `PETG`, `ABS`, `ASA`, `TPU`, `PA`, `PC`), temperature, duration, and rotate option.
 - Static cache-bust bumped to `v=73`.
+
+### Session 28.17 AMS drying screen polish
+- Reworked the AMS drying dialog into a richer Flightdeck control surface with AMS/printer subtitle, RH/temp/state chips, preset selector, sliders, rotate toggle, and stronger Start/Stop actions.
+- Temperature and duration controls now use range sliders with live readouts and preset-driven defaults.
+- Static cache-bust bumped to `v=74`.
 
 ---
 
