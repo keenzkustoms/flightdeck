@@ -12,6 +12,18 @@ It's built primarily for my own bench (one Voron Greyhound Elite V2, a Bambu H2D
 
 ---
 
+## Safe Restart
+
+If `systemctl restart flightdeck.service` hangs because old Bambu camera `ffmpeg` or `uvicorn` processes do not exit cleanly, use:
+
+```bash
+sudo ./scripts/safe-restart-flightdeck.sh
+```
+
+The helper stops the service, cleans only Flightdeck-owned leftover `uvicorn` and Bambu RTSP `ffmpeg` processes, starts the service again, and prints a compact `/api/printers` health check.
+
+---
+
 ## Why
 
 Running multiple printers across ecosystems means juggling:

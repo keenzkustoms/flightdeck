@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 28 May 2026 (Session 28.17 AMS drying screen polish)_
+_Last updated 28 May 2026 (Session 28.18 safe restart helper)_
 
 ## Current state
 
@@ -735,6 +735,11 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Reworked the AMS drying dialog into a richer Flightdeck control surface with AMS/printer subtitle, RH/temp/state chips, preset selector, sliders, rotate toggle, and stronger Start/Stop actions.
 - Temperature and duration controls now use range sliders with live readouts and preset-driven defaults.
 - Static cache-bust bumped to `v=74`.
+
+### Session 28.18 safe restart helper
+- Added `scripts/safe-restart-flightdeck.sh` for restarts that hang on lingering Bambu RTSP `ffmpeg` or Flightdeck `uvicorn` processes.
+- Helper stops `flightdeck.service` with a timeout, terminates only Flightdeck-owned leftovers, starts the service, and prints a compact `/api/printers` health check.
+- README now documents `sudo ./scripts/safe-restart-flightdeck.sh`.
 
 ---
 
