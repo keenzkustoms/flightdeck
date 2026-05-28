@@ -5599,7 +5599,7 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
   async function searchCatalogue() {
     const q = catalogueSearch.value.trim();
     if (q.length < 2) { catalogueResults.classList.add('hidden'); return; }
-    const params = new URLSearchParams({ q, limit: '12' });
+    const params = new URLSearchParams({ q, limit: '30' });
     const r = await fetch(`/api/filament/catalog/search?${params.toString()}`);
     if (!r.ok) return;
     const rows = await r.json();

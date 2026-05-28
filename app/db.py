@@ -1141,7 +1141,17 @@ def search_filament_catalog(q: str = "", brand: str = "", material: str = "", li
                        filament_weight_g, empty_spool_weight_g, diameter, traits, source
                 FROM filament_catalog
                 WHERE {' AND '.join(clauses)}
-                ORDER BY brand, material, product, color_name
+                ORDER BY brand,
+                         CASE material
+                           WHEN 'PLA' THEN 0
+                           WHEN 'PLA+' THEN 1
+                           WHEN 'PETG' THEN 2
+                           WHEN 'ASA' THEN 3
+                           WHEN 'ABS' THEN 4
+                           WHEN 'TPU' THEN 5
+                           ELSE 9
+                         END,
+                         material, product, color_name
                 LIMIT ?""",
             params + [max(1, min(int(limit or 25), 100))],
         ).fetchall()
