@@ -1884,7 +1884,7 @@ function _spoolLocationText(s) {
 
 function _spoolStorageLocationName(id) {
   const loc = _spoolLocations.find(l => String(l.id) === String(id));
-  return loc?.name || 'Storage';
+  return loc?.name || 'Unassigned';
 }
 
 function _spoolTraceRow(row) {
@@ -3904,7 +3904,7 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
     }).join('') : '<div class="slot-empty-state">No stored spools available.</div>';
     const locationOptions = _spoolLocations.length
       ? _spoolLocations.map(loc => `<option value="${loc.id}">${esc(loc.name)}</option>`).join('')
-      : '<option value="">Storage</option>';
+      : '<option value="">Unassigned</option>';
     body.innerHTML = `
       <div class="slot-current">
         <div class="slot-current-label">Current assignment</div>
@@ -4317,7 +4317,7 @@ function _spoolsCategoryHtml(spools, summary, costs, intelligence = {}) {
       <div class="spool-chips">
         ${fc('status','active','Active')}${fc('status','archived','Archived')}
         <span class="spool-chip-sep"></span>
-        ${fc('slotFilter','all','All')}${fc('slotFilter','loaded','Loaded')}${fc('slotFilter','storage','Storage')}${fc('slotFilter','low','Low stock')}
+        ${fc('slotFilter','all','All')}${fc('slotFilter','loaded','Loaded')}${fc('slotFilter','storage','Shelved')}${fc('slotFilter','low','Low stock')}
       </div>
     </div>
     <div id="spool-list"></div>`;
@@ -4464,7 +4464,7 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
   const printerOpts = _latestPrinters.map(p =>
     `<option value="${p.id}" data-kind="${p.kind}"${p0.location_printer_id===p.id?' selected':''}>${p.custom_name}</option>`
   ).join('');
-  const storageOpts = (_spoolLocations.length ? _spoolLocations : [{ id: '', name: 'Storage' }]).map(loc =>
+  const storageOpts = (_spoolLocations.length ? _spoolLocations : [{ id: '', name: 'Unassigned' }]).map(loc =>
     `<option value="${loc.id}"${String(p0.storage_location_id ?? '')===String(loc.id)?' selected':''}>${esc(loc.name)}</option>`
   ).join('');
 
@@ -4549,7 +4549,7 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
           <label class="spool-form-label">Location</label>
           <div class="spool-location-block">
             <label class="spool-radio-label">
-              <input type="radio" name="sm-loc" value="storage"${!p0.location_printer_id?' checked':''}> Stored at:
+              <input type="radio" name="sm-loc" value="storage"${!p0.location_printer_id?' checked':''}> Shelved at:
             </label>
             <div id="sm-storage-selects" class="spool-location-selects${p0.location_printer_id?' hidden':''}">
               <select id="sm-storage-location" class="spool-form-input">${storageOpts}</select>
@@ -4927,7 +4927,7 @@ function _locationsCategoryHtml(locations) {
   const unassignedCard = unassigned.length ? `<section class="location-card location-card-unassigned">
     <div class="location-card-head">
       <div>
-        <div class="location-card-name">Unassigned Storage</div>
+        <div class="location-card-name">Unassigned</div>
         <div class="location-card-notes">Stored spools without a named location yet.</div>
       </div>
       <div class="location-card-stats">
@@ -4971,7 +4971,7 @@ function _locationsCategoryHtml(locations) {
       <div class="location-overview-grid">${locationCards}${unassignedCard}</div>
     </div>
     <div class="settings-section">
-      <div class="settings-section-title">Storage Locations</div>
+      <div class="settings-section-title">Shelf Locations</div>
       <div class="settings-subtitle">Create the shelves, dry boxes, tubs, or bays where spools live when they are not loaded in a printer.</div>
       <form id="spool-location-form" class="settings-form spool-location-form" novalidate>
         <input id="loc-id" type="hidden" value="">
@@ -5064,7 +5064,7 @@ function _attachLocationsEvents(el, locations) {
 async function _renderSettingsContent(category) {
   const el = document.getElementById('settings-content');
   if (!el) return;
-  el.classList.remove('settings-content-spools');
+  el.classList.remove('settings-content-spools', 'settings-content-locations');
 
   if (category === 'printers') {
     el.innerHTML = `<div class="detail-placeholder" style="min-height:10rem">Loading…</div>`;
@@ -5098,6 +5098,7 @@ async function _renderSettingsContent(category) {
     el.innerHTML = _filamentCategoryHtml(summary, costs);
     _attachFilamentEvents(el);
   } else if (category === 'locations') {
+    el.classList.add('settings-content-locations');
     el.innerHTML = `<div class="detail-placeholder" style="min-height:10rem">Loading…</div>`;
     const [locations, spools] = await Promise.all([
       fetch('/api/spool-locations').then(r => r.json()).catch(() => []),

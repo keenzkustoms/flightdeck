@@ -200,14 +200,44 @@ def init() -> None:
     UPLOADS_DIR.mkdir(exist_ok=True)
 
     with _conn() as conn:
-        exists = conn.execute(
-            "SELECT id FROM spool_locations WHERE name = ?",
+        shelf1 = conn.execute(
+            "SELECT id FROM spool_locations WHERE name = ? AND archived_at IS NULL",
+            ("Shelf #1",),
+        ).fetchone()
+        if not shelf1:
+            cursor = conn.execute(
+                "INSERT INTO spool_locations (name, notes, sort_order) VALUES (?, ?, ?)",
+                ("Shelf #1", "Inside main cupboard top shelf", 10),
+            )
+            shelf1 = {"id": cursor.lastrowid}
+
+        defaults = (
+            ("Shelf #2", "Inside main cupboard middle shelf", 20),
+            ("Shelf #3", "Inside main cupboard bottom shelf", 30),
+        )
+        for name, notes, order in defaults:
+            exists = conn.execute(
+                "SELECT id FROM spool_locations WHERE name = ? AND archived_at IS NULL",
+                (name,),
+            ).fetchone()
+            if not exists:
+                conn.execute(
+                    "INSERT INTO spool_locations (name, notes, sort_order) VALUES (?, ?, ?)",
+                    (name, notes, order),
+                )
+
+        storage = conn.execute(
+            "SELECT id FROM spool_locations WHERE name = ? AND archived_at IS NULL",
             ("Storage",),
         ).fetchone()
-        if not exists:
+        if storage:
             conn.execute(
-                "INSERT INTO spool_locations (name, notes, sort_order) VALUES (?, ?, ?)",
-                ("Storage", "Default storage location", 0),
+                "UPDATE spools SET storage_location_id = ? WHERE storage_location_id = ?",
+                (shelf1["id"], storage["id"]),
+            )
+            conn.execute(
+                "UPDATE spool_locations SET archived_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (storage["id"],),
             )
 
     # Clean up prints that started >24 h ago but never got a final_state

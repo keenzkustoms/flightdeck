@@ -2310,6 +2310,12 @@ header {
   padding-bottom: 0;
 }
 
+.settings-content.settings-content-locations {
+  min-height: 0;
+  overflow: auto;
+  padding: 0 0.15rem 2rem 0;
+}
+
 .settings-content-spools .spool-page-header,
 .settings-content-spools .spool-intel-panel,
 .settings-content-spools .spool-summary-strip,
@@ -3646,8 +3652,9 @@ select.settings-input { cursor: pointer; }
 
 .location-overview-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: 1rem;
+  align-items: start;
 }
 
 .location-card {
@@ -3655,6 +3662,9 @@ select.settings-input { cursor: pointer; }
   border-radius: 0.65rem;
   background: var(--surface);
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .location-card-head {
@@ -3707,6 +3717,8 @@ select.settings-input { cursor: pointer; }
 .location-spool-list {
   display: grid;
   gap: 0;
+  max-height: min(42vh, 30rem);
+  overflow: auto;
 }
 
 .location-spool-row {

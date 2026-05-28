@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 28 May 2026 (Session 28.12 H2D paired light control)_
+_Last updated 28 May 2026 (Session 28.13 shelf location cleanup)_
 
 ## Current state
 
@@ -703,6 +703,13 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Bambu light state now reads all reported light modes and treats the printer as lit if any known channel is on.
 - Removed the duplicate Bambu light click path on the printer detail view so one click sends one toggle command.
 - Static cache-bust bumped to `v=69`.
+
+### Session 28.13 shelf location cleanup
+- Removed the generic seeded `Storage` location and kept the default physical shelf locations (`Shelf #1`, `Shelf #2`, `Shelf #3`).
+- Startup migration moves any spools still assigned to `Storage` onto `Shelf #1` before archiving the generic location.
+- Location fallback labels now read `Unassigned` instead of `Storage`.
+- The Locations settings content and each shelf's spool list are scrollable so long shelf lists remain reachable.
+- Static cache-bust bumped to `v=70`.
 
 ---
 
