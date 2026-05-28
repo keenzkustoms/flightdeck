@@ -5,6 +5,7 @@ SERVICE="${SERVICE:-flightdeck.service}"
 APP_DIR="${APP_DIR:-/home/flightdeck/flightdeck}"
 STOP_TIMEOUT="${STOP_TIMEOUT:-20}"
 START_TIMEOUT="${START_TIMEOUT:-30}"
+HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-45}"
 
 if [[ "${EUID}" -ne 0 ]]; then
   echo "Run with sudo: sudo $0" >&2
@@ -74,8 +75,10 @@ systemctl status "${SERVICE}" --no-pager --lines=8
 
 echo
 echo "Local health check:"
-if curl -fsS --max-time 5 http://127.0.0.1:8000/api/printers >/tmp/flightdeck-printers.json; then
-  python3 - <<'PY'
+deadline=$((SECONDS + HEALTH_TIMEOUT))
+while true; do
+  if curl -fsS --max-time 5 http://127.0.0.1:8000/api/printers >/tmp/flightdeck-printers.json; then
+    python3 - <<'PY'
 import json
 from pathlib import Path
 
@@ -89,10 +92,17 @@ for p in data:
             bits.append(f"{unit.get('label', 'AMS')} {unit['humidity']}% RH")
     print(" | ".join(bits))
 PY
-else
-  echo "Flightdeck started, but /api/printers did not respond within 5s." >&2
-  exit 1
-fi
+    break
+  fi
+
+  if ((SECONDS >= deadline)); then
+    echo "Flightdeck started, but /api/printers did not respond within ${HEALTH_TIMEOUT}s." >&2
+    systemctl status "${SERVICE}" --no-pager --lines=20 || true
+    exit 1
+  fi
+
+  sleep 2
+done
 
 echo
 echo "Done."

@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 28 May 2026 (Session 28.42 Notification stale-error guard)_
+_Last updated 28 May 2026 (Session 28.43 Safe restart health wait)_
 
 ## Current state
 
@@ -47,6 +47,24 @@ Real ntfy testing showed a false pairing: H2D finished a print and X1C sent a `P
 ### Behaviour
 - A stale Bambu `FAILED` state no longer produces a fresh print-error notification when there was no current print.
 - Real print failures still notify when the printer transitions from `printing` to `error`.
+
+---
+
+## What was built — Session 28.43 (Safe restart health wait — 28 May)
+
+Real restart testing showed `scripts/safe-restart-flightdeck.sh` can correctly start `flightdeck.service`, but still fail its local health check because `/api/printers` may need more than the old 5s curl window while Bambu MQTT/camera startup settles.
+
+### Fix
+- Added `HEALTH_TIMEOUT`, defaulting to 45 seconds.
+- Health check now retries `/api/printers` every 2 seconds until it responds or the deadline expires.
+- On timeout, the script prints a fuller `systemctl status` block before exiting.
+
+### Behaviour
+- Safe restart no longer reports a false failure just because the app was active before the API had finished warming.
+- Existing overrides remain available:
+  - `STOP_TIMEOUT=...`
+  - `START_TIMEOUT=...`
+  - `HEALTH_TIMEOUT=...`
 
 ---
 
