@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 28 May 2026 (Session 28.41 AMS active-slot deduction hardening)_
+_Last updated 28 May 2026 (Session 28.42 Notification stale-error guard)_
 
 ## Current state
 
@@ -29,6 +29,24 @@ Real print testing on H2D exposed a restart-sensitive spool deduction bug: a sin
 
 ### Verification
 - Python compile: `python -m py_compile app/db.py app/printers/bambu.py`
+
+---
+
+## What was built — Session 28.42 (Notification stale-error guard — 28 May)
+
+Real ntfy testing showed a false pairing: H2D finished a print and X1C sent a `Print error` notification at nearly the same time, even though X1C had no active print row.
+
+### Fix
+- Backend ntfy now only sends `Print error` when:
+  - the printer was previously `printing`, or
+  - the error state has an attached `_error_print_id`.
+- Failure snapshots and queue failure cancellation use the same guard, avoiding `failure_snapshot_unavailable` rows for stale Bambu error states with no print row.
+- Browser notifications/toasts now use the same stale-error guard.
+- Static cache-bust bumped to `v=97`.
+
+### Behaviour
+- A stale Bambu `FAILED` state no longer produces a fresh print-error notification when there was no current print.
+- Real print failures still notify when the printer transitions from `printing` to `error`.
 
 ---
 

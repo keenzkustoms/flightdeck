@@ -3477,7 +3477,7 @@ function _detectTransitions(printers) {
     let title = null, toastMsg = null, toastType = 'info';
     if (p.state === 'finished' && prev === 'printing') {
       title = 'Print complete'; toastMsg = 'Print complete'; toastType = 'success';
-    } else if (p.state === 'error') {
+    } else if (p.state === 'error' && (prev === 'printing' || p._error_print_id)) {
       title = 'Print error'; toastMsg = 'Print error — check printer'; toastType = 'error';
     } else if (p.state === 'paused' && prev === 'printing') {
       title = 'Print paused'; toastMsg = 'Print paused'; toastType = 'info';

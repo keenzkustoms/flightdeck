@@ -195,6 +195,7 @@ def _check_transitions(data: list[dict]) -> None:
         fname = (job.get("filename") or "").rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
         sub = job.get("subtask_name", "").strip()
         label = sub if sub and sub != fname else fname
+        has_error_print = p.get("_error_print_id") is not None
 
         if prev == "printing" and curr == "finished":
             msg = f"{name}" + (f" · {label}" if label else "")
@@ -202,11 +203,13 @@ def _check_transitions(data: list[dict]) -> None:
             asyncio.create_task(_on_print_finished_queue(pid))
         elif curr in ("error", "estop"):
             error_pid = p.get("_error_print_id")
-            asyncio.create_task(_do_failure_snapshot(pid, error_pid))
-            if curr == "error":
+            is_print_failure = prev == "printing" or has_error_print
+            if is_print_failure:
+                asyncio.create_task(_do_failure_snapshot(pid, error_pid))
+            if curr == "error" and is_print_failure:
                 msg = f"{name}" + (f" · {label}" if label else "")
                 asyncio.create_task(_send_ntfy("Print error", msg, ["warning"], priority=4))
-            db.queue_cancel_active(pid, "failed")
+                db.queue_cancel_active(pid, "failed")
         elif prev == "printing" and curr == "paused":
             msg = f"{name}" + (f" · {label}" if label else "")
             asyncio.create_task(_send_ntfy("Print paused", msg, ["double_vertical_bar"]))
