@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 28 May 2026 (Session 28.44 Spool usage reconciliation)_
+_Last updated 29 May 2026 (Session 28.45 Smart weigh-in trial)_
 
 ## Current state
 
@@ -90,6 +90,24 @@ Real H2D testing showed the slicer filament estimate can be much lower than the 
 - If a print has multiple recorded usage rows, Reconcile asks whether the selected spool was the only actual spool used.
 - If actual usage exceeds slicer-recorded model grams, the row shows model grams plus purge/waste grams.
 - Static cache-bust bumped to `app.js?v=98` and `style.css?v=86`.
+
+---
+
+## What was built — Session 28.45 (Smart weigh-in trial — 29 May)
+
+First pass at making reconciliation useful without turning it into operator homework.
+
+### Behaviour
+- History print detail now marks spool usage rows with `Weigh-in suggested` only when the row looks worth checking:
+  - multiple spools were recorded for one print
+  - the spool is below the low-stock threshold, capped at 20%
+  - the spool is near empty
+  - the deduction is large relative to remaining stock
+- Suggested rows get a subtle amber treatment and the action reads `Weigh`.
+- Normal low-risk rows still show the quieter `Reconcile` action and do not nag.
+
+### Cache
+- Static cache-bust bumped to `app.js?v=99` and `style.css?v=87`.
 
 ---
 

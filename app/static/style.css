@@ -2609,6 +2609,14 @@ header {
   padding: 0.28rem 0;
 }
 
+.print-spool-row-suggested {
+  margin: 0.25rem 0;
+  padding: 0.45rem 0.5rem;
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  border-radius: 6px;
+  background: rgba(245, 158, 11, 0.08);
+}
+
 .print-spool-row a {
   color: var(--text);
   text-decoration: none;
@@ -2632,6 +2640,10 @@ header {
   font-style: normal;
 }
 
+.print-spool-grams .weigh-suggested {
+  color: var(--paused);
+}
+
 .print-spool-reconcile {
   border: 1px solid var(--border);
   background: var(--card-2);
@@ -2645,6 +2657,11 @@ header {
 .print-spool-reconcile:hover {
   border-color: var(--printing);
   color: var(--text);
+}
+
+.print-spool-reconcile.suggested {
+  border-color: var(--paused);
+  color: var(--paused);
 }
 
 .print-notes-view {

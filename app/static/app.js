@@ -1742,13 +1742,14 @@ function _showPrintDetail(printerId, dateStr, print) {
     ? `<div class="print-spool-usage">
         <div class="print-spool-title">Spool usage</div>
         ${print.spool_usage.map(u => `
-          <div class="print-spool-row">
+          <div class="print-spool-row${u.reconcile_suggested ? ' print-spool-row-suggested' : ''}">
             <a href="#/spool/${u.spool_id}">Spool #${u.spool_id}${u.slot != null ? ` · ${(_latestPrinters.find(x => x.id === printerId) ? _amsSlotLabel(_latestPrinters.find(x => x.id === printerId), u.slot) : `S${u.slot + 1}`)}` : ''}</a>
             <span class="print-spool-grams">
               <strong>${Number(u.actual_grams ?? u.grams ?? 0).toFixed(1)}g</strong>
               ${u.waste_grams ? `<em>${Number(u.grams || 0).toFixed(1)}g model · ${Number(u.waste_grams || 0).toFixed(1)}g purge</em>` : ''}
+              ${u.reconcile_suggested ? `<em class="weigh-suggested">Weigh-in suggested · ${(u.reconcile_reasons || []).join(', ')}</em>` : ''}
             </span>
-            <button class="print-spool-reconcile" data-print-id="${print.id}" data-spool-id="${u.spool_id}">Reconcile</button>
+            <button class="print-spool-reconcile${u.reconcile_suggested ? ' suggested' : ''}" data-print-id="${print.id}" data-spool-id="${u.spool_id}">${u.reconcile_suggested ? 'Weigh' : 'Reconcile'}</button>
           </div>`).join('')}
       </div>`
     : '';

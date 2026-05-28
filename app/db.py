@@ -519,6 +519,15 @@ def get_prints_for_day(printer_id: str, date_str: str) -> list[dict]:
                ORDER BY started_at""",
             (printer_id, date_str),
         ).fetchall()
+        threshold_row = conn.execute(
+            "SELECT value FROM settings WHERE key = 'spool_low_stock_pct'"
+        ).fetchone()
+        low_pct = float(threshold_row["value"]) if threshold_row else 20.0
+        spool_rows = conn.execute(
+            """SELECT id, label_weight_g, remaining_g
+               FROM spools"""
+        ).fetchall()
+    spools = {int(r["id"]): dict(r) for r in spool_rows}
     result = []
     import json
     for r in rows:
@@ -528,8 +537,49 @@ def get_prints_for_day(printer_id: str, date_str: str) -> list[dict]:
             item["spool_usage"] = json.loads(raw_usage) if raw_usage else []
         except Exception:
             item["spool_usage"] = []
+        _mark_reconcile_suggestions(item["spool_usage"], spools, low_pct)
         result.append(item)
     return result
+
+
+def _mark_reconcile_suggestions(usage: list[dict], spools: dict[int, dict], low_pct: float) -> None:
+    """Add light-touch weigh-in hints to risky usage rows.
+
+    These hints are deliberately conservative so normal prints do not turn into
+    an operator chore. Reconcile is suggested only when inventory accuracy is
+    likely to matter or the usage attribution looks suspicious.
+    """
+    if not usage:
+        return
+    multiple_rows = len(usage) > 1
+    for entry in usage:
+        if entry.get("actual_grams") is not None:
+            continue
+        reasons: list[str] = []
+        spool = spools.get(int(entry.get("spool_id") or 0), {})
+        remaining = entry.get("remaining_after_g")
+        if remaining is None:
+            remaining = spool.get("remaining_g")
+        label = spool.get("label_weight_g") or 0
+        pct = None
+        try:
+            pct = float(remaining) * 100.0 / float(label) if label else None
+        except (TypeError, ValueError, ZeroDivisionError):
+            pct = None
+
+        if multiple_rows:
+            reasons.append("multiple spools recorded")
+        if pct is not None and pct < min(float(low_pct), 20.0):
+            reasons.append(f"low spool ({pct:.0f}%)")
+        if pct is not None and pct < 8:
+            reasons.append("near empty")
+        grams = float(entry.get("grams") or 0)
+        if pct is not None and pct < 25 and grams >= max(10.0, float(remaining or 0) * 0.25):
+            reasons.append("deduction close to remaining stock")
+
+        if reasons:
+            entry["reconcile_suggested"] = True
+            entry["reconcile_reasons"] = reasons[:3]
 
 
 def get_failure_review(days: int = 90) -> dict:
