@@ -1,5 +1,6 @@
 from __future__ import annotations
 import asyncio
+import io
 import json
 import logging
 import re
@@ -1244,6 +1245,39 @@ def _spool_matches_material(spool: dict, material: str) -> bool:
     return bool(got) and (wanted in got or got in wanted)
 
 
+def _queue_filament_colors(job: dict) -> list[dict]:
+    raw = job.get("filament_colors")
+    if not raw:
+        return []
+    if isinstance(raw, list):
+        return raw
+    try:
+        parsed = json.loads(raw)
+        return parsed if isinstance(parsed, list) else []
+    except Exception:
+        return []
+
+
+def _norm_hex(value: Optional[str]) -> str:
+    h = str(value or "").strip().lstrip("#")[:6].upper()
+    return f"#{h}" if re.fullmatch(r"[0-9A-F]{6}", h) else ""
+
+
+def _hex_dist(a: Optional[str], b: Optional[str]) -> float:
+    ha, hb = _norm_hex(a), _norm_hex(b)
+    if not ha or not hb:
+        return 0.0
+    va = [int(ha[i:i + 2], 16) for i in (1, 3, 5)]
+    vb = [int(hb[i:i + 2], 16) for i in (1, 3, 5)]
+    return sum((x - y) ** 2 for x, y in zip(va, vb)) ** 0.5
+
+
+def _spool_matches_color(spool: dict, color: Optional[str]) -> bool:
+    if not color:
+        return True
+    return _hex_dist(spool.get("color_hex"), color) <= 95
+
+
 def _queue_preflight(job: dict, printer_status: Optional[dict]) -> dict:
     issues: list[dict] = []
     state = (printer_status or {}).get("state")
@@ -1263,20 +1297,25 @@ def _queue_preflight(job: dict, printer_status: Optional[dict]) -> dict:
 
     required_g = job.get("filament_weight_g")
     material = job.get("filament_type")
+    color_reqs = _queue_filament_colors(job)
     loaded = db.get_spools_by_printer(job["printer_id"])
     loaded_spools = list(loaded.values())
     material_matches = [s for s in loaded_spools if _spool_matches_material(s, material)]
+    color_matches = [s for s in material_matches if any(_spool_matches_color(s, c.get("color")) for c in color_reqs)] if color_reqs else material_matches
 
     if material:
         if not loaded_spools:
             issues.append({"level": "block", "message": f"No loaded spool recorded for {material}"})
         elif not material_matches:
             issues.append({"level": "block", "message": f"No loaded spool matches {material}"})
+        elif color_reqs and not color_matches:
+            wanted = ", ".join(_norm_hex(c.get("color")) for c in color_reqs if _norm_hex(c.get("color")))
+            issues.append({"level": "block", "message": f"No loaded spool matches required colour {wanted}"})
     else:
         issues.append({"level": "warn", "message": "No material metadata; material check skipped"})
 
     if required_g is not None:
-        candidates = material_matches if material and material_matches else loaded_spools
+        candidates = color_matches if color_reqs else material_matches if material and material_matches else loaded_spools
         if not candidates:
             issues.append({"level": "block", "message": f"No inventory spool available for {required_g:.0f}g check"})
         else:
@@ -1398,7 +1437,7 @@ async def queue_upload(printer_id: str = Form(...), file: UploadFile = File(...)
     with open(file_path, "wb") as f:
         f.write(data)
 
-    preview_png = estimated_seconds = filament_weight_g = filament_type = None
+    preview_png = estimated_seconds = filament_weight_g = filament_type = filament_colors = None
     if ext == ".3mf":
         try:
             from .printers.bambu_ftp import _parse_3mf
@@ -1408,6 +1447,7 @@ async def queue_upload(printer_id: str = Form(...), file: UploadFile = File(...)
             estimated_seconds = p.estimated_total_seconds
             filament_weight_g = p.filament_weight_g
             filament_type = p.filament_type
+            filament_colors = p.filament_colors
         except Exception:
             pass
 
@@ -1417,6 +1457,7 @@ async def queue_upload(printer_id: str = Form(...), file: UploadFile = File(...)
         estimated_seconds=estimated_seconds,
         filament_weight_g=filament_weight_g,
         filament_type=filament_type,
+        filament_colors=filament_colors,
     )
     return {"id": job_id}
 

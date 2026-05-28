@@ -2624,6 +2624,29 @@ function _missionSpoolEnough(job, spool) {
   return !required || Number(spool.remaining_g || 0) >= required;
 }
 
+function _missionJobColours(job) {
+  if (!job.filament_colors) return [];
+  if (Array.isArray(job.filament_colors)) return job.filament_colors;
+  try {
+    const parsed = JSON.parse(job.filament_colors);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function _missionSpoolMatchesColour(spool, colour) {
+  if (!colour) return true;
+  return _hexDistance(spool.color_hex, colour) <= 95;
+}
+
+function _missionColourSummary(job) {
+  const colours = _missionJobColours(job)
+    .map(c => _normHex(c.color))
+    .filter(Boolean);
+  return [...new Set(colours)];
+}
+
 function _missionSpoolLabel(spool, printer) {
   const grams = Math.round(Number(spool.remaining_g || 0));
   const colour = spool.color_name ? `${spool.color_name} ` : '';
@@ -2636,19 +2659,22 @@ function _missionSpoolLabel(spool, printer) {
 
 function _missionMaterialRescue(job, target, printers, spools) {
   if (!target || !_missionMaterial(job)) return null;
+  const colours = _missionColourSummary(job);
+  const matchesJob = s => _missionSpoolMatches(job, s) && (!colours.length || colours.some(c => _missionSpoolMatchesColour(s, c)));
   const loaded = _missionLoadedSpools(target.id, spools).filter(s => _missionSpoolMatches(job, s));
-  const ready = loaded.find(s => _missionSpoolEnough(job, s));
+  const colourLoaded = colours.length ? loaded.filter(s => colours.some(c => _missionSpoolMatchesColour(s, c))) : loaded;
+  const ready = colourLoaded.find(s => _missionSpoolEnough(job, s));
   if (job.preflight?.can_start !== false && ready) {
     return { kind: 'ready', text: `Ready now: ${_missionSpoolLabel(ready, target)}` };
   }
   const samePrinter = spools
-    .filter(s => s.location_printer_id === target.id && !s.archived_at && _missionSpoolMatches(job, s) && _missionSpoolEnough(job, s))
+    .filter(s => s.location_printer_id === target.id && !s.archived_at && matchesJob(s) && _missionSpoolEnough(job, s))
     .sort((a, b) => Number(b.remaining_g || 0) - Number(a.remaining_g || 0))[0];
   if (samePrinter) {
     return { kind: 'slot', text: `Select ${_missionSpoolLabel(samePrinter, target)}` };
   }
   const shelf = spools
-    .filter(s => !s.location_printer_id && !s.archived_at && _missionSpoolMatches(job, s) && _missionSpoolEnough(job, s))
+    .filter(s => !s.location_printer_id && !s.archived_at && matchesJob(s) && _missionSpoolEnough(job, s))
     .sort((a, b) => Number(b.remaining_g || 0) - Number(a.remaining_g || 0))[0];
   if (shelf) {
     return { kind: 'shelf', text: `Load ${_missionSpoolLabel(shelf, null)}` };
@@ -2656,7 +2682,8 @@ function _missionMaterialRescue(job, target, printers, spools) {
   const total = spools
     .filter(s => !s.archived_at && _missionSpoolMatches(job, s))
     .reduce((sum, s) => sum + Number(s.remaining_g || 0), 0);
-  return { kind: 'none', text: `No single ${_missionMaterial(job)} spool has enough. Total known stock ${Math.round(total)}g.` };
+  const colourText = colours.length ? ` matching ${colours.join(' / ')}` : '';
+  return { kind: 'none', text: `No single ${_missionMaterial(job)}${colourText} spool has enough. Total known stock ${Math.round(total)}g.` };
 }
 
 function _missionPrinterFit(job, p, spools, maint) {
@@ -2730,6 +2757,7 @@ function _missionDispatchIntel(jobs, printers, spools, maint) {
     const target = printers.find(p => p.id === j.printer_id);
     const name = j.filename.replace(/.*[\\/]/, '');
     const material = _missionMaterial(j) || 'Unknown material';
+    const colours = _missionColourSummary(j);
     const rescue = _missionMaterialRescue(j, target, printers, spools);
     const recommendation = best && best.score > -100
       ? `${_dashboardPrinterName(best.printer)} · ${best.reasons.slice(0, 3).join(' · ')}`
@@ -2737,7 +2765,7 @@ function _missionDispatchIntel(jobs, printers, spools, maint) {
     const changed = best?.printer && target && best.printer.id !== target.id;
     return `<a class="mission-intel-row mission-${ready.cls}" href="#/queue">
       <span>${esc(name)}</span>
-      <small>${esc(material)}${j.filament_weight_g ? ` · ${Math.round(j.filament_weight_g)}g` : ''}</small>
+      <small>${esc(material)}${j.filament_weight_g ? ` · ${Math.round(j.filament_weight_g)}g` : ''}${colours.length ? ` · ${colours.join(' / ')}` : ''}</small>
       <strong>${changed ? 'Recommend ' : ''}${esc(recommendation)}</strong>
       ${rescue ? `<em class="mission-rescue mission-rescue-${rescue.kind}">${esc(rescue.text)}</em>` : ''}
     </a>`;

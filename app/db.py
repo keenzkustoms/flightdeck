@@ -125,6 +125,7 @@ def init() -> None:
                 estimated_seconds   INTEGER,
                 filament_weight_g   REAL,
                 filament_type       TEXT,
+                filament_colors     TEXT,
                 created_at          TEXT DEFAULT (datetime('now')),
                 started_at          TEXT,
                 finished_at         TEXT,
@@ -169,6 +170,7 @@ def init() -> None:
             "ALTER TABLE prints ADD COLUMN ams_slot_snapshot TEXT",
             "ALTER TABLE spools ADD COLUMN empty_spool_weight_g REAL",
             "ALTER TABLE spools ADD COLUMN storage_location_id INTEGER",
+            "ALTER TABLE print_queue ADD COLUMN filament_colors TEXT",
         ):
             try:
                 conn.execute(stmt)
@@ -1726,6 +1728,7 @@ def queue_add(
     estimated_seconds: Optional[int] = None,
     filament_weight_g: Optional[float] = None,
     filament_type: Optional[str] = None,
+    filament_colors: Optional[str] = None,
 ) -> int:
     with _conn() as conn:
         row = conn.execute(
@@ -1736,10 +1739,10 @@ def queue_add(
         cursor = conn.execute(
             """INSERT INTO print_queue
                (printer_id, position, filename, file_path, file_size,
-                preview_png, estimated_seconds, filament_weight_g, filament_type)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                preview_png, estimated_seconds, filament_weight_g, filament_type, filament_colors)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (printer_id, position, filename, file_path, file_size,
-             preview_png, estimated_seconds, filament_weight_g, filament_type),
+             preview_png, estimated_seconds, filament_weight_g, filament_type, filament_colors),
         )
         return cursor.lastrowid
 
@@ -1750,7 +1753,7 @@ def queue_list(printer_id: Optional[str] = None) -> list[dict]:
         if printer_id:
             rows = conn.execute(
                 f"""SELECT id, printer_id, position, filename, file_size, status,
-                           estimated_seconds, filament_weight_g, filament_type,
+                           estimated_seconds, filament_weight_g, filament_type, filament_colors,
                            created_at, started_at, finished_at, error_msg,
                            (preview_png IS NOT NULL) AS has_preview
                     FROM print_queue WHERE printer_id = ?
@@ -1760,7 +1763,7 @@ def queue_list(printer_id: Optional[str] = None) -> list[dict]:
         else:
             rows = conn.execute(
                 f"""SELECT id, printer_id, position, filename, file_size, status,
-                           estimated_seconds, filament_weight_g, filament_type,
+                           estimated_seconds, filament_weight_g, filament_type, filament_colors,
                            created_at, started_at, finished_at, error_msg,
                            (preview_png IS NOT NULL) AS has_preview
                     FROM print_queue
@@ -1781,12 +1784,32 @@ def queue_get(job_id: int) -> Optional[dict]:
     with _conn() as conn:
         row = conn.execute(
             """SELECT id, printer_id, position, filename, file_path, file_size,
-                      status, estimated_seconds, filament_weight_g, filament_type,
+                      status, estimated_seconds, filament_weight_g, filament_type, filament_colors,
                       created_at, started_at, finished_at, error_msg
                FROM print_queue WHERE id = ?""",
             (job_id,),
         ).fetchone()
     return dict(row) if row else None
+
+
+def queue_update_metadata(
+    job_id: int,
+    *,
+    estimated_seconds: Optional[int] = None,
+    filament_weight_g: Optional[float] = None,
+    filament_type: Optional[str] = None,
+    filament_colors: Optional[str] = None,
+) -> None:
+    with _conn() as conn:
+        conn.execute(
+            """UPDATE print_queue
+               SET estimated_seconds = COALESCE(?, estimated_seconds),
+                   filament_weight_g = COALESCE(?, filament_weight_g),
+                   filament_type = COALESCE(?, filament_type),
+                   filament_colors = COALESCE(?, filament_colors)
+               WHERE id = ?""",
+            (estimated_seconds, filament_weight_g, filament_type, filament_colors, job_id),
+        )
 
 
 def queue_update_status(job_id: int, status: str, error_msg: Optional[str] = None) -> bool:
@@ -1848,7 +1871,7 @@ def queue_next_pending(printer_id: str) -> Optional[dict]:
     with _conn() as conn:
         row = conn.execute(
             """SELECT id, printer_id, filename, file_path,
-                      estimated_seconds, filament_weight_g, filament_type
+                      estimated_seconds, filament_weight_g, filament_type, filament_colors
                FROM print_queue
                WHERE printer_id = ? AND status = 'pending'
                ORDER BY position ASC, id ASC LIMIT 1""",

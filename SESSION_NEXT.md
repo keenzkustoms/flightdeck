@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 28 May 2026 (Session 28.28 Mission Control sidebar compacting)_
+_Last updated 28 May 2026 (Session 28.29 Queue colour-aware dispatch)_
 
 ## Current state
 
@@ -805,6 +805,13 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Added clamping/ellipsis for long Dispatch Intel filenames and recommendation text.
 - Gave the sidebar a responsive width clamp while keeping the main printer lanes flexible.
 - Static cache-bust bumped to `v=84`.
+
+### Session 28.29 Queue colour-aware dispatch
+- Added `filament_colors` metadata to queued jobs and 3MF parsing.
+- Queue preflight now treats slicer filament colours as a constraint when colour metadata is present.
+- Mission Control Dispatch Intel now displays required colours and only suggests loaded/shelf spools whose colours match within tolerance.
+- Existing queued 3MF files can be backfilled from their saved upload files.
+- Static cache-bust bumped to `v=85`.
 
 ---
 

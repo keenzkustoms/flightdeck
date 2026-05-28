@@ -8,6 +8,7 @@ import xml.etree.ElementTree as ET
 import logging
 from dataclasses import dataclass
 from typing import Optional
+import json
 
 log = logging.getLogger(__name__)
 
@@ -18,6 +19,7 @@ class BambuPreview:
     estimated_total_seconds: Optional[int]
     filament_weight_g: Optional[float]
     filament_type: Optional[str]
+    filament_colors: Optional[str] = None
 
 
 class _ImplicitFTP_TLS(ftplib.FTP_TLS):
@@ -56,7 +58,7 @@ def _parse_3mf(buf: io.BytesIO) -> BambuPreview:
             slice_xml = z.read("Metadata/slice_info.config").decode()
         except KeyError:
             return BambuPreview(image_png=image_png, estimated_total_seconds=None,
-                                filament_weight_g=None, filament_type=None)
+                                filament_weight_g=None, filament_type=None, filament_colors=None)
 
     root_el = ET.fromstring(slice_xml)
     plate = root_el.find("plate")
@@ -69,12 +71,25 @@ def _parse_3mf(buf: io.BytesIO) -> BambuPreview:
     weight = meta("weight")
     filament_el = plate.find("filament") if plate is not None else None
     filament_type = filament_el.get("type") if filament_el is not None else None
+    filaments = []
+    if plate is not None:
+        for el in plate.findall("filament"):
+            color = el.get("color")
+            used_g = el.get("used_g")
+            ftype = el.get("type")
+            if color:
+                try:
+                    grams = float(used_g) if used_g else None
+                except ValueError:
+                    grams = None
+                filaments.append({"type": ftype, "color": color.upper(), "used_g": grams})
 
     return BambuPreview(
         image_png=image_png,
         estimated_total_seconds=int(pred) if pred else None,
         filament_weight_g=float(weight) if weight else None,
         filament_type=filament_type,
+        filament_colors=json.dumps(filaments) if filaments else None,
     )
 
 
