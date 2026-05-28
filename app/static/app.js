@@ -508,7 +508,11 @@ function _dashboardStateRank(p) {
 }
 
 function _dashboardPrinterName(p) {
-  return p.custom_name || p.model_name || p.id;
+  return _printerNavLabel(p);
+}
+
+function _printerNavLabel(p) {
+  return p.model_name || p.custom_name || p.id;
 }
 
 function _dashboardIssueText(p) {
@@ -1049,7 +1053,7 @@ function buildTabs(printers) {
     `<div class="tab-section">Printers</div>`,
     ...printers.map((p, i) => {
       const color = _PRINTER_ACCENT_PALETTE[i % _PRINTER_ACCENT_PALETTE.length];
-      return `<a class="tab tab-printer" href="#/printer/${p.id}" style="--tab-accent:${color}">${p.custom_name || p.model_name}</a>`;
+      return `<a class="tab tab-printer" href="#/printer/${p.id}" style="--tab-accent:${color}">${_printerNavLabel(p)}</a>`;
     }),
     `<div class="tab-section">Operations</div>`,
     `<a class="tab" href="#/cameras">Cameras</a>`,
@@ -2371,7 +2375,7 @@ async function renderQueueView() {
     const printers = Array.isArray(printersRaw) ? printersRaw : [];
 
     const byPrinter = {};
-    for (const p of printers) byPrinter[p.id] = { label: p.custom_name || p.model_name, kind: p.kind, jobs: [] };
+    for (const p of printers) byPrinter[p.id] = { label: _printerNavLabel(p), kind: p.kind, jobs: [] };
     for (const j of jobs) {
       if (byPrinter[j.printer_id]) byPrinter[j.printer_id].jobs.push(j);
     }

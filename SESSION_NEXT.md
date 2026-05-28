@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 28 May 2026 (Session 28.10 Bambu camera/light recovery)_
+_Last updated 28 May 2026 (Session 28.11 printer label cleanup)_
 
 ## Current state
 
@@ -691,6 +691,12 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Bambu RTSP watchdog now detects byte-identical frozen frames, not just missing frames, and recycles ffmpeg after 8 seconds of frozen output.
 - Bambu light control now publishes `system.command=ledctrl` with `led_node=chamber_light` and timing fields, matching known Bambu MQTT light commands.
 - This fixes the case where Flightdeck returned `200 OK` but H2D/X1C ignored the previous `print.command=ledctrl` payload.
+
+### Session 28.11 printer label cleanup
+- Sidebar printer links now use machine model names (`Voron`, `X1C`, `H2D`) instead of shop/custom names.
+- Queue printer group labels now use the same machine names.
+- Shop/custom names remain unchanged as secondary labels on cards/detail/camera surfaces.
+- Static cache-bust bumped to `v=68`.
 
 ---
 
