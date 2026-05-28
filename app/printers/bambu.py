@@ -445,10 +445,14 @@ class BambuPrinter:
 
     def _set_light(self, mode: str) -> None:
         ok = self._printer.mqtt_client._PrinterMQTTClient__publish_command({
-            "print": {
+            "system": {
                 "command": "ledctrl",
                 "led_node": "chamber_light",
                 "led_mode": mode,
+                "led_on_time": 500,
+                "led_off_time": 500,
+                "loop_times": 1,
+                "interval_time": 1000,
             }
         })
         if not ok:

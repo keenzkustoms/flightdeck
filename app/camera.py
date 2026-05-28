@@ -8,6 +8,7 @@ log = logging.getLogger(__name__)
 
 _IDLE_TIMEOUT       = 60    # seconds before killing ffmpeg after last client leaves
 _STALE_TIMEOUT      = 8     # seconds without a new frame before declaring stream dead
+_FROZEN_TIMEOUT     = 8     # seconds of byte-identical frames before recycling
 _INITIAL_TIMEOUT    = 10    # max seconds to wait for the very first frame after (re)start
 _MAX_SESSION_LIFE   = 900   # 15 min — H2D firmware silently freezes long-lived RTSP sessions
 _FRAME_START = b"\xff\xd8"
@@ -31,6 +32,8 @@ class BambuCameraProxy:
         self._watchdog_task: Optional[asyncio.Task] = None
         self._latest: Optional[bytes] = None
         self._last_frame_at: float = 0.0
+        self._last_changed_at: float = 0.0
+        self._last_frame_sig: Optional[tuple[int, int, int]] = None
         self._started_at: float = 0.0
         self._clients: int = 0
         self._idle_task: Optional[asyncio.Task] = None
@@ -42,6 +45,8 @@ class BambuCameraProxy:
             return
         self._latest = None
         self._last_frame_at = 0.0
+        self._last_changed_at = 0.0
+        self._last_frame_sig = None
         self._started_at = time.monotonic()
         self._proc = await asyncio.create_subprocess_exec(
             "ffmpeg",
@@ -104,6 +109,11 @@ class BambuCameraProxy:
                 if self._proc:
                     try: self._proc.kill()
                     except Exception: pass
+            elif self._last_changed_at > 0 and (now - self._last_changed_at) > _FROZEN_TIMEOUT:
+                log.warning("camera frozen (%ds identical frames), restarting: %s", _FROZEN_TIMEOUT, self._id)
+                if self._proc:
+                    try: self._proc.kill()
+                    except Exception: pass
             elif (now - self._started_at) > _MAX_SESSION_LIFE:
                 log.info("camera session max lifetime reached, recycling RTSP connection: %s", self._id)
                 if self._proc:
@@ -130,8 +140,14 @@ class BambuCameraProxy:
                     if e < 0:
                         buf = buf[s:]
                         break
-                    self._latest = buf[s : e + 2]
-                    self._last_frame_at = time.monotonic()
+                    frame = buf[s : e + 2]
+                    self._latest = frame
+                    now = time.monotonic()
+                    self._last_frame_at = now
+                    sig = (len(frame), frame[32:64], frame[-64:])
+                    if sig != self._last_frame_sig:
+                        self._last_frame_sig = sig
+                        self._last_changed_at = now
                     buf = buf[e + 2 :]
             except Exception:
                 break

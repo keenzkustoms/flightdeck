@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 28 May 2026 (Session 28.9 Bambu word toggle)_
+_Last updated 28 May 2026 (Session 28.10 Bambu camera/light recovery)_
 
 ## Current state
 
@@ -686,6 +686,11 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Added a single glowing `Bambu` word control; clicking it toggles the chamber light on/off.
 - Bambu model labels remain clickable light toggles and stop dashboard/camera tile navigation when clicked directly.
 - Static cache-bust bumped to `v=67`.
+
+### Session 28.10 Bambu camera/light recovery
+- Bambu RTSP watchdog now detects byte-identical frozen frames, not just missing frames, and recycles ffmpeg after 8 seconds of frozen output.
+- Bambu light control now publishes `system.command=ledctrl` with `led_node=chamber_light` and timing fields, matching known Bambu MQTT light commands.
+- This fixes the case where Flightdeck returned `200 OK` but H2D/X1C ignored the previous `print.command=ledctrl` payload.
 
 ---
 
