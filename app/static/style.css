@@ -532,10 +532,11 @@ body {
   display: grid;
   gap: 0.4rem;
   min-width: 0;
+  width: 100%;
 }
 
 .spool-catalogue-results {
-  max-height: 12rem;
+  max-height: 22rem;
   overflow-y: auto;
   border: 1px solid var(--border);
   border-radius: 0.45rem;
@@ -575,13 +576,20 @@ body {
 }
 
 .spool-catalogue-result small,
-.spool-catalogue-empty {
+.spool-catalogue-empty,
+.spool-catalogue-hint {
   color: var(--muted);
   font-size: 0.68rem;
 }
 
-.spool-catalogue-empty {
+.spool-catalogue-empty,
+.spool-catalogue-hint {
   padding: 0.45rem;
+}
+
+.spool-catalogue-hint {
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 0.2rem;
 }
 
 @media (max-width: 1100px) {

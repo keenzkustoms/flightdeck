@@ -864,7 +864,8 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Sync verified on the Pi: imported 18k+ usable 1.75mm catalogue rows; `bambu white pla` returns Bambu Lab results.
 - Catalogue search ordering now prioritises everyday materials for broad brand searches, so `bambu` shows PLA before ABS.
 - Add Spool catalogue search now asks for 30 results instead of 12.
-- Static cache-bust bumped to `v=92`.
+- Add Spool catalogue results panel is taller and includes a hint when broad searches return many matches.
+- Static cache-bust bumped to `v=93`.
 
 ---
 

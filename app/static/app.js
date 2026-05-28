@@ -5608,7 +5608,7 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
       catalogueResults.classList.remove('hidden');
       return;
     }
-    catalogueResults.innerHTML = rows.map((item, idx) => `
+    catalogueResults.innerHTML = `<div class="spool-catalogue-hint">Showing ${rows.length} matches. Add material or colour to narrow.</div>` + rows.map((item, idx) => `
       <button type="button" class="spool-catalogue-result" data-idx="${idx}">
         <span class="spool-catalogue-swatch" style="background:${item.color_hex || '#808080'}"></span>
         <span><b>${esc(item.color_name || 'Colour')}</b><small>${esc(item.brand || '')} · ${esc(item.material || '')}${item.subtype ? ` · ${esc(item.subtype)}` : ''}${item.filament_weight_g ? ` · ${Math.round(item.filament_weight_g)}g` : ''}</small></span>
