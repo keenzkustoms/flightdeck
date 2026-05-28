@@ -5372,6 +5372,9 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
               <span>Filament catalogue</span>
               <button type="button" class="spool-inline-btn" id="sm-catalogue-sync">Sync</button>
             </div>
+            <div id="sm-catalogue-chips" class="spool-catalogue-chips">
+              ${['PLA','PLA+','PETG','ASA','ABS','TPU','Bambu','3DFillies','Polymaker'].map(v => `<button type="button" data-chip="${v}">${v}</button>`).join('')}
+            </div>
             <input id="sm-catalogue-search" class="spool-form-input" type="search" placeholder="Search brand, material, colour...">
             <div id="sm-catalogue-picked" class="spool-catalogue-picked hidden"></div>
             <div id="sm-catalogue-results" class="spool-catalogue-results hidden"></div>
@@ -5491,6 +5494,7 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
   const catalogueResults = overlay.querySelector('#sm-catalogue-results');
   const cataloguePicked = overlay.querySelector('#sm-catalogue-picked');
   const catalogueSync = overlay.querySelector('#sm-catalogue-sync');
+  const catalogueChips = overlay.querySelector('#sm-catalogue-chips');
 
   let matNewMode = false;
   let brandNewMode = false;
@@ -5583,6 +5587,7 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
     const material = String(item.material || '').toUpperCase();
     const brand = item.brand || '';
     ensureMaterialBrand(material, brand);
+    const tareFallback = costLookup[`${material}|||${brand || ''}`]?.empty_spool_weight_g;
     overlay.querySelector('#sm-subtype').value = item.subtype || item.product || '';
     syncColor(item.color_hex || '#808080');
     overlay.querySelector('#sm-color-name').value = item.color_name || '';
@@ -5592,11 +5597,13 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
     }
     if (item.empty_spool_weight_g != null && !emptyG.dataset.touched) {
       emptyG.value = Math.round(Number(item.empty_spool_weight_g));
+    } else if (tareFallback != null && !emptyG.dataset.touched) {
+      emptyG.value = Math.round(Number(tareFallback));
     }
     catalogueResults.classList.add('hidden');
     cataloguePicked.innerHTML = `
       <span class="spool-catalogue-swatch" style="background:${item.color_hex || '#808080'}"></span>
-      <span><b>${esc(item.color_name || 'Colour')}</b><small>${esc(brand)} · ${esc(material)}${item.subtype ? ` · ${esc(item.subtype)}` : ''}${item.filament_weight_g ? ` · ${Math.round(item.filament_weight_g)}g` : ''}</small></span>
+      <span><b>${esc(item.color_name || 'Colour')}</b><small>${esc(brand)} · ${esc(material)}${item.subtype ? ` · ${esc(item.subtype)}` : ''}${item.filament_weight_g ? ` · ${Math.round(item.filament_weight_g)}g` : ''}</small><em>Open Filament Database · editable defaults</em></span>
     `;
     cataloguePicked.classList.remove('hidden');
     catalogueSearch.value = `${brand} ${material} ${item.color_name || ''}`.trim();
@@ -5630,6 +5637,20 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
   catalogueSearch.addEventListener('input', () => {
     clearTimeout(catalogueTimer);
     catalogueTimer = setTimeout(searchCatalogue, 180);
+  });
+  catalogueChips.querySelectorAll('button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const chip = btn.dataset.chip || '';
+      const parts = catalogueSearch.value.trim().split(/\s+/).filter(Boolean);
+      if (!parts.map(p => p.toLowerCase()).includes(chip.toLowerCase())) {
+        catalogueSearch.value = [...parts, chip].join(' ').trim();
+      }
+      catalogueChips.querySelectorAll('button').forEach(b => b.classList.toggle(
+        'active',
+        catalogueSearch.value.toLowerCase().split(/\s+/).includes((b.dataset.chip || '').toLowerCase())
+      ));
+      searchCatalogue();
+    });
   });
   catalogueSync.addEventListener('click', async () => {
     const old = catalogueSync.textContent;

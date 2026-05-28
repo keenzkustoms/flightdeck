@@ -547,6 +547,30 @@ body {
   text-transform: uppercase;
 }
 
+.spool-catalogue-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.spool-catalogue-chips button {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(255,255,255,0.04);
+  color: #8aa9d6;
+  cursor: pointer;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 0.22rem 0.5rem;
+}
+
+.spool-catalogue-chips button:hover,
+.spool-catalogue-chips button.active {
+  border-color: rgba(59,130,246,0.75);
+  background: rgba(59,130,246,0.16);
+  color: #dbeafe;
+}
+
 .spool-catalogue-results {
   max-height: 56vh;
   overflow-y: auto;
@@ -593,7 +617,8 @@ body {
 .spool-catalogue-result b,
 .spool-catalogue-result small,
 .spool-catalogue-picked b,
-.spool-catalogue-picked small {
+.spool-catalogue-picked small,
+.spool-catalogue-picked em {
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -602,10 +627,17 @@ body {
 
 .spool-catalogue-result small,
 .spool-catalogue-picked small,
+.spool-catalogue-picked em,
 .spool-catalogue-empty,
 .spool-catalogue-hint {
   color: var(--muted);
   font-size: 0.68rem;
+}
+
+.spool-catalogue-picked em {
+  color: #86efac;
+  font-style: normal;
+  margin-top: 0.18rem;
 }
 
 .spool-catalogue-empty,

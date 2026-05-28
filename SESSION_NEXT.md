@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 28 May 2026 (Session 28.37 Catalogue-first spool modal)_
+_Last updated 28 May 2026 (Session 28.38 Catalogue picker polish)_
 
 ## Current state
 
@@ -874,6 +874,12 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Selecting a catalogue entry now shows a selected-source card while filling the spool fields.
 - Mobile/narrow screens fall back to the stacked single-column flow.
 - Static cache-bust bumped to `v=94`.
+
+### Session 28.38 Catalogue picker polish
+- Added quick catalogue chips for common materials and brands: PLA, PLA+, PETG, ASA, ABS, TPU, Bambu, 3DFillies, Polymaker.
+- Catalogue selected-source card now shows `Open Filament Database · editable defaults` so imported values are clearly defaults.
+- If the catalogue entry has no tare, Add Spool now falls back to the saved brand/material tare from Filament settings when available.
+- Static cache-bust bumped to `v=95`.
 
 ---
 
