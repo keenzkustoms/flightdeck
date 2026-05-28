@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 28 May 2026 (Session 28.6 live light controls)_
+_Last updated 28 May 2026 (Session 28.7 Bambu light command fix)_
 
 ## Current state
 
@@ -669,6 +669,11 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Greyhound Voron exposes `Bars On` / `Bars Off` through Moonraker gcode macros (`STATUS_IDLE` / `STATUS_SLEEP`).
 - Light commands are allowed whenever the printer is not offline and clear their pending UI state quickly after the request succeeds.
 - Static cache-bust bumped to `v=64`.
+
+### Session 28.7 Bambu light command fix
+- Bambu light control no longer uses the library's generic `system.led_mode` command.
+- X1C/H2D light buttons now publish Bambu `print.command=ledctrl` with `led_node=chamber_light` and `led_mode=on/off`.
+- Static cache-bust bumped to `v=65`.
 
 ---
 

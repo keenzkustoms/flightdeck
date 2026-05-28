@@ -436,10 +436,21 @@ class BambuPrinter:
         self._printer.stop_print()  # Bambu MQTT has no dedicated e-stop
 
     def light_on(self) -> None:
-        self._printer.turn_light_on()
+        self._set_light("on")
 
     def light_off(self) -> None:
-        self._printer.turn_light_off()
+        self._set_light("off")
+
+    def _set_light(self, mode: str) -> None:
+        ok = self._printer.mqtt_client._PrinterMQTTClient__publish_command({
+            "print": {
+                "command": "ledctrl",
+                "led_node": "chamber_light",
+                "led_mode": mode,
+            }
+        })
+        if not ok:
+            raise RuntimeError(f"Bambu light command failed: {mode}")
 
     def set_temp(self, heater: str, target: int) -> None:
         if heater == "hotend":
