@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 28 May 2026 (Session 28.35 Queue Fix It panel)_
+_Last updated 28 May 2026 (Session 28.36 Filament catalogue import)_
 
 ## Current state
 
@@ -850,6 +850,17 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Colour-aware steps can suggest loading a specific shelf spool, adding/loading a missing colour, or checking a short loaded colour/brand.
 - Duplicate queue copies use the best matching target printer for advice, so H2D-targetable copies get H2D-focused steps.
 - Static cache-bust bumped to `v=90`.
+
+### Session 28.36 Filament catalogue import
+- Added local SQLite `filament_catalog` cache for brand/material/product/colour/hex/weight/tare data.
+- Added Open Filament Database sync/search endpoints:
+  - `POST /api/filament/catalog/sync`
+  - `GET /api/filament/catalog/search`
+  - `GET /api/filament/catalog/status`
+- Add Spool modal now has a Catalogue search field and Sync button.
+- Selecting a catalogue result fills material, brand, subtype/product, colour name, hex, label weight, and tare if known.
+- Static cache-bust bumped to `v=91`.
+- Restart still pending because sudo requested a password during deploy; run `sudo systemctl restart flightdeck.service` or `sudo ./scripts/safe-restart-flightdeck.sh`, then press Sync in Add Spool.
 
 ---
 

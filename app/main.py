@@ -1,9 +1,11 @@
 from __future__ import annotations
 import asyncio
+import csv
 import io
 import json
 import logging
 import re
+import urllib.request
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from datetime import datetime
@@ -937,9 +939,94 @@ class CostUpdate(BaseModel):
     comment: Optional[str] = None
     empty_spool_weight_g: Optional[float] = None
 
+
+OPEN_FILAMENT_BASE = "https://api.openfilamentdatabase.org/csv"
+
+
+def _catalog_float(value: object) -> Optional[float]:
+    try:
+        text = str(value or "").strip()
+        return float(text) if text else None
+    except Exception:
+        return None
+
+
+def _catalog_rows(name: str) -> list[dict]:
+    url = f"{OPEN_FILAMENT_BASE}/{name}.csv"
+    with urllib.request.urlopen(url, timeout=30) as resp:
+        text = resp.read().decode("utf-8-sig")
+    return list(csv.DictReader(io.StringIO(text)))
+
+
+def _sync_open_filament_catalog() -> dict:
+    brands = {r["id"]: r for r in _catalog_rows("brands")}
+    filaments = {r["id"]: r for r in _catalog_rows("filaments")}
+    variants = _catalog_rows("variants")
+    sizes_by_variant: dict[str, list[dict]] = {}
+    for row in _catalog_rows("sizes"):
+        sizes_by_variant.setdefault(row.get("variant_id") or "", []).append(row)
+
+    rows: list[dict] = []
+    for variant in variants:
+        color_hex = (variant.get("color_hex") or "").strip().upper()
+        if not re.fullmatch(r"#[0-9A-F]{6}", color_hex):
+            continue
+        filament = filaments.get(variant.get("filament_id") or "")
+        if not filament:
+            continue
+        brand = brands.get(filament.get("brand_id") or "", {})
+        product = filament.get("name") or ""
+        product_bits = product.replace("-", " ").split()
+        material = (filament.get("material") or "").upper()
+        subtype = " ".join(bit for bit in product_bits if bit.upper() != material) or product or None
+        sizes = sizes_by_variant.get(variant.get("id") or "") or [{}]
+        for size in sizes:
+            diameter = _catalog_float(size.get("diameter"))
+            if diameter and abs(diameter - 1.75) > 0.01:
+                continue
+            rows.append({
+                "source_variant_id": variant.get("id"),
+                "source_filament_id": filament.get("id"),
+                "brand": brand.get("name") or "",
+                "material": material,
+                "product": product,
+                "subtype": subtype,
+                "color_name": variant.get("name") or "",
+                "color_hex": color_hex,
+                "filament_weight_g": _catalog_float(size.get("filament_weight")),
+                "empty_spool_weight_g": _catalog_float(size.get("empty_spool_weight")),
+                "diameter": diameter,
+                "traits": variant.get("traits"),
+                "discontinued": (variant.get("discontinued") == "1" or filament.get("discontinued") == "1" or size.get("discontinued") == "1"),
+            })
+    count = db.replace_filament_catalog(rows)
+    db.log_decision("system", "filament_catalog_synced", f"Open Filament Database rows imported: {count}")
+    return {"ok": True, "imported": count, **db.get_filament_catalog_status()}
+
+
 @app.get("/api/filament/costs")
 async def get_filament_costs():
     return db.get_material_costs()
+
+
+@app.get("/api/filament/catalog/status")
+async def get_filament_catalog_status():
+    return db.get_filament_catalog_status()
+
+
+@app.post("/api/filament/catalog/sync")
+async def sync_filament_catalog():
+    try:
+        return await asyncio.to_thread(_sync_open_filament_catalog)
+    except Exception as exc:
+        _app_log.exception("filament catalog sync failed")
+        raise HTTPException(status_code=502, detail=f"Filament catalogue sync failed: {exc}")
+
+
+@app.get("/api/filament/catalog/search")
+async def search_filament_catalog(q: str = "", brand: str = "", material: str = "", limit: int = 25):
+    return db.search_filament_catalog(q=q, brand=brand, material=material, limit=limit)
+
 
 @app.put("/api/filament/costs/{material}/{brand}")
 async def put_filament_cost(material: str, brand: str, body: CostUpdate):

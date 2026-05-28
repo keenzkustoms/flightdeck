@@ -5387,6 +5387,16 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
           <div id="sm-prev-picks" class="spool-prev-picks hidden"></div>
         </div>
         <div class="spool-form-row">
+          <label class="spool-form-label">Catalogue</label>
+          <div class="spool-catalogue-block">
+            <div class="spool-inline-row">
+              <input id="sm-catalogue-search" class="spool-form-input" type="search" placeholder="Search brand, material, colour...">
+              <button type="button" class="spool-inline-btn" id="sm-catalogue-sync">Sync</button>
+            </div>
+            <div id="sm-catalogue-results" class="spool-catalogue-results hidden"></div>
+          </div>
+        </div>
+        <div class="spool-form-row">
           <label class="spool-form-label">Subtype</label>
           <input id="sm-subtype" class="spool-form-input" type="text" placeholder="Basic, Matte, Silk…" value="${p0.subtype||''}">
         </div>
@@ -5476,6 +5486,9 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
   const printerSel= overlay.querySelector('#sm-printer');
   const slotSel   = overlay.querySelector('#sm-slot');
   const prevPicks = overlay.querySelector('#sm-prev-picks');
+  const catalogueSearch = overlay.querySelector('#sm-catalogue-search');
+  const catalogueResults = overlay.querySelector('#sm-catalogue-results');
+  const catalogueSync = overlay.querySelector('#sm-catalogue-sync');
 
   let matNewMode = false;
   let brandNewMode = false;
@@ -5544,6 +5557,89 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
     updatePrevPicks();
   }
   if (p0.material) populateBrands(p0.material);
+
+  function ensureMaterialBrand(material, brand) {
+    if (material && !matBrands[material]) {
+      matBrands[material] = [];
+      const opt = document.createElement('option');
+      opt.value = material;
+      opt.textContent = material;
+      matSel.appendChild(opt);
+    }
+    if (material && brand && !matBrands[material].includes(brand)) {
+      matBrands[material].push(brand);
+      matBrands[material].sort();
+    }
+    if (matNewMode) matToggle.click();
+    if (brandNewMode) brandToggle.click();
+    matSel.value = material;
+    populateBrands(material);
+    brandSel.value = brand;
+  }
+
+  function applyCatalogueEntry(item) {
+    const material = String(item.material || '').toUpperCase();
+    const brand = item.brand || '';
+    ensureMaterialBrand(material, brand);
+    overlay.querySelector('#sm-subtype').value = item.subtype || item.product || '';
+    syncColor(item.color_hex || '#808080');
+    overlay.querySelector('#sm-color-name').value = item.color_name || '';
+    if (item.filament_weight_g) {
+      labelG.value = Math.round(Number(item.filament_weight_g));
+      if (!remainG.dataset.touched) remainG.value = labelG.value;
+    }
+    if (item.empty_spool_weight_g != null && !emptyG.dataset.touched) {
+      emptyG.value = Math.round(Number(item.empty_spool_weight_g));
+    }
+    catalogueResults.classList.add('hidden');
+    catalogueSearch.value = `${brand} ${material} ${item.color_name || ''}`.trim();
+  }
+
+  let catalogueTimer = null;
+  async function searchCatalogue() {
+    const q = catalogueSearch.value.trim();
+    if (q.length < 2) { catalogueResults.classList.add('hidden'); return; }
+    const params = new URLSearchParams({ q, limit: '12' });
+    const r = await fetch(`/api/filament/catalog/search?${params.toString()}`);
+    if (!r.ok) return;
+    const rows = await r.json();
+    if (!rows.length) {
+      catalogueResults.innerHTML = '<div class="spool-catalogue-empty">No catalogue matches. Press Sync if the catalogue is empty.</div>';
+      catalogueResults.classList.remove('hidden');
+      return;
+    }
+    catalogueResults.innerHTML = rows.map((item, idx) => `
+      <button type="button" class="spool-catalogue-result" data-idx="${idx}">
+        <span class="spool-catalogue-swatch" style="background:${item.color_hex || '#808080'}"></span>
+        <span><b>${esc(item.color_name || 'Colour')}</b><small>${esc(item.brand || '')} · ${esc(item.material || '')}${item.subtype ? ` · ${esc(item.subtype)}` : ''}${item.filament_weight_g ? ` · ${Math.round(item.filament_weight_g)}g` : ''}</small></span>
+      </button>
+    `).join('');
+    catalogueResults.classList.remove('hidden');
+    catalogueResults.querySelectorAll('.spool-catalogue-result').forEach(btn => {
+      btn.addEventListener('click', () => applyCatalogueEntry(rows[Number(btn.dataset.idx)]));
+    });
+  }
+
+  catalogueSearch.addEventListener('input', () => {
+    clearTimeout(catalogueTimer);
+    catalogueTimer = setTimeout(searchCatalogue, 180);
+  });
+  catalogueSync.addEventListener('click', async () => {
+    const old = catalogueSync.textContent;
+    catalogueSync.disabled = true;
+    catalogueSync.textContent = 'Syncing';
+    try {
+      const r = await fetch('/api/filament/catalog/sync', { method: 'POST' });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.detail || 'Catalogue sync failed');
+      catalogueSync.textContent = `${data.imported || 0}`;
+      await searchCatalogue();
+    } catch (err) {
+      alert(err.message || 'Catalogue sync failed');
+    } finally {
+      setTimeout(() => { catalogueSync.disabled = false; catalogueSync.textContent = old; }, 1300);
+    }
+  });
 
   function selectedMaterialBrand() {
     const mat = matNewMode ? matNewIn.value.trim().toUpperCase() : matSel.value;

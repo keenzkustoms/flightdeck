@@ -104,6 +104,29 @@ def init() -> None:
             CREATE INDEX IF NOT EXISTS idx_spools_location
                 ON spools(location_printer_id, location_slot) WHERE archived_at IS NULL;
 
+            CREATE TABLE IF NOT EXISTS filament_catalog (
+                id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+                source               TEXT NOT NULL DEFAULT 'open_filament_database',
+                source_variant_id    TEXT,
+                source_filament_id   TEXT,
+                brand                TEXT NOT NULL,
+                material             TEXT NOT NULL,
+                product              TEXT,
+                subtype              TEXT,
+                color_name           TEXT NOT NULL,
+                color_hex            TEXT NOT NULL,
+                filament_weight_g    REAL,
+                empty_spool_weight_g REAL,
+                diameter             REAL,
+                traits               TEXT,
+                discontinued         INTEGER NOT NULL DEFAULT 0,
+                updated_at           TEXT NOT NULL,
+                UNIQUE(source, source_variant_id, filament_weight_g, diameter)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_filament_catalog_lookup
+                ON filament_catalog(brand, material, color_name);
+
             CREATE TABLE IF NOT EXISTS spool_locations (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
                 name        TEXT NOT NULL UNIQUE,
@@ -1051,6 +1074,78 @@ def get_material_costs() -> list:
          "empty_spool_weight_g": r["empty_spool_weight_g"]}
         for r in rows
     ]
+
+
+def replace_filament_catalog(rows: list[dict], source: str = "open_filament_database") -> int:
+    now = _now()
+    with _conn() as conn:
+        conn.execute("DELETE FROM filament_catalog WHERE source = ?", (source,))
+        conn.executemany(
+            """INSERT OR REPLACE INTO filament_catalog
+               (source, source_variant_id, source_filament_id, brand, material, product,
+                subtype, color_name, color_hex, filament_weight_g, empty_spool_weight_g,
+                diameter, traits, discontinued, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            [
+                (
+                    source,
+                    r.get("source_variant_id"),
+                    r.get("source_filament_id"),
+                    r.get("brand") or "",
+                    r.get("material") or "",
+                    r.get("product"),
+                    r.get("subtype"),
+                    r.get("color_name") or "",
+                    r.get("color_hex") or "",
+                    r.get("filament_weight_g"),
+                    r.get("empty_spool_weight_g"),
+                    r.get("diameter"),
+                    r.get("traits"),
+                    1 if r.get("discontinued") else 0,
+                    now,
+                )
+                for r in rows
+            ],
+        )
+    return len(rows)
+
+
+def get_filament_catalog_status(source: str = "open_filament_database") -> dict:
+    with _conn() as conn:
+        row = conn.execute(
+            """SELECT COUNT(*) AS count, MAX(updated_at) AS updated_at
+               FROM filament_catalog WHERE source = ?""",
+            (source,),
+        ).fetchone()
+    return {"source": source, "count": int(row["count"] or 0), "updated_at": row["updated_at"]}
+
+
+def search_filament_catalog(q: str = "", brand: str = "", material: str = "", limit: int = 25) -> list:
+    clauses = ["discontinued = 0"]
+    params: list = []
+    if brand:
+        clauses.append("brand LIKE ?")
+        params.append(f"%{brand}%")
+    if material:
+        clauses.append("material = ?")
+        params.append(material)
+    if q:
+        for term in [t for t in q.lower().split() if t][:5]:
+            clauses.append(
+                "(LOWER(brand || ' ' || material || ' ' || COALESCE(product,'') || ' ' || COALESCE(subtype,'') || ' ' || color_name || ' ' || color_hex) LIKE ?)"
+            )
+            params.append(f"%{term}%")
+    with _conn() as conn:
+        rows = conn.execute(
+            f"""SELECT brand, material, product, subtype, color_name, color_hex,
+                       filament_weight_g, empty_spool_weight_g, diameter, traits, source
+                FROM filament_catalog
+                WHERE {' AND '.join(clauses)}
+                ORDER BY brand, material, product, color_name
+                LIMIT ?""",
+            params + [max(1, min(int(limit or 25), 100))],
+        ).fetchall()
+    return [dict(r) for r in rows]
 
 
 def set_material_cost(
