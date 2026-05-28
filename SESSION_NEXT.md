@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 28 May 2026 (Session 28.34 Dispatch Intel duplicate grouping)_
+_Last updated 28 May 2026 (Session 28.35 Queue Fix It panel)_
 
 ## Current state
 
@@ -843,6 +843,13 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Duplicate queue copies are shown as one advisory row with a `N queue copies` note instead of repeated recommendations.
 - Recommendation change detection now treats any duplicate target as already represented, avoiding noisy `Recommend H2D` wording for a copy already queued to H2D.
 - Static cache-bust bumped to `v=89`.
+
+### Session 28.35 Queue Fix It panel
+- Added a Mission Control `Fix It` panel between `Blocked` and `Dispatch Intel`.
+- Fix It groups duplicate blocked queue jobs and translates preflight failures into physical next actions.
+- Colour-aware steps can suggest loading a specific shelf spool, adding/loading a missing colour, or checking a short loaded colour/brand.
+- Duplicate queue copies use the best matching target printer for advice, so H2D-targetable copies get H2D-focused steps.
+- Static cache-bust bumped to `v=90`.
 
 ---
 

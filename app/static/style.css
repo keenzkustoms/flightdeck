@@ -483,6 +483,45 @@ body {
 .mission-rescue-shelf { color: #bfdbfe; }
 .mission-rescue-none { color: #fca5a5; }
 
+.mission-fix-list {
+  display: grid;
+  gap: 0.42rem;
+}
+
+.mission-fix-card {
+  display: block;
+  border: 1px solid rgba(59,130,246,0.45);
+  border-radius: 0.45rem;
+  background: rgba(59,130,246,0.06);
+  color: var(--text);
+  padding: 0.6rem 0.7rem;
+  text-decoration: none;
+}
+
+.mission-fix-card span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.74rem;
+  font-weight: 900;
+  margin-bottom: 0.38rem;
+}
+
+.mission-fix-card ol {
+  margin: 0;
+  padding-left: 1rem;
+  display: grid;
+  gap: 0.25rem;
+}
+
+.mission-fix-card li {
+  color: #bfdbfe;
+  font-size: 0.68rem;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
 .mission-note {
   color: var(--muted);
   font-size: 0.78rem;

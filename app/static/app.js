@@ -2737,6 +2737,10 @@ function _missionRequirementLabel(req) {
   return `${_missionColourLabel(req.colour)} (${brandText})${grams}`;
 }
 
+function _missionRequirementName(req) {
+  return `${_missionColourLabel(req.colour)} ${req.type || ''}`.trim();
+}
+
 function _missionMaterialRescue(job, target, printers, spools) {
   if (!target || !_missionMaterial(job)) return null;
   const requirements = _missionColourRequirements(job);
@@ -2889,13 +2893,73 @@ function _missionDedupPendingJobs(jobs) {
   return [...grouped.values()];
 }
 
+function _missionBestShelfSpool(req, spools) {
+  return spools
+    .filter(s => !s.archived_at && !s.location_printer_id)
+    .filter(s => String(s.material || '').toUpperCase() === req.type)
+    .filter(s => _missionSpoolMatchesColour(s, req.colour))
+    .filter(s => !req.used_g || Number(s.remaining_g || 0) >= req.used_g)
+    .sort((a, b) => Number(a.remaining_g || 0) - Number(b.remaining_g || 0))[0];
+}
+
+function _missionFixSteps(job, printers, spools) {
+  const best = _missionBestPrinter(job, printers, spools, {});
+  const copies = job._missionCopies || [job];
+  const targetJob = best?.printer ? (copies.find(copy => copy.printer_id === best.printer.id) || job) : job;
+  const target = best?.printer || printers.find(p => p.id === targetJob.printer_id);
+  const targetName = target ? _dashboardPrinterName(target) : 'target printer';
+  const steps = [];
+  const requirements = _missionColourRequirements(job);
+  const loaded = target ? _missionLoadedSpools(target.id, spools) : [];
+  if (requirements.length) {
+    const coverage = _missionCoverageForRequirements(requirements, loaded, target);
+    coverage.missing.forEach(req => {
+      const shelf = _missionBestShelfSpool(req, spools);
+      if (shelf) {
+        steps.push(`Load ${_missionSpoolLabel(shelf, null)} into ${targetName} for ${_missionRequirementName(req)}`);
+      } else if ((req.candidates || []).length) {
+        steps.push(`${_missionRequirementName(req)} loaded on ${targetName} is short: ${_missionRequirementLabel(req)}`);
+      } else {
+        steps.push(`Add or load ${_missionRequirementName(req)} with ${Math.round(req.used_g || 0)}g+ remaining`);
+      }
+    });
+  }
+  (job.preflight?.issues || []).forEach(issue => {
+    const msg = String(issue.message || '');
+    if (/colour coverage|loaded filament short|No loaded spool matches required colour/i.test(msg)) return;
+    if (/Printer is offline/i.test(msg)) steps.push(`Wake or reconnect ${targetName}`);
+    else if (/Printer is (printing|paused|idle|finished|error|estop)/i.test(msg)) steps.push(msg);
+    else if (/Maintenance due/i.test(msg)) steps.push(msg);
+  });
+  if (!steps.length) steps.push('Refresh queue preflight after loading filament');
+  return steps.slice(0, 4);
+}
+
+function _missionFixItPanel(jobs, printers, spools) {
+  const blocked = _missionDedupPendingJobs(jobs)
+    .filter(j => _missionJobReadiness(j).cls === 'blocked')
+    .slice(0, 3);
+  if (!blocked.length) return '<div class="mission-empty-list">No queue fixes needed.</div>';
+  return blocked.map(job => {
+    const name = String(job.filename || '').replace(/.*[\\/]/, '');
+    const steps = _missionFixSteps(job, printers, spools);
+    return `<a class="mission-fix-card" href="#/queue">
+      <span>${esc(name)}</span>
+      <ol>${steps.map(step => `<li>${esc(step)}</li>`).join('')}</ol>
+    </a>`;
+  }).join('');
+}
+
 function _missionDispatchIntel(jobs, printers, spools, maint) {
   const pending = _missionDedupPendingJobs(jobs).slice(0, 8);
   if (!pending.length) return '<div class="mission-empty-list">No queued work to advise on.</div>';
   return pending.map(j => {
     const ready = _missionJobReadiness(j);
     const best = _missionBestPrinter(j, printers, spools, maint);
-    const target = printers.find(p => p.id === j.printer_id);
+    const targetIds = new Set((j._missionCopies || [j]).map(copy => copy.printer_id));
+    const target = best?.printer && targetIds.has(best.printer.id)
+      ? best.printer
+      : printers.find(p => p.id === j.printer_id);
     const name = j.filename.replace(/.*[\\/]/, '');
     const material = _missionMaterial(j) || 'Unknown material';
     const colours = _missionColourSummary(j);
@@ -2903,7 +2967,6 @@ function _missionDispatchIntel(jobs, printers, spools, maint) {
     const recommendation = best && best.score > -100
       ? `${_dashboardPrinterName(best.printer)} · ${best.reasons.slice(0, 3).join(' · ')}`
       : 'No suitable printer right now';
-    const targetIds = new Set((j._missionCopies || [j]).map(copy => copy.printer_id));
     const changed = best?.printer && target && !targetIds.has(best.printer.id);
     const copies = (j._missionCopies?.length || 1) > 1 ? ` · ${j._missionCopies.length} queue copies` : '';
     const colourText = colours.map(c => _missionColourLabel(c)).join(' / ');
@@ -3064,6 +3127,8 @@ async function renderMissionControl() {
           <div class="mission-job-list">${dispatchReady}</div>
           <div class="mission-panel-title">Blocked</div>
           <div class="mission-job-list">${blockedJobs}</div>
+          <div class="mission-panel-title">Fix It</div>
+          <div class="mission-fix-list">${_missionFixItPanel(jobs, printers, spools)}</div>
           <div class="mission-panel-title">Dispatch Intel</div>
           <div class="mission-intel-list">${_missionDispatchIntel(jobs, printers, spools, maint)}</div>
           <div class="mission-panel-title">Operator Notes</div>
