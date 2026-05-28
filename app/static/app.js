@@ -124,6 +124,8 @@ function getIcon(key) {
 
 let _latestPrinters = [];
 let _tabsBuilt = false;
+let _missionRenderInFlight = false;
+let _missionLastHtml = '';
 const _cameraUrlCache = {};     // printer_id → url string or null
 let _renderedDetailId = null;
 let _renderedDetailSubtab = null;
@@ -2541,7 +2543,11 @@ function _missionRecommendation(p, laneJobs, signals) {
 async function renderMissionControl() {
   const el = document.getElementById('mission-page');
   if (!el) return;
-  el.innerHTML = `<div class="detail-placeholder">Loading Mission Control…</div>`;
+  if (_missionRenderInFlight) return;
+  _missionRenderInFlight = true;
+  if (!_missionLastHtml) {
+    el.innerHTML = `<div class="detail-placeholder">Loading Mission Control...</div>`;
+  }
   try {
     const [printers, jobs, spools] = await Promise.all([
       fetch('/api/printers').then(r => { if (!r.ok) throw new Error('printers'); return r.json(); }),
@@ -2611,7 +2617,7 @@ async function renderMissionControl() {
         </a>`;
       }).join('') || '<div class="mission-empty-list">Queue is clear.</div>';
 
-    el.innerHTML = `
+    const html = `
       <section class="mission-hero">
         <div>
           <div class="mission-eyebrow">Mission Control</div>
@@ -2634,8 +2640,16 @@ async function renderMissionControl() {
           <div class="mission-note">Readiness is calculated from queue preflight, printer state, loaded spool stock, health warnings, and maintenance due flags.</div>
         </aside>
       </section>`;
+    if (html !== _missionLastHtml) {
+      _missionLastHtml = html;
+      el.innerHTML = html;
+    }
   } catch (err) {
-    el.innerHTML = `<div class="detail-placeholder">Mission Control unavailable.</div>`;
+    if (!_missionLastHtml) {
+      el.innerHTML = `<div class="detail-placeholder">Mission Control unavailable.</div>`;
+    }
+  } finally {
+    _missionRenderInFlight = false;
   }
 }
 

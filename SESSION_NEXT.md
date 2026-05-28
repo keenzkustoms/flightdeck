@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 28 May 2026 (Session 28.19 Mission Control v1)_
+_Last updated 28 May 2026 (Session 28.20 Mission Control anti-flicker)_
 
 ## Current state
 
@@ -748,6 +748,12 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Added per-printer mission lanes with current action, queue timeline blocks, loaded spool pills, and operator signals.
 - Added a right-side Next Dispatch panel that ranks upcoming queued/blocked work.
 - Static cache-bust bumped to `v=75`.
+
+### Session 28.20 Mission Control anti-flicker
+- Fixed Mission Control flashing by keeping the rendered screen visible while refresh data loads.
+- Added an in-flight render guard so websocket ticks cannot stack overlapping Mission Control refreshes.
+- Mission Control now only swaps DOM markup when the generated view actually changes.
+- Static cache-bust bumped to `v=76`.
 
 ---
 
