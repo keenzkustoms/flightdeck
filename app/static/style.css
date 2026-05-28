@@ -183,7 +183,7 @@ body {
 
 .mission-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 320px;
+  grid-template-columns: minmax(0, 1fr) clamp(20rem, 28vw, 24rem);
   gap: 1rem;
   align-items: start;
 }
@@ -400,7 +400,8 @@ body {
 .mission-sidebar-panel {
   position: sticky;
   top: 1rem;
-  padding: 1rem;
+  padding: 0.85rem;
+  min-width: 0;
 }
 
 .mission-panel-title {
@@ -413,12 +414,12 @@ body {
 }
 
 .mission-panel-title:not(:first-child) {
-  margin-top: 1.2rem;
+  margin-top: 1rem;
 }
 
 .mission-job-list {
   display: grid;
-  gap: 0.5rem;
+  gap: 0.42rem;
 }
 
 .mission-job-row,
@@ -428,29 +429,53 @@ body {
   border-radius: 0.45rem;
   background: rgba(255,255,255,0.025);
   color: var(--text);
-  padding: 0.65rem;
+  padding: 0.55rem 0.6rem;
   text-decoration: none;
 }
 
 .mission-intel-list {
   display: grid;
-  gap: 0.5rem;
+  gap: 0.42rem;
+}
+
+.mission-intel-row span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
+.mission-intel-row small {
+  display: block;
+  margin-top: 0.22rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 0.66rem;
 }
 
 .mission-intel-row strong {
   display: block;
-  margin-top: 0.4rem;
+  margin-top: 0.32rem;
   color: #bfdbfe;
-  font-size: 0.72rem;
-  line-height: 1.3;
+  font-size: 0.68rem;
+  line-height: 1.25;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
 }
 
 .mission-rescue {
   display: block;
-  margin-top: 0.35rem;
-  font-size: 0.7rem;
+  margin-top: 0.3rem;
+  font-size: 0.66rem;
   font-style: normal;
-  line-height: 1.3;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
 }
 
 .mission-rescue-ready,

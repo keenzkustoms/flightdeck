@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 28 May 2026 (Session 28.27 Dispatch material rescue)_
+_Last updated 28 May 2026 (Session 28.28 Mission Control sidebar compacting)_
 
 ## Current state
 
@@ -799,6 +799,12 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - It distinguishes ready-now loaded filament, same-printer slot selection, shelf/storage spool loading, and no-single-spool-enough cases.
 - Rescue hints include spool number, material/brand, remaining grams, and storage/slot location.
 - Static cache-bust bumped to `v=83`.
+
+### Session 28.28 Mission Control sidebar compacting
+- Tightened Mission Control right-panel job cards to reduce overflow.
+- Added clamping/ellipsis for long Dispatch Intel filenames and recommendation text.
+- Gave the sidebar a responsive width clamp while keeping the main printer lanes flexible.
+- Static cache-bust bumped to `v=84`.
 
 ---
 
