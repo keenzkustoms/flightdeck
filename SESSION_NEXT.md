@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 28 May 2026 (Session 28.8 Bambu light badge)_
+_Last updated 28 May 2026 (Session 28.9 Bambu word toggle)_
 
 ## Current state
 
@@ -680,6 +680,12 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Bambu model text glows when `light_state` is `on` and dims when `off`/`unknown`.
 - Light button clicks apply an optimistic glow/dim immediately, then settle to the reported MQTT state.
 - Static cache-bust bumped to `v=66`.
+
+### Session 28.9 Bambu word toggle
+- Removed separate `Light On` / `Light Off` buttons from Bambu live controls.
+- Added a single glowing `Bambu` word control; clicking it toggles the chamber light on/off.
+- Bambu model labels remain clickable light toggles and stop dashboard/camera tile navigation when clicked directly.
+- Static cache-bust bumped to `v=67`.
 
 ---
 

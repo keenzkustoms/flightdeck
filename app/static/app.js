@@ -33,9 +33,22 @@ function _printerModelHtml(p) {
   const kind = p.kind || p.connection?.type;
   const lightState = _effectiveLightState(p);
   const lit = kind === 'bambu' && lightState === 'on';
-  const cls = `printer-model${kind === 'bambu' ? ' printer-model-bambu' : ''}${lit ? ' printer-model-lit' : ''}`;
+  const clickable = kind === 'bambu';
+  const cls = `printer-model${kind === 'bambu' ? ' printer-model-bambu' : ''}${lit ? ' printer-model-lit' : ''}${clickable ? ' printer-model-light-toggle' : ''}`;
   const title = kind === 'bambu' ? `Bambu chamber light: ${lightState}` : '';
-  return `<span class="${cls}" data-light-printer="${p.id}" title="${esc(title)}">${esc(p.model_name)}</span>`;
+  const attrs = clickable
+    ? `data-light-printer="${p.id}" data-light-toggle="${p.id}" role="button" tabindex="0"`
+    : `data-light-printer="${p.id}"`;
+  return `<span class="${cls}" ${attrs} title="${esc(title)}">${esc(p.model_name)}</span>`;
+}
+
+function _bambuLightWordHtml(p) {
+  const lightState = _effectiveLightState(p);
+  const lit = lightState === 'on';
+  return `<button class="bambu-light-word printer-model-bambu${lit ? ' printer-model-lit' : ''}"
+    type="button"
+    data-light-toggle="${p.id}"
+    title="Bambu chamber light: ${esc(lightState)}">Bambu</button>`;
 }
 
 function _refreshLightBadges(id) {
@@ -776,14 +789,15 @@ function _detailControls(id, p) {
   const firmwareRestartBtn = p.kind === 'moonraker'
     ? btn('firmware_restart', 'Firmware Restart', 'ctrl-btn-firmware-restart')
     : '';
-  const lightOnLabel = p.kind === 'moonraker' ? 'Bars On' : 'Light On';
-  const lightOffLabel = p.kind === 'moonraker' ? 'Bars Off' : 'Light Off';
+  const lightControls = p.kind === 'moonraker'
+    ? `${btn('light_on', 'Bars On', 'ctrl-btn-light')}
+       ${btn('light_off', 'Bars Off', 'ctrl-btn-light')}`
+    : p.kind === 'bambu'
+      ? _bambuLightWordHtml(p)
+      : '';
 
   return `
-    <div class="controls-lights">
-      ${btn('light_on', lightOnLabel, 'ctrl-btn-light')}
-      ${btn('light_off', lightOffLabel, 'ctrl-btn-light')}
-    </div>
+    ${lightControls ? `<div class="controls-lights">${lightControls}</div>` : ''}
     <div class="controls-primary">
       ${btn('pause', 'Pause')}
       ${btn('resume', 'Resume')}
@@ -847,8 +861,23 @@ async function sendControl(id, action) {
   }
 }
 
+function toggleBambuLight(id) {
+  const p = _latestPrinters.find(x => x.id === id);
+  if (!p || p.kind !== 'bambu' || p.state === 'offline') return;
+  const action = _effectiveLightState(p) === 'on' ? 'light_off' : 'light_on';
+  sendControl(id, action);
+}
+
 // Delegated handler — wired once at startup
 document.getElementById('view-printer').addEventListener('click', e => {
+  const lightToggle = e.target.closest('[data-light-toggle]');
+  if (lightToggle) {
+    e.preventDefault();
+    e.stopPropagation();
+    toggleBambuLight(lightToggle.dataset.lightToggle);
+    return;
+  }
+
   const btn = e.target.closest('[data-action]');
   if (!btn || btn.disabled) return;
   const { action, printerId: id } = btn.dataset;
@@ -866,6 +895,23 @@ document.getElementById('view-printer').addEventListener('click', e => {
     sendControl(id, action);
   }
 });
+
+document.addEventListener('click', e => {
+  const lightToggle = e.target.closest('[data-light-toggle]');
+  if (!lightToggle) return;
+  e.preventDefault();
+  e.stopPropagation();
+  toggleBambuLight(lightToggle.dataset.lightToggle);
+}, true);
+
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  const lightToggle = e.target.closest?.('[data-light-toggle]');
+  if (!lightToggle) return;
+  e.preventDefault();
+  e.stopPropagation();
+  toggleBambuLight(lightToggle.dataset.lightToggle);
+}, true);
 
 // Delegated handler for temp nudge + inline edit
 document.getElementById('view-printer').addEventListener('click', e => {
