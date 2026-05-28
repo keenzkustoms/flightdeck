@@ -2601,16 +2601,51 @@ header {
 
 .print-spool-row {
   display: flex;
+  align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
   color: var(--text);
-  text-decoration: none;
   font-size: 0.82rem;
   padding: 0.28rem 0;
 }
 
-.print-spool-row:hover { color: var(--printing); }
+.print-spool-row a {
+  color: var(--text);
+  text-decoration: none;
+  min-width: 0;
+}
+
+.print-spool-row a:hover { color: var(--printing); }
 .print-spool-row strong { font-variant-numeric: tabular-nums; }
+
+.print-spool-grams {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.1rem;
+  margin-left: auto;
+}
+
+.print-spool-grams em {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-style: normal;
+}
+
+.print-spool-reconcile {
+  border: 1px solid var(--border);
+  background: var(--card-2);
+  color: var(--muted);
+  border-radius: 4px;
+  padding: 0.18rem 0.45rem;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+
+.print-spool-reconcile:hover {
+  border-color: var(--printing);
+  color: var(--text);
+}
 
 .print-notes-view {
   display: flex;

@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 28 May 2026 (Session 28.43 Safe restart health wait)_
+_Last updated 28 May 2026 (Session 28.44 Spool usage reconciliation)_
 
 ## Current state
 
@@ -65,6 +65,29 @@ Real restart testing showed `scripts/safe-restart-flightdeck.sh` can correctly s
   - `STOP_TIMEOUT=...`
   - `START_TIMEOUT=...`
   - `HEALTH_TIMEOUT=...`
+
+---
+
+## What was built — Session 28.44 (Spool usage reconciliation — 28 May)
+
+Real H2D testing showed the slicer filament estimate can be much lower than the actual physical spool loss because purge/prime/waste comes off the same spool.
+
+### Backend
+- Bambu AMS print-start snapshots now store `remaining_g_at_start` for each assigned Flightdeck spool.
+- Finished-print spool usage entries now include:
+  - `remaining_before_g`
+  - `remaining_after_g`
+  - `remaining_start_g` when captured
+- Added `POST /api/prints/{print_id}/spool_usage/{spool_id}/reconcile`.
+- Reconcile updates the spool's actual remaining grams, annotates the print usage with `actual_grams` and `waste_grams`, and logs `spool_reconciled` to the decision trail.
+- Moved spool deduction decision logging outside the write transaction to stop the non-fatal SQLite lock warning during `spool_deducted` logging.
+
+### UI
+- History print detail spool usage rows now show a `Reconcile` action.
+- Reconcile prompts for the actual remaining grams after a re-weigh.
+- If a print predates start-weight capture, Reconcile can also accept a one-off starting gram value.
+- If actual usage exceeds slicer-recorded model grams, the row shows model grams plus purge/waste grams.
+- Static cache-bust bumped to `app.js?v=98` and `style.css?v=86`.
 
 ---
 
@@ -956,7 +979,6 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Hardware setup still needs real-device confirmation after deploy:
   - Brother QL-700 must be switched out of Editor Lite mass-storage mode before printing (`lsusb` should show `04f9:2042`, not `04f9:2049`).
   - Dymo M10 scale was not detected in the last preflight; plug/wake it and apply udev rules if `/dev/hidraw*` or `/dev/usb/hiddev*` is inaccessible.
-- Non-fatal `spool_deducted` decision-log SQLite lock can occur during spool deduction; trace data still writes.
 
 ---
 

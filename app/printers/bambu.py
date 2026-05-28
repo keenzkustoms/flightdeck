@@ -152,7 +152,11 @@ class BambuPrinter:
                 enriched: dict[str, dict] = {}
                 for slot_idx, slot_data in raw_snap.items():
                     spool = db.get_spool_at_slot(self.id, slot_idx)
-                    enriched[str(slot_idx)] = {**slot_data, "spool_id": spool["id"] if spool else None}
+                    enriched[str(slot_idx)] = {
+                        **slot_data,
+                        "spool_id": spool["id"] if spool else None,
+                        "remaining_g_at_start": spool["remaining_g"] if spool else None,
+                    }
                     if spool is None:
                         db.log_decision(self.id, "spool_missing",
                                        f"No spool assigned to AMS slot {slot_idx}",

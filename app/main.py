@@ -1106,6 +1106,12 @@ class SpoolWeightCorrection(BaseModel):
     reading_g: Optional[float] = None
     empty_spool_weight_g: Optional[float] = None
 
+class SpoolUsageReconcile(BaseModel):
+    remaining_g: Optional[float] = None
+    start_remaining_g: Optional[float] = None
+    reading_g: Optional[float] = None
+    empty_spool_weight_g: Optional[float] = None
+
 @app.get("/api/spools/summary")
 async def get_spools_summary():
     return db.get_spools_summary()
@@ -1263,6 +1269,46 @@ async def correct_spool_weight(spool_id: int, body: SpoolWeightCorrection):
     ):
         raise HTTPException(status_code=404, detail="Spool not found")
     return {"ok": True, "remaining_g": max(0.0, round(float(remaining), 1)), "empty_spool_weight_g": empty_g}
+
+@app.post("/api/prints/{print_id}/spool_usage/{spool_id}/reconcile")
+async def reconcile_print_spool_usage(print_id: int, spool_id: int, body: SpoolUsageReconcile):
+    spool = db.get_spool(spool_id)
+    if not spool:
+        raise HTTPException(status_code=404, detail="Spool not found")
+
+    empty_g = body.empty_spool_weight_g
+    if empty_g is None:
+        empty_g = spool.get("empty_spool_weight_g")
+    if empty_g is None:
+        costs = db.get_material_costs()
+        for cost in costs:
+            if cost.get("material") == spool.get("material") and cost.get("brand") == spool.get("brand"):
+                empty_g = cost.get("empty_spool_weight_g")
+                break
+
+    if body.remaining_g is not None:
+        remaining = body.remaining_g
+    elif body.reading_g is not None:
+        remaining = float(body.reading_g) - float(empty_g or 0)
+    else:
+        reading = _scale.read_stable()
+        if not reading:
+            db.log_decision("system", "scale_unavailable", _scale.last_error or "Scale read failed")
+            raise HTTPException(status_code=503, detail=_scale.last_error or "Scale unavailable")
+        body.reading_g = reading.grams
+        remaining = float(reading.grams or 0) - float(empty_g or 0)
+
+    result = db.reconcile_spool_usage(
+        print_id,
+        spool_id,
+        remaining,
+        start_remaining_g=body.start_remaining_g,
+        reading_g=body.reading_g,
+        empty_spool_weight_g=body.empty_spool_weight_g,
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail="Print usage not found")
+    return {"ok": True, **result}
 
 @app.post("/api/spools/{spool_id}/move")
 async def move_spool(spool_id: int, body: SpoolMove):

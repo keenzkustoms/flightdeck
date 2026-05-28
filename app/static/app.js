@@ -1742,10 +1742,14 @@ function _showPrintDetail(printerId, dateStr, print) {
     ? `<div class="print-spool-usage">
         <div class="print-spool-title">Spool usage</div>
         ${print.spool_usage.map(u => `
-          <a class="print-spool-row" href="#/spool/${u.spool_id}">
-            <span>Spool #${u.spool_id}${u.slot != null ? ` · ${(_latestPrinters.find(x => x.id === printerId) ? _amsSlotLabel(_latestPrinters.find(x => x.id === printerId), u.slot) : `S${u.slot + 1}`)}` : ''}</span>
-            <strong>${Number(u.grams || 0).toFixed(1)}g</strong>
-          </a>`).join('')}
+          <div class="print-spool-row">
+            <a href="#/spool/${u.spool_id}">Spool #${u.spool_id}${u.slot != null ? ` · ${(_latestPrinters.find(x => x.id === printerId) ? _amsSlotLabel(_latestPrinters.find(x => x.id === printerId), u.slot) : `S${u.slot + 1}`)}` : ''}</a>
+            <span class="print-spool-grams">
+              <strong>${Number(u.actual_grams ?? u.grams ?? 0).toFixed(1)}g</strong>
+              ${u.waste_grams ? `<em>${Number(u.grams || 0).toFixed(1)}g model · ${Number(u.waste_grams || 0).toFixed(1)}g purge</em>` : ''}
+            </span>
+            <button class="print-spool-reconcile" data-print-id="${print.id}" data-spool-id="${u.spool_id}">Reconcile</button>
+          </div>`).join('')}
       </div>`
     : '';
 
@@ -1780,6 +1784,60 @@ function _showPrintDetail(printerId, dateStr, print) {
       _showNoteEditor(prid, pid, existing, saved => _refreshNotesView(saved));
     });
   }
+
+  el.querySelectorAll('.print-spool-reconcile').forEach(btn => {
+    btn.addEventListener('click', async e => {
+      e.preventDefault();
+      const printId = btn.dataset.printId;
+      const spoolId = btn.dataset.spoolId;
+      const value = prompt(`Actual remaining grams for spool #${spoolId}`);
+      if (value === null) return;
+      const remaining = parseFloat(value);
+      if (isNaN(remaining) || remaining < 0) {
+        alert('Enter a valid remaining gram value.');
+        return;
+      }
+      const usage = print.spool_usage.find(u => String(u.spool_id) === String(spoolId));
+      let startRemaining = null;
+      if (usage && usage.remaining_start_g == null) {
+        const startValue = prompt(`Starting grams for spool #${spoolId} before this print (optional)`, usage.remaining_before_g ?? '');
+        if (startValue === null) return;
+        if (startValue.trim() !== '') {
+          startRemaining = parseFloat(startValue);
+          if (isNaN(startRemaining) || startRemaining < 0) {
+            alert('Enter a valid starting gram value.');
+            return;
+          }
+        }
+      }
+      const old = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = '...';
+      try {
+        const payload = { remaining_g: remaining };
+        if (startRemaining !== null) payload.start_remaining_g = startRemaining;
+        const r = await fetch(`/api/prints/${printId}/spool_usage/${spoolId}/reconcile`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.detail || 'Reconcile failed');
+        if (usage) {
+          usage.actual_grams = data.actual_grams;
+          usage.waste_grams = data.waste_grams;
+          usage.remaining_after_g = data.remaining_g;
+          if (startRemaining !== null) usage.remaining_start_g = startRemaining;
+        }
+        await _refreshSpoolsByPrinter();
+        _showPrintDetail(printerId, dateStr, print);
+      } catch (err) {
+        alert(err.message || 'Reconcile failed');
+        btn.disabled = false;
+        btn.textContent = old;
+      }
+    });
+  });
 
   const trail = el.querySelector('.decision-trail');
   if (trail) {

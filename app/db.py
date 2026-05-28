@@ -1353,11 +1353,13 @@ def get_spool_trace(spool_id: int) -> Optional[dict]:
         for entry in entries:
             if int(entry.get("spool_id") or 0) != int(spool_id):
                 continue
-            grams = float(entry.get("grams") or 0)
+            grams = float(entry.get("actual_grams") or entry.get("grams") or 0)
             total_used += grams
             item = dict(row)
             item.pop("spool_usage", None)
             item["usage_grams"] = round(grams, 2)
+            item["model_grams"] = round(float(entry.get("grams") or 0), 2)
+            item["waste_grams"] = round(float(entry.get("waste_grams") or 0), 2)
             item["usage_slot"] = entry.get("slot")
             usage.append(item)
     spool["usage"] = usage
@@ -1637,7 +1639,7 @@ def get_spool_intelligence(days: int = 30) -> dict:
             entries = []
         for entry in entries:
             spool_id = int(entry.get("spool_id") or 0)
-            grams = float(entry.get("grams") or 0)
+            grams = float(entry.get("actual_grams") or entry.get("grams") or 0)
             if not spool_id or grams <= 0:
                 continue
             spool = spools.get(spool_id, {})
@@ -1797,8 +1799,10 @@ def deduct_spool_usage(
 
     spool_usage = []
     spool_id_map = {s: sid for s, sid in slots_with}
+    slot_snapshot = {int(s): d for s, d in snapshot.items() if isinstance(d, dict)}
 
     with _conn() as conn:
+        decision_logs = []
         for slot, grams in slot_grams.items():
             spool_id = spool_id_map[slot]
             cur = conn.execute("SELECT remaining_g FROM spools WHERE id = ?", (spool_id,)).fetchone()
@@ -1807,29 +1811,134 @@ def deduct_spool_usage(
             old_r = cur["remaining_g"]
             new_r = max(0.0, old_r - grams)
             conn.execute("UPDATE spools SET remaining_g = ? WHERE id = ?", (new_r, spool_id))
-            spool_usage.append({"spool_id": spool_id, "grams": round(grams, 2), "slot": slot})
+            usage = {
+                "spool_id": spool_id,
+                "grams": round(grams, 2),
+                "slot": slot,
+                "remaining_before_g": round(float(old_r), 2),
+                "remaining_after_g": round(float(new_r), 2),
+            }
+            start_g = slot_snapshot.get(slot, {}).get("remaining_g_at_start")
+            if start_g is not None:
+                try:
+                    usage["remaining_start_g"] = round(float(start_g), 2)
+                except (TypeError, ValueError):
+                    pass
+            spool_usage.append(usage)
             if old_r - grams < 0:
-                log_decision(printer_id, "spool_overdrawn",
-                            f"Spool #{spool_id} slot {slot}: tried to deduct {grams:.1f}g "
-                            f"but only {old_r:.1f}g remained; clamped to 0",
-                            print_id=print_id)
+                decision_logs.append(("spool_overdrawn",
+                                      f"Spool #{spool_id} slot {slot}: tried to deduct {grams:.1f}g "
+                                      f"but only {old_r:.1f}g remained; clamped to 0"))
             else:
-                log_decision(printer_id, "spool_deducted",
-                            f"Spool #{spool_id} slot {slot}: {grams:.1f}g deducted "
-                            f"({old_r:.1f}g → {new_r:.1f}g)",
-                            print_id=print_id)
+                decision_logs.append(("spool_deducted",
+                                      f"Spool #{spool_id} slot {slot}: {grams:.1f}g deducted "
+                                      f"({old_r:.1f}g -> {new_r:.1f}g)"))
 
         for slot in slots_without:
             unattr = slot_grams.get(slot, 0.0) if not slots_with else 0.0
-            log_decision(printer_id, "spool_missing",
-                        f"Slot {slot}: no spool assigned; {unattr:.1f}g unattributed",
-                        print_id=print_id)
+            decision_logs.append(("spool_missing",
+                                  f"Slot {slot}: no spool assigned; {unattr:.1f}g unattributed"))
 
         if spool_usage:
             conn.execute(
                 "UPDATE prints SET spool_usage = ? WHERE id = ?",
                 (json.dumps(spool_usage), print_id),
             )
+
+    for event, detail in decision_logs:
+        log_decision(printer_id, event, detail, print_id=print_id)
+
+
+def reconcile_spool_usage(
+    print_id: int,
+    spool_id: int,
+    actual_remaining_g: float,
+    *,
+    start_remaining_g: Optional[float] = None,
+    reading_g: Optional[float] = None,
+    empty_spool_weight_g: Optional[float] = None,
+) -> Optional[dict]:
+    """Correct a spool after re-weighing and annotate the print's recorded usage."""
+    import json
+    actual_remaining = max(0.0, float(actual_remaining_g))
+    with _conn() as conn:
+        prow = conn.execute(
+            "SELECT id, printer_id, spool_usage FROM prints WHERE id = ?",
+            (print_id,),
+        ).fetchone()
+        if not prow:
+            return None
+        spool = conn.execute(
+            "SELECT id, remaining_g FROM spools WHERE id = ?",
+            (spool_id,),
+        ).fetchone()
+        if not spool:
+            return None
+
+        try:
+            usage = json.loads(prow["spool_usage"] or "[]")
+        except Exception:
+            usage = []
+
+        target = None
+        for entry in usage:
+            if int(entry.get("spool_id") or 0) == int(spool_id):
+                target = entry
+                break
+        if target is None:
+            target = {"spool_id": spool_id, "grams": 0}
+            usage.append(target)
+
+        recorded = float(target.get("grams") or 0)
+        current_remaining = float(spool["remaining_g"] or 0)
+        start_remaining = start_remaining_g
+        if start_remaining is None:
+            start_remaining = target.get("remaining_start_g")
+        if start_remaining is None:
+            start_remaining = target.get("remaining_before_g")
+        try:
+            start_remaining = float(start_remaining)
+        except (TypeError, ValueError):
+            start_remaining = current_remaining + recorded
+
+        actual_loss = max(0.0, start_remaining - actual_remaining)
+        waste = max(0.0, actual_loss - recorded)
+        target["actual_grams"] = round(actual_loss, 2)
+        target["waste_grams"] = round(waste, 2)
+        target["remaining_start_g"] = round(start_remaining, 2)
+        target["remaining_after_g"] = round(actual_remaining, 2)
+        target["reconciled_at"] = datetime.utcnow().isoformat()
+        if reading_g is not None:
+            target["scale_reading_g"] = round(float(reading_g), 2)
+        if empty_spool_weight_g is not None:
+            target["empty_spool_weight_g"] = round(float(empty_spool_weight_g), 2)
+
+        updates = ["remaining_g = ?"]
+        vals = [actual_remaining]
+        if empty_spool_weight_g is not None:
+            updates.append("empty_spool_weight_g = ?")
+            vals.append(float(empty_spool_weight_g))
+        vals.append(spool_id)
+        conn.execute(f"UPDATE spools SET {', '.join(updates)} WHERE id = ?", vals)
+        conn.execute(
+            "UPDATE prints SET spool_usage = ? WHERE id = ?",
+            (json.dumps(usage), print_id),
+        )
+
+    detail = (
+        f"Spool #{spool_id} reconciled: recorded {recorded:.1f}g, "
+        f"actual {actual_loss:.1f}g"
+    )
+    if waste > 0:
+        detail += f", purge/waste {waste:.1f}g"
+    log_decision(prow["printer_id"], "spool_reconciled", detail, print_id=print_id)
+    return {
+        "spool_id": spool_id,
+        "remaining_g": round(actual_remaining, 1),
+        "recorded_grams": round(recorded, 2),
+        "actual_grams": round(actual_loss, 2),
+        "waste_grams": round(waste, 2),
+    }
 
 
 # ── print queue ───────────────────────────────────────────────────────────
