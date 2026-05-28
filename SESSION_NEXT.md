@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 28 May 2026 (Session 28.29 Queue colour-aware dispatch)_
+_Last updated 28 May 2026 (Session 28.30 Multi-colour dispatch coverage)_
 
 ## Current state
 
@@ -812,6 +812,13 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Mission Control Dispatch Intel now displays required colours and only suggests loaded/shelf spools whose colours match within tolerance.
 - Existing queued 3MF files can be backfilled from their saved upload files.
 - Static cache-bust bumped to `v=85`.
+
+### Session 28.30 Multi-colour dispatch coverage
+- Backfilled existing queued 3MF files so the current queue now exposes slicer colour metadata through `/api/queue`.
+- Tightened Mission Control Dispatch Intel so multi-colour jobs require coverage for every required colour, not just one matching colour.
+- Dispatch rescue hints now pick per-colour spool coverage before suggesting loaded, same-printer, shelf, or mixed stock paths.
+- Printer recommendation scoring now treats partial colour coverage as a weaker match instead of calling it fully ready.
+- Static cache-bust bumped to `v=86`.
 
 ---
 

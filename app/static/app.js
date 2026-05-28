@@ -2647,6 +2647,21 @@ function _missionColourSummary(job) {
   return [...new Set(colours)];
 }
 
+function _missionColourRequirements(job) {
+  const material = _missionMaterial(job);
+  const byColour = new Map();
+  _missionJobColours(job).forEach(item => {
+    const colour = _normHex(item.color);
+    if (!colour) return;
+    const type = String(item.type || material || '').toUpperCase();
+    const key = `${type}:${colour}`;
+    const existing = byColour.get(key) || { type, colour, used_g: 0 };
+    existing.used_g += Number(item.used_g || 0);
+    byColour.set(key, existing);
+  });
+  return [...byColour.values()];
+}
+
 function _missionSpoolLabel(spool, printer) {
   const grams = Math.round(Number(spool.remaining_g || 0));
   const colour = spool.color_name ? `${spool.color_name} ` : '';
@@ -2657,13 +2672,66 @@ function _missionSpoolLabel(spool, printer) {
   return `#${spool.id} ${material} · ${grams}g · ${where}`;
 }
 
+function _missionCoverageForRequirements(requirements, spools, printer) {
+  const usedIds = new Set();
+  const picks = [];
+  const missing = [];
+  requirements.forEach(req => {
+    const pick = spools
+      .filter(s => !s.archived_at && !usedIds.has(s.id))
+      .filter(s => String(s.material || '').toUpperCase() === req.type)
+      .filter(s => _missionSpoolMatchesColour(s, req.colour))
+      .filter(s => !req.used_g || Number(s.remaining_g || 0) >= req.used_g)
+      .sort((a, b) => Number(a.remaining_g || 0) - Number(b.remaining_g || 0))[0];
+    if (pick) {
+      usedIds.add(pick.id);
+      picks.push(pick);
+    } else {
+      missing.push(req);
+    }
+  });
+  return {
+    ok: missing.length === 0,
+    picks,
+    missing,
+    text: picks.map(s => _missionSpoolLabel(s, printer)).join(' + '),
+  };
+}
+
 function _missionMaterialRescue(job, target, printers, spools) {
   if (!target || !_missionMaterial(job)) return null;
-  const colours = _missionColourSummary(job);
-  const matchesJob = s => _missionSpoolMatches(job, s) && (!colours.length || colours.some(c => _missionSpoolMatchesColour(s, c)));
+  const requirements = _missionColourRequirements(job);
+  const matchesJob = s => _missionSpoolMatches(job, s);
   const loaded = _missionLoadedSpools(target.id, spools).filter(s => _missionSpoolMatches(job, s));
-  const colourLoaded = colours.length ? loaded.filter(s => colours.some(c => _missionSpoolMatchesColour(s, c))) : loaded;
-  const ready = colourLoaded.find(s => _missionSpoolEnough(job, s));
+  if (requirements.length) {
+    const loadedCoverage = _missionCoverageForRequirements(requirements, loaded, target);
+    if (job.preflight?.can_start !== false && loadedCoverage.ok) {
+      return { kind: 'ready', text: `Ready now: ${loadedCoverage.text}` };
+    }
+    const samePrinterCoverage = _missionCoverageForRequirements(
+      requirements,
+      spools.filter(s => s.location_printer_id === target.id),
+      target,
+    );
+    if (samePrinterCoverage.ok) {
+      return { kind: 'slot', text: `Select ${samePrinterCoverage.text}` };
+    }
+    const shelfCoverage = _missionCoverageForRequirements(
+      requirements,
+      spools.filter(s => !s.location_printer_id),
+      null,
+    );
+    if (shelfCoverage.ok) {
+      return { kind: 'shelf', text: `Load ${shelfCoverage.text}` };
+    }
+    const mixedCoverage = _missionCoverageForRequirements(requirements, spools, target);
+    if (mixedCoverage.ok) {
+      return { kind: 'shelf', text: `Use ${mixedCoverage.text}` };
+    }
+    const missing = mixedCoverage.missing.map(r => r.colour).join(' / ');
+    return { kind: 'none', text: `Missing ${_missionMaterial(job)} colour coverage: ${missing}` };
+  }
+  const ready = loaded.find(s => _missionSpoolEnough(job, s));
   if (job.preflight?.can_start !== false && ready) {
     return { kind: 'ready', text: `Ready now: ${_missionSpoolLabel(ready, target)}` };
   }
@@ -2682,8 +2750,7 @@ function _missionMaterialRescue(job, target, printers, spools) {
   const total = spools
     .filter(s => !s.archived_at && _missionSpoolMatches(job, s))
     .reduce((sum, s) => sum + Number(s.remaining_g || 0), 0);
-  const colourText = colours.length ? ` matching ${colours.join(' / ')}` : '';
-  return { kind: 'none', text: `No single ${_missionMaterial(job)}${colourText} spool has enough. Total known stock ${Math.round(total)}g.` };
+  return { kind: 'none', text: `No single ${_missionMaterial(job)} spool has enough. Total known stock ${Math.round(total)}g.` };
 }
 
 function _missionPrinterFit(job, p, spools, maint) {
@@ -2708,10 +2775,18 @@ function _missionPrinterFit(job, p, spools, maint) {
   const loaded = _missionLoadedSpools(p.id, spools);
   const matching = material ? loaded.filter(s => String(s.material || '').toUpperCase() === material) : [];
   const matchingStock = matching.reduce((sum, s) => sum + Number(s.remaining_g || 0), 0);
+  const requirements = _missionColourRequirements(job);
+  const colourCoverage = requirements.length ? _missionCoverageForRequirements(requirements, matching, p) : null;
   if (material && matching.length) {
     score += 45;
-    reasons.push(`${material} loaded`);
-    if (required && matchingStock >= required) {
+    reasons.push(colourCoverage?.ok === false ? `${material} partial` : `${material} loaded`);
+    if (colourCoverage?.ok) {
+      score += 35;
+      reasons.push('colours ok');
+    } else if (requirements.length) {
+      score -= 35;
+      reasons.push('colour missing');
+    } else if (required && matchingStock >= required) {
       score += 25;
       reasons.push('stock ok');
     } else if (required) {
