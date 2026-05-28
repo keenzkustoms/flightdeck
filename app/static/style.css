@@ -947,7 +947,12 @@ header {
   flex-shrink: 0;
 }
 
-.controls-primary { display: flex; gap: 0.625rem; flex-wrap: wrap; }
+.controls-primary,
+.controls-lights {
+  display: flex;
+  gap: 0.625rem;
+  flex-wrap: wrap;
+}
 
 .ctrl-btn {
   min-height: 44px;
@@ -989,6 +994,12 @@ header {
   color: #fcd34d;
 }
 .ctrl-btn-firmware-restart:hover:not(:disabled) { background: rgba(146,96,0,0.55); }
+
+.ctrl-btn-light {
+  border-color: rgba(96,165,250,0.55);
+  color: #bfdbfe;
+}
+.ctrl-btn-light:hover:not(:disabled) { background: rgba(59,130,246,0.13); }
 
 /* ── Temperature modal ── */
 .temp-modal-overlay {

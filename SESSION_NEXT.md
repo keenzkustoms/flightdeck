@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 28 May 2026 (Session 28.5 Spools nav cleanup)_
+_Last updated 28 May 2026 (Session 28.6 live light controls)_
 
 ## Current state
 
@@ -662,6 +662,13 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Standalone Spools view now strips any leftover Settings subnav from the Spools container.
 - Added a defensive CSS guard so Settings tabs cannot show inside `#view-spools`.
 - Static cache-bust bumped to `v=63`.
+
+### Session 28.6 live light controls
+- Live printer detail controls now include light buttons.
+- Bambu printers expose `Light On` / `Light Off` via the installed Bambu MQTT API.
+- Greyhound Voron exposes `Bars On` / `Bars Off` through Moonraker gcode macros (`STATUS_IDLE` / `STATUS_SLEEP`).
+- Light commands are allowed whenever the printer is not offline and clear their pending UI state quickly after the request succeeds.
+- Static cache-bust bumped to `v=64`.
 
 ---
 

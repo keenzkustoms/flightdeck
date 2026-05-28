@@ -346,6 +346,11 @@ _CONTROL_PATHS = {
     "firmware_restart": "/printer/firmware_restart",
 }
 
+_CONTROL_GCODE = {
+    "light_on":  "STATUS_IDLE",
+    "light_off": "STATUS_SLEEP",
+}
+
 
 _HEATER_NAMES = {"hotend": "extruder", "bed": "heater_bed"}
 
@@ -364,6 +369,15 @@ async def set_temp(base_url: str, heater: str, target: int) -> None:
 
 
 async def control(base_url: str, action: str) -> None:
+    if action in _CONTROL_GCODE:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.post(
+                f"{base_url.rstrip('/')}/printer/gcode/script",
+                json={"script": _CONTROL_GCODE[action]},
+            )
+            resp.raise_for_status()
+        return
+
     path = _CONTROL_PATHS.get(action)
     if not path:
         raise ValueError(f"unknown action: {action}")

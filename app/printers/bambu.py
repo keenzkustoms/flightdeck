@@ -435,6 +435,12 @@ class BambuPrinter:
         self._cancel_requested = True
         self._printer.stop_print()  # Bambu MQTT has no dedicated e-stop
 
+    def light_on(self) -> None:
+        self._printer.turn_light_on()
+
+    def light_off(self) -> None:
+        self._printer.turn_light_off()
+
     def set_temp(self, heater: str, target: int) -> None:
         if heater == "hotend":
             self._printer.set_nozzle_temperature(target)

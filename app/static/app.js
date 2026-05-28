@@ -725,6 +725,9 @@ document.getElementById('refresh-time').textContent = new Date().toLocaleTimeStr
 
 function _canDo(state, action) {
   switch (action) {
+    case 'light_on':
+    case 'light_off':
+      return state !== 'offline';
     case 'pause':            return state === 'printing';
     case 'resume':           return state === 'paused';
     case 'cancel':           return state === 'printing' || state === 'paused';
@@ -748,8 +751,14 @@ function _detailControls(id, p) {
   const firmwareRestartBtn = p.kind === 'moonraker'
     ? btn('firmware_restart', 'Firmware Restart', 'ctrl-btn-firmware-restart')
     : '';
+  const lightOnLabel = p.kind === 'moonraker' ? 'Bars On' : 'Light On';
+  const lightOffLabel = p.kind === 'moonraker' ? 'Bars Off' : 'Light Off';
 
   return `
+    <div class="controls-lights">
+      ${btn('light_on', lightOnLabel, 'ctrl-btn-light')}
+      ${btn('light_off', lightOffLabel, 'ctrl-btn-light')}
+    </div>
     <div class="controls-primary">
       ${btn('pause', 'Pause')}
       ${btn('resume', 'Resume')}
@@ -791,6 +800,13 @@ async function sendControl(id, action) {
     if (!resp.ok) {
       delete _pendingControls[id];
       _updateControlsWidget(id);
+    } else if (action === 'light_on' || action === 'light_off') {
+      setTimeout(() => {
+        if (_pendingControls[id]?.action === action) {
+          delete _pendingControls[id];
+          _updateControlsWidget(id);
+        }
+      }, 600);
     }
   } catch {
     delete _pendingControls[id];

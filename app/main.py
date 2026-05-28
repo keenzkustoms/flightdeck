@@ -460,7 +460,7 @@ def _camera_active(status) -> bool:
     return False
 
 
-_VALID_ACTIONS = {"pause", "resume", "cancel", "estop", "firmware_restart"}
+_VALID_ACTIONS = {"pause", "resume", "cancel", "estop", "firmware_restart", "light_on", "light_off"}
 
 
 class ControlRequest(BaseModel):
