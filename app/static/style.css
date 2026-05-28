@@ -2235,6 +2235,7 @@ header {
 }
 .settings-nav-item:hover { color: var(--text); background: rgba(255,255,255,0.04); }
 .settings-nav-item.active { color: var(--text); background: rgba(255,255,255,0.08); }
+#view-spools .settings-nav { display: none; }
 
 .settings-content {
   flex: 1;

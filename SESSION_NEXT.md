@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 28 May 2026 (Session 28.4 H2D camera + Spools top-level)_
+_Last updated 28 May 2026 (Session 28.5 Spools nav cleanup)_
 
 ## Current state
 
@@ -657,6 +657,11 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Bambu RTSP camera proxy now transcodes a lighter 1280px-wide MJPEG stream at 8fps/q5 with low-latency ffmpeg flags to help H2D start reliably in-browser.
 - Frontend camera images now use cache-busted stream URLs and retry failed image loads.
 - Static cache-bust bumped to `v=62`.
+
+### Session 28.5 Spools nav cleanup
+- Standalone Spools view now strips any leftover Settings subnav from the Spools container.
+- Added a defensive CSS guard so Settings tabs cannot show inside `#view-spools`.
+- Static cache-bust bumped to `v=63`.
 
 ---
 

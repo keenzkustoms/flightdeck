@@ -5025,6 +5025,7 @@ async function _renderSpoolsContent(el) {
 async function renderSpoolsView() {
   const body = document.getElementById('spools-body');
   if (!body) return;
+  document.querySelectorAll('#view-spools .settings-nav').forEach(nav => nav.remove());
   body.innerHTML = `<div class="settings-content settings-content-spools" id="spools-content"></div>`;
   await _renderSpoolsContent(body.querySelector('#spools-content'));
 }
