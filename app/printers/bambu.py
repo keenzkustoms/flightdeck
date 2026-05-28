@@ -503,17 +503,14 @@ class BambuPrinter:
         rotate_tray: bool = False,
     ) -> bool:
         if enabled:
-            temp = max(45, min(int(temp), 85))
+            max_temp = 85 if int(ams_id) >= 128 else 65
+            temp = max(45, min(int(temp), max_temp))
             duration = max(1, min(int(duration), 24))
-            filament = str(filament or "PLA").upper()
             payload = {
                 "print": {
                     "command": "ams_filament_drying",
                     "ams_id": int(ams_id),
-                    "dry_filament": filament,
-                    "dry_temperature": temp,
-                    "dry_duration": duration,
-                    "cooling_temp": temp,
+                    "cooling_temp": 45,
                     "duration": duration,
                     "humidity": 0,
                     "mode": 1,
@@ -526,9 +523,6 @@ class BambuPrinter:
                 "print": {
                     "command": "ams_filament_drying",
                     "ams_id": int(ams_id),
-                    "dry_filament": "",
-                    "dry_temperature": -1,
-                    "dry_duration": 0,
                     "cooling_temp": 40,
                     "duration": 0,
                     "humidity": 0,

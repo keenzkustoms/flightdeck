@@ -1613,8 +1613,8 @@ header {
 
 .ams-unit {
   display: grid;
-  grid-template-columns: 5.8rem minmax(0, 1fr);
-  gap: 0.75rem 1rem;
+  grid-template-columns: 4.4rem minmax(0, 1fr);
+  gap: 0.65rem 0.65rem;
   align-items: start;
 }
 
@@ -1639,9 +1639,9 @@ header {
 }
 
 .ams-dry-btn {
-  border: 1px solid #f59e0b;
-  background: rgba(245,158,11,0.08);
-  color: #fbbf24;
+  border: 1px solid var(--accent);
+  background: rgba(59,130,246,0.08);
+  color: #93c5fd;
   border-radius: 0.35rem;
   padding: 0.2rem 0.45rem;
   font-size: 0.66rem;
@@ -1650,7 +1650,7 @@ header {
 }
 
 .ams-dry-btn:hover:not(:disabled) {
-  background: rgba(245,158,11,0.16);
+  background: rgba(59,130,246,0.16);
 }
 
 .ams-dry-btn:disabled {
@@ -1666,7 +1666,7 @@ header {
 
 .ams-dry-modal {
   width: min(25rem, calc(100vw - 2rem));
-  border-color: rgba(245,158,11,0.28);
+  border-color: rgba(59,130,246,0.35);
 }
 
 .ams-dry-header {
@@ -1690,9 +1690,9 @@ header {
   flex-wrap: wrap;
   gap: 0.45rem;
   padding: 0.75rem;
-  border: 1px solid rgba(245,158,11,0.18);
+  border: 1px solid rgba(59,130,246,0.22);
   border-radius: 0.5rem;
-  background: rgba(245,158,11,0.05);
+  background: rgba(59,130,246,0.05);
 }
 
 .ams-dry-status-chip {
@@ -1743,7 +1743,7 @@ header {
 }
 
 .ams-dry-range {
-  accent-color: #f59e0b;
+  accent-color: var(--accent);
 }
 
 .ams-dry-toggle {
@@ -1766,9 +1766,9 @@ header {
 }
 
 .ams-dry-start {
-  background: #f59e0b;
-  border-color: #f59e0b;
-  color: #111827;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
 }
 
 .ams-dry-stop {
@@ -1778,7 +1778,14 @@ header {
   background: rgba(239,68,68,0.08);
 }
 
-.ams-slots { display: flex; gap: 0.625rem; flex-wrap: wrap; }
+.ams-slots {
+  display: flex;
+  gap: 0.45rem;
+  flex-wrap: nowrap;
+  min-width: 0;
+  overflow-x: auto;
+  padding-bottom: 0.1rem;
+}
 
 .ams-slot-wrap {
   display: flex;
@@ -1788,8 +1795,8 @@ header {
 }
 
 .ams-slot {
-  width: 40px;
-  height: 40px;
+  width: 34px;
+  height: 34px;
   border-radius: 0.5rem;
   border: 2px solid var(--border);
   flex-shrink: 0;

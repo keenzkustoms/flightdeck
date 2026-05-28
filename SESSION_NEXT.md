@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 28 May 2026 (Session 28.21 Mission Control fleet scaling)_
+_Last updated 28 May 2026 (Session 28.22 AMS drying polish/fix)_
 
 ## Current state
 
@@ -760,6 +760,13 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Added automatic dense fleet mode for Mission Control once the printer count reaches 8+ printers.
 - Dense mode changes lanes into a multi-column fleet board and limits visible queue blocks per printer with a `+N more` queue link.
 - Static cache-bust bumped to `v=77`.
+
+### Session 28.22 AMS drying polish/fix
+- Changed AMS drying MQTT command payload to the lean firmware-compatible `ams_filament_drying` shape.
+- Capped AMS 2 Pro drying temperature at 65°C while keeping AMS HT up to 85°C.
+- Changed AMS drying UI accents from orange to Flightdeck blue.
+- Tightened AMS slot sizing and spacing so four-slot AMS rows fit in the live sidebar without wrapping.
+- Static cache-bust bumped to `v=78`.
 
 ---
 

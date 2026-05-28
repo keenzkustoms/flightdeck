@@ -1299,7 +1299,8 @@ function _openAmsDryDialog(printerId, amsId) {
   const current = unit?.dry_setting || {};
   const startFilament = current.filament || 'PLA';
   const preset = _AMS_DRY_PRESETS[startFilament] || _AMS_DRY_PRESETS.PLA;
-  const startTemp = current.temperature > 0 ? current.temperature : preset.temp;
+  const maxTemp = Number(amsId) >= 128 ? 85 : 65;
+  const startTemp = Math.min(maxTemp, current.temperature > 0 ? current.temperature : preset.temp);
   const startDuration = current.duration > 0 ? current.duration : preset.duration;
   const rh = unit?.humidity != null ? `${unit.humidity}% RH` : 'RH --';
   const tempNow = unit?.temperature != null ? `${Math.round(unit.temperature * 10) / 10}°C` : '--°C';
@@ -1332,8 +1333,8 @@ function _openAmsDryDialog(printerId, amsId) {
         <label class="ams-dry-field" for="ams-dry-temp">
           <span>Temperature</span>
           <strong><output id="ams-dry-temp-out">${startTemp}</output>°C</strong>
-          <input id="ams-dry-temp" class="ams-dry-range" type="range" min="45" max="85" value="${startTemp}">
-          <small><span>45°C</span><span>85°C</span></small>
+          <input id="ams-dry-temp" class="ams-dry-range" type="range" min="45" max="${maxTemp}" value="${startTemp}">
+          <small><span>45°C</span><span>${maxTemp}°C</span></small>
         </label>
         <label class="ams-dry-field" for="ams-dry-duration">
           <span>Duration</span>
@@ -1371,7 +1372,7 @@ function _openAmsDryDialog(printerId, amsId) {
   duration.addEventListener('input', updateOutputs);
   filament.addEventListener('change', () => {
     const p = _AMS_DRY_PRESETS[filament.value] || _AMS_DRY_PRESETS.PLA;
-    temp.value = p.temp;
+    temp.value = Math.min(maxTemp, p.temp);
     duration.value = p.duration;
     updateOutputs();
   });
