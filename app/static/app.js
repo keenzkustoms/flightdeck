@@ -987,7 +987,7 @@ function parseRoute() {
   if (printerMatch) return { view: 'printer', id: printerMatch[1], subtab: printerMatch[2] || 'live' };
   const spoolMatch = hash.match(/^#\/spool\/(\d+)/);
   if (spoolMatch) return { view: 'spool', id: parseInt(spoolMatch[1], 10) };
-  if (hash === '#/mission') return { view: 'mission' };
+  if (hash === '#/mission' || hash.startsWith('#/mission?')) return { view: 'mission' };
   if (hash === '#/cameras') return { view: 'cameras' };
   if (hash === '#/stats') return { view: 'stats' };
   if (hash === '#/queue') return { view: 'queue' };
@@ -2562,6 +2562,48 @@ function _missionRecommendation(p, laneJobs, signals) {
   return 'Available for new work';
 }
 
+function _missionPrinterBucket(p, laneJobs, signals) {
+  if (signals.some(s => s.level === 'bad') || ['offline', 'error', 'estop'].includes(p.state)) return 'blocked';
+  if (p.state === 'printing') return 'printing';
+  if (p.state === 'paused' || signals.some(s => s.level === 'warn') || laneJobs.some(j => _missionJobReadiness(j).cls === 'blocked')) return 'attention';
+  return 'ready';
+}
+
+function _missionControlPrefs() {
+  const params = new URLSearchParams(location.hash.split('?')[1] || '');
+  const filter = params.get('filter') || 'all';
+  return {
+    filter: ['all', 'ready', 'printing', 'attention', 'blocked'].includes(filter) ? filter : 'all',
+    sim: params.get('sim') === '30',
+  };
+}
+
+function _missionHref(filter, sim) {
+  const params = new URLSearchParams();
+  if (filter && filter !== 'all') params.set('filter', filter);
+  if (sim) params.set('sim', '30');
+  const q = params.toString();
+  return q ? `#/mission?${q}` : '#/mission';
+}
+
+function _missionSimPrinters(printers) {
+  if (!printers.length) return [];
+  return Array.from({ length: 30 }, (_, i) => {
+    const base = printers[i % printers.length];
+    const n = i + 1;
+    const state = i % 9 === 0 ? 'offline' : i % 5 === 0 ? 'printing' : i % 7 === 0 ? 'paused' : base.state;
+    return {
+      ...base,
+      id: `${base.id}-sim-${n}`,
+      custom_name: `Sim Bay ${String(n).padStart(2, '0')}`,
+      model_name: base.model_name,
+      state,
+      job: state === 'printing' ? { filename: `fleet_test_${n}.3mf` } : null,
+      health: i % 6 === 0 ? { status: 'attention', reasons: [{ message: 'Simulated attention' }] } : base.health,
+    };
+  });
+}
+
 async function renderMissionControl() {
   const el = document.getElementById('mission-page');
   if (!el) return;
@@ -2578,6 +2620,8 @@ async function renderMissionControl() {
     ]);
     _latestPrinters = printers;
     _allSpools = spools;
+    const prefs = _missionControlPrefs();
+    const missionPrinters = prefs.sim ? _missionSimPrinters(printers) : printers;
     const maintPairs = await Promise.all(printers.map(async p => {
       try {
         const r = await fetch(`/api/printers/${p.id}/maintenance`);
@@ -2587,19 +2631,40 @@ async function renderMissionControl() {
       }
     }));
     const maint = Object.fromEntries(maintPairs);
-    const active = printers.filter(p => p.state === 'printing' || p.state === 'paused').length;
+    const active = missionPrinters.filter(p => p.state === 'printing' || p.state === 'paused').length;
     const pendingJobs = jobs.filter(j => j.status === 'pending');
     const blocked = jobs.filter(j => _missionJobReadiness(j).cls === 'blocked').length;
     const caution = jobs.filter(j => _missionJobReadiness(j).cls === 'warn').length;
     const forecastSeconds = pendingJobs.reduce((sum, j) => sum + _missionJobEta(j), 0);
     const forecast = forecastSeconds ? new Date(Date.now() + forecastSeconds * 1000).toLocaleTimeString([], _clockOpts()) : 'Clear';
-    const denseFleet = printers.length >= 8;
+    const printerContexts = missionPrinters.map(p => {
+      const laneJobs = _missionQueueForPrinter(jobs, p.id.replace(/-sim-\d+$/, ''));
+      const signals = _missionPrinterSignals(p, laneJobs, spools, maint);
+      return { p, laneJobs, signals, bucket: _missionPrinterBucket(p, laneJobs, signals) };
+    });
+    const filteredContexts = prefs.filter === 'all'
+      ? printerContexts
+      : printerContexts.filter(c => c.bucket === prefs.filter);
+    const counts = printerContexts.reduce((acc, c) => {
+      acc[c.bucket] = (acc[c.bucket] || 0) + 1;
+      return acc;
+    }, { all: printerContexts.length });
+    const denseFleet = missionPrinters.length >= 8;
     const laneJobLimit = denseFleet ? 3 : 6;
     el.classList.toggle('mission-page-dense', denseFleet);
 
-    const lanes = printers.map(p => {
-      const laneJobs = _missionQueueForPrinter(jobs, p.id);
-      const signals = _missionPrinterSignals(p, laneJobs, spools, maint);
+    const filterBar = [
+      ['all', 'All', counts.all || 0],
+      ['ready', 'Ready', counts.ready || 0],
+      ['printing', 'Printing', counts.printing || 0],
+      ['attention', 'Needs attention', counts.attention || 0],
+      ['blocked', 'Blocked', counts.blocked || 0],
+    ].map(([id, label, count]) =>
+      `<a class="mission-filter ${prefs.filter === id ? 'active' : ''}" href="${_missionHref(id, prefs.sim)}">${label}<b>${count}</b></a>`
+    ).join('');
+    const simToggle = `<a class="mission-sim-toggle ${prefs.sim ? 'active' : ''}" href="${_missionHref(prefs.filter, !prefs.sim)}">${prefs.sim ? '30-printer sim on' : 'Sim 30 printers'}</a>`;
+
+    const lanes = filteredContexts.map(({ p, laneJobs, signals, bucket }) => {
       const activeJob = p.job ? jobDisplayName(p.job) : '';
       const visibleLaneJobs = laneJobs.slice(0, laneJobLimit);
       const queueBlocks = visibleLaneJobs.map(j => {
@@ -2614,7 +2679,7 @@ async function renderMissionControl() {
         ? `<a class="mission-timeline-more" href="#/queue">+${laneJobs.length - laneJobLimit} more</a>`
         : '';
       const queueHtml = queueBlocks || '<div class="mission-empty-lane">No queued work</div>';
-      return `<section class="mission-lane">
+      return `<section class="mission-lane mission-lane-${bucket}">
         <div class="mission-lane-head">
           <div>
             <a class="mission-printer-name" href="#/printer/${p.id}">${esc(_dashboardPrinterName(p))}</a>
@@ -2632,12 +2697,12 @@ async function renderMissionControl() {
           ${signals.map(s => `<span class="mission-signal mission-signal-${s.level}">${esc(s.text)}</span>`).join('')}
         </div>
       </section>`;
-    }).join('');
+    }).join('') || `<div class="mission-empty-filter">No printers match this filter.</div>`;
 
-    const nextJobs = jobs
-      .filter(j => ['pending', 'failed', 'cancelled'].includes(j.status))
+    const dispatchReady = jobs
+      .filter(j => j.status === 'pending' && _missionJobReadiness(j).cls === 'ready')
       .sort((a, b) => (a.status === 'pending' ? 0 : 1) - (b.status === 'pending' ? 0 : 1) || (a.position ?? 999) - (b.position ?? 999))
-      .slice(0, 8)
+      .slice(0, 6)
       .map(j => {
         const ready = _missionJobReadiness(j);
         const p = printers.find(x => x.id === j.printer_id);
@@ -2645,14 +2710,26 @@ async function renderMissionControl() {
           <span>${esc(j.filename.replace(/.*[\\/]/, ''))}</span>
           <small>${esc(p ? _dashboardPrinterName(p) : j.printer_id)} · ${ready.label}</small>
         </a>`;
-      }).join('') || '<div class="mission-empty-list">Queue is clear.</div>';
+      }).join('') || '<div class="mission-empty-list">Nothing ready right now.</div>';
+
+    const blockedJobs = jobs
+      .filter(j => _missionJobReadiness(j).cls === 'blocked')
+      .slice(0, 6)
+      .map(j => {
+        const ready = _missionJobReadiness(j);
+        const p = printers.find(x => x.id === j.printer_id);
+        return `<a class="mission-job-row mission-blocked" href="#/queue">
+          <span>${esc(j.filename.replace(/.*[\\/]/, ''))}</span>
+          <small>${esc(p ? _dashboardPrinterName(p) : j.printer_id)} · ${ready.label}</small>
+        </a>`;
+      }).join('') || '<div class="mission-empty-list">No blocked queue items.</div>';
 
     const html = `
       <section class="mission-hero">
         <div>
           <div class="mission-eyebrow">Mission Control</div>
           <h1>Farm forecast</h1>
-          <p>${printers.length} printers · ${active} active · ${pendingJobs.length} pending · finish forecast ${esc(forecast)}</p>
+          <p>${missionPrinters.length} printers${prefs.sim ? ' simulated' : ''} · ${active} active · ${pendingJobs.length} pending · finish forecast ${esc(forecast)}</p>
         </div>
         <div class="mission-kpis">
           <div><strong>${pendingJobs.length}</strong><span>Pending</span></div>
@@ -2661,13 +2738,19 @@ async function renderMissionControl() {
           <div><strong>${_fmtSeconds(forecastSeconds) || '0m'}</strong><span>Queued time</span></div>
         </div>
       </section>
+      <section class="mission-commandbar">
+        <div class="mission-filters">${filterBar}</div>
+        ${simToggle}
+      </section>
       <section class="mission-grid">
         <div class="mission-lanes">${lanes}</div>
         <aside class="mission-sidebar-panel">
-          <div class="mission-panel-title">Next Dispatch</div>
-          <div class="mission-job-list">${nextJobs}</div>
+          <div class="mission-panel-title">Dispatch Ready</div>
+          <div class="mission-job-list">${dispatchReady}</div>
+          <div class="mission-panel-title">Blocked</div>
+          <div class="mission-job-list">${blockedJobs}</div>
           <div class="mission-panel-title">Operator Notes</div>
-          <div class="mission-note">Readiness is calculated from queue preflight, printer state, loaded spool stock, health warnings, and maintenance due flags.</div>
+          <div class="mission-note">Readiness is calculated from queue preflight, printer state, loaded spool stock, health warnings, and maintenance due flags. Simulation mode only clones the display.</div>
         </aside>
       </section>`;
     if (html !== _missionLastHtml) {

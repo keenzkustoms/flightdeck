@@ -127,6 +127,53 @@ body {
 .mission-kpi-bad { border-color: rgba(239,68,68,0.55) !important; }
 .mission-kpi-warn { border-color: rgba(245,158,11,0.65) !important; }
 
+.mission-commandbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.mission-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.mission-filter,
+.mission-sim-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  border: 1px solid rgba(122,162,216,0.22);
+  border-radius: 999px;
+  background: rgba(255,255,255,0.025);
+  color: #93a9cf;
+  padding: 0.38rem 0.62rem;
+  font-size: 0.74rem;
+  font-weight: 800;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.mission-filter b {
+  color: var(--text);
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.mission-filter.active,
+.mission-sim-toggle.active {
+  border-color: var(--accent);
+  background: rgba(59,130,246,0.16);
+  color: white;
+}
+
+.mission-sim-toggle {
+  border-radius: 0.45rem;
+}
+
 .mission-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 320px;
@@ -170,6 +217,10 @@ body {
   min-width: 0;
   overflow: hidden;
 }
+
+.mission-lane-ready { border-color: rgba(34,197,94,0.22); }
+.mission-lane-attention { border-color: rgba(245,158,11,0.28); }
+.mission-lane-blocked { border-color: rgba(239,68,68,0.34); }
 
 .mission-lane-head {
   display: flex;
@@ -282,9 +333,17 @@ body {
 
 .mission-empty-lane,
 .mission-empty-list,
+.mission-empty-filter,
 .mission-muted {
   color: var(--muted);
   font-size: 0.78rem;
+}
+
+.mission-empty-filter {
+  border: 1px dashed rgba(122,162,216,0.2);
+  border-radius: 0.65rem;
+  padding: 1.5rem;
+  text-align: center;
 }
 
 .mission-loaded {
@@ -380,6 +439,8 @@ body {
 @media (max-width: 720px) {
   .mission-page { padding: 1rem; }
   .mission-kpis { grid-template-columns: repeat(2, 1fr); }
+  .mission-commandbar { align-items: stretch; flex-direction: column; }
+  .mission-sim-toggle { justify-content: center; }
 }
 
 #view-printer {

@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 28 May 2026 (Session 28.23 AMS drying diagnostics)_
+_Last updated 28 May 2026 (Session 28.24 Mission Control dispatch board)_
 
 ## Current state
 
@@ -774,6 +774,13 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Added backend guardrails so blocked drying starts return a useful 409 error instead of silently doing nothing.
 - Added AMS drying modal warning text for known block reasons such as filament sitting at the AMS outlet.
 - Static cache-bust bumped to `v=79`.
+
+### Session 28.24 Mission Control dispatch board
+- Added Mission Control status filters for All, Ready, Printing, Needs attention, and Blocked printers.
+- Split the side panel into `Dispatch Ready` and `Blocked` queue lists so startable work and queue issues are separated.
+- Added a 30-printer simulation toggle on Mission Control to stress-test dense fleet layout without changing real printer config.
+- Added lane bucket styling and empty-filter states for the dispatch board.
+- Static cache-bust bumped to `v=80`.
 
 ---
 
