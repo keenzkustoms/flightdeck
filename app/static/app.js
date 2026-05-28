@@ -5373,7 +5373,7 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
               <button type="button" class="spool-inline-btn" id="sm-catalogue-sync">Sync</button>
             </div>
             <div id="sm-catalogue-chips" class="spool-catalogue-chips">
-              ${['PLA','PLA+','PETG','ASA','ABS','TPU','Bambu','3DFillies','Polymaker'].map(v => `<button type="button" data-chip="${v}">${v}</button>`).join('')}
+              ${['PLA','PLA+','PETG','ASA','ABS','TPU','Bambu','Polymaker'].map(v => `<button type="button" data-chip="${v}">${v}</button>`).join('')}
             </div>
             <input id="sm-catalogue-search" class="spool-form-input" type="search" placeholder="Search brand, material, colour...">
             <div id="sm-catalogue-picked" class="spool-catalogue-picked hidden"></div>

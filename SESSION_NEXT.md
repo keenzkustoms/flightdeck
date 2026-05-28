@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 28 May 2026 (Session 28.39 Active AMS slot preflight guard)_
+_Last updated 28 May 2026 (Session 28.40 Catalogue chip cleanup)_
 
 ## Current state
 
@@ -886,6 +886,11 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - This catches cases where Flightdeck inventory says the right colour exists somewhere, but the printer is actually using another active tray.
 - Example intended block: `Active AMS slot mismatch: printer is using AMS 1 slot 1 (Black PLA), expected Yellow PLA`.
 - Deploy copied `app/main.py`, but service restart is pending because sudo requested a password. Run `sudo systemctl restart flightdeck.service`.
+
+### Session 28.40 Catalogue chip cleanup
+- Removed the `3DFillies` quick chip from the Add Spool catalogue picker because that brand is no longer in current use.
+- Existing 3DFillies spool/history data is untouched.
+- Static cache-bust bumped to `v=96`.
 
 ---
 
