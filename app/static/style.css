@@ -1342,6 +1342,33 @@ header {
   color: #fca5a5;
 }
 
+.ams-dry-modal {
+  width: min(22rem, calc(100vw - 2rem));
+}
+
+.ams-dry-form {
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.25rem 0 0.9rem;
+}
+
+.ams-dry-inline {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.ams-dry-check {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+  margin-top: 0.25rem;
+}
+
 .ams-slots { display: flex; gap: 0.625rem; flex-wrap: wrap; }
 
 .ams-slot-wrap {

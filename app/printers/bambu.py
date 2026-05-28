@@ -497,6 +497,7 @@ class BambuPrinter:
         ams_id: int,
         enabled: bool,
         *,
+        filament: str = "PLA",
         temp: int = 45,
         duration: int = 12,
         rotate_tray: bool = False,
@@ -504,10 +505,14 @@ class BambuPrinter:
         if enabled:
             temp = max(45, min(int(temp), 85))
             duration = max(1, min(int(duration), 24))
+            filament = str(filament or "PLA").upper()
             payload = {
                 "print": {
                     "command": "ams_filament_drying",
                     "ams_id": int(ams_id),
+                    "dry_filament": filament,
+                    "dry_temperature": temp,
+                    "dry_duration": duration,
                     "cooling_temp": temp,
                     "duration": duration,
                     "humidity": 0,
@@ -521,6 +526,9 @@ class BambuPrinter:
                 "print": {
                     "command": "ams_filament_drying",
                     "ams_id": int(ams_id),
+                    "dry_filament": "",
+                    "dry_temperature": -1,
+                    "dry_duration": 0,
                     "cooling_temp": 40,
                     "duration": 0,
                     "humidity": 0,
@@ -714,6 +722,7 @@ def _parse_ams(dump: dict) -> list[dict]:
 
     for unit_data in ams_raw.get("ams", []):
         unit_id = int(unit_data.get("id", 0))
+        dry_setting = unit_data.get("dry_setting") or {}
         dry_time = _safe_int(unit_data.get("dry_time"))
         unit_temp = _safe_float(
             unit_data.get("temp")
@@ -721,6 +730,10 @@ def _parse_ams(dump: dict) -> list[dict]:
             or unit_data.get("dry_temp")
         )
         humidity = _safe_int(unit_data.get("humidity"))
+        humidity_raw = _safe_int(unit_data.get("humidity_raw"))
+        dry_filament = str(dry_setting.get("dry_filament") or "").upper()
+        dry_temperature = _safe_int(dry_setting.get("dry_temperature"))
+        dry_duration = _safe_int(dry_setting.get("dry_duration"))
         slots = []
         for tray_data in unit_data.get("tray", []):
             tray_id = int(tray_data.get("id", 0))
@@ -749,11 +762,17 @@ def _parse_ams(dump: dict) -> list[dict]:
                 "unit": unit_id,
                 "label": _AMS_LABELS.get(unit_id, f"AMS {unit_id + 1}"),
                 "slots": slots,
-                "humidity": humidity,
+                "humidity": humidity_raw if humidity_raw is not None else humidity,
+                "humidity_level": humidity,
                 "temperature": unit_temp,
                 "dry_time": dry_time,
                 "drying": bool(dry_time and dry_time > 0),
-                "dry_capable": unit_id >= 128 or dry_time is not None or unit_temp is not None,
+                "dry_capable": unit_id >= 128 or bool(dry_setting),
+                "dry_setting": {
+                    "filament": dry_filament,
+                    "temperature": dry_temperature,
+                    "duration": dry_duration,
+                },
             })
 
     return result

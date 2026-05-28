@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 28 May 2026 (Session 28.15 AMS drying control)_
+_Last updated 28 May 2026 (Session 28.16 AMS drying presets)_
 
 ## Current state
 
@@ -723,6 +723,13 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Heated AMS units such as AMS HT can be started/stopped from the live AMS panel using Bambu `ams_filament_drying`.
 - Default manual dry cycle is conservative: 45°C for 12 hours, no tray rotation; Stop sends Bambu's drying-off payload.
 - Static cache-bust bumped to `v=72`.
+
+### Session 28.16 AMS drying presets
+- Raw H2D MQTT inspection showed `humidity_raw` is the actual RH value and `humidity` is Bambu's level indicator.
+- AMS parsing now uses `humidity_raw` for `% RH` and keeps Bambu's level separately as `humidity_level`.
+- Drying payload now includes Bambu's reported setting fields: `dry_filament`, `dry_temperature`, and `dry_duration`.
+- Drying now opens a Flightdeck dialog with filament presets (`PLA`, `PETG`, `ABS`, `ASA`, `TPU`, `PA`, `PC`), temperature, duration, and rotate option.
+- Static cache-bust bumped to `v=73`.
 
 ---
 

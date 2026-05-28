@@ -954,18 +954,15 @@ document.getElementById('view-printer').addEventListener('click', e => {
     e.preventDefault();
     e.stopPropagation();
     const enabled = dryBtn.dataset.enabled === 'true';
-    const old = dryBtn.textContent;
-    dryBtn.disabled = true;
-    dryBtn.textContent = enabled ? 'Starting' : 'Stopping';
-    sendAmsDry(dryBtn.dataset.printerId, dryBtn.dataset.amsId, enabled)
+    if (enabled) {
+      _openAmsDryDialog(dryBtn.dataset.printerId, Number(dryBtn.dataset.amsId));
+      return;
+    }
+    _setDryButtonPending(dryBtn, 'Stopping');
+    sendAmsDry({ printerId: dryBtn.dataset.printerId, amsId: dryBtn.dataset.amsId, enabled: false })
       .then(() => setTimeout(() => refreshPrinters(), 900))
       .catch(err => alert(err.message || 'AMS drying command failed'))
-      .finally(() => {
-        setTimeout(() => {
-          dryBtn.disabled = false;
-          dryBtn.textContent = old;
-        }, 1200);
-      });
+      .finally(() => setTimeout(() => _clearDryButtonPending(dryBtn), 1200));
     return;
   }
 
@@ -1223,9 +1220,11 @@ function _detailAmsPanel(p) {
   const units = p.ams.map(unit => {
     const drying = !!unit.drying;
     const dryTime = unit.dry_time ? formatEta(unit.dry_time * 60) : '';
+    const preset = unit.dry_setting || {};
     const meta = [
       unit.humidity != null ? `${unit.humidity}% RH` : '',
       unit.temperature != null ? `${Math.round(unit.temperature)}°` : '',
+      preset.filament && preset.temperature > 0 ? `${preset.filament} ${preset.temperature}°` : '',
       drying && dryTime ? `${dryTime} left` : '',
     ].filter(Boolean).join(' · ');
     const dryControl = unit.dry_capable
@@ -1265,9 +1264,110 @@ function _detailAmsPanel(p) {
   return `<div class="detail-panel">${title}<div class="ams-units">${units}</div></div>`;
 }
 
-async function sendAmsDry(printerId, amsId, enabled) {
+const _AMS_DRY_PRESETS = {
+  PLA:  { temp: 45, duration: 12 },
+  PETG: { temp: 55, duration: 12 },
+  ABS:  { temp: 65, duration: 12 },
+  ASA:  { temp: 65, duration: 12 },
+  TPU:  { temp: 55, duration: 8 },
+  PA:   { temp: 75, duration: 12 },
+  PC:   { temp: 75, duration: 12 },
+};
+
+function _setDryButtonPending(btn, text) {
+  btn.dataset.oldText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = text;
+}
+
+function _clearDryButtonPending(btn) {
+  btn.disabled = false;
+  btn.textContent = btn.dataset.oldText || btn.textContent;
+  delete btn.dataset.oldText;
+}
+
+function _openAmsDryDialog(printerId, amsId) {
+  const p = _latestPrinters.find(x => x.id === printerId);
+  const unit = (p?.ams || []).find(u => Number(u.unit) === Number(amsId));
+  const current = unit?.dry_setting || {};
+  const startFilament = current.filament || 'PLA';
+  const preset = _AMS_DRY_PRESETS[startFilament] || _AMS_DRY_PRESETS.PLA;
+  const startTemp = current.temperature > 0 ? current.temperature : preset.temp;
+  const startDuration = current.duration > 0 ? current.duration : preset.duration;
+  const options = Object.keys(_AMS_DRY_PRESETS).map(f =>
+    `<option value="${f}"${f === startFilament ? ' selected' : ''}>${f}</option>`
+  ).join('');
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal-box ams-dry-modal">
+      <div class="modal-header">
+        <span class="modal-title">AMS drying</span>
+        <button class="modal-close-btn">×</button>
+      </div>
+      <div class="ams-dry-form">
+        <label class="spool-form-label" for="ams-dry-filament">Filament</label>
+        <select id="ams-dry-filament" class="spool-form-input">${options}</select>
+        <label class="spool-form-label" for="ams-dry-temp">Temperature</label>
+        <div class="ams-dry-inline">
+          <input id="ams-dry-temp" class="spool-form-input spool-weight-input" type="number" min="45" max="85" value="${startTemp}">
+          <span>°C</span>
+        </div>
+        <label class="spool-form-label" for="ams-dry-duration">Duration</label>
+        <div class="ams-dry-inline">
+          <input id="ams-dry-duration" class="spool-form-input spool-weight-input" type="number" min="1" max="24" value="${startDuration}">
+          <span>hours</span>
+        </div>
+        <label class="ams-dry-check">
+          <input id="ams-dry-rotate" type="checkbox">
+          <span>Rotate spool during drying</span>
+        </label>
+      </div>
+      <div class="modal-actions">
+        <button class="modal-btn" id="ams-dry-cancel">Cancel</button>
+        <button class="modal-btn modal-btn-primary" id="ams-dry-start">Start drying</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+
+  const close = () => overlay.remove();
+  const filament = overlay.querySelector('#ams-dry-filament');
+  const temp = overlay.querySelector('#ams-dry-temp');
+  const duration = overlay.querySelector('#ams-dry-duration');
+  filament.addEventListener('change', () => {
+    const p = _AMS_DRY_PRESETS[filament.value] || _AMS_DRY_PRESETS.PLA;
+    temp.value = p.temp;
+    duration.value = p.duration;
+  });
+  overlay.querySelector('.modal-close-btn').addEventListener('click', close);
+  overlay.querySelector('#ams-dry-cancel').addEventListener('click', close);
+  overlay.querySelector('#ams-dry-start').addEventListener('click', async e => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    btn.textContent = 'Starting...';
+    try {
+      await sendAmsDry({
+        printerId,
+        amsId,
+        enabled: true,
+        filament: filament.value,
+        temp: Number(temp.value),
+        duration: Number(duration.value),
+        rotateTray: overlay.querySelector('#ams-dry-rotate').checked,
+      });
+      close();
+      setTimeout(() => refreshPrinters(), 900);
+    } catch (err) {
+      alert(err.message || 'AMS drying command failed');
+      btn.disabled = false;
+      btn.textContent = 'Start drying';
+    }
+  });
+}
+
+async function sendAmsDry({ printerId, amsId, enabled, filament = 'PLA', temp = 45, duration = 12, rotateTray = false }) {
   const body = enabled
-    ? { enabled: true, temp: 45, duration: 12, rotate_tray: false }
+    ? { enabled: true, filament, temp, duration, rotate_tray: rotateTray }
     : { enabled: false };
   const resp = await fetch(`/api/printers/${encodeURIComponent(printerId)}/ams/${encodeURIComponent(amsId)}/dry`, {
     method: 'POST',

@@ -474,6 +474,7 @@ class SetTempRequest(BaseModel):
 
 class AmsDryRequest(BaseModel):
     enabled: bool
+    filament: str = "PLA"
     temp: int = 45
     duration: int = 12
     rotate_tray: bool = False
@@ -536,6 +537,7 @@ async def control_ams_drying(printer_id: str, ams_id: int, req: AmsDryRequest):
                 p.set_ams_drying,
                 ams_id,
                 req.enabled,
+                filament=req.filament,
                 temp=req.temp,
                 duration=req.duration,
                 rotate_tray=req.rotate_tray,
@@ -543,7 +545,7 @@ async def control_ams_drying(printer_id: str, ams_id: int, req: AmsDryRequest):
         except Exception as exc:
             raise HTTPException(status_code=502, detail=str(exc))
         action = "ams_drying_started" if req.enabled else "ams_drying_stopped"
-        db.log_decision(printer_id, action, f"AMS {ams_id} temp={req.temp} duration={req.duration}h")
+        db.log_decision(printer_id, action, f"AMS {ams_id} {req.filament} temp={req.temp} duration={req.duration}h")
         return {"ok": bool(ok)}
 
     raise HTTPException(status_code=404, detail="Bambu printer not found")
