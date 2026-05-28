@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 28 May 2026 (Session 28.3 fixed spool cockpit)_
+_Last updated 28 May 2026 (Session 28.4 H2D camera + Spools top-level)_
 
 ## Current state
 
@@ -650,6 +650,13 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Both Cards and Table views use the same dedicated `#spool-list` scroll region.
 - Table headers now stay visible inside the scrolling list.
 - Static cache-bust bumped to `v=61`.
+
+### Session 28.4 H2D camera + Spools top-level
+- Spools moved out of Settings into its own top-level `#/spools` view; Settings no longer shows a Spools subtab.
+- Old `#/settings/spools` routes now land on the top-level Spools view.
+- Bambu RTSP camera proxy now transcodes a lighter 1280px-wide MJPEG stream at 8fps/q5 with low-latency ffmpeg flags to help H2D start reliably in-browser.
+- Frontend camera images now use cache-busted stream URLs and retry failed image loads.
+- Static cache-bust bumped to `v=62`.
 
 ---
 

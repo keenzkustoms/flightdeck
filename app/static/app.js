@@ -100,6 +100,7 @@ let _camerasFull = false;       // true once cameras grid has been fully rendere
 let _camZoom = 0;               // 0=normal, 1=wide, 2=fullscreen
 let _onSettings = false;        // true while settings view is active
 let _onFailures = false;        // true while failure review is active
+let _onSpools = false;          // true while spool inventory is active
 
 // ── Toast notifications ────────────────────────────────────────────────────
 
@@ -873,9 +874,10 @@ function parseRoute() {
   if (hash === '#/stats') return { view: 'stats' };
   if (hash === '#/queue') return { view: 'queue' };
   if (hash === '#/failures') return { view: 'failures' };
+  if (hash === '#/spools') return { view: 'spools' };
   const settingsMatch = hash.match(/^#\/settings\/([^/]+)/);
+  if (settingsMatch?.[1] === 'spools') return { view: 'spools' };
   if (settingsMatch) return { view: 'settings', category: settingsMatch[1] };
-  if (hash === '#/spools') return { view: 'settings', category: 'spools' };
   if (hash === '#/settings') return { view: 'settings' };
   return { view: 'dashboard' };
 }
@@ -902,8 +904,10 @@ function router() {
 
   const wasOnSettings = _onSettings;
   const wasOnFailures = _onFailures;
+  const wasOnSpools = _onSpools;
   _onSettings = route.view === 'settings';
   _onFailures = route.view === 'failures';
+  _onSpools = route.view === 'spools';
 
   document.getElementById('view-dashboard').hidden = route.view !== 'dashboard';
   document.getElementById('view-stats').hidden     = route.view !== 'stats';
@@ -912,6 +916,7 @@ function router() {
   document.getElementById('view-cameras').hidden   = route.view !== 'cameras';
   document.getElementById('view-queue').hidden     = route.view !== 'queue';
   document.getElementById('view-failures').hidden  = route.view !== 'failures';
+  document.getElementById('view-spools').hidden    = route.view !== 'spools';
   document.getElementById('view-settings').hidden  = route.view !== 'settings';
 
   document.querySelectorAll('#tab-strip .tab').forEach(tab => {
@@ -923,10 +928,10 @@ function router() {
       (route.view === 'cameras'  && href === '#/cameras') ||
       (route.view === 'queue'    && href === '#/queue') ||
       (route.view === 'failures' && href === '#/failures') ||
+      (route.view === 'spools'   && href === '#/spools') ||
       (route.view === 'settings' && (
         href === '#/settings' ||
-        href === `#/settings/${_settingsCategory}` ||
-        (href === '#/spools' && _settingsCategory === 'spools')
+        href === `#/settings/${_settingsCategory}`
       ))
     );
   });
@@ -937,6 +942,7 @@ function router() {
   if (route.view === 'cameras') renderCamerasView();
   if (route.view === 'queue') renderQueueView();
   if (route.view === 'failures' && !wasOnFailures) renderFailuresView();
+  if (route.view === 'spools' && !wasOnSpools) renderSpoolsView();
   if (route.view === 'settings' && (!wasOnSettings || categoryBeforeRoute !== _settingsCategory)) renderSettingsView();
 }
 
@@ -2054,9 +2060,9 @@ async function renderPrinterDetail(id, subtab = 'live') {
     const existingImg = el.querySelector('#detail-cam-img');
     if (existingImg) existingImg.src = '';
 
-    const camUrl = _cameraUrlCache[id];
-    const camHtml = (camUrl && p.state !== 'offline')
-      ? `<img id="detail-cam-img" src="${camUrl}" alt="Live camera">`
+    const camSrc = _cameraStreamSrc(id);
+    const camHtml = (camSrc && p.state !== 'offline')
+      ? `<img id="detail-cam-img" src="${camSrc}" alt="Live camera" data-camera-id="${id}">`
       : `<div class="camera-hero-offline">${p.state === 'offline' ? 'Printer offline' : 'No camera configured'}</div>`;
 
     const printerColor = _printerColor(id);
@@ -2079,6 +2085,7 @@ async function renderPrinterDetail(id, subtab = 'live') {
           <div id="detail-objects"></div>
         </div>
       </div>`;
+    _attachCameraRetries(el);
 
     // Click cycles — desktop: normal→wide→fullscreen→normal; mobile: normal↔fullscreen
     _camZoom = 0;
@@ -2119,10 +2126,10 @@ async function renderPrinterDetail(id, subtab = 'live') {
   } else {
     // Restore camera stream if it was stopped when navigating away and back.
     const camImg = el.querySelector('#detail-cam-img');
-    const camUrl = _cameraUrlCache[id];
-    if (camImg?.dataset.stopped && camUrl && p.state !== 'offline') {
+    const camSrc = _cameraStreamSrc(id);
+    if (camImg?.dataset.stopped && camSrc && p.state !== 'offline') {
       delete camImg.dataset.stopped;
-      camImg.src = camUrl;
+      camImg.src = camSrc;
     }
 
     const ctrlEl = el.querySelector('.detail-controls-wrap');
@@ -2377,10 +2384,31 @@ function _camHeaderInner(p) {
   <span class="badge badge-${p.state}">${badgeLabel}</span>`;
 }
 
+function _cameraStreamSrc(printerId) {
+  const url = _cameraUrlCache[printerId];
+  if (!url) return null;
+  return `${url}${url.includes('?') ? '&' : '?'}t=${Date.now()}`;
+}
+
+function _attachCameraRetries(root) {
+  root.querySelectorAll('img[data-camera-id]').forEach(img => {
+    let tries = 0;
+    img.addEventListener('error', () => {
+      if (tries >= 3) return;
+      tries += 1;
+      const url = _cameraUrlCache[img.dataset.cameraId];
+      if (!url) return;
+      setTimeout(() => {
+        img.src = `${url}${url.includes('?') ? '&' : '?'}retry=${Date.now()}`;
+      }, 1200 * tries);
+    });
+  });
+}
+
 function _camTileHtml(p) {
-  const camUrl = _cameraUrlCache[p.id];
-  const feed = (camUrl && p.state !== 'offline')
-    ? `<img src="${camUrl}" alt="${p.custom_name}">`
+  const camSrc = _cameraStreamSrc(p.id);
+  const feed = (camSrc && p.state !== 'offline')
+    ? `<img src="${camSrc}" alt="${p.custom_name}" data-camera-id="${p.id}">`
     : `<div class="cam-tile-offline">${p.state === 'offline' ? 'Offline' : 'No camera'}</div>`;
   return `<div class="cam-tile" data-printer-id="${p.id}" tabindex="0">
     <div class="cam-tile-header">${_camHeaderInner(p)}</div>
@@ -2414,6 +2442,7 @@ async function renderCamerasView() {
   }));
 
   el.innerHTML = _latestPrinters.map(_camTileHtml).join('');
+  _attachCameraRetries(el);
 
   el.querySelectorAll('.cam-tile[data-printer-id]').forEach(tile => {
     tile.addEventListener('click', () => location.hash = `#/printer/${tile.dataset.printerId}`);
@@ -2639,7 +2668,6 @@ const _SETTINGS_CATEGORIES = [
   { id: 'slicer',     label: 'Slicer'     },
   { id: 'filament',   label: 'Filament'   },
   { id: 'locations',  label: 'Locations'  },
-  { id: 'spools',     label: 'Spools'     },
 ];
 
 async function refreshPrinters() {
@@ -4191,7 +4219,11 @@ function _spoolsCategoryHtml(spools, summary, costs, intelligence = {}) {
     <div id="spool-list"></div>`;
 }
 
-function _attachSpoolListEvents(el, listEl, refreshCategory = 'spools') {
+function _refreshSpoolsSurface() {
+  return location.hash === '#/spools' ? renderSpoolsView() : _renderSettingsContent('spools');
+}
+
+function _attachSpoolListEvents(el, listEl, refresh = _refreshSpoolsSurface) {
   listEl.querySelectorAll('.spool-action-btn[data-action]').forEach(btn => {
     btn.addEventListener('click', async e => {
       e.stopPropagation();
@@ -4199,7 +4231,7 @@ function _attachSpoolListEvents(el, listEl, refreshCategory = 'spools') {
       const costs = await fetch('/api/filament/costs').then(r => r.json()).catch(() => []);
       if (action === 'edit') {
         const spool = _allSpools.find(s => s.id == id);
-        if (spool) _openSpoolModal(costs, () => _renderSettingsContent(refreshCategory), spool);
+        if (spool) _openSpoolModal(costs, refresh, spool);
       } else if (action === 'label') {
         btn.disabled = true;
         const old = btn.textContent;
@@ -4231,7 +4263,7 @@ function _attachSpoolListEvents(el, listEl, refreshCategory = 'spools') {
             body: JSON.stringify({ empty_spool_weight_g: empty }),
           });
           if (!r.ok) throw new Error(_scaleFriendlyMessage((await r.json()).detail || 'Scale read failed'));
-          await _renderSettingsContent(refreshCategory);
+          await refresh();
         } catch (err) {
           alert(_scaleFriendlyMessage(err.message || 'Scale read failed'));
           btn.textContent = old;
@@ -4240,19 +4272,19 @@ function _attachSpoolListEvents(el, listEl, refreshCategory = 'spools') {
         }
       } else if (action === 'duplicate') {
         const spool = _allSpools.find(s => s.id == id);
-        if (spool) _openSpoolModal(costs, () => _renderSettingsContent(refreshCategory), {...spool, id: null, location_printer_id: null, location_slot: null});
+        if (spool) _openSpoolModal(costs, refresh, {...spool, id: null, location_printer_id: null, location_slot: null});
       } else if (action === 'archive') {
         if (!confirm('Archive this spool?')) return;
         await fetch(`/api/spools/${id}/archive`, { method: 'POST' });
-        _renderSettingsContent(refreshCategory);
+        refresh();
       } else if (action === 'reset') {
         if (!confirm('Reset remaining weight to label weight?')) return;
         await fetch(`/api/spools/${id}/reset_weight`, { method: 'POST' });
-        _renderSettingsContent(refreshCategory);
+        refresh();
       } else if (action === 'delete') {
         if (!confirm('Permanently delete this spool?')) return;
         await fetch(`/api/spools/${id}`, { method: 'DELETE' });
-        _renderSettingsContent(refreshCategory);
+        refresh();
       }
     });
   });
@@ -4260,7 +4292,7 @@ function _attachSpoolListEvents(el, listEl, refreshCategory = 'spools') {
 
 function _attachSpoolsEvents(el, costs) {
   el.querySelector('.spool-add-btn')?.addEventListener('click', () =>
-    _openSpoolModal(costs, () => _renderSettingsContent('spools'))
+    _openSpoolModal(costs, _refreshSpoolsSurface)
   );
 
   // Filter chips
@@ -4928,7 +4960,7 @@ function _attachLocationsEvents(el, locations) {
 async function _renderSettingsContent(category) {
   const el = document.getElementById('settings-content');
   if (!el) return;
-  el.classList.toggle('settings-content-spools', category === 'spools');
+  el.classList.remove('settings-content-spools');
 
   if (category === 'printers') {
     el.innerHTML = `<div class="detail-placeholder" style="min-height:10rem">Loading…</div>`;
@@ -4971,19 +5003,30 @@ async function _renderSettingsContent(category) {
     _allSpools = spools;
     el.innerHTML = _locationsCategoryHtml(locations);
     _attachLocationsEvents(el, locations);
-  } else if (category === 'spools') {
-    el.innerHTML = `<div class="detail-placeholder" style="min-height:10rem">Loading…</div>`;
-    const [spools, summary, costs, locations, intelligence] = await Promise.all([
-      fetch('/api/spools').then(r => r.json()).catch(() => []),
-      fetch('/api/spools/summary').then(r => r.json()).catch(() => ({})),
-      fetch('/api/filament/costs').then(r => r.json()).catch(() => []),
-      fetch('/api/spool-locations').then(r => r.json()).catch(() => []),
-      fetch('/api/spools/intelligence').then(r => r.json()).catch(() => ({})),
-    ]);
-    _spoolLocations = locations;
-    el.innerHTML = _spoolsCategoryHtml(spools, summary, costs, intelligence);
-    _attachSpoolsEvents(el, costs);
   }
+}
+
+async function _renderSpoolsContent(el) {
+  if (!el) return;
+  el.classList.add('settings-content-spools');
+  el.innerHTML = `<div class="detail-placeholder" style="min-height:10rem">Loading…</div>`;
+  const [spools, summary, costs, locations, intelligence] = await Promise.all([
+    fetch('/api/spools').then(r => r.json()).catch(() => []),
+    fetch('/api/spools/summary').then(r => r.json()).catch(() => ({})),
+    fetch('/api/filament/costs').then(r => r.json()).catch(() => []),
+    fetch('/api/spool-locations').then(r => r.json()).catch(() => []),
+    fetch('/api/spools/intelligence').then(r => r.json()).catch(() => ({})),
+  ]);
+  _spoolLocations = locations;
+  el.innerHTML = _spoolsCategoryHtml(spools, summary, costs, intelligence);
+  _attachSpoolsEvents(el, costs);
+}
+
+async function renderSpoolsView() {
+  const body = document.getElementById('spools-body');
+  if (!body) return;
+  body.innerHTML = `<div class="settings-content settings-content-spools" id="spools-content"></div>`;
+  await _renderSpoolsContent(body.querySelector('#spools-content'));
 }
 
 async function renderSettingsView() {
@@ -5001,7 +5044,7 @@ async function renderSettingsView() {
   body.querySelectorAll('.settings-nav-item').forEach(item => {
     item.addEventListener('click', () => {
       _settingsCategory = item.dataset.category;
-      const targetHash = _settingsCategory === 'spools' ? '#/spools' : `#/settings/${_settingsCategory}`;
+      const targetHash = `#/settings/${_settingsCategory}`;
       if (location.hash !== targetHash) history.replaceState(null, '', targetHash);
       body.querySelectorAll('.settings-nav-item').forEach(i =>
         i.classList.toggle('active', i === item)
@@ -5009,7 +5052,6 @@ async function renderSettingsView() {
       document.querySelectorAll('#tab-strip .tab').forEach(tab => {
         const href = tab.getAttribute('href');
         tab.classList.toggle('active',
-          (href === '#/spools' && _settingsCategory === 'spools') ||
           (href === `#/settings/${_settingsCategory}`) ||
           (href === '#/settings' && _settingsCategory === 'printers')
         );
