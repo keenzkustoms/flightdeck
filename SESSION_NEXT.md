@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 28 May 2026 (Session 28.40 Catalogue chip cleanup)_
+_Last updated 28 May 2026 (Session 28.41 AMS active-slot deduction hardening)_
 
 ## Current state
 
@@ -9,6 +9,26 @@ Service running at:
 - `http://flightdeck.local:8000`
 - `http://192.168.4.127:8000`
 - **`https://flightdeck.tail7de73e.ts.net`** (Tailscale Serve — HTTPS, used for PWA / notifications)
+
+---
+
+## What was built — Session 28.41 (AMS active-slot deduction hardening — 28 May)
+
+Real print testing on H2D exposed a restart-sensitive spool deduction bug: a single-colour Bambu print could deduct evenly from every assigned AMS/HT slot if Flightdeck restarted between print start and print finish.
+
+### Fix
+- Bambu AMS print-start snapshots now persist the active `tray_now` slot in two ways:
+  - per-slot `"active": true` on the slot that the printer reports as feeding
+  - snapshot `__meta__.active_slot` when Flightdeck captured the active slot in memory
+- `db.deduct_spool_usage()` now recovers the active slot from persisted snapshot metadata when its in-memory `active_slot` argument is missing.
+- If metadata is missing but exactly one snapshot slot is marked active, deduction uses that slot instead of splitting grams across all loaded spools.
+
+### Behaviour
+- Future Bambu spool deductions survive a service restart between print start and print finish.
+- If Flightdeck truly cannot identify an active slot, it keeps the existing conservative equal-split fallback rather than guessing.
+
+### Verification
+- Python compile: `python -m py_compile app/db.py app/printers/bambu.py`
 
 ---
 

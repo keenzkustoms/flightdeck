@@ -157,6 +157,8 @@ class BambuPrinter:
                         db.log_decision(self.id, "spool_missing",
                                        f"No spool assigned to AMS slot {slot_idx}",
                                        print_id=self._current_print_id)
+                if self._ams_active_slot_at_start is not None:
+                    enriched["__meta__"] = {"active_slot": self._ams_active_slot_at_start}
                 db.write_slot_snapshot(self._current_print_id, enriched)
                 log.info("AMS slot snapshot for %s print_id=%d: slots=%s active=%s",
                          self.id, self._current_print_id, list(raw_snap.keys()),
@@ -816,6 +818,7 @@ def _safe_float(value) -> Optional[float]:
 def _snapshot_ams_slots(print_data: dict) -> dict[int, dict]:
     """Capture AMS slot state at print start. Returns {slot_index: slot_info}."""
     ams_raw = print_data.get("ams", {})
+    tray_now = int(ams_raw.get("tray_now", 255))
     result: dict[int, dict] = {}
     for unit_data in ams_raw.get("ams", []):
         unit_id = int(unit_data.get("id", 0))
@@ -833,6 +836,7 @@ def _snapshot_ams_slots(print_data: dict) -> dict[int, dict]:
                 "color": color,
                 "uuid": tray_data.get("tray_uuid", ""),
                 "remain_pct": tray_data.get("remain", -1),
+                "active": tray_now == slot_index,
             }
     return result
 

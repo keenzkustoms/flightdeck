@@ -1770,6 +1770,17 @@ def deduct_spool_usage(
             log.info("No slot snapshot for print %d, skipping spool deduction", print_id)
             return
         snapshot = json.loads(row["ams_slot_snapshot"])
+        meta = snapshot.pop("__meta__", {}) if isinstance(snapshot, dict) else {}
+
+    if active_slot is None:
+        try:
+            active_slot = int(meta.get("active_slot")) if meta.get("active_slot") is not None else None
+        except (TypeError, ValueError):
+            active_slot = None
+    if active_slot is None:
+        active_slots = [int(s) for s, d in snapshot.items() if isinstance(d, dict) and d.get("active")]
+        if len(active_slots) == 1:
+            active_slot = active_slots[0]
 
     # snapshot: {slot_str: {... "spool_id": int|null}}
     slots_with = [(int(s), d["spool_id"]) for s, d in snapshot.items() if d.get("spool_id")]
