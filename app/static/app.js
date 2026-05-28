@@ -1296,6 +1296,7 @@ function _clearDryButtonPending(btn) {
 function _openAmsDryDialog(printerId, amsId) {
   const p = _latestPrinters.find(x => x.id === printerId);
   const unit = (p?.ams || []).find(u => Number(u.unit) === Number(amsId));
+  const reasonText = _amsDryReasonText(unit?.dry_sf_reason);
   const current = unit?.dry_setting || {};
   const startFilament = current.filament || 'PLA';
   const preset = _AMS_DRY_PRESETS[startFilament] || _AMS_DRY_PRESETS.PLA;
@@ -1325,6 +1326,7 @@ function _openAmsDryDialog(printerId, amsId) {
         <span class="ams-dry-status-chip">${esc(tempNow)}</span>
         <span class="ams-dry-status-chip ${drying ? 'ams-dry-running' : ''}">${drying ? `Drying${dryTime ? ` · ${dryTime} left` : ''}` : 'Idle'}</span>
       </div>
+      ${reasonText ? `<div class="ams-dry-blocked">${esc(reasonText)}</div>` : ''}
       <div class="ams-dry-form">
         <label class="ams-dry-field" for="ams-dry-filament">
           <span>Filament</span>
@@ -1353,7 +1355,7 @@ function _openAmsDryDialog(printerId, amsId) {
       <div class="modal-actions ams-dry-actions">
         ${drying ? '<button class="modal-btn ams-dry-stop" id="ams-dry-stop">Stop drying</button>' : ''}
         <button class="modal-btn" id="ams-dry-cancel">Cancel</button>
-        <button class="modal-btn modal-btn-primary ams-dry-start" id="ams-dry-start">Start drying</button>
+        <button class="modal-btn modal-btn-primary ams-dry-start" id="ams-dry-start" ${reasonText ? 'disabled' : ''}>Start drying</button>
       </div>
     </div>`;
   document.body.appendChild(overlay);
@@ -1414,6 +1416,25 @@ function _openAmsDryDialog(printerId, amsId) {
       btn.textContent = 'Start drying';
     }
   });
+}
+
+function _amsDryReasonText(reasons = []) {
+  const messages = {
+    0: 'Printer is busy.',
+    1: 'Insufficient power; connect an external AMS power adapter or stop other AMS drying.',
+    2: 'AMS is busy.',
+    3: 'Filament is at the AMS outlet; retract/unload it first.',
+    4: 'AMS is already starting a drying cycle.',
+    5: 'Drying is not supported in the current mode.',
+    6: 'AMS is already drying.',
+    7: 'AMS firmware is upgrading.',
+    8: 'Plug in the external AMS power adapter to start drying.',
+  };
+  for (const reason of reasons || []) {
+    const msg = messages[Number(reason)];
+    if (msg) return msg;
+  }
+  return '';
 }
 
 async function sendAmsDry({ printerId, amsId, enabled, filament = 'PLA', temp = 45, duration = 12, rotateTray = false }) {

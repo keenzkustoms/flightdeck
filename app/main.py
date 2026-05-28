@@ -529,9 +529,32 @@ async def control_printer(printer_id: str, req: ControlRequest):
 
 @app.post("/api/printers/{printer_id}/ams/{ams_id}/dry")
 async def control_ams_drying(printer_id: str, ams_id: int, req: AmsDryRequest):
+    reason_messages = {
+        0: "Printer is busy",
+        1: "Insufficient power; connect an external AMS power adapter or stop other AMS drying",
+        2: "AMS is busy",
+        3: "Filament is at the AMS outlet; retract/unload it first",
+        4: "AMS is already starting a drying cycle",
+        5: "Drying is not supported in the current mode",
+        6: "AMS is already drying",
+        7: "AMS firmware is upgrading",
+        8: "Plug in the external AMS power adapter to start drying",
+    }
     for p in _bambu:
         if p.id != printer_id:
             continue
+        if req.enabled:
+            status = _latest_printers.get(printer_id)
+            target_ams = None
+            for unit in (status or {}).get("ams") or []:
+                if int(unit.get("unit", -1)) == int(ams_id):
+                    target_ams = unit
+                    break
+            if target_ams:
+                for reason in target_ams.get("dry_sf_reason") or []:
+                    msg = reason_messages.get(int(reason))
+                    if msg:
+                        raise HTTPException(status_code=409, detail=msg)
         try:
             ok = await asyncio.to_thread(
                 p.set_ams_drying,

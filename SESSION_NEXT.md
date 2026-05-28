@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 28 May 2026 (Session 28.22 AMS drying polish/fix)_
+_Last updated 28 May 2026 (Session 28.23 AMS drying diagnostics)_
 
 ## Current state
 
@@ -767,6 +767,13 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Changed AMS drying UI accents from orange to Flightdeck blue.
 - Tightened AMS slot sizing and spacing so four-slot AMS rows fit in the live sidebar without wrapping.
 - Static cache-bust bumped to `v=78`.
+
+### Session 28.23 AMS drying diagnostics
+- Matched Flightdeck's AMS drying payload to Bambuddy's current wire shape, including `filament` and `close_power_conflict`.
+- Parsed Bambu `dry_sf_reason`, `dry_status`, and `dry_sub_status` from raw AMS MQTT.
+- Added backend guardrails so blocked drying starts return a useful 409 error instead of silently doing nothing.
+- Added AMS drying modal warning text for known block reasons such as filament sitting at the AMS outlet.
+- Static cache-bust bumped to `v=79`.
 
 ---
 

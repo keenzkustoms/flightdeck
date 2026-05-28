@@ -510,12 +510,14 @@ class BambuPrinter:
                 "print": {
                     "command": "ams_filament_drying",
                     "ams_id": int(ams_id),
-                    "cooling_temp": 45,
+                    "temp": temp,
+                    "cooling_temp": 20,
                     "duration": duration,
                     "humidity": 0,
                     "mode": 1,
                     "rotate_tray": bool(rotate_tray),
-                    "temp": temp,
+                    "filament": str(filament or "PLA").upper(),
+                    "close_power_conflict": False,
                 }
             }
         else:
@@ -523,12 +525,14 @@ class BambuPrinter:
                 "print": {
                     "command": "ams_filament_drying",
                     "ams_id": int(ams_id),
-                    "cooling_temp": 40,
+                    "temp": 0,
+                    "cooling_temp": 0,
                     "duration": 0,
                     "humidity": 0,
                     "mode": 0,
                     "rotate_tray": False,
-                    "temp": 0,
+                    "filament": "",
+                    "close_power_conflict": False,
                 }
             }
         return self._printer.mqtt_client._PrinterMQTTClient__publish_command(payload)
@@ -728,6 +732,22 @@ def _parse_ams(dump: dict) -> list[dict]:
         dry_filament = str(dry_setting.get("dry_filament") or "").upper()
         dry_temperature = _safe_int(dry_setting.get("dry_temperature"))
         dry_duration = _safe_int(dry_setting.get("dry_duration"))
+        dry_reasons = []
+        if isinstance(unit_data.get("dry_sf_reason"), list):
+            for reason in unit_data.get("dry_sf_reason") or []:
+                parsed = _safe_int(reason)
+                if parsed is not None:
+                    dry_reasons.append(parsed)
+        dry_status = None
+        dry_sub_status = None
+        info = unit_data.get("info")
+        if info is not None:
+            try:
+                info_val = int(str(info), 16)
+                dry_status = (info_val >> 4) & 0xF
+                dry_sub_status = (info_val >> 22) & 0xF
+            except (TypeError, ValueError):
+                pass
         slots = []
         for tray_data in unit_data.get("tray", []):
             tray_id = int(tray_data.get("id", 0))
@@ -762,6 +782,9 @@ def _parse_ams(dump: dict) -> list[dict]:
                 "dry_time": dry_time,
                 "drying": bool(dry_time and dry_time > 0),
                 "dry_capable": unit_id >= 128 or bool(dry_setting),
+                "dry_status": dry_status,
+                "dry_sub_status": dry_sub_status,
+                "dry_sf_reason": dry_reasons,
                 "dry_setting": {
                     "filament": dry_filament,
                     "temperature": dry_temperature,

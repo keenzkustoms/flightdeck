@@ -1711,6 +1711,17 @@ header {
   background: rgba(34,197,94,0.08);
 }
 
+.ams-dry-blocked {
+  margin-top: 0.65rem;
+  border: 1px solid rgba(239,68,68,0.42);
+  border-radius: 0.5rem;
+  background: rgba(239,68,68,0.1);
+  color: #fca5a5;
+  padding: 0.65rem 0.75rem;
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
 .ams-dry-field {
   display: grid;
   grid-template-columns: 1fr auto;
