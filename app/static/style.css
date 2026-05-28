@@ -2664,6 +2664,15 @@ header {
   color: var(--paused);
 }
 
+.print-spool-reconciled {
+  border: 1px solid rgba(34, 197, 94, 0.35);
+  background: rgba(34, 197, 94, 0.08);
+  color: var(--idle);
+  border-radius: 4px;
+  padding: 0.18rem 0.45rem;
+  font-size: 0.72rem;
+}
+
 .print-notes-view {
   display: flex;
   align-items: flex-start;

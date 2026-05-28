@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 29 May 2026 (Session 28.45 Smart weigh-in trial)_
+_Last updated 29 May 2026 (Session 28.46 Reconciled usage state)_
 
 ## Current state
 
@@ -108,6 +108,13 @@ First pass at making reconciliation useful without turning it into operator home
 
 ### Cache
 - Static cache-bust bumped to `app.js?v=99` and `style.css?v=87`.
+
+---
+
+## What was built — Session 28.46 (Reconciled usage state — 29 May)
+
+- History spool usage rows that already have `actual_grams` now show a quiet green `Reconciled` state instead of continuing to show the `Reconcile` button.
+- Static cache-bust bumped to `app.js?v=100` and `style.css?v=88`.
 
 ---
 
