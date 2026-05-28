@@ -80,12 +80,14 @@ Real H2D testing showed the slicer filament estimate can be much lower than the 
   - `remaining_start_g` when captured
 - Added `POST /api/prints/{print_id}/spool_usage/{spool_id}/reconcile`.
 - Reconcile updates the spool's actual remaining grams, annotates the print usage with `actual_grams` and `waste_grams`, and logs `spool_reconciled` to the decision trail.
+- Reconcile can optionally mark one spool as the only spool actually used, removing other usage rows and restoring their wrongly deducted grams.
 - Moved spool deduction decision logging outside the write transaction to stop the non-fatal SQLite lock warning during `spool_deducted` logging.
 
 ### UI
 - History print detail spool usage rows now show a `Reconcile` action.
 - Reconcile prompts for the actual remaining grams after a re-weigh.
 - If a print predates start-weight capture, Reconcile can also accept a one-off starting gram value.
+- If a print has multiple recorded usage rows, Reconcile asks whether the selected spool was the only actual spool used.
 - If actual usage exceeds slicer-recorded model grams, the row shows model grams plus purge/waste grams.
 - Static cache-bust bumped to `app.js?v=98` and `style.css?v=86`.
 

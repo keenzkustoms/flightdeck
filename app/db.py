@@ -1855,6 +1855,7 @@ def reconcile_spool_usage(
     actual_remaining_g: float,
     *,
     start_remaining_g: Optional[float] = None,
+    exclusive: bool = False,
     reading_g: Optional[float] = None,
     empty_spool_weight_g: Optional[float] = None,
 ) -> Optional[dict]:
@@ -1901,6 +1902,21 @@ def reconcile_spool_usage(
         except (TypeError, ValueError):
             start_remaining = current_remaining + recorded
 
+        restored = []
+        if exclusive:
+            for entry in list(usage):
+                other_id = int(entry.get("spool_id") or 0)
+                if not other_id or other_id == int(spool_id):
+                    continue
+                restore_g = float(entry.get("actual_grams") or entry.get("grams") or 0)
+                if restore_g > 0:
+                    conn.execute(
+                        "UPDATE spools SET remaining_g = remaining_g + ? WHERE id = ?",
+                        (restore_g, other_id),
+                    )
+                    restored.append({"spool_id": other_id, "grams": round(restore_g, 2)})
+            usage = [target]
+
         actual_loss = max(0.0, start_remaining - actual_remaining)
         waste = max(0.0, actual_loss - recorded)
         target["actual_grams"] = round(actual_loss, 2)
@@ -1931,6 +1947,8 @@ def reconcile_spool_usage(
     )
     if waste > 0:
         detail += f", purge/waste {waste:.1f}g"
+    if restored:
+        detail += f", restored {len(restored)} other spool(s)"
     log_decision(prow["printer_id"], "spool_reconciled", detail, print_id=print_id)
     return {
         "spool_id": spool_id,
@@ -1938,6 +1956,7 @@ def reconcile_spool_usage(
         "recorded_grams": round(recorded, 2),
         "actual_grams": round(actual_loss, 2),
         "waste_grams": round(waste, 2),
+        "restored": restored,
     }
 
 

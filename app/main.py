@@ -1109,6 +1109,7 @@ class SpoolWeightCorrection(BaseModel):
 class SpoolUsageReconcile(BaseModel):
     remaining_g: Optional[float] = None
     start_remaining_g: Optional[float] = None
+    exclusive: bool = False
     reading_g: Optional[float] = None
     empty_spool_weight_g: Optional[float] = None
 
@@ -1303,6 +1304,7 @@ async def reconcile_print_spool_usage(print_id: int, spool_id: int, body: SpoolU
         spool_id,
         remaining,
         start_remaining_g=body.start_remaining_g,
+        exclusive=body.exclusive,
         reading_g=body.reading_g,
         empty_spool_weight_g=body.empty_spool_weight_g,
     )

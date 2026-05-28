@@ -1810,11 +1810,15 @@ function _showPrintDetail(printerId, dateStr, print) {
           }
         }
       }
+      let exclusive = false;
+      if (print.spool_usage.length > 1) {
+        exclusive = confirm('Was this the only spool actually used for this print? OK will remove the other usage rows and restore their deducted grams.');
+      }
       const old = btn.textContent;
       btn.disabled = true;
       btn.textContent = '...';
       try {
-        const payload = { remaining_g: remaining };
+        const payload = { remaining_g: remaining, exclusive };
         if (startRemaining !== null) payload.start_remaining_g = startRemaining;
         const r = await fetch(`/api/prints/${printId}/spool_usage/${spoolId}/reconcile`, {
           method: 'POST',
@@ -1828,6 +1832,9 @@ function _showPrintDetail(printerId, dateStr, print) {
           usage.waste_grams = data.waste_grams;
           usage.remaining_after_g = data.remaining_g;
           if (startRemaining !== null) usage.remaining_start_g = startRemaining;
+        }
+        if (exclusive) {
+          print.spool_usage = print.spool_usage.filter(u => String(u.spool_id) === String(spoolId));
         }
         await _refreshSpoolsByPrinter();
         _showPrintDetail(printerId, dateStr, print);
