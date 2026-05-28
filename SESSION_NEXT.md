@@ -860,7 +860,8 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Add Spool modal now has a Catalogue search field and Sync button.
 - Selecting a catalogue result fills material, brand, subtype/product, colour name, hex, label weight, and tare if known.
 - Static cache-bust bumped to `v=91`.
-- Restart still pending because sudo requested a password during deploy; run `sudo systemctl restart flightdeck.service` or `sudo ./scripts/safe-restart-flightdeck.sh`, then press Sync in Add Spool.
+- Fixed catalogue sync fetch headers/fallback mirror and timestamp handling.
+- Sync verified on the Pi: imported 18k+ usable 1.75mm catalogue rows; `bambu white pla` returns Bambu Lab results.
 
 ---
 

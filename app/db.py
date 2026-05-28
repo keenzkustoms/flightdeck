@@ -1077,7 +1077,7 @@ def get_material_costs() -> list:
 
 
 def replace_filament_catalog(rows: list[dict], source: str = "open_filament_database") -> int:
-    now = _now()
+    now = datetime.utcnow().isoformat()
     with _conn() as conn:
         conn.execute("DELETE FROM filament_catalog WHERE source = ?", (source,))
         conn.executemany(

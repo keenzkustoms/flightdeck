@@ -940,7 +940,10 @@ class CostUpdate(BaseModel):
     empty_spool_weight_g: Optional[float] = None
 
 
-OPEN_FILAMENT_BASE = "https://api.openfilamentdatabase.org/csv"
+OPEN_FILAMENT_CSV_BASES = [
+    "https://api.openfilamentdatabase.org/csv",
+    "https://openfilamentcollective.github.io/open-filament-database/csv",
+]
 
 
 def _catalog_float(value: object) -> Optional[float]:
@@ -952,10 +955,22 @@ def _catalog_float(value: object) -> Optional[float]:
 
 
 def _catalog_rows(name: str) -> list[dict]:
-    url = f"{OPEN_FILAMENT_BASE}/{name}.csv"
-    with urllib.request.urlopen(url, timeout=30) as resp:
-        text = resp.read().decode("utf-8-sig")
-    return list(csv.DictReader(io.StringIO(text)))
+    last_error: Optional[Exception] = None
+    headers = {
+        "User-Agent": "Flightdeck/1.0 filament-catalog-sync",
+        "Accept": "text/csv,*/*",
+    }
+    for base in OPEN_FILAMENT_CSV_BASES:
+        url = f"{base}/{name}.csv"
+        try:
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=45) as resp:
+                text = resp.read().decode("utf-8-sig")
+            return list(csv.DictReader(io.StringIO(text)))
+        except Exception as exc:
+            last_error = exc
+            _app_log.warning("catalogue fetch failed for %s: %s", url, exc)
+    raise RuntimeError(f"Could not fetch {name}.csv: {last_error}")
 
 
 def _sync_open_filament_catalog() -> dict:
