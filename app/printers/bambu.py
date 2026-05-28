@@ -465,6 +465,33 @@ class BambuPrinter:
         if not ok_any:
             raise RuntimeError(f"Bambu light command failed: {mode}")
 
+    def set_ams_slot_filament(self, slot: int, spool: Optional[dict]) -> bool:
+        ams_id, tray_id = _split_ams_slot(slot)
+        if spool is None:
+            return self._printer.mqtt_client._PrinterMQTTClient__publish_command({
+                "print": {
+                    "command": "ams_filament_setting",
+                    "ams_id": ams_id,
+                    "tray_id": tray_id,
+                    "tray_info_idx": "",
+                    "tray_color": "00000000",
+                    "nozzle_temp_min": 0,
+                    "nozzle_temp_max": 0,
+                    "tray_type": "",
+                }
+            })
+
+        filament = _filament_for_spool(spool)
+        color = str(spool.get("color_hex") or "#808080").lstrip("#")[:6]
+        if len(color) != 6:
+            color = "808080"
+        return self._printer.set_filament_printer(
+            color.upper(),
+            filament,
+            ams_id=ams_id,
+            tray_id=tray_id,
+        )
+
     def set_temp(self, heater: str, target: int) -> None:
         if heater == "hotend":
             self._printer.set_nozzle_temperature(target)
@@ -598,6 +625,42 @@ def _read_light_state(print_data: dict) -> str:
     if any(m == "on" for m in known):
         return "on"
     return "off"
+
+
+def _split_ams_slot(slot: int) -> tuple[int, int]:
+    slot = int(slot)
+    return slot // 4, slot % 4
+
+
+def _filament_for_spool(spool: dict):
+    material = str(spool.get("material") or "").upper()
+    subtype = str(spool.get("subtype") or "").upper()
+    label = f"{material} {subtype}"
+
+    if "PA" in material and "CF" in label:
+        key = "PA_CF"
+    elif "PLA" in material and "CF" in label:
+        key = "PLA_CF"
+    elif "ABS" in material:
+        key = "ABS"
+    elif "ASA" in material:
+        key = "ASA"
+    elif "PETG" in material:
+        key = "PETG"
+    elif "TPU" in material:
+        key = "TPU"
+    elif "PC" in material:
+        key = "PC"
+    elif "PVA" in material:
+        key = "PVA"
+    elif "PA" in material:
+        key = "PA"
+    elif "PLA" in material:
+        key = "PLA"
+    else:
+        key = "PLA"
+
+    return bl.Filament(key)
 
 
 def _parse_ams(dump: dict) -> list[dict]:

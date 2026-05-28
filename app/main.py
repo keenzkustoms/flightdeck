@@ -1033,6 +1033,9 @@ async def create_spool(body: SpoolCreate):
             db.log_decision("system", "label_printed", f"Spool #{spool_id} auto-print")
         else:
             db.log_decision("system", "label_print_failed", f"Spool #{spool_id}: {_label_printer.last_error}")
+    if body.location_printer_id and body.location_slot is not None:
+        spool = db.get_spool(spool_id)
+        await _sync_bambu_ams_slot(body.location_printer_id, body.location_slot, spool)
     return {"id": spool_id}
 
 @app.put("/api/spools/{spool_id}")
@@ -1102,6 +1105,7 @@ async def correct_spool_weight(spool_id: int, body: SpoolWeightCorrection):
 
 @app.post("/api/spools/{spool_id}/move")
 async def move_spool(spool_id: int, body: SpoolMove):
+    before = db.get_spool(spool_id)
     result = db.move_spool(spool_id, body.printer_id, body.slot, body.storage_location_id)
     if not result["ok"]:
         conflict = db.get_spool(result["conflict_spool_id"])
@@ -1110,7 +1114,40 @@ async def move_spool(spool_id: int, body: SpoolMove):
             "conflict_spool_id": result["conflict_spool_id"],
             "conflict_spool": conflict,
         })
-    return {"ok": True}
+    ams_sync = None
+    if before and before.get("location_printer_id") and before.get("location_slot") is not None:
+        moved_slot = (
+            before.get("location_printer_id") != body.printer_id
+            or before.get("location_slot") != body.slot
+        )
+        if moved_slot:
+            ams_sync = await _sync_bambu_ams_slot(
+                before["location_printer_id"],
+                before["location_slot"],
+                None,
+            )
+    if body.printer_id and body.slot is not None:
+        spool = db.get_spool(spool_id)
+        ams_sync = await _sync_bambu_ams_slot(body.printer_id, body.slot, spool)
+    return {"ok": True, "ams_sync": ams_sync}
+
+
+async def _sync_bambu_ams_slot(printer_id: str, slot: int, spool: Optional[dict]) -> Optional[bool]:
+    for p in _bambu:
+        if p.id != printer_id:
+            continue
+        try:
+            ok = await asyncio.to_thread(p.set_ams_slot_filament, slot, spool)
+            action = "ams_slot_synced" if spool else "ams_slot_cleared"
+            target = f"{printer_id}:{slot}"
+            detail = f"{target} {'spool #' + str(spool['id']) if spool else 'empty'}"
+            db.log_decision(printer_id, action, detail)
+            return bool(ok)
+        except Exception as exc:
+            db.log_decision(printer_id, "ams_slot_sync_failed", f"{printer_id}:{slot}: {exc}")
+            log.warning("AMS slot sync failed for %s:%s: %s", printer_id, slot, exc)
+            return False
+    return None
 
 
 # ── Print queue ──────────────────────────────────────────────────────────

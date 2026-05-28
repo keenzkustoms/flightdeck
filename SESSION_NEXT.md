@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 28 May 2026 (Session 28.13 shelf location cleanup)_
+_Last updated 28 May 2026 (Session 28.14 AMS slot metadata sync)_
 
 ## Current state
 
@@ -710,6 +710,13 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Location fallback labels now read `Unassigned` instead of `Storage`.
 - The Locations settings content and each shelf's spool list are scrollable so long shelf lists remain reachable.
 - Static cache-bust bumped to `v=70`.
+
+### Session 28.14 AMS slot metadata sync
+- Assigning a Flightdeck spool to a Bambu AMS slot now best-effort syncs the printer's own AMS metadata using Bambu `ams_filament_setting`.
+- Moving a spool away from a Bambu AMS slot now best-effort clears that printer slot's filament metadata.
+- Generic Flightdeck materials are mapped to Bambu-compatible material families (`PLA`, `ASA`, `ABS`, `PETG`, `TPU`, etc.) before publishing.
+- The spool modal keeps the friendly `Storage:` label, while the Locations overview stays shelf-only.
+- Static cache-bust bumped to `v=71`.
 
 ---
 

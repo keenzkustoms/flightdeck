@@ -4464,7 +4464,7 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
   const printerOpts = _latestPrinters.map(p =>
     `<option value="${p.id}" data-kind="${p.kind}"${p0.location_printer_id===p.id?' selected':''}>${p.custom_name}</option>`
   ).join('');
-  const storageOpts = (_spoolLocations.length ? _spoolLocations : [{ id: '', name: 'Unassigned' }]).map(loc =>
+  const storageOpts = (_spoolLocations.length ? _spoolLocations : [{ id: '', name: 'Storage' }]).map(loc =>
     `<option value="${loc.id}"${String(p0.storage_location_id ?? '')===String(loc.id)?' selected':''}>${esc(loc.name)}</option>`
   ).join('');
 
@@ -4549,7 +4549,7 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
           <label class="spool-form-label">Location</label>
           <div class="spool-location-block">
             <label class="spool-radio-label">
-              <input type="radio" name="sm-loc" value="storage"${!p0.location_printer_id?' checked':''}> Shelved at:
+              <input type="radio" name="sm-loc" value="storage"${!p0.location_printer_id?' checked':''}> Storage:
             </label>
             <div id="sm-storage-selects" class="spool-location-selects${p0.location_printer_id?' hidden':''}">
               <select id="sm-storage-location" class="spool-form-input">${storageOpts}</select>
