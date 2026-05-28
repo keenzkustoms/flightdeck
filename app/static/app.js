@@ -949,6 +949,26 @@ document.getElementById('view-printer').addEventListener('click', e => {
 });
 
 document.getElementById('view-printer').addEventListener('click', e => {
+  const dryBtn = e.target.closest('[data-ams-dry]');
+  if (dryBtn) {
+    e.preventDefault();
+    e.stopPropagation();
+    const enabled = dryBtn.dataset.enabled === 'true';
+    const old = dryBtn.textContent;
+    dryBtn.disabled = true;
+    dryBtn.textContent = enabled ? 'Starting' : 'Stopping';
+    sendAmsDry(dryBtn.dataset.printerId, dryBtn.dataset.amsId, enabled)
+      .then(() => setTimeout(() => refreshPrinters(), 900))
+      .catch(err => alert(err.message || 'AMS drying command failed'))
+      .finally(() => {
+        setTimeout(() => {
+          dryBtn.disabled = false;
+          dryBtn.textContent = old;
+        }, 1200);
+      });
+    return;
+  }
+
   const slot = e.target.closest('[data-slot-edit]');
   if (!slot) return;
   e.preventDefault();
@@ -1201,6 +1221,18 @@ function _detailAmsPanel(p) {
 
   const title = `<div class="detail-panel-title">AMS</div>`;
   const units = p.ams.map(unit => {
+    const drying = !!unit.drying;
+    const dryTime = unit.dry_time ? formatEta(unit.dry_time * 60) : '';
+    const meta = [
+      unit.humidity != null ? `${unit.humidity}% RH` : '',
+      unit.temperature != null ? `${Math.round(unit.temperature)}°` : '',
+      drying && dryTime ? `${dryTime} left` : '',
+    ].filter(Boolean).join(' · ');
+    const dryControl = unit.dry_capable
+      ? `<button class="ams-dry-btn${drying ? ' ams-dry-active' : ''}"
+          data-ams-dry data-printer-id="${p.id}" data-ams-id="${unit.unit}" data-enabled="${drying ? 'false' : 'true'}"
+          title="${drying ? 'Stop AMS drying' : 'Start AMS drying'}">${drying ? 'Stop' : 'Dry'}</button>`
+      : '';
     const slots = unit.slots.map(slot => {
       const flatSlot = unit.unit * 4 + slot.idx;
       const loaded = (_latestSpoolsByPrinter[p.id] || []).find(s => Number(s.location_slot) === flatSlot);
@@ -1221,12 +1253,31 @@ function _detailAmsPanel(p) {
       </div>`;
     }).join('');
     return `<div class="ams-unit">
-      <span class="ams-unit-lbl">${unit.label ?? 'AMS ' + (unit.unit + 1)}</span>
+      <div class="ams-unit-head">
+        <span class="ams-unit-lbl">${unit.label ?? 'AMS ' + (unit.unit + 1)}</span>
+        ${meta ? `<span class="ams-unit-meta">${esc(meta)}</span>` : ''}
+        ${dryControl}
+      </div>
       <div class="ams-slots">${slots}</div>
     </div>`;
   }).join('');
 
   return `<div class="detail-panel">${title}<div class="ams-units">${units}</div></div>`;
+}
+
+async function sendAmsDry(printerId, amsId, enabled) {
+  const body = enabled
+    ? { enabled: true, temp: 45, duration: 12, rotate_tray: false }
+    : { enabled: false };
+  const resp = await fetch(`/api/printers/${encodeURIComponent(printerId)}/ams/${encodeURIComponent(amsId)}/dry`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}));
+    throw new Error(err.detail || 'AMS drying command failed');
+  }
 }
 
 // ── MMU panel ─────────────────────────────────────────────────────────────

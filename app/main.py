@@ -472,6 +472,13 @@ class SetTempRequest(BaseModel):
     target: int
 
 
+class AmsDryRequest(BaseModel):
+    enabled: bool
+    temp: int = 45
+    duration: int = 12
+    rotate_tray: bool = False
+
+
 @app.post("/api/printers/{printer_id}/set-temp")
 async def set_printer_temp(printer_id: str, req: SetTempRequest):
     if req.heater not in ("hotend", "bed", "chamber"):
@@ -517,6 +524,29 @@ async def control_printer(printer_id: str, req: ControlRequest):
             return {"ok": True}
 
     raise HTTPException(status_code=404, detail="printer not found")
+
+
+@app.post("/api/printers/{printer_id}/ams/{ams_id}/dry")
+async def control_ams_drying(printer_id: str, ams_id: int, req: AmsDryRequest):
+    for p in _bambu:
+        if p.id != printer_id:
+            continue
+        try:
+            ok = await asyncio.to_thread(
+                p.set_ams_drying,
+                ams_id,
+                req.enabled,
+                temp=req.temp,
+                duration=req.duration,
+                rotate_tray=req.rotate_tray,
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+        action = "ams_drying_started" if req.enabled else "ams_drying_stopped"
+        db.log_decision(printer_id, action, f"AMS {ams_id} temp={req.temp} duration={req.duration}h")
+        return {"ok": bool(ok)}
+
+    raise HTTPException(status_code=404, detail="Bambu printer not found")
 
 
 @app.get("/api/printers/{printer_id}/camera")

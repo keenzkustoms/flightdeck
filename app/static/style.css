@@ -1289,16 +1289,57 @@ header {
 
 .ams-units { display: flex; flex-direction: column; gap: 1rem; }
 
-.ams-unit { display: flex; align-items: flex-start; gap: 1rem; }
+.ams-unit {
+  display: grid;
+  grid-template-columns: 5.8rem minmax(0, 1fr);
+  gap: 0.75rem 1rem;
+  align-items: start;
+}
+
+.ams-unit-head {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.35rem;
+}
 
 .ams-unit-lbl {
   font-size: 0.7rem;
   color: var(--muted);
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  flex-shrink: 0;
-  width: 4rem;
-  padding-top: 10px;
+}
+
+.ams-unit-meta {
+  color: #7aa2d8;
+  font-size: 0.66rem;
+  line-height: 1.2;
+}
+
+.ams-dry-btn {
+  border: 1px solid #f59e0b;
+  background: rgba(245,158,11,0.08);
+  color: #fbbf24;
+  border-radius: 0.35rem;
+  padding: 0.2rem 0.45rem;
+  font-size: 0.66rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.ams-dry-btn:hover:not(:disabled) {
+  background: rgba(245,158,11,0.16);
+}
+
+.ams-dry-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.ams-dry-btn.ams-dry-active {
+  border-color: #ef4444;
+  background: rgba(239,68,68,0.1);
+  color: #fca5a5;
 }
 
 .ams-slots { display: flex; gap: 0.625rem; flex-wrap: wrap; }

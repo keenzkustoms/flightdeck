@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 28 May 2026 (Session 28.14 AMS slot metadata sync)_
+_Last updated 28 May 2026 (Session 28.15 AMS drying control)_
 
 ## Current state
 
@@ -717,6 +717,12 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Generic Flightdeck materials are mapped to Bambu-compatible material families (`PLA`, `ASA`, `ABS`, `PETG`, `TPU`, etc.) before publishing.
 - The spool modal keeps the friendly `Storage:` label, while the Locations overview stays shelf-only.
 - Static cache-bust bumped to `v=71`.
+
+### Session 28.15 AMS drying control
+- AMS units now expose humidity, temperature, drying countdown, and drying capability when reported by Bambu MQTT.
+- Heated AMS units such as AMS HT can be started/stopped from the live AMS panel using Bambu `ams_filament_drying`.
+- Default manual dry cycle is conservative: 45°C for 12 hours, no tray rotation; Stop sends Bambu's drying-off payload.
+- Static cache-bust bumped to `v=72`.
 
 ---
 

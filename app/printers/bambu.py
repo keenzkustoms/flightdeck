@@ -492,6 +492,45 @@ class BambuPrinter:
             tray_id=tray_id,
         )
 
+    def set_ams_drying(
+        self,
+        ams_id: int,
+        enabled: bool,
+        *,
+        temp: int = 45,
+        duration: int = 12,
+        rotate_tray: bool = False,
+    ) -> bool:
+        if enabled:
+            temp = max(45, min(int(temp), 85))
+            duration = max(1, min(int(duration), 24))
+            payload = {
+                "print": {
+                    "command": "ams_filament_drying",
+                    "ams_id": int(ams_id),
+                    "cooling_temp": temp,
+                    "duration": duration,
+                    "humidity": 0,
+                    "mode": 1,
+                    "rotate_tray": bool(rotate_tray),
+                    "temp": temp,
+                }
+            }
+        else:
+            payload = {
+                "print": {
+                    "command": "ams_filament_drying",
+                    "ams_id": int(ams_id),
+                    "cooling_temp": 40,
+                    "duration": 0,
+                    "humidity": 0,
+                    "mode": 0,
+                    "rotate_tray": False,
+                    "temp": 0,
+                }
+            }
+        return self._printer.mqtt_client._PrinterMQTTClient__publish_command(payload)
+
     def set_temp(self, heater: str, target: int) -> None:
         if heater == "hotend":
             self._printer.set_nozzle_temperature(target)
@@ -675,6 +714,13 @@ def _parse_ams(dump: dict) -> list[dict]:
 
     for unit_data in ams_raw.get("ams", []):
         unit_id = int(unit_data.get("id", 0))
+        dry_time = _safe_int(unit_data.get("dry_time"))
+        unit_temp = _safe_float(
+            unit_data.get("temp")
+            or unit_data.get("temperature")
+            or unit_data.get("dry_temp")
+        )
+        humidity = _safe_int(unit_data.get("humidity"))
         slots = []
         for tray_data in unit_data.get("tray", []):
             tray_id = int(tray_data.get("id", 0))
@@ -699,9 +745,36 @@ def _parse_ams(dump: dict) -> list[dict]:
             })
 
         if slots:
-            result.append({"unit": unit_id, "label": _AMS_LABELS.get(unit_id, f"AMS {unit_id + 1}"), "slots": slots})
+            result.append({
+                "unit": unit_id,
+                "label": _AMS_LABELS.get(unit_id, f"AMS {unit_id + 1}"),
+                "slots": slots,
+                "humidity": humidity,
+                "temperature": unit_temp,
+                "dry_time": dry_time,
+                "drying": bool(dry_time and dry_time > 0),
+                "dry_capable": unit_id >= 128 or dry_time is not None or unit_temp is not None,
+            })
 
     return result
+
+
+def _safe_int(value) -> Optional[int]:
+    try:
+        if value is None or value == "":
+            return None
+        return int(float(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _safe_float(value) -> Optional[float]:
+    try:
+        if value is None or value == "":
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _snapshot_ams_slots(print_data: dict) -> dict[int, dict]:
