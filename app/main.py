@@ -1258,6 +1258,20 @@ def _queue_filament_colors(job: dict) -> list[dict]:
         return []
 
 
+def _queue_colour_requirements(job: dict) -> list[dict]:
+    material = _norm_material(job.get("filament_type"))
+    grouped: dict[tuple[str, str], dict] = {}
+    for item in _queue_filament_colors(job):
+        color = _norm_hex(item.get("color"))
+        if not color:
+            continue
+        item_material = _norm_material(item.get("type")) or material
+        key = (item_material, color)
+        req = grouped.setdefault(key, {"material": item_material, "color": color, "used_g": 0.0})
+        req["used_g"] += float(item.get("used_g") or 0)
+    return list(grouped.values())
+
+
 def _norm_hex(value: Optional[str]) -> str:
     h = str(value or "").strip().lstrip("#")[:6].upper()
     return f"#{h}" if re.fullmatch(r"[0-9A-F]{6}", h) else ""
@@ -1276,6 +1290,23 @@ def _spool_matches_color(spool: dict, color: Optional[str]) -> bool:
     if not color:
         return True
     return _hex_dist(spool.get("color_hex"), color) <= 95
+
+
+def _queue_colour_coverage(requirements: list[dict], spools: list[dict]) -> list[dict]:
+    coverage = []
+    for req in requirements:
+        matching = [
+            s for s in spools
+            if _spool_matches_material(s, req["material"]) and _spool_matches_color(s, req["color"])
+        ]
+        available = sum(float(s.get("remaining_g") or 0) for s in matching)
+        coverage.append({
+            **req,
+            "available_g": available,
+            "spools": matching,
+            "ok": available + 0.1 >= float(req.get("used_g") or 0),
+        })
+    return coverage
 
 
 def _queue_preflight(job: dict, printer_status: Optional[dict]) -> dict:
@@ -1297,11 +1328,15 @@ def _queue_preflight(job: dict, printer_status: Optional[dict]) -> dict:
 
     required_g = job.get("filament_weight_g")
     material = job.get("filament_type")
-    color_reqs = _queue_filament_colors(job)
+    color_reqs = _queue_colour_requirements(job)
     loaded = db.get_spools_by_printer(job["printer_id"])
     loaded_spools = list(loaded.values())
     material_matches = [s for s in loaded_spools if _spool_matches_material(s, material)]
-    color_matches = [s for s in material_matches if any(_spool_matches_color(s, c.get("color")) for c in color_reqs)] if color_reqs else material_matches
+    color_coverage = _queue_colour_coverage(color_reqs, loaded_spools) if color_reqs else []
+    color_matches = [
+        s for s in material_matches
+        if any(_spool_matches_color(s, c["color"]) for c in color_reqs)
+    ] if color_reqs else material_matches
 
     if material:
         if not loaded_spools:
@@ -1309,16 +1344,36 @@ def _queue_preflight(job: dict, printer_status: Optional[dict]) -> dict:
         elif not material_matches:
             issues.append({"level": "block", "message": f"No loaded spool matches {material}"})
         elif color_reqs and not color_matches:
-            wanted = ", ".join(_norm_hex(c.get("color")) for c in color_reqs if _norm_hex(c.get("color")))
+            wanted = ", ".join(c["color"] for c in color_reqs)
             issues.append({"level": "block", "message": f"No loaded spool matches required colour {wanted}"})
     else:
         issues.append({"level": "warn", "message": "No material metadata; material check skipped"})
 
     if required_g is not None:
-        candidates = color_matches if color_reqs else material_matches if material and material_matches else loaded_spools
-        if not candidates:
+        if color_reqs:
+            missing = [c for c in color_coverage if not c["ok"]]
+            if missing:
+                detail = "; ".join(
+                    f"{c['color']} {c['available_g']:.0f}g/{c['used_g']:.0f}g"
+                    for c in missing
+                )
+                issues.append({
+                    "level": "block",
+                    "message": f"Loaded colour coverage short: {detail}",
+                })
+            elif any(c["available_g"] < float(c["used_g"] or 0) * 1.15 for c in color_coverage):
+                detail = "; ".join(
+                    f"{c['color']} {c['available_g']:.0f}g/{c['used_g']:.0f}g"
+                    for c in color_coverage
+                )
+                issues.append({
+                    "level": "warn",
+                    "message": f"Low colour margin: {detail}",
+                })
+        candidates = material_matches if material and material_matches else loaded_spools
+        if not color_reqs and not candidates:
             issues.append({"level": "block", "message": f"No inventory spool available for {required_g:.0f}g check"})
-        else:
+        elif not color_reqs:
             remaining_g = sum(float(s.get("remaining_g") or 0) for s in candidates)
             if remaining_g + 0.1 < float(required_g):
                 issues.append({

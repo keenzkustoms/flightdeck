@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 28 May 2026 (Session 28.30 Multi-colour dispatch coverage)_
+_Last updated 28 May 2026 (Session 28.31 Queue preflight colour coverage)_
 
 ## Current state
 
@@ -819,6 +819,12 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Dispatch rescue hints now pick per-colour spool coverage before suggesting loaded, same-printer, shelf, or mixed stock paths.
 - Printer recommendation scoring now treats partial colour coverage as a weaker match instead of calling it fully ready.
 - Static cache-bust bumped to `v=86`.
+
+### Session 28.31 Queue preflight colour coverage
+- Queue preflight now groups slicer filament colour metadata by required colour and grams.
+- Multi-colour queued jobs now check each loaded colour independently instead of summing all matching-material loaded spools.
+- Preflight block messages now identify the short colour directly, e.g. `Loaded colour coverage short: #FFFFFF 118g/280g`.
+- Restarted `flightdeck.service`; API health is OK after startup.
 
 ---
 
