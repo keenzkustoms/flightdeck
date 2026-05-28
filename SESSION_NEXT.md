@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 28 May 2026 (Session 28.7 Bambu light command fix)_
+_Last updated 28 May 2026 (Session 28.8 Bambu light badge)_
 
 ## Current state
 
@@ -674,6 +674,12 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Bambu light control no longer uses the library's generic `system.led_mode` command.
 - X1C/H2D light buttons now publish Bambu `print.command=ledctrl` with `led_node=chamber_light` and `led_mode=on/off`.
 - Static cache-bust bumped to `v=65`.
+
+### Session 28.8 Bambu light badge
+- Printer status now includes Bambu chamber light state from `lights_report`.
+- Bambu model text glows when `light_state` is `on` and dims when `off`/`unknown`.
+- Light button clicks apply an optimistic glow/dim immediately, then settle to the reported MQTT state.
+- Static cache-bust bumped to `v=66`.
 
 ---
 

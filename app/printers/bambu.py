@@ -106,6 +106,7 @@ class BambuPrinter:
                     )
             bed = self._printer.get_bed_temperature()
             chamber = _read_chamber_temp(dump, self.model_name)
+            light_state = _read_light_state(dump.get("print", {}))
             if bed is not None:
                 temps["bed"] = TempReading(
                     actual=float(bed),
@@ -181,7 +182,8 @@ class BambuPrinter:
                 id=self.id, model_name=self.model_name, custom_name=self.custom_name,
                 icon=self.icon, kind="bambu", state=state,
                 temps=temps, job=job, substage=substage,
-                idle_info=idle_info, ams=ams, last_seen=now, updated_at=now,
+                idle_info=idle_info, ams=ams, light_state=light_state,
+                last_seen=now, updated_at=now,
             )
         except Exception as exc:
             return PrinterStatus(id=self.id, model_name=self.model_name,
@@ -572,6 +574,14 @@ def _read_chamber_temp(mqtt_dump: dict, model_name: str) -> float | None:
                         pass
 
     return None
+
+
+def _read_light_state(print_data: dict) -> str:
+    report = print_data.get("lights_report") or []
+    if not report:
+        return "unknown"
+    mode = str((report[0] or {}).get("mode", "unknown")).lower()
+    return mode if mode in {"on", "off"} else "unknown"
 
 
 def _parse_ams(dump: dict) -> list[dict]:

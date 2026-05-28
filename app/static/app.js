@@ -22,6 +22,30 @@ function esc(s) {
   }[c]));
 }
 
+function _effectiveLightState(p) {
+  const opt = _lightOptimistic[p.id];
+  if (opt && Date.now() < opt.expiresAt) return opt.state;
+  if (opt) delete _lightOptimistic[p.id];
+  return p.light_state || 'unknown';
+}
+
+function _printerModelHtml(p) {
+  const kind = p.kind || p.connection?.type;
+  const lightState = _effectiveLightState(p);
+  const lit = kind === 'bambu' && lightState === 'on';
+  const cls = `printer-model${kind === 'bambu' ? ' printer-model-bambu' : ''}${lit ? ' printer-model-lit' : ''}`;
+  const title = kind === 'bambu' ? `Bambu chamber light: ${lightState}` : '';
+  return `<span class="${cls}" data-light-printer="${p.id}" title="${esc(title)}">${esc(p.model_name)}</span>`;
+}
+
+function _refreshLightBadges(id) {
+  const p = _latestPrinters.find(x => x.id === id);
+  if (!p) return;
+  document.querySelectorAll(`[data-light-printer="${CSS.escape(id)}"]`).forEach(el => {
+    el.outerHTML = _printerModelHtml(p);
+  });
+}
+
 async function loadSettings() {
   // One-time migration: push any existing localStorage value to the server
   const legacy = localStorage.getItem('fd_accent');
@@ -92,6 +116,7 @@ let _renderedDetailId = null;
 let _renderedDetailSubtab = null;
 let _renderedDetailOk = false;
 const _pendingControls = {};    // printer_id → { action, fromState }
+const _lightOptimistic = {};    // printer_id → { state, expiresAt }
 const _tempOptimistic = {};     // `${id}:${heater}` → { sentTarget, expiresAt }
 const _objectsCache = {};       // printer_id → { supported, objects }
 const _historyYear = {};        // printer_id → selected year (int)
@@ -662,7 +687,7 @@ function renderCard(p) {
           <div class="printer-icon">${getIcon(p.icon)}</div>
           ${connDot(p.last_seen)}
           <div class="printer-names">
-            <span class="printer-model">${p.model_name}</span>
+            ${_printerModelHtml(p)}
             <span class="printer-custom">${p.custom_name}</span>
           </div>
         </div>
@@ -779,6 +804,14 @@ function _updateControlsWidget(id) {
 async function sendControl(id, action) {
   const p = _latestPrinters.find(x => x.id === id);
   if (!p) return;
+
+  if (action === 'light_on' || action === 'light_off') {
+    _lightOptimistic[id] = {
+      state: action === 'light_on' ? 'on' : 'off',
+      expiresAt: Date.now() + 8000,
+    };
+    _refreshLightBadges(id);
+  }
 
   _pendingControls[id] = { action, fromState: p.state };
   _updateControlsWidget(id);
@@ -2393,7 +2426,7 @@ function _camHeaderInner(p) {
     <div class="printer-icon">${getIcon(p.icon)}</div>
     ${connDot(p.last_seen)}
     <div class="printer-names">
-      <span class="printer-model">${p.model_name}</span>
+      ${_printerModelHtml(p)}
       <span class="printer-custom">${p.custom_name}</span>
     </div>
   </div>
@@ -2583,6 +2616,12 @@ function updateDashboard(printers) {
 
   _detectTransitions(printers);
   updateTitle(printers);
+  for (const p of printers) {
+    const opt = _lightOptimistic[p.id];
+    if (opt && (p.light_state === opt.state || Date.now() >= opt.expiresAt)) {
+      delete _lightOptimistic[p.id];
+    }
+  }
   _latestPrinters = printers;
   if (!_tabsBuilt) buildTabs(printers);
   else router();
@@ -2716,7 +2755,7 @@ function _printersCategoryHtml(printers) {
           <div class="printer-identity">
             <div class="printer-icon">${getIcon(p.icon ?? 'generic')}</div>
             <div class="printer-names">
-              <span class="printer-model">${p.model_name}</span>
+            ${_printerModelHtml(p)}
               <span class="printer-custom">${p.custom_name}</span>
             </div>
           </div>
