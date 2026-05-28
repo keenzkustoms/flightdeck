@@ -1456,6 +1456,34 @@ def _queue_colour_coverage(requirements: list[dict], spools: list[dict]) -> list
     return coverage
 
 
+def _flatten_reported_ams_slots(printer_status: Optional[dict]) -> list[dict]:
+    slots: list[dict] = []
+    for unit in (printer_status or {}).get("ams") or []:
+        unit_id = int(unit.get("unit") or 0)
+        for slot in unit.get("slots") or []:
+            if slot.get("empty"):
+                continue
+            idx = int(slot.get("idx") or 0)
+            slots.append({
+                **slot,
+                "unit": unit_id,
+                "flat_slot": unit_id * 4 + idx,
+                "label": f"{unit.get('label') or 'AMS'} slot {idx + 1}",
+            })
+    return slots
+
+
+def _reported_active_slot(printer_status: Optional[dict]) -> Optional[dict]:
+    return next((s for s in _flatten_reported_ams_slots(printer_status) if s.get("active")), None)
+
+
+def _reported_slot_matches_requirement(slot: dict, req: dict) -> bool:
+    return (
+        _spool_matches_material({"material": slot.get("type") or "", "subtype": "", "brand": ""}, req["material"])
+        and _hex_dist(slot.get("color"), req["color"]) <= 95
+    )
+
+
 def _queue_preflight(job: dict, printer_status: Optional[dict]) -> dict:
     issues: list[dict] = []
     state = (printer_status or {}).get("state")
@@ -1484,6 +1512,7 @@ def _queue_preflight(job: dict, printer_status: Optional[dict]) -> dict:
         s for s in material_matches
         if any(_spool_matches_color(s, c["color"]) for c in color_reqs)
     ] if color_reqs else material_matches
+    active_reported = _reported_active_slot(printer_status)
 
     if material:
         if not loaded_spools:
@@ -1493,6 +1522,20 @@ def _queue_preflight(job: dict, printer_status: Optional[dict]) -> dict:
         elif color_reqs and not color_matches:
             wanted = ", ".join(_colour_label(c["color"]) for c in color_reqs)
             issues.append({"level": "block", "message": f"No loaded spool matches required colour {wanted}"})
+        elif len(color_reqs) == 1 and active_reported:
+            req = color_reqs[0]
+            if not _reported_slot_matches_requirement(active_reported, req):
+                actual = " ".join(
+                    p for p in [
+                        _colour_label(active_reported.get("color")),
+                        str(active_reported.get("type") or "").strip(),
+                    ] if p
+                ) or "unknown filament"
+                expected = f"{_colour_label(req['color'])} {req['material']}".strip()
+                issues.append({
+                    "level": "block",
+                    "message": f"Active AMS slot mismatch: printer is using {active_reported['label']} ({actual}), expected {expected}",
+                })
     else:
         issues.append({"level": "warn", "message": "No material metadata; material check skipped"})
 

@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 28 May 2026 (Session 28.38 Catalogue picker polish)_
+_Last updated 28 May 2026 (Session 28.39 Active AMS slot preflight guard)_
 
 ## Current state
 
@@ -880,6 +880,12 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Catalogue selected-source card now shows `Open Filament Database · editable defaults` so imported values are clearly defaults.
 - If the catalogue entry has no tare, Add Spool now falls back to the saved brand/material tare from Filament settings when available.
 - Static cache-bust bumped to `v=95`.
+
+### Session 28.39 Active AMS slot preflight guard
+- Added a hard queue preflight guard for single-colour Bambu jobs when the printer-reported active AMS slot does not match the queued job's required material/colour.
+- This catches cases where Flightdeck inventory says the right colour exists somewhere, but the printer is actually using another active tray.
+- Example intended block: `Active AMS slot mismatch: printer is using AMS 1 slot 1 (Black PLA), expected Yellow PLA`.
+- Deploy copied `app/main.py`, but service restart is pending because sudo requested a password. Run `sudo systemctl restart flightdeck.service`.
 
 ---
 
