@@ -445,6 +445,19 @@ body {
   line-height: 1.3;
 }
 
+.mission-rescue {
+  display: block;
+  margin-top: 0.35rem;
+  font-size: 0.7rem;
+  font-style: normal;
+  line-height: 1.3;
+}
+
+.mission-rescue-ready,
+.mission-rescue-slot { color: #86efac; }
+.mission-rescue-shelf { color: #bfdbfe; }
+.mission-rescue-none { color: #fca5a5; }
+
 .mission-note {
   color: var(--muted);
   font-size: 0.78rem;

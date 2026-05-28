@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 28 May 2026 (Session 28.26 Dispatch intelligence v1)_
+_Last updated 28 May 2026 (Session 28.27 Dispatch material rescue)_
 
 ## Current state
 
@@ -793,6 +793,12 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Dispatch Intel scores queued pending jobs against each real printer by availability, loaded matching material, stock level, health, maintenance, and current queue target.
 - Recommendations are read-only and do not move, start, or retarget queue jobs.
 - Static cache-bust bumped to `v=82`.
+
+### Session 28.27 Dispatch material rescue
+- Dispatch Intel now explains material rescue paths for pending jobs.
+- It distinguishes ready-now loaded filament, same-printer slot selection, shelf/storage spool loading, and no-single-spool-enough cases.
+- Rescue hints include spool number, material/brand, remaining grams, and storage/slot location.
+- Static cache-bust bumped to `v=83`.
 
 ---
 
