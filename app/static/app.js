@@ -679,10 +679,6 @@ function renderCard(p) {
   // Loaded spools panel
   const loadedSpools = (_latestSpoolsByPrinter[p.id] || []).filter(s => !s.archived_at);
   const lowStockPct = _latestLowStockPct;
-  const hasLowStock = loadedSpools.some(s => s.label_weight_g > 0 && (s.remaining_g / s.label_weight_g * 100) < lowStockPct);
-  const lowStockBadge = hasLowStock
-    ? `<a class="badge badge-loaded-low" href="#/spools?filter=low&printer=${encodeURIComponent(p.id)}" title="Show loaded low filament for this printer">Low filament</a>`
-    : '';
   const healthBadge = _healthBadge(p.health, p.id);
   const healthLine = _healthLine(p.health);
 
@@ -716,7 +712,6 @@ function renderCard(p) {
         </div>
         <div class="card-badges">
           ${healthBadge}
-          ${lowStockBadge}
           <span class="badge badge-${p.state}">${badgeLabel}</span>
         </div>
       </div>

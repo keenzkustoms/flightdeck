@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 29 May 2026 (Session 28.47 Dashboard badge drill-downs)_
+_Last updated 29 May 2026 (Session 28.48 Demote dashboard low-stock badge)_
 
 ## Current state
 
@@ -125,6 +125,15 @@ First pass at making reconciliation useful without turning it into operator home
 - Card click handling now ignores nested links/buttons, so badge drill-downs work without triggering the card's Live navigation.
 - Failure Review and Spools pages now read simple hash query filters such as `#/failures?printer=h2d` and `#/spools?filter=low&printer=h2d`.
 - Static cache-bust bumped to `app.js?v=101` and `style.css?v=89`.
+
+---
+
+## What was built — Session 28.48 (Demote dashboard low-stock badge — 29 May)
+
+- Removed the top-level dashboard `Low filament` badge because it was a raw inventory condition, not necessarily a print-impacting problem.
+- Loaded spool percentages still show low/amber/red inside each printer card.
+- Queue preflight and Mission Control continue to be the surfaces for actual print-impacting stock risk such as `Loaded filament short` or `Low filament margin`.
+- Static cache-bust bumped to `app.js?v=102`.
 
 ---
 
