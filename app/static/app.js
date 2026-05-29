@@ -6320,6 +6320,15 @@ function _spoolGroupedCards(spools) {
     .sort((a, b) => Number(a[0]?.id || 0) - Number(b[0]?.id || 0));
 }
 
+function _spoolGroupCounts(spools) {
+  const counts = new Map();
+  for (const s of spools) {
+    const key = _spoolGroupKey(s);
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  return counts;
+}
+
 function _spoolGroupCardHtml(group) {
   if (group.length === 1) return _spoolCardHtml(group[0]);
   const first = group[0];
@@ -6541,7 +6550,7 @@ function _spoolCabinetHtml(spools) {
 function _applySpoolFilters(spools) {
   const f = _spoolsFilter;
   const thresh = _latestLowStockPct;
-  return spools.filter(s => {
+  const filtered = spools.filter(s => {
     if (f.status === 'active'   && s.archived_at)  return false;
     if (f.status === 'archived' && !s.archived_at) return false;
     if (f.printer && s.location_printer_id !== f.printer) return false;
@@ -6558,7 +6567,12 @@ function _applySpoolFilters(spools) {
       if (!(s.material + s.brand + (s.color_name||'') + (s.notes||'')).toLowerCase().includes(q)) return false;
     }
     return true;
-  }).sort((a, b) => {
+  });
+  const groupCounts = f.slotFilter === 'multiples' ? _spoolGroupCounts(filtered) : null;
+  const multiples = groupCounts
+    ? filtered.filter(s => (groupCounts.get(_spoolGroupKey(s)) || 0) > 1)
+    : filtered;
+  return multiples.sort((a, b) => {
     const va = a[_spoolsSortKey], vb = b[_spoolsSortKey];
     if (typeof va === 'string') return _spoolsSortDir * (va || '').localeCompare(vb || '');
     return _spoolsSortDir * ((va ?? 0) - (vb ?? 0));
@@ -6700,7 +6714,7 @@ function _spoolsCategoryHtml(spools, summary, costs, intelligence = {}) {
       <div class="spool-chips">
         ${fc('status','active','Active')}${fc('status','archived','Archived')}
         <span class="spool-chip-sep"></span>
-        ${fc('slotFilter','all','All')}${fc('slotFilter','loaded','Loaded')}${fc('slotFilter','storage','Shelved')}${fc('slotFilter','low','Low stock')}
+        ${fc('slotFilter','all','All')}${fc('slotFilter','multiples','Multiples')}${fc('slotFilter','loaded','Loaded')}${fc('slotFilter','storage','Shelved')}${fc('slotFilter','low','Low stock')}
       </div>
     </div>
     <div id="spool-list"></div>`;
