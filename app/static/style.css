@@ -1002,7 +1002,7 @@ header {
 
 .stats-kpi-grid {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 0.75rem;
   margin-bottom: 1rem;
 }
@@ -1206,6 +1206,63 @@ header {
   background: rgba(245,158,11,0.07);
   color: #fcd34d;
 }
+
+.stats-rh-list {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.stats-rh-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.8rem;
+  align-items: center;
+  border: 1px solid rgba(122,162,216,0.22);
+  border-left-width: 3px;
+  border-radius: 0.5rem;
+  background: rgba(255,255,255,0.025);
+  color: var(--text);
+  padding: 0.58rem 0.65rem;
+  text-decoration: none;
+}
+
+.stats-rh-row strong,
+.stats-rh-row b,
+.stats-rh-row span {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stats-rh-row strong {
+  color: var(--text);
+  font-size: 0.78rem;
+}
+
+.stats-rh-row b {
+  color: var(--text);
+  font-size: 0.88rem;
+  text-align: right;
+}
+
+.stats-rh-row span {
+  margin-top: 0.16rem;
+  color: var(--muted);
+  font-size: 0.68rem;
+}
+
+.stats-rh-row > div:first-child {
+  min-width: 0;
+}
+
+.stats-rh-ok { border-color: rgba(34,197,94,0.32); }
+.stats-rh-warn { border-color: rgba(245,158,11,0.58); background: rgba(245,158,11,0.06); }
+.stats-rh-bad { border-color: rgba(239,68,68,0.55); background: rgba(239,68,68,0.07); }
+.stats-rh-ok b { color: #86efac; }
+.stats-rh-warn b { color: #fcd34d; }
+.stats-rh-bad b { color: #fca5a5; }
 
 .stats-printer-list {
   display: grid;

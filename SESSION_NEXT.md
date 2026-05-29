@@ -1059,6 +1059,12 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Stats uses existing endpoints only: `/api/filament/summary`, `/api/spools/summary`, `/api/spools`, `/api/spools/intelligence`, `/api/failures`, and `/api/queue`.
 - Static cache-bust bumped to `style.css?v=93` and `app.js?v=106`.
 
+### Stats AMS humidity
+- Added AMS RH to the Stats KPI strip with average RH, max RH, and sensor count.
+- Added an `AMS Humidity` panel showing each AMS/HT humidity and temperature reading by printer.
+- RH status colours are currently green under 35%, amber from 35%, and red from 45%.
+- Static cache-bust bumped to `style.css?v=94` and `app.js?v=107`.
+
 ### Closing fixes (shipped same session)
 - **Bambu filament metadata**: `get_preview()` now called proactively on first poll of any new print (same trigger as AMS snapshot). One-shot FTP call per job; cached on `subtask_name`. Ensures `filament_weight_g` and `material` are always populated for spool deduction, even when nobody views the detail page.
 - **Spool snapshot overwrite on restart**: `write_slot_snapshot` now uses `WHERE ams_slot_snapshot IS NULL`. Post-restart the snapshot condition re-fires (in-memory state resets), but the original DB row is preserved. Spool deduction uses correct print-start slot assignments regardless of restarts.

@@ -3834,6 +3834,50 @@ function _statsPrinterRows(printers, filamentSummary, failureSummary, allSpools 
   }).join('')}</div>`;
 }
 
+function _statsRhReadings(printers) {
+  const rows = [];
+  printers.forEach(p => {
+    (p.ams || []).forEach(unit => {
+      if (unit.humidity == null) return;
+      const rh = Number(unit.humidity);
+      rows.push({
+        printer: _dashboardPrinterName(p),
+        custom: p.custom_name || '',
+        href: `#/printer/${p.id}`,
+        label: unit.label || `AMS ${Number(unit.unit || 0) + 1}`,
+        rh,
+        temp: unit.temperature,
+        drying: !!unit.drying,
+      });
+    });
+  });
+  return rows.sort((a, b) => b.rh - a.rh || a.printer.localeCompare(b.printer));
+}
+
+function _statsRhClass(rh) {
+  if (rh >= 45) return 'bad';
+  if (rh >= 35) return 'warn';
+  return 'ok';
+}
+
+function _statsRhPanel(readings) {
+  if (!readings.length) return `<div class="stats-empty">No AMS humidity telemetry yet.</div>`;
+  return `<div class="stats-rh-list">${readings.map(r => {
+    const cls = _statsRhClass(r.rh);
+    const temp = r.temp != null ? `${Math.round(Number(r.temp) * 10) / 10}°C` : '--°C';
+    return `<a class="stats-rh-row stats-rh-${cls}" href="${r.href}">
+      <div>
+        <strong>${esc(r.label)} · ${esc(r.printer)}</strong>
+        <span>${esc(r.custom)}${r.drying ? ' · drying' : ''}</span>
+      </div>
+      <div>
+        <b>${Math.round(r.rh)}% RH</b>
+        <span>${esc(temp)}</span>
+      </div>
+    </a>`;
+  }).join('')}</div>`;
+}
+
 function _statsActionSummary(jobs, printers) {
   const pending = jobs.filter(j => j.status === 'pending').length;
   const blocked = jobs.filter(j => _missionJobReadiness(j).cls === 'blocked').length;
@@ -3870,6 +3914,11 @@ async function renderStatsView() {
     const spoolAlerts = intel.alerts || [];
     const topSpools = intel.by_spool || [];
     const active = printers.filter(p => p.state === 'printing' || p.state === 'paused').length;
+    const rhReadings = _statsRhReadings(printers);
+    const avgRh = rhReadings.length
+      ? Math.round(rhReadings.reduce((sum, r) => sum + r.rh, 0) / rhReadings.length)
+      : null;
+    const maxRh = rhReadings.length ? Math.max(...rhReadings.map(r => r.rh)) : null;
     const html = `
       <div class="stats-page">
         <section class="stats-hero">
@@ -3885,6 +3934,7 @@ async function renderStatsView() {
           <a class="stats-kpi-card" href="#/stats"><strong>${printers.length}</strong><span>Printers</span><small>${states.idle || 0} idle · ${active} active</small></a>
           <a class="stats-kpi-card" href="#/settings/filament"><strong>${_fmtGrams(filament.total_grams || 0)}</strong><span>Filament used</span><small>${filament.total_cost != null ? `$${filament.total_cost.toFixed(2)} estimated` : 'cost pending'}</small></a>
           <a class="stats-kpi-card" href="#/spools"><strong>${_fmtGrams(spools.total_remaining_g || 0)}</strong><span>Inventory</span><small>${spools.total_count || 0} spools · ${spools.in_printer_count || 0} loaded</small></a>
+          <a class="stats-kpi-card ${maxRh != null && maxRh >= 35 ? 'stats-kpi-warn' : ''}" href="#/stats"><strong>${avgRh != null ? `${avgRh}%` : '--'}</strong><span>AMS RH</span><small>${maxRh != null ? `Max ${Math.round(maxRh)}% · ${rhReadings.length} sensors` : 'no telemetry'}</small></a>
           <a class="stats-kpi-card ${spools.low_stock_count ? 'stats-kpi-warn' : ''}" href="#/spools?filter=low"><strong>${spools.low_stock_count || 0}</strong><span>Low stock</span><small>Below ${Math.round(spools.low_stock_pct || 20)}%</small></a>
           <a class="stats-kpi-card ${failures.total ? 'stats-kpi-warn' : ''}" href="#/failures?days=30"><strong>${failures.total || 0}</strong><span>Failure review</span><small>Last 30 days</small></a>
         </section>
@@ -3901,6 +3951,10 @@ async function renderStatsView() {
           <div class="stats-panel">
             <div class="stats-panel-head"><span>Inventory Mix</span><a href="#/spools">Open</a></div>
             ${_statsBarRows(spools.by_material || [], { total: spools.total_remaining_g || 0 })}
+          </div>
+          <div class="stats-panel">
+            <div class="stats-panel-head"><span>AMS Humidity</span><a href="#/">Live</a></div>
+            ${_statsRhPanel(rhReadings)}
           </div>
           <div class="stats-panel">
             <div class="stats-panel-head"><span>Spool Tracking</span><a href="#/spools">Inventory</a></div>
