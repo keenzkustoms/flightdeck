@@ -5116,6 +5116,104 @@ select.settings-input { cursor: pointer; }
   white-space: nowrap;
 }
 
+.spool-group-card {
+  grid-column: span 2;
+  border-color: rgba(122,162,216,0.32);
+}
+
+@media (max-width: 740px) {
+  .spool-group-card { grid-column: span 1; }
+  .spool-group-roll { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .spool-group-roll .spool-action-label,
+  .spool-group-roll .spool-action-edit { display: none; }
+}
+
+.spool-roll-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.18rem;
+  margin-top: 0.05rem;
+}
+
+.spool-roll-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.55rem;
+  padding: 0.05rem 0.22rem;
+  border: 1px solid rgba(122,162,216,0.34);
+  border-radius: 999px;
+  background: rgba(122,162,216,0.08);
+  color: var(--accent);
+  font-size: 0.58rem;
+  font-weight: 800;
+  line-height: 1.1;
+  text-decoration: none;
+}
+
+.spool-roll-chip.spool-amber {
+  color: #f59e0b;
+  border-color: rgba(245,158,11,0.42);
+  background: rgba(245,158,11,0.1);
+}
+
+.spool-roll-chip.spool-low {
+  color: var(--error);
+  border-color: rgba(239,68,68,0.48);
+  background: rgba(239,68,68,0.12);
+}
+
+.spool-group-rolls {
+  display: grid;
+  gap: 0.16rem;
+  margin-top: 0.22rem;
+  padding-top: 0.24rem;
+  border-top: 1px solid rgba(255,255,255,0.04);
+}
+
+.spool-group-roll {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto auto auto;
+  align-items: center;
+  gap: 0.16rem;
+  min-width: 0;
+}
+
+.spool-group-roll-id {
+  color: var(--text);
+  font-size: 0.6rem;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.spool-group-roll-loc {
+  color: var(--muted);
+  font-size: 0.56rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.spool-group-roll-grams {
+  color: var(--printing);
+  font-size: 0.58rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.spool-group-roll-grams.spool-amber { color: #f59e0b; }
+.spool-group-roll-grams.spool-low { color: var(--error); }
+
+.spool-group-roll .spool-action-btn {
+  font-size: 0.55rem;
+  padding: 0.02rem 0.14rem !important;
+}
+
+.spool-group-menu {
+  margin-left: 0;
+}
+
 .spool-card-actions {
   position: relative;
   display: flex;

@@ -6280,6 +6280,115 @@ function _spoolCardActionsHtml(spoolId) {
   </div>`;
 }
 
+function _spoolGroupKey(s) {
+  return [
+    s.material || '',
+    s.subtype || '',
+    s.brand || '',
+    s.color_name || '',
+    _normHex(s.color_hex) || s.color_hex || '',
+    Math.round(Number(s.label_weight_g || 0)),
+    s.archived_at ? 'archived' : 'active',
+  ].map(v => String(v).trim().toLowerCase()).join('|');
+}
+
+function _spoolGroupLocationSummary(group) {
+  const names = new Set();
+  for (const s of group) {
+    if (s.location_printer_id) {
+      const p = _latestPrinters.find(x => x.id === s.location_printer_id);
+      names.add(p?.custom_name ?? s.location_printer_id);
+    } else {
+      names.add(_spoolStorageLocationName(s.storage_location_id));
+    }
+  }
+  const list = [...names].filter(Boolean);
+  if (!list.length) return 'No location';
+  if (list.length === 1) return list[0];
+  return `${list[0]} +${list.length - 1}`;
+}
+
+function _spoolGroupedCards(spools) {
+  const groups = new Map();
+  for (const s of spools) {
+    const key = _spoolGroupKey(s);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(s);
+  }
+  return [...groups.values()]
+    .map(group => group.sort((a, b) => Number(a.id || 0) - Number(b.id || 0)))
+    .sort((a, b) => Number(a[0]?.id || 0) - Number(b[0]?.id || 0));
+}
+
+function _spoolGroupCardHtml(group) {
+  if (group.length === 1) return _spoolCardHtml(group[0]);
+  const first = group[0];
+  const totalRemaining = group.reduce((sum, s) => sum + Number(s.remaining_g || 0), 0);
+  const totalLabel = group.reduce((sum, s) => sum + Number(s.label_weight_g || 0), 0);
+  const used = Math.max(0, totalLabel - totalRemaining);
+  const pct = totalLabel > 0 ? Math.round(totalRemaining * 100 / totalLabel) : 0;
+  const barColor = _spoolProgressColor(pct);
+  const bandColor = first.color_hex || '#404040';
+  const textColor = _spoolTextColor(bandColor);
+  const locationSummary = _spoolGroupLocationSummary(group);
+  const confidenceScores = group.map(s => Number(s.confidence?.score ?? 0)).filter(n => !isNaN(n));
+  const confidenceAvg = confidenceScores.length
+    ? Math.round(confidenceScores.reduce((sum, n) => sum + n, 0) / confidenceScores.length)
+    : null;
+  const rollChips = group.map(s => {
+    const rollPct = s.label_weight_g > 0 ? Math.round(s.remaining_g * 100 / s.label_weight_g) : 0;
+    const cls = rollPct < 20 ? ' spool-low' : rollPct < 50 ? ' spool-amber' : '';
+    return `<a class="spool-roll-chip${cls}" href="#/spool/${s.id}" title="#${s.id} · ${Math.round(s.remaining_g || 0)}g">#${s.id}</a>`;
+  }).join('');
+  const rows = group.map(s => {
+    const rollPct = s.label_weight_g > 0 ? Math.round(s.remaining_g * 100 / s.label_weight_g) : 0;
+    const cls = rollPct < 20 ? ' spool-low' : rollPct < 50 ? ' spool-amber' : '';
+    const p = _latestPrinters.find(x => x.id === s.location_printer_id);
+    const loc = s.location_printer_id
+      ? `${p?.custom_name ?? s.location_printer_id} ${_amsSlotLabel(p, s.location_slot)}`
+      : _spoolStorageLocationName(s.storage_location_id);
+    return `<div class="spool-group-roll">
+      <a class="spool-group-roll-id" href="#/spool/${s.id}">#${s.id}</a>
+      <span class="spool-group-roll-loc" title="${esc(loc)}">${esc(loc)}</span>
+      <span class="spool-group-roll-grams${cls}">${Math.round(s.remaining_g || 0)}g</span>
+      <button class="spool-action-btn spool-action-label" data-action="label" data-id="${s.id}" title="Print label">Label</button>
+      <button class="spool-action-btn spool-action-edit" data-action="edit" data-id="${s.id}" title="Edit">Edit</button>
+      <details class="spool-action-menu spool-group-menu">
+        <summary class="spool-action-btn spool-action-more" title="More actions">Actions</summary>
+        <div class="spool-action-menu-panel">${_SPOOL_ACTIONS.map(a => _spoolActionControl(a, s.id, true)).join('')}</div>
+      </details>
+    </div>`;
+  }).join('');
+  return `<div class="spool-card spool-group-card" data-spool-group="${esc(_spoolGroupKey(first))}">
+    <div class="spool-card-band" style="background:${bandColor};color:${textColor}">
+      <span class="spool-color-name">${esc(first.color_name || '—')}</span>
+      <span class="spool-id-badge">${group.length} rolls</span>
+    </div>
+    <div class="spool-card-body">
+      <div class="spool-card-row">
+        <span class="spool-material">${esc(first.material)}${first.subtype ? ' ' + esc(first.subtype) : ''}</span>
+        <span class="spool-location-badge" title="${esc(locationSummary)}">${esc(locationSummary)}</span>
+      </div>
+      <div class="spool-card-row spool-brand">${esc(first.brand || 'Unknown brand')}</div>
+      <div class="spool-roll-chips">${rollChips}</div>
+      <div class="spool-remaining-row">
+        <span class="spool-remaining-label">Combined</span>
+        <span class="spool-remaining-pct${pct < 20 ? ' spool-low' : pct < 50 ? ' spool-amber' : ''}">${pct}%</span>
+        <span class="spool-remaining-g">${Math.round(totalRemaining)}g</span>
+      </div>
+      <div class="spool-progress-bar">
+        <div class="spool-progress-fill" style="width:${pct}%;background:${barColor}"></div>
+      </div>
+      <div class="spool-meta-row">
+        <span class="spool-meta">${Math.round(totalLabel)}g total</span>
+        <span class="spool-meta">${Math.round(used)}g used</span>
+        ${confidenceAvg != null ? `<span class="spool-meta">${confidenceAvg}% trust</span>` : ''}
+      </div>
+      <div class="spool-group-rolls">${rows}</div>
+    </div>
+  </div>`;
+}
+
 function _spoolCardHtml(s) {
   const pct = s.label_weight_g > 0 ? Math.round(s.remaining_g * 100 / s.label_weight_g) : 0;
   const barColor = _spoolProgressColor(pct);
@@ -6479,7 +6588,7 @@ function _renderSpoolList(el) {
     listEl.innerHTML = _spoolCabinetHtml(filtered);
   } else {
     listEl.className = 'spool-card-grid';
-    listEl.innerHTML = [...filtered].sort((a, b) => Number(a.id || 0) - Number(b.id || 0)).map(_spoolCardHtml).join('');
+    listEl.innerHTML = _spoolGroupedCards(filtered).map(_spoolGroupCardHtml).join('');
   }
   _attachSpoolListEvents(el, listEl);
 }

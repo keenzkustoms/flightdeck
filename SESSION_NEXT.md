@@ -1223,6 +1223,13 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Hardware and catalogue failures now also write RADAR notification entries from the backend.
 - Static cache-bust bumped to `style.css?v=110` and `app.js?v=129`.
 
+### Grouped spool cards
+- Card view now groups duplicate physical rolls that share material, subtype, brand, colour name/hex, and label weight.
+- Each physical roll keeps its own spool number, detail page, label, edit, weigh, copy, reset, archive, and delete actions.
+- Group cards show roll chips, combined remaining grams, combined label weight, location summary, and per-roll rows.
+- Table and cabinet views still show individual rolls.
+- Static cache-bust bumped to `style.css?v=111` and `app.js?v=130`.
+
 ### Closing fixes (shipped same session)
 - **Bambu filament metadata**: `get_preview()` now called proactively on first poll of any new print (same trigger as AMS snapshot). One-shot FTP call per job; cached on `subtask_name`. Ensures `filament_weight_g` and `material` are always populated for spool deduction, even when nobody views the detail page.
 - **Spool snapshot overwrite on restart**: `write_slot_snapshot` now uses `WHERE ams_slot_snapshot IS NULL`. Post-restart the snapshot condition re-fires (in-memory state resets), but the original DB row is preserved. Spool deduction uses correct print-start slot assignments regardless of restarts.
