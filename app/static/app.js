@@ -1098,7 +1098,7 @@ function router() {
   if (route.view === 'spool') renderSpoolDetail(route.id);
   if (route.view === 'cameras') renderCamerasView();
   if (route.view === 'queue') renderQueueView();
-  if (route.view === 'files') renderFileDeskView();
+  if (route.view === 'files' && !_fileDeskRenderInFlight) renderFileDeskView();
   if (route.view === 'failures' && !wasOnFailures) renderFailuresView();
   if (route.view === 'spools' && !wasOnSpools) renderSpoolsView();
   if (route.view === 'settings' && (!wasOnSettings || categoryBeforeRoute !== _settingsCategory)) renderSettingsView();
@@ -2668,15 +2668,20 @@ function _fileDeskTargetHtml(target) {
   </section>`;
 }
 
+let _fileDeskRenderInFlight = false;
+let _fileDeskLastHtml = '';
+
 async function renderFileDeskView() {
   const el = document.getElementById('filedesk-page');
   if (!el) return;
-  el.innerHTML = `<div class="detail-placeholder">Loading File Desk...</div>`;
+  if (_fileDeskRenderInFlight) return;
+  _fileDeskRenderInFlight = true;
+  if (!_fileDeskLastHtml) el.innerHTML = `<div class="detail-placeholder">Loading File Desk...</div>`;
   try {
     const r = await fetch('/api/files');
     if (!r.ok) throw new Error('Unable to load files');
     const data = await r.json();
-    el.innerHTML = `<div class="filedesk-shell">
+    const html = `<div class="filedesk-shell">
       <section class="filedesk-hero">
         <div>
           <div class="mission-eyebrow">File Desk</div>
@@ -2687,8 +2692,14 @@ async function renderFileDeskView() {
       </section>
       <div class="filedesk-grid">${(data.targets || []).map(_fileDeskTargetHtml).join('')}</div>
     </div>`;
+    if (html !== _fileDeskLastHtml) {
+      el.innerHTML = html;
+      _fileDeskLastHtml = html;
+    }
   } catch (err) {
-    el.innerHTML = `<div class="detail-placeholder">File Desk unavailable.</div>`;
+    if (!_fileDeskLastHtml) el.innerHTML = `<div class="detail-placeholder">File Desk unavailable.</div>`;
+  } finally {
+    _fileDeskRenderInFlight = false;
   }
 }
 

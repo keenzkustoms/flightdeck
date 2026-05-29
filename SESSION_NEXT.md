@@ -1120,6 +1120,12 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Bambu targets expose `format_sd` capability metadata but no destructive format action is wired yet.
 - Static cache-bust bumped to `style.css?v=100` and `app.js?v=115`.
 
+### File Desk anti-flicker
+- File Desk now keeps the previous rendered screen visible during refresh.
+- Added an in-flight render guard so websocket/router refreshes cannot stack overlapping File Desk fetches.
+- DOM is only swapped when the generated File Desk HTML actually changes.
+- Static cache-bust bumped to `app.js?v=116`.
+
 ### Closing fixes (shipped same session)
 - **Bambu filament metadata**: `get_preview()` now called proactively on first poll of any new print (same trigger as AMS snapshot). One-shot FTP call per job; cached on `subtask_name`. Ensures `filament_weight_g` and `material` are always populated for spool deduction, even when nobody views the detail page.
 - **Spool snapshot overwrite on restart**: `write_slot_snapshot` now uses `WHERE ams_slot_snapshot IS NULL`. Post-restart the snapshot condition re-fires (in-memory state resets), but the original DB row is preserved. Spool deduction uses correct print-start slot assignments regardless of restarts.
