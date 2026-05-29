@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 30 May 2026 (Session 28.71 Print Bay first pass)_
+_Last updated 30 May 2026 (Session 28.72 Reprint Bay first pass)_
 
 ## Current state
 
@@ -9,6 +9,34 @@ Service running at:
 - `http://flightdeck.local:8000`
 - `http://192.168.4.127:8000`
 - **`https://flightdeck.tail7de73e.ts.net`** (Tailscale Serve — HTTPS, used for PWA / notifications)
+
+---
+
+## What was built — Session 28.72 (Reprint Bay first pass — 30 May)
+
+Print Bay now has its first history-aware Reprint Bay strip.
+
+### Backend
+- Added `db.get_recent_reprints(limit)` for recent completed/cancelled/error print records.
+- Added `GET /api/files/reprints?limit=12`, enriched with printer model/custom names.
+
+### Frontend
+- Print Bay now fetches recent print history alongside file sources.
+- Added `Reprint Bay / Recent work` cards above the source panels.
+- Reprint cards show:
+  - job name
+  - outcome badge
+  - printer
+  - duration
+  - material/grams when known
+  - failure snapshot when available
+- Reprint cards search current Print Bay sources for a matching file; if found, they expose a direct `Queue` action.
+- If no source file exists, the card is marked history-only.
+- Static cache-bust bumped to `style.css?v=144` and `app.js?v=165`.
+
+### Verification
+- `python3 -m py_compile app/db.py app/main.py`
+- `node --check app/static/app.js`
 
 ---
 

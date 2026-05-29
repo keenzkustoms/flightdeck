@@ -3429,6 +3429,86 @@ function _printBayOverview(targets) {
   </section>`;
 }
 
+function _printBayFileKey(name) {
+  return String(name || '')
+    .replace(/.*[/\\]/, '')
+    .replace(/\.gcode\.3mf$/i, '')
+    .replace(/\.gcode\.gz$/i, '')
+    .replace(/\.(3mf|gcode|ufp)$/i, '')
+    .toLowerCase();
+}
+
+function _printBayPrintName(print) {
+  return print.subtask_name || String(print.filename || '').replace(/.*[/\\]/, '') || `Print #${print.id}`;
+}
+
+function _printBayFindMatch(print, targets) {
+  const keys = new Set([
+    _printBayFileKey(print.subtask_name),
+    _printBayFileKey(print.filename),
+  ].filter(Boolean));
+  for (const target of targets || []) {
+    for (const file of target.files || []) {
+      if (file.kind === 'dir') continue;
+      if (!keys.has(_printBayFileKey(file.path || file.name))) continue;
+      if (!_fileCompatiblePrinters(file).length) continue;
+      return { target, file, path: file.path || file.name };
+    }
+  }
+  return null;
+}
+
+function _printBayStateLabel(state) {
+  if (state === 'FINISHED') return { cls: 'done', label: 'Printed' };
+  if (state === 'CANCELLED') return { cls: 'warn', label: 'Cancelled' };
+  return { cls: 'bad', label: 'Failed' };
+}
+
+function _printBayReprintHtml(items, targets) {
+  const cards = (items || []).slice(0, 8).map(print => {
+    const name = _printBayPrintName(print);
+    const state = _printBayStateLabel(print.final_state);
+    const printer = print.printer || {};
+    const match = _printBayFindMatch(print, targets);
+    const material = [print.material, print.filament_grams != null ? `${Number(print.filament_grams).toFixed(1)}g` : ''].filter(Boolean).join(' · ');
+    const duration = print.duration_seconds ? formatEta(print.duration_seconds) : '';
+    const snapshot = print.has_snapshot
+      ? `<img src="/api/printers/${esc(print.printer_id)}/prints/${print.id}/snapshot" alt="" loading="lazy">`
+      : `<span>${esc(state.label)}</span>`;
+    const action = match
+      ? `<button class="filedesk-action-btn filedesk-queue-primary" data-file-action="queue" data-source-id="${esc(match.target.id)}" data-path="${esc(match.path)}">Queue</button>`
+      : `<span class="printbay-history-only">No source file found</span>`;
+    return `<article class="printbay-reprint-card">
+      <div class="printbay-reprint-thumb printbay-reprint-${state.cls}">${snapshot}</div>
+      <div class="printbay-reprint-main">
+        <div class="printbay-reprint-head">
+          <strong title="${esc(print.filename || name)}">${esc(name)}</strong>
+          <span class="printbay-state printbay-state-${state.cls}">${esc(state.label)}</span>
+        </div>
+        <div class="printbay-reprint-meta">
+          <span>${esc(printer.model_name || printer.custom_name || print.printer_id)}</span>
+          ${duration ? `<span>${esc(duration)}</span>` : ''}
+          ${material ? `<span>${esc(material)}</span>` : ''}
+        </div>
+        <div class="printbay-reprint-foot">
+          ${match ? `<span>${esc(match.target.label || match.target.id)}</span>` : '<span>History only</span>'}
+          ${action}
+        </div>
+      </div>
+    </article>`;
+  }).join('');
+  return `<section class="printbay-reprints">
+    <div class="printbay-section-head">
+      <div>
+        <div class="mission-eyebrow">Reprint Bay</div>
+        <h2>Recent work</h2>
+      </div>
+      <span>${items?.length || 0} recent</span>
+    </div>
+    <div class="printbay-reprint-grid">${cards || '<div class="filedesk-empty">No print history yet.</div>'}</div>
+  </section>`;
+}
+
 function _fileDeskTargetHtml(target) {
   const files = (target.files || []).filter(f => f.kind !== 'dir' && _fileCompatiblePrinters(f).length);
   const summary = _printBaySourceSummary(target, files);
@@ -3512,6 +3592,9 @@ async function renderFileDeskView() {
     const r = await fetch('/api/files');
     if (!r.ok) throw new Error('Unable to load files');
     const data = await r.json();
+    const reprints = await fetch('/api/files/reprints?limit=12')
+      .then(r => r.ok ? r.json() : { items: [] })
+      .catch(() => ({ items: [] }));
     _fileDeskTargets = data.targets || [];
     const html = `<div class="filedesk-shell">
       <section class="filedesk-hero">
@@ -3523,6 +3606,7 @@ async function renderFileDeskView() {
         <div class="filedesk-library-path">${esc(data.library_path || '')}</div>
       </section>
       ${_printBayOverview(data.targets || [])}
+      ${_printBayReprintHtml(reprints.items || [], data.targets || [])}
       <div class="filedesk-grid">${(data.targets || []).map(_fileDeskTargetHtml).join('')}</div>
     </div>`;
     if (html !== _fileDeskLastHtml) {

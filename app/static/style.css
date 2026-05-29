@@ -8030,6 +8030,119 @@ select.settings-input { cursor: pointer; }
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
+.printbay-reprints {
+  margin-bottom: 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 0.65rem;
+  background: var(--surface);
+  overflow: hidden;
+}
+.printbay-section-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.8rem 0.9rem;
+  border-bottom: 1px solid var(--border);
+  background: rgba(255,255,255,0.025);
+}
+.printbay-section-head h2 {
+  margin: 0.18rem 0 0;
+  color: var(--text);
+  font-size: 1.05rem;
+}
+.printbay-section-head > span {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+.printbay-reprint-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+  gap: 0.65rem;
+  padding: 0.8rem 0.9rem;
+}
+.printbay-reprint-card {
+  display: grid;
+  grid-template-columns: 5.2rem minmax(0, 1fr);
+  min-width: 0;
+  border: 1px solid rgba(122,162,216,0.18);
+  border-radius: 0.55rem;
+  background: rgba(255,255,255,0.025);
+  overflow: hidden;
+}
+.printbay-reprint-thumb {
+  display: grid;
+  place-items: center;
+  min-height: 5.2rem;
+  background: rgba(3,7,18,0.45);
+  color: var(--muted);
+  font-size: 0.64rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+.printbay-reprint-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.printbay-reprint-done { border-right: 2px solid #22c55e; }
+.printbay-reprint-warn { border-right: 2px solid #f59e0b; }
+.printbay-reprint-bad { border-right: 2px solid #ef4444; }
+.printbay-reprint-main {
+  display: grid;
+  gap: 0.38rem;
+  min-width: 0;
+  padding: 0.58rem 0.62rem;
+}
+.printbay-reprint-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.55rem;
+  min-width: 0;
+}
+.printbay-reprint-head strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 0.78rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.printbay-state {
+  border-radius: 999px;
+  padding: 0.08rem 0.38rem;
+  font-size: 0.54rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.printbay-state-done { background: rgba(34,197,94,0.15); color: #86efac; }
+.printbay-state-warn { background: rgba(245,158,11,0.15); color: #fcd34d; }
+.printbay-state-bad { background: rgba(239,68,68,0.16); color: #fca5a5; }
+.printbay-reprint-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.28rem 0.45rem;
+  color: var(--muted);
+  font-size: 0.66rem;
+}
+.printbay-reprint-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.55rem;
+  min-width: 0;
+}
+.printbay-reprint-foot > span {
+  overflow: hidden;
+  color: #7aa2d8;
+  font-size: 0.66rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.printbay-history-only {
+  color: var(--muted) !important;
+  font-size: 0.64rem;
+}
 .filedesk-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.8rem; }
 .filedesk-target { min-width: 0; border: 1px solid var(--border); border-radius: 0.65rem; background: var(--surface); overflow: hidden; }
 .filedesk-target-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; border-bottom: 1px solid var(--border); background: rgba(255,255,255,0.025); padding: 0.8rem 0.9rem; }
@@ -8391,6 +8504,8 @@ select.settings-input { cursor: pointer; }
 
 @media (max-width: 620px) {
   .filedesk-overview { grid-template-columns: 1fr; }
+  .printbay-reprint-card { grid-template-columns: 1fr; }
+  .printbay-reprint-thumb { min-height: 7rem; }
   .filedesk-file-row { grid-template-columns: auto minmax(0, 1fr); }
   .filedesk-queue-primary { grid-column: 2; justify-self: start; }
 }

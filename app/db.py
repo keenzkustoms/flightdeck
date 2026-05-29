@@ -1423,6 +1423,25 @@ def get_last_print(printer_id: str) -> Optional[dict]:
     return dict(row) if row else None
 
 
+def get_recent_reprints(limit: int = 12) -> list[dict]:
+    """Recent completed/cancelled/error prints for Print Bay reprint staging."""
+    limit = max(1, min(int(limit or 12), 48))
+    with _conn() as conn:
+        rows = conn.execute(
+            """SELECT id, printer_id, filename, subtask_name, started_at, ended_at,
+                      duration_seconds, final_state, error_message,
+                      layers_total, layers_completed, filament_grams, material,
+                      snapshot_captured_at IS NOT NULL AS has_snapshot
+               FROM prints
+               WHERE final_state IS NOT NULL
+                 AND (error_message IS NULL OR error_message != 'Abandoned (stale open row)')
+               ORDER BY started_at DESC
+               LIMIT ?""",
+            (limit,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
 # ── spools ────────────────────────────────────────────────────────────────
 
 def create_spool(

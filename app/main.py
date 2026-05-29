@@ -584,6 +584,25 @@ async def get_file_desk():
     return {"library_path": str(_PRINT_LIBRARY), "targets": targets}
 
 
+@app.get("/api/files/reprints")
+async def get_file_desk_reprints(limit: int = 12):
+    limit = max(1, min(int(limit or 12), 48))
+    printers = {
+        id: {"id": id, "model_name": model_name, "custom_name": custom_name, "kind": "moonraker"}
+        for (id, model_name, custom_name, _icon, _url) in _moonraker
+    }
+    printers.update({
+        p.id: {"id": p.id, "model_name": p.model_name, "custom_name": p.custom_name, "kind": "bambu"}
+        for p in _bambu
+    })
+    items = []
+    for row in db.get_recent_reprints(limit):
+        item = dict(row)
+        item["printer"] = printers.get(item["printer_id"], {"id": item["printer_id"]})
+        items.append(item)
+    return {"items": items}
+
+
 @app.post("/api/files/queue", status_code=201)
 async def queue_file_from_file_desk(body: FileQueueRequest):
     printer_id = body.printer_id.strip()
