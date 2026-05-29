@@ -1275,6 +1275,14 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Reduced action-button horizontal padding so `Label / Edit / Actions` fits without clipping.
 - Static cache-bust bumped to `style.css?v=119` and `app.js?v=138`.
 
+### Header status polish
+- Centred the Flightdeck wordmark in the top header.
+- Moved aggregate system state to the left side of the header.
+- Renamed the old `RADAR` notification button to `Alerts`.
+- Moved the clock to the left side of the right-hand status cluster.
+- Replaced the small live dot with a larger animated radar sweep for live/reconnect state.
+- Static cache-bust bumped to `style.css?v=122` and `app.js?v=140`.
+
 ### Closing fixes (shipped same session)
 - **Bambu filament metadata**: `get_preview()` now called proactively on first poll of any new print (same trigger as AMS snapshot). One-shot FTP call per job; cached on `subtask_name`. Ensures `filament_weight_g` and `material` are always populated for spool deduction, even when nobody views the detail page.
 - **Spool snapshot overwrite on restart**: `write_slot_snapshot` now uses `WHERE ams_slot_snapshot IS NULL`. Post-restart the snapshot condition re-fires (in-memory state resets), but the original DB row is preserved. Spool deduction uses correct print-start slot assignments regardless of restarts.

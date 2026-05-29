@@ -826,10 +826,10 @@ function setLiveIndicator(connected) {
   const text = document.getElementById('live-text');
   if (!dot || !text) return;
   if (connected) {
-    dot.className = 'live-dot live-ok';
+    dot.className = 'live-radar live-ok';
     text.textContent = 'Live';
   } else {
-    dot.className = 'live-dot live-err';
+    dot.className = 'live-radar live-err';
     text.textContent = 'Reconnecting…';
   }
 }
@@ -4323,9 +4323,9 @@ function initNotifBtn() {
     btn.classList.toggle('notif-on',          perm === 'granted');
     btn.classList.toggle('notif-off',         perm === 'denied');
     btn.classList.toggle('notif-unavailable', perm === 'unavailable');
-    btn.title = perm === 'granted' ? 'Radar'
-              : perm === 'denied'  ? 'Radar · browser notifications blocked in site settings'
-              : 'Radar';
+    btn.title = perm === 'granted' ? 'Alerts'
+              : perm === 'denied'  ? 'Alerts · browser notifications blocked in site settings'
+              : 'Alerts';
   };
   update();
   loadNotifications(false);

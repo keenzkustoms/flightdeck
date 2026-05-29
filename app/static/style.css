@@ -745,6 +745,34 @@ body {
 }
 
 @media (max-width: 720px) {
+  header {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    justify-content: center;
+    min-height: 7.2rem;
+    padding: 4.2rem 1rem 0.95rem;
+  }
+  .wordmark {
+    top: 0.95rem;
+    transform: translateX(-50%);
+  }
+  .header-status {
+    justify-content: center;
+    flex-wrap: wrap;
+    min-width: 0;
+    width: 100%;
+  }
+  .header-right {
+    position: absolute;
+    right: 1rem;
+    top: 1.25rem;
+    min-width: 0;
+    gap: 0.5rem;
+  }
+  .notif-panel {
+    left: 50%;
+    transform: translateX(-50%);
+  }
   .mission-page { padding: 1rem; }
   .mission-kpis { grid-template-columns: repeat(2, 1fr); }
   .mission-commandbar { align-items: stretch; flex-direction: column; }
@@ -793,16 +821,28 @@ body {
 header {
   display: flex;
   align-items: center;
+  position: relative;
   padding: 1.25rem 2rem;
   border-bottom: 1px solid var(--border);
   gap: 0.75rem;
+  min-height: 4.6rem;
+}
+
+.header-status {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+  min-width: 22rem;
 }
 
 .header-right {
   display: flex;
   align-items: center;
-  gap: 1rem;
+  gap: 0.75rem;
   margin-left: auto;
+  min-width: 22rem;
+  justify-content: flex-end;
 }
 
 .notif-shell {
@@ -827,43 +867,16 @@ header {
 .notif-btn.notif-on { opacity: 1; filter: brightness(1.3); }
 .notif-btn.notif-off { opacity: 0.45; }
 .notif-btn.notif-unavailable { opacity: 0.45; }
-.radar-btn {
+.notif-text-btn {
   display: inline-flex;
   align-items: center;
-  gap: 0.38rem;
   min-height: 1.85rem;
-  padding: 0.32rem 0.55rem;
+  padding: 0.32rem 0.65rem;
   font-size: 0.68rem;
   font-weight: 800;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.04em;
 }
-.radar-mark {
-  position: relative;
-  width: 0.72rem;
-  height: 0.72rem;
-  border: 1px solid currentColor;
-  border-radius: 999px;
-  opacity: 0.9;
-}
-.radar-mark::before {
-  content: '';
-  position: absolute;
-  inset: 0.16rem;
-  border-radius: 999px;
-  background: currentColor;
-}
-.radar-mark::after {
-  content: '';
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  width: 0.34rem;
-  height: 1px;
-  background: currentColor;
-  transform-origin: left center;
-  transform: rotate(-38deg);
-}
-.radar-label {
+.notif-label {
   line-height: 1;
 }
 .notif-count {
@@ -885,7 +898,7 @@ header {
 .notif-panel {
   position: absolute;
   top: calc(100% + 0.6rem);
-  right: 0;
+  left: 0;
   z-index: 1200;
   width: min(24rem, calc(100vw - 2rem));
   max-height: min(34rem, calc(100vh - 7rem));
@@ -1002,6 +1015,10 @@ header {
   gap: 0.6rem;
   text-decoration: none;
   flex-shrink: 0;
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
 }
 .wordmark-text {
   display: flex;
@@ -1020,6 +1037,37 @@ header {
 }
 .deck-text {
   color: #EF4444;
+}
+
+@media (max-width: 720px) {
+  header {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    justify-content: center;
+    min-height: 7.2rem;
+    padding: 4.2rem 1rem 0.95rem;
+  }
+  .wordmark {
+    top: 0.95rem;
+    transform: translateX(-50%);
+  }
+  .header-status {
+    justify-content: center;
+    flex-wrap: wrap;
+    min-width: 0;
+    width: 100%;
+  }
+  .header-right {
+    position: absolute;
+    right: 1rem;
+    top: 1.25rem;
+    gap: 0.5rem;
+    min-width: 0;
+  }
+  .notif-panel {
+    left: 50%;
+    transform: translateX(-50%);
+  }
 }
 
 #tab-strip {
@@ -2073,7 +2121,7 @@ header {
 .status-pill {
   font-size: 0.65rem;
   font-weight: 600;
-  padding: 0.2rem 0.6rem;
+  padding: 0.28rem 0.75rem;
   border-radius: 9999px;
   letter-spacing: 0.05em;
   white-space: nowrap;
@@ -2086,30 +2134,114 @@ header {
 #live-indicator {
   display: flex;
   align-items: center;
-  gap: 5px;
-  font-size: 0.7rem;
+  gap: 0.5rem;
+  font-size: 0.72rem;
   color: var(--muted);
 }
 
-.live-dot {
-  width: 6px;
-  height: 6px;
+.live-radar {
+  position: relative;
+  width: 1.72rem;
+  height: 1.72rem;
   border-radius: 50%;
+  border: 1px solid rgba(34,197,94,0.72);
+  background:
+    radial-gradient(circle at center, rgba(34,197,94,0.22) 0 0.13rem, transparent 0.14rem),
+    repeating-radial-gradient(circle at center, transparent 0 0.28rem, rgba(34,197,94,0.2) 0.29rem 0.31rem, transparent 0.32rem 0.48rem);
+  box-shadow: 0 0 14px rgba(34,197,94,0.26);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.live-radar::before,
+.live-radar::after {
+  content: '';
+  position: absolute;
+  background: rgba(34,197,94,0.22);
+}
+
+.live-radar::before {
+  left: 50%;
+  top: 0.14rem;
+  bottom: 0.14rem;
+  width: 1px;
+}
+
+.live-radar::after {
+  top: 50%;
+  left: 0.14rem;
+  right: 0.14rem;
+  height: 1px;
+}
+
+.live-radar-sweep {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 50%;
+  height: 50%;
+  background: linear-gradient(42deg, rgba(34,197,94,0.62), rgba(34,197,94,0.12) 56%, transparent 58%);
+  transform-origin: left top;
+  border-radius: 0 100% 0 0;
+  animation: radar-sweep 2.6s linear infinite;
+}
+
+.live-radar-blip {
+  position: absolute;
+  width: 0.2rem;
+  height: 0.2rem;
+  border-radius: 999px;
   background: #22c55e;
+  box-shadow: 0 0 8px rgba(34,197,94,0.8);
 }
 
-.live-dot.live-ok {
-  animation: pulse-live 2s ease-in-out infinite;
+.live-radar-blip-a {
+  right: 0.34rem;
+  top: 0.42rem;
 }
 
-.live-dot.live-err {
-  background: #ef4444;
+.live-radar-blip-b {
+  left: 0.38rem;
+  bottom: 0.36rem;
+  opacity: 0.65;
+}
+
+.live-radar.live-ok {
+  animation: radar-pulse 2.1s ease-in-out infinite;
+}
+
+.live-radar.live-err {
+  border-color: rgba(239,68,68,0.72);
+  background:
+    radial-gradient(circle at center, rgba(239,68,68,0.24) 0 0.13rem, transparent 0.14rem),
+    repeating-radial-gradient(circle at center, transparent 0 0.28rem, rgba(239,68,68,0.2) 0.29rem 0.31rem, transparent 0.32rem 0.48rem);
+  box-shadow: 0 0 14px rgba(239,68,68,0.24);
   animation: none;
 }
 
-@keyframes pulse-live {
-  0%, 100% { opacity: 1; }
-  50%       { opacity: 0.25; }
+.live-radar.live-err::before,
+.live-radar.live-err::after {
+  background: rgba(239,68,68,0.24);
+}
+
+.live-radar.live-err .live-radar-sweep {
+  background: linear-gradient(42deg, rgba(239,68,68,0.58), rgba(239,68,68,0.12) 56%, transparent 58%);
+  animation: none;
+  opacity: 0.4;
+}
+
+.live-radar.live-err .live-radar-blip {
+  background: #ef4444;
+  box-shadow: 0 0 8px rgba(239,68,68,0.75);
+}
+
+@keyframes radar-sweep {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes radar-pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.08); opacity: 0.82; }
 }
 
 .card[tabindex] {

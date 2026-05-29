@@ -8,10 +8,13 @@
   <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
   <link rel="manifest" href="/static/manifest.json">
   <meta name="theme-color" content="#0a0a0f">
-  <link rel="stylesheet" href="/static/style.css?v=119">
+  <link rel="stylesheet" href="/static/style.css?v=122">
 </head>
 <body>
   <header>
+    <div class="header-status">
+      <span id="status-pill" class="status-pill"></span>
+    </div>
     <a class="wordmark" href="#/">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="30" height="30" aria-hidden="true">
         <path d="M10,52 L42,52 C44,52 46,51 47,49 L55,39 C56,37 56,36 54,36 L22,36 C20,36 18,37 17,39 L11,49 C10,51 10,52 12,52 Z" fill="#EF4444" opacity="0.3"/>
@@ -26,20 +29,22 @@
       </span>
     </a>
     <div class="header-right">
+      <span id="refresh-time"></span>
+      <div id="live-indicator">
+        <div class="live-radar live-connecting" id="live-dot" aria-hidden="true">
+          <span class="live-radar-sweep"></span>
+          <span class="live-radar-blip live-radar-blip-a"></span>
+          <span class="live-radar-blip live-radar-blip-b"></span>
+        </div>
+        <span id="live-text">Connecting…</span>
+      </div>
       <div class="notif-shell">
-        <button id="notif-btn" class="notif-btn radar-btn" title="Radar">
-          <span class="radar-mark" aria-hidden="true"></span>
-          <span class="radar-label">RADAR</span>
+        <button id="notif-btn" class="notif-btn notif-text-btn" title="Alerts">
+          <span class="notif-label">Alerts</span>
           <span id="notif-count" class="notif-count" hidden></span>
         </button>
         <div id="notif-panel" class="notif-panel" hidden></div>
       </div>
-      <span id="status-pill" class="status-pill"></span>
-      <div id="live-indicator">
-        <div class="live-dot" id="live-dot"></div>
-        <span id="live-text">Connecting…</span>
-      </div>
-      <span id="refresh-time"></span>
     </div>
   </header>
 
@@ -107,6 +112,6 @@
     </div>
   </div>
 
-  <script type="module" src="/static/app.js?v=138"></script>
+  <script type="module" src="/static/app.js?v=140"></script>
 </body>
 </html>
