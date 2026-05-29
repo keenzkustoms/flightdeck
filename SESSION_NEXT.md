@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 29 May 2026 (Session 28.61 Live AMS loaded rows)_
+_Last updated 29 May 2026 (Session 28.62 Live AMS row alignment)_
 
 ## Current state
 
@@ -9,6 +9,20 @@ Service running at:
 - `http://flightdeck.local:8000`
 - `http://192.168.4.127:8000`
 - **`https://flightdeck.tail7de73e.ts.net`** (Tailscale Serve — HTTPS, used for PWA / notifications)
+
+---
+
+## What was built — Session 28.62 (Live AMS row alignment — 29 May)
+
+Small Live screen polish for the AMS rows.
+
+### Frontend
+- Aligned AMS colour slot rows with the Dry control so each feeder row reads as one clean block.
+- Reduced the Dry button footprint so the swatches stay visually dominant.
+- Capped live AMS slot width so single-slot HT rows stay swatch-sized instead of stretching into a full bar.
+- Static cache-bust bumped:
+  - `style.css?v=137`
+  - `app.js?v=156`
 
 ---
 
