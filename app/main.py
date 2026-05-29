@@ -1104,6 +1104,7 @@ def _assert_printer(printer_id: str) -> None:
 
 class ExcludeObjectRequest(BaseModel):
     name: str
+    id: Optional[int] = None
 
 
 @app.get("/api/printers/{printer_id}/objects")
@@ -1113,7 +1114,7 @@ async def get_printer_objects(printer_id: str):
             return await moonraker.fetch_objects(url)
     for p in _bambu:
         if p.id == printer_id:
-            return {"supported": False, "objects": []}
+            return await asyncio.to_thread(p.get_objects)
     raise HTTPException(status_code=404, detail="printer not found")
 
 
@@ -1206,6 +1207,17 @@ async def post_exclude_object(printer_id: str, req: ExcludeObjectRequest):
                 await moonraker.exclude_object(url, req.name)
             except Exception as exc:
                 raise HTTPException(status_code=502, detail=str(exc))
+            return {"ok": True}
+    for p in _bambu:
+        if p.id == printer_id:
+            if req.id is None:
+                raise HTTPException(status_code=422, detail="Bambu object id required")
+            try:
+                ok = await asyncio.to_thread(p.skip_object, req.id)
+            except Exception as exc:
+                raise HTTPException(status_code=502, detail=str(exc))
+            if not ok:
+                raise HTTPException(status_code=502, detail="Bambu skip object command failed")
             return {"ok": True}
     raise HTTPException(status_code=400, detail="object exclusion not supported for this printer")
 

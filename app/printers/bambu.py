@@ -586,6 +586,36 @@ class BambuPrinter:
             self._preview_cache = (subtask, _BAMBU_PREVIEW_FAILED)
             return None
 
+    def get_objects(self) -> dict:
+        """Return skip-object candidates parsed from the current 3MF metadata."""
+        preview = self.get_preview()
+        if not preview or not preview.objects:
+            return {"supported": False, "objects": []}
+
+        skipped = set()
+        try:
+            skipped = {int(x) for x in self._printer.mqtt_client.get_skipped_objects() or []}
+        except Exception:
+            skipped = set()
+
+        objects = []
+        for obj in preview.objects:
+            obj_id = obj.get("id")
+            state = obj.get("state") or "available"
+            if obj_id in skipped:
+                state = "excluded"
+            objects.append({**obj, "state": state})
+        return {"supported": len(objects) > 1, "objects": objects}
+
+    def skip_object(self, object_id: int) -> bool:
+        skipped = set()
+        try:
+            skipped = {int(x) for x in self._printer.mqtt_client.get_skipped_objects() or []}
+        except Exception:
+            skipped = set()
+        skipped.add(int(object_id))
+        return self._printer.mqtt_client.skip_objects(sorted(skipped))
+
     def seed_preview(self, subtask_name: str, preview) -> None:
         """Pre-populate preview cache from relay upload; avoids FTP fetch for H2D."""
         self._preview_cache = (subtask_name, preview)

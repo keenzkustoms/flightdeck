@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 30 May 2026 (Session 28.67 Bambu stale fault clear)_
+_Last updated 30 May 2026 (Session 28.68 Bambu object skip metadata)_
 
 ## Current state
 
@@ -9,6 +9,25 @@ Service running at:
 - `http://flightdeck.local:8000`
 - `http://192.168.4.127:8000`
 - **`https://flightdeck.tail7de73e.ts.net`** (Tailscale Serve — HTTPS, used for PWA / notifications)
+
+---
+
+## What was built — Session 28.68 (Bambu object skip metadata — 30 May)
+
+Flightdeck now reads Bambu object/part candidates from the active 3MF metadata instead of waiting for live MQTT `s_obj` to populate.
+
+### Backend
+- `BambuPreview` now carries parsed objects from `Metadata/slice_info.config`.
+- Bambu `/api/printers/{id}/objects` returns parsed object IDs/names for multi-object plates.
+- Bambu `/api/printers/{id}/exclude-object` sends the MQTT `skip_objects` command with the selected object ID.
+
+### Frontend
+- Existing Print Objects panel now passes Bambu object IDs through the checkbox flow.
+- Static cache-bust bumped to `app.js?v=161`.
+
+### Verification
+- Parsed the active H2D 3MF and confirmed twelve object IDs from `slice_info.config`.
+- `python3 -m py_compile app/printers/bambu.py app/printers/bambu_ftp.py app/main.py`
 
 ---
 

@@ -20,6 +20,7 @@ class BambuPreview:
     filament_weight_g: Optional[float]
     filament_type: Optional[str]
     filament_colors: Optional[str] = None
+    objects: Optional[list[dict]] = None
 
 
 class _ImplicitFTP_TLS(ftplib.FTP_TLS):
@@ -58,7 +59,8 @@ def _parse_3mf(buf: io.BytesIO) -> BambuPreview:
             slice_xml = z.read("Metadata/slice_info.config").decode()
         except KeyError:
             return BambuPreview(image_png=image_png, estimated_total_seconds=None,
-                                filament_weight_g=None, filament_type=None, filament_colors=None)
+                                filament_weight_g=None, filament_type=None, filament_colors=None,
+                                objects=None)
 
     root_el = ET.fromstring(slice_xml)
     plate = root_el.find("plate")
@@ -72,7 +74,9 @@ def _parse_3mf(buf: io.BytesIO) -> BambuPreview:
     filament_el = plate.find("filament") if plate is not None else None
     filament_type = filament_el.get("type") if filament_el is not None else None
     filaments = []
+    objects = []
     if plate is not None:
+        name_counts: dict[str, int] = {}
         for el in plate.findall("filament"):
             color = el.get("color")
             used_g = el.get("used_g")
@@ -83,6 +87,21 @@ def _parse_3mf(buf: io.BytesIO) -> BambuPreview:
                 except ValueError:
                     grams = None
                 filaments.append({"type": ftype, "color": color.upper(), "used_g": grams})
+        for el in plate.findall("object"):
+            obj_id = el.get("identify_id")
+            name = el.get("name") or f"Object {obj_id or len(objects) + 1}"
+            try:
+                identify_id = int(obj_id) if obj_id is not None else None
+            except ValueError:
+                identify_id = None
+            base = name.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+            name_counts[base] = name_counts.get(base, 0) + 1
+            objects.append({
+                "id": identify_id,
+                "name": base,
+                "label": f"{base} #{name_counts[base]}" if name_counts[base] > 1 else base,
+                "state": "excluded" if el.get("skipped", "false").lower() == "true" else "available",
+            })
 
     return BambuPreview(
         image_png=image_png,
@@ -90,6 +109,7 @@ def _parse_3mf(buf: io.BytesIO) -> BambuPreview:
         filament_weight_g=float(weight) if weight else None,
         filament_type=filament_type,
         filament_colors=json.dumps(filaments) if filaments else None,
+        objects=objects or None,
     )
 
 

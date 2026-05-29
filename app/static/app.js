@@ -2253,8 +2253,10 @@ function _detailObjectsPanel(id, objects) {
   const rows = objects.map(obj => {
     const isExcluded = obj.state === 'excluded';
     const isCurrent = obj.state === 'current';
-    const shortName = obj.name.replace(/.*[/\\]/, '');
-    const safeName = obj.name.replace(/"/g, '&quot;');
+    const rawName = obj.name || `Object ${obj.id ?? ''}`;
+    const shortName = (obj.label || rawName).replace(/.*[/\\]/, '');
+    const safeName = rawName.replace(/"/g, '&quot;');
+    const safeId = obj.id ?? '';
     const stateHtml = isCurrent
       ? `<span class="obj-state obj-state-current">▶</span>`
       : isExcluded
@@ -2264,6 +2266,7 @@ function _detailObjectsPanel(id, objects) {
       <label class="obj-label">
         <input type="checkbox" class="obj-check"
           data-obj-name="${safeName}" data-printer-id="${id}"
+          data-obj-id="${safeId}"
           ${isExcluded ? 'checked disabled' : ''}>
         <span class="obj-name" title="${safeName}">${shortName}</span>
       </label>
@@ -2288,12 +2291,12 @@ async function refreshObjectsPanel(id) {
     : '';
 }
 
-async function sendExcludeObject(id, name) {
+async function sendExcludeObject(id, name, objectId = null) {
   try {
     await fetch(`/api/printers/${id}/exclude-object`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name }),
+      body: JSON.stringify({ name, id: objectId === null || objectId === '' ? null : Number(objectId) }),
     });
     await refreshObjectsPanel(id);
   } catch {}
@@ -2306,11 +2309,12 @@ document.getElementById('view-printer').addEventListener('click', e => {
   e.preventDefault();
   const name = cb.dataset.objName;
   const id = cb.dataset.printerId;
+  const objectId = cb.dataset.objId;
   if (!name || !id) return;
   const shortName = name.replace(/.*[/\\]/, '');
   _modal.show(
     `Exclude "${shortName}" from this print? The printer will skip this object.`,
-    () => sendExcludeObject(id, name)
+    () => sendExcludeObject(id, name, objectId)
   );
 });
 
