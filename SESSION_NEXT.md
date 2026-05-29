@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 30 May 2026 (Session 28.70 Live environment compact pass)_
+_Last updated 30 May 2026 (Session 28.71 Print Bay first pass)_
 
 ## Current state
 
@@ -9,6 +9,33 @@ Service running at:
 - `http://flightdeck.local:8000`
 - `http://192.168.4.127:8000`
 - **`https://flightdeck.tail7de73e.ts.net`** (Tailscale Serve — HTTPS, used for PWA / notifications)
+
+---
+
+## What was built — Session 28.71 (Print Bay first pass — 30 May)
+
+The old Files surface has been renamed and reshaped into the first pass of Print Bay.
+
+### Frontend
+- Navigation now calls the page `Print Bay` instead of `Files`.
+- Page heading changed to `Print Bay / Run-ready library`.
+- Added overview counters for:
+  - ready to launch
+  - Pi library files
+  - printer storage files
+  - total printable files
+- Source panels now show operational summary chips: ready count, compatible printer count, and total size.
+- Replaced the cramped file table with launch rows:
+  - checkbox
+  - file type/name/path
+  - size/modified metadata
+  - compatible printer chips
+  - visible `Queue` action at the right edge
+- Bulk copy/delete flows remain intact.
+- Static cache-bust bumped to `style.css?v=143` and `app.js?v=164`.
+
+### Verification
+- `node --check app/static/app.js`
 
 ---
 

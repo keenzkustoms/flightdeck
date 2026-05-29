@@ -511,7 +511,7 @@ function _commandStaticItems() {
     ['Telemetry', '#/stats', 'Stats, RH, utilisation'],
     ['Cameras', '#/cameras', 'All live feeds'],
     ['Queue', '#/queue', 'Pending print jobs'],
-    ['Files', '#/files', 'Pi library and printer storage'],
+    ['Print Bay', '#/files', 'Files, printer storage, and reprint staging'],
     ['Failures', '#/failures', 'Failure review'],
     ['Spools', '#/spools', 'Spool inventory'],
     ['Settings', '#/settings', 'Configuration'],
@@ -1649,7 +1649,7 @@ function buildTabs(printers) {
     `<div class="tab-section">Operations</div>`,
     `<a class="tab" href="#/cameras">Cameras</a>`,
     `<a class="tab" href="#/queue">Queue</a>`,
-    `<a class="tab" href="#/files">Files</a>`,
+    `<a class="tab" href="#/files">Print Bay</a>`,
     `<a class="tab" href="#/failures">Failures</a>`,
     `<a class="tab" href="#/spools">Spools</a>`,
     `<div class="tab-section">System</div>`,
@@ -3388,30 +3388,75 @@ function _fileCompatiblePrinters(file) {
   );
 }
 
+function _printBaySourceSummary(target, files) {
+  const totalBytes = files.reduce((sum, f) => sum + (Number(f.size) || 0), 0);
+  const compatible = new Set();
+  files.forEach(f => _fileCompatiblePrinters(f).forEach(p => compatible.add(p.id)));
+  return {
+    count: files.length,
+    size: totalBytes,
+    compatible: compatible.size,
+    ready: files.filter(f => _fileCompatiblePrinters(f).some(p => p.state === 'idle' || p.state === 'finished')).length,
+  };
+}
+
+function _printBayOverview(targets) {
+  const sourceSummaries = (targets || []).map(t => {
+    const files = (t.files || []).filter(f => f.kind !== 'dir' && _fileCompatiblePrinters(f).length);
+    return { target: t, files, summary: _printBaySourceSummary(t, files) };
+  });
+  const allFiles = sourceSummaries.reduce((sum, s) => sum + s.summary.count, 0);
+  const readyFiles = sourceSummaries.reduce((sum, s) => sum + s.summary.ready, 0);
+  const libraryFiles = sourceSummaries.find(s => s.target.id === 'library')?.summary.count || 0;
+  const printerFiles = allFiles - libraryFiles;
+  return `<section class="filedesk-overview" aria-label="Print Bay overview">
+    <div>
+      <strong>${readyFiles}</strong>
+      <span>ready to launch</span>
+    </div>
+    <div>
+      <strong>${libraryFiles}</strong>
+      <span>Pi library</span>
+    </div>
+    <div>
+      <strong>${printerFiles}</strong>
+      <span>printer storage</span>
+    </div>
+    <div>
+      <strong>${allFiles}</strong>
+      <span>printable files</span>
+    </div>
+  </section>`;
+}
+
 function _fileDeskTargetHtml(target) {
   const files = (target.files || []).filter(f => f.kind !== 'dir' && _fileCompatiblePrinters(f).length);
-  const rowActions = f => {
+  const summary = _printBaySourceSummary(target, files);
+  const rows = files.length ? files.map(f => {
     const path = esc(f.path || f.name);
-    return `<span class="filedesk-row-actions">
-      <button class="filedesk-action-btn" data-file-action="queue" data-source-id="${esc(target.id)}" data-path="${path}">Queue</button>
-    </span>`;
-  };
-  const rows = files.length ? files.map(f => `
-    <tr>
-      <td class="filedesk-select-cell">
-        <input type="checkbox" class="filedesk-select" data-source-id="${esc(target.id)}" data-path="${esc(f.path || f.name)}" data-name="${esc(f.name || f.path || 'File')}">
-      </td>
-      <td><span class="filedesk-kind filedesk-kind-${_fileKindClass(f.kind)}">${esc(f.kind || 'file')}</span></td>
-      <td class="filedesk-name-cell" title="${esc(f.path || f.name)}">
-        <span class="filedesk-name-main">
+    const printers = _fileCompatiblePrinters(f);
+    const ready = printers.filter(p => p.state === 'idle' || p.state === 'finished');
+    const printerChips = printers.slice(0, 4).map(p => `<span class="filedesk-printer-chip${ready.some(r => r.id === p.id) ? ' filedesk-printer-ready' : ''}">${esc(p.model_name || p.custom_name || p.id)}</span>`).join('');
+    const more = printers.length > 4 ? `<span class="filedesk-printer-chip">+${printers.length - 4}</span>` : '';
+    return `<article class="filedesk-file-row">
+      <input type="checkbox" class="filedesk-select" data-source-id="${esc(target.id)}" data-path="${path}" data-name="${esc(f.name || f.path || 'File')}" aria-label="Select ${esc(f.name || f.path || 'file')}">
+      <div class="filedesk-file-main" title="${esc(f.path || f.name)}">
+        <div class="filedesk-file-title">
+          <span class="filedesk-kind filedesk-kind-${_fileKindClass(f.kind)}">${esc(f.kind || 'file')}</span>
           <strong class="filedesk-name">${esc(f.name || f.path || 'File')}</strong>
-          <span class="filedesk-inline-path">${esc(f.path || '')}</span>
-        </span>
-        ${rowActions(f)}
-      </td>
-      <td>${_fmtBytes(f.size)}</td>
-      <td>${esc(_fileModifiedLabel(f.modified))}</td>
-    </tr>`).join('') : `<tr><td colspan="5" class="filedesk-empty">${target.error ? esc(target.error) : 'No files found.'}</td></tr>`;
+        </div>
+        <div class="filedesk-file-meta">
+          <span>${esc(_fmtBytes(f.size))}</span>
+          <span>${esc(_fileModifiedLabel(f.modified))}</span>
+          <span>${esc(f.path || '')}</span>
+        </div>
+      </div>
+      <div class="filedesk-compat">
+        ${printerChips}${more}
+      </div>
+      <button class="filedesk-action-btn filedesk-queue-primary" data-file-action="queue" data-source-id="${esc(target.id)}" data-path="${path}">Queue</button>
+    </article>`;
+  }).join('') : `<div class="filedesk-empty">${target.error ? esc(target.error) : 'No printable files found.'}</div>`;
   const formatNote = target.actions?.format_sd
     ? `<div class="filedesk-format-row">
         <span class="filedesk-format-note">Bambu SD cleanout deletes printable jobs only and keeps utility folders.</span>
@@ -3436,13 +3481,19 @@ function _fileDeskTargetHtml(target) {
         <span>${files.length === 1 ? 'file' : 'files'}</span>
       </div>
     </div>
+    <div class="filedesk-source-strip">
+      <span><strong>${summary.ready}</strong> ready</span>
+      <span><strong>${summary.compatible}</strong> compatible printers</span>
+      <span><strong>${_fmtBytes(summary.size)}</strong></span>
+    </div>
     ${formatNote}
     ${bulkBar}
-    <div class="filedesk-table-wrap">
-      <table class="filedesk-table">
-        <thead><tr><th class="filedesk-select-cell"><input type="checkbox" class="filedesk-select-all" data-source-id="${esc(target.id)}" ${files.length ? '' : 'disabled'}></th><th>Type</th><th>Name</th><th>Size</th><th>Modified</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
+    <div class="filedesk-list-head">
+      <label><input type="checkbox" class="filedesk-select-all" data-source-id="${esc(target.id)}" ${files.length ? '' : 'disabled'}> Select all</label>
+      <span>Launch candidates</span>
+    </div>
+    <div class="filedesk-list-wrap">
+      ${rows}
     </div>
   </section>`;
 }
@@ -3465,12 +3516,13 @@ async function renderFileDeskView() {
     const html = `<div class="filedesk-shell">
       <section class="filedesk-hero">
         <div>
-          <div class="mission-eyebrow">File Desk</div>
-          <h1>Printer files</h1>
-          <p>Browse the Pi library, Voron files, and Bambu SD cards. Queue compatible files without starting them.</p>
+          <div class="mission-eyebrow">Print Bay</div>
+          <h1>Run-ready library</h1>
+          <p>Stage files, inspect printer storage, and queue compatible jobs without starting them.</p>
         </div>
         <div class="filedesk-library-path">${esc(data.library_path || '')}</div>
       </section>
+      ${_printBayOverview(data.targets || [])}
       <div class="filedesk-grid">${(data.targets || []).map(_fileDeskTargetHtml).join('')}</div>
     </div>`;
     if (html !== _fileDeskLastHtml) {
