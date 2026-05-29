@@ -6587,6 +6587,19 @@ select.settings-input { cursor: pointer; }
 .filedesk-kind { display: inline-flex; border: 1px solid rgba(122,162,216,0.28); border-radius: 999px; background: rgba(122,162,216,0.08); color: #bfdbfe; padding: 0.12rem 0.38rem; font-size: 0.6rem; text-transform: uppercase; white-space: nowrap; }
 .filedesk-kind-dir { color: #fcd34d; border-color: rgba(245,158,11,0.35); background: rgba(245,158,11,0.1); }
 .filedesk-empty { color: var(--muted) !important; text-align: center; padding: 1.5rem !important; }
+.filedesk-actions { text-align: right; white-space: nowrap; }
+.filedesk-action-btn {
+  border: 1px solid var(--accent);
+  border-radius: 0.35rem;
+  background: rgba(59,130,246,0.08);
+  color: #60a5fa;
+  padding: 0.18rem 0.48rem;
+  font-size: 0.68rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+.filedesk-action-btn:hover:not(:disabled) { background: rgba(59,130,246,0.16); color: white; }
+.filedesk-action-btn:disabled { opacity: 0.55; cursor: default; }
 
 @media (max-width: 1100px) {
   .filedesk-grid { grid-template-columns: 1fr; }

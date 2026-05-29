@@ -2634,6 +2634,15 @@ function _fileKindClass(kind) {
   return String(kind || 'file').replace(/[^a-z0-9_-]/gi, '-').toLowerCase();
 }
 
+function _fileCompatiblePrinters(file) {
+  const name = String(file?.name || file?.path || '').toLowerCase();
+  const isBambu = name.endsWith('.3mf') || name.endsWith('.gcode.3mf');
+  const isMoonraker = name.endsWith('.gcode') || name.endsWith('.gcode.gz') || name.endsWith('.ufp');
+  return _latestPrinters.filter(p =>
+    (p.kind === 'bambu' && isBambu) || (p.kind === 'moonraker' && isMoonraker)
+  );
+}
+
 function _fileDeskTargetHtml(target) {
   const files = target.files || [];
   const rows = files.length ? files.map(f => `
@@ -2643,7 +2652,8 @@ function _fileDeskTargetHtml(target) {
       <td>${_fmtBytes(f.size)}</td>
       <td>${esc(_fileModifiedLabel(f.modified))}</td>
       <td class="filedesk-path" title="${esc(f.path || '')}">${esc(f.path || '')}</td>
-    </tr>`).join('') : `<tr><td colspan="5" class="filedesk-empty">${target.error ? esc(target.error) : 'No files found.'}</td></tr>`;
+      <td class="filedesk-actions">${f.kind === 'dir' || !_fileCompatiblePrinters(f).length ? '' : `<button class="filedesk-action-btn" data-file-action="queue" data-source-id="${esc(target.id)}" data-path="${esc(f.path || f.name)}">Queue</button>`}</td>
+    </tr>`).join('') : `<tr><td colspan="6" class="filedesk-empty">${target.error ? esc(target.error) : 'No files found.'}</td></tr>`;
   const formatNote = target.actions?.format_sd
     ? `<span class="filedesk-format-note">Bambu SD format: guarded action planned</span>`
     : '';
@@ -2661,7 +2671,7 @@ function _fileDeskTargetHtml(target) {
     ${formatNote}
     <div class="filedesk-table-wrap">
       <table class="filedesk-table">
-        <thead><tr><th>Type</th><th>Name</th><th>Size</th><th>Modified</th><th>Path</th></tr></thead>
+        <thead><tr><th>Type</th><th>Name</th><th>Size</th><th>Modified</th><th>Path</th><th>Actions</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
     </div>
@@ -2670,6 +2680,7 @@ function _fileDeskTargetHtml(target) {
 
 let _fileDeskRenderInFlight = false;
 let _fileDeskLastHtml = '';
+let _fileDeskTargets = [];
 
 async function renderFileDeskView() {
   const el = document.getElementById('filedesk-page');
@@ -2681,12 +2692,13 @@ async function renderFileDeskView() {
     const r = await fetch('/api/files');
     if (!r.ok) throw new Error('Unable to load files');
     const data = await r.json();
+    _fileDeskTargets = data.targets || [];
     const html = `<div class="filedesk-shell">
       <section class="filedesk-hero">
         <div>
           <div class="mission-eyebrow">File Desk</div>
           <h1>Printer files</h1>
-          <p>Read-only view of the Pi library, Voron files, and Bambu SD cards.</p>
+          <p>Browse the Pi library, Voron files, and Bambu SD cards. Queue compatible files without starting them.</p>
         </div>
         <div class="filedesk-library-path">${esc(data.library_path || '')}</div>
       </section>
@@ -2695,12 +2707,52 @@ async function renderFileDeskView() {
     if (html !== _fileDeskLastHtml) {
       el.innerHTML = html;
       _fileDeskLastHtml = html;
+      _attachFileDeskEvents(el);
     }
   } catch (err) {
     if (!_fileDeskLastHtml) el.innerHTML = `<div class="detail-placeholder">File Desk unavailable.</div>`;
   } finally {
     _fileDeskRenderInFlight = false;
   }
+}
+
+function _attachFileDeskEvents(el) {
+  el.querySelectorAll('[data-file-action="queue"]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const sourceId = btn.dataset.sourceId;
+      const path = btn.dataset.path;
+      const file = (_fileDeskTargets.find(t => t.id === sourceId)?.files || [])
+        .find(f => (f.path || f.name) === path);
+      const printers = _fileCompatiblePrinters(file);
+      if (!printers.length) return;
+      const labels = printers.map((p, i) => `${i + 1}. ${p.custom_name || p.model_name}`).join('\n');
+      const pick = prompt(`Queue to which printer?\n${labels}`, '1');
+      if (pick === null) return;
+      const printer = printers[Number(pick) - 1];
+      if (!printer) {
+        alert('Invalid printer selection');
+        return;
+      }
+      const old = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = 'Adding';
+      try {
+        const r = await fetch('/api/files/queue', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ source_id: sourceId, path, printer_id: printer.id }),
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(data.detail || 'Unable to queue file');
+        btn.textContent = 'Queued';
+        setTimeout(() => { location.hash = '#/queue'; }, 450);
+      } catch (err) {
+        alert(err.message || 'Unable to queue file');
+        btn.textContent = old;
+        btn.disabled = false;
+      }
+    });
+  });
 }
 
 function _queuePreflightBadge(preflight) {

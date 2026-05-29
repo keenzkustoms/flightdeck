@@ -317,6 +317,12 @@ app = FastAPI(title="Flightdeck", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=_STATIC), name="static")
 
 
+class FileQueueRequest(BaseModel):
+    source_id: str
+    path: str
+    printer_id: str
+
+
 @app.get("/", include_in_schema=False)
 def index():
     return FileResponse(_STATIC / "index.html")
@@ -367,6 +373,16 @@ def _local_library_files() -> list[dict]:
     return rows
 
 
+def _safe_library_path(rel_path: str) -> Path:
+    root = _PRINT_LIBRARY.resolve()
+    target = (root / rel_path).resolve()
+    if root != target and root not in target.parents:
+        raise HTTPException(status_code=400, detail="Invalid library path")
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail="Library file not found")
+    return target
+
+
 async def _moonraker_files(base_url: str) -> list[dict]:
     async with httpx.AsyncClient(timeout=8.0) as client:
         r = await client.get(f"{base_url.rstrip('/')}/server/files/list", params={"root": "gcodes"})
@@ -386,6 +402,47 @@ async def _moonraker_files(base_url: str) -> list[dict]:
             "modified": item.get("modified") or item.get("date"),
         })
     return sorted(rows, key=lambda r: (r["kind"] != "dir", r["path"].lower()))
+
+
+async def _download_moonraker_file(base_url: str, path: str) -> bytes:
+    from urllib.parse import quote
+    safe = quote(path.lstrip("/"), safe="/")
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        r = await client.get(f"{base_url.rstrip('/')}/server/files/gcodes/{safe}")
+        r.raise_for_status()
+        return r.content
+
+
+def _queue_file_extension(filename: str) -> str:
+    if filename.endswith(".gcode.3mf"):
+        return ".3mf"
+    if filename.endswith(".gcode.gz"):
+        return ".gcode.gz"
+    if "." in filename:
+        return "." + filename.rsplit(".", 1)[-1]
+    return ""
+
+
+def _queue_file_metadata(filename: str, data: bytes) -> dict:
+    preview_png = estimated_seconds = filament_weight_g = filament_type = filament_colors = None
+    if _queue_file_extension(filename) == ".3mf":
+        try:
+            from .printers.bambu_ftp import _parse_3mf
+            p = _parse_3mf(io.BytesIO(data))
+            preview_png = p.image_png
+            estimated_seconds = p.estimated_total_seconds
+            filament_weight_g = p.filament_weight_g
+            filament_type = p.filament_type
+            filament_colors = p.filament_colors
+        except Exception:
+            pass
+    return {
+        "preview_png": preview_png,
+        "estimated_seconds": estimated_seconds,
+        "filament_weight_g": filament_weight_g,
+        "filament_type": filament_type,
+        "filament_colors": filament_colors,
+    }
 
 
 @app.get("/api/files")
@@ -435,6 +492,62 @@ async def get_file_desk():
         })
 
     return {"library_path": str(_PRINT_LIBRARY), "targets": targets}
+
+
+@app.post("/api/files/queue", status_code=201)
+async def queue_file_from_file_desk(body: FileQueueRequest):
+    printer_id = body.printer_id.strip()
+    source_id = body.source_id.strip()
+    source_path = body.path.strip().lstrip("/")
+    if not source_path:
+        raise HTTPException(status_code=422, detail="File path required")
+
+    target_kind = _printer_kind(printer_id)
+    if target_kind is None:
+        raise HTTPException(status_code=404, detail="Target printer not found")
+
+    filename = source_path.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+    ext = _queue_file_extension(filename)
+    allowed = _ALLOWED_BAMBU_EXT if target_kind == "bambu" else _ALLOWED_MOONRAKER_EXT
+    if ext not in allowed:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unsupported file type '{ext}' for {target_kind} printer. Expected: {', '.join(sorted(allowed))}",
+        )
+
+    if source_id == "library":
+        data = _safe_library_path(source_path).read_bytes()
+    else:
+        bambu = _find_bambu(source_id)
+        if bambu:
+            from .printers.bambu_ftp import download_bambu_file
+            data = await asyncio.to_thread(download_bambu_file, bambu._ip, bambu._access_code, source_path)
+        else:
+            mr_url = _find_moonraker_url(source_id)
+            if not mr_url:
+                raise HTTPException(status_code=404, detail="Source not found")
+            data = await _download_moonraker_file(mr_url, source_path)
+
+    if not data:
+        raise HTTPException(status_code=422, detail="Empty file")
+
+    import uuid as _uuid
+    safe_name = f"{_uuid.uuid4().hex[:8]}_{filename}"
+    file_path = str(db.UPLOADS_DIR / safe_name)
+    with open(file_path, "wb") as f:
+        f.write(data)
+
+    meta = _queue_file_metadata(filename, data)
+    job_id = db.queue_add(
+        printer_id, filename, file_path, len(data),
+        preview_png=meta["preview_png"],
+        estimated_seconds=meta["estimated_seconds"],
+        filament_weight_g=meta["filament_weight_g"],
+        filament_type=meta["filament_type"],
+        filament_colors=meta["filament_colors"],
+    )
+    db.log_decision(printer_id, "filedesk_queued", f"{source_id}:{source_path} -> job #{job_id}")
+    return {"id": job_id}
 
 
 

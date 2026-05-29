@@ -1126,6 +1126,13 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - DOM is only swapped when the generated File Desk HTML actually changes.
 - Static cache-bust bumped to `app.js?v=116`.
 
+### File Desk queue action
+- Added `POST /api/files/queue` to copy a File Desk item into the normal Flightdeck queue storage and create a pending queue job.
+- Supports Pi library, Bambu SD files via FTPS, and Voron Moonraker files.
+- Queue action only appears for compatible target types: `.3mf/.gcode.3mf` to Bambu, `.gcode/.gcode.gz/.ufp` to Moonraker.
+- File Desk rows now have a `Queue` action that prompts for the compatible target printer and then jumps to Queue.
+- Static cache-bust bumped to `style.css?v=101` and `app.js?v=117`.
+
 ### Closing fixes (shipped same session)
 - **Bambu filament metadata**: `get_preview()` now called proactively on first poll of any new print (same trigger as AMS snapshot). One-shot FTP call per job; cached on `subtask_name`. Ensures `filament_weight_g` and `material` are always populated for spool deduction, even when nobody views the detail page.
 - **Spool snapshot overwrite on restart**: `write_slot_snapshot` now uses `WHERE ams_slot_snapshot IS NULL`. Post-restart the snapshot condition re-fires (in-memory state resets), but the original DB row is preserved. Spool deduction uses correct print-start slot assignments regardless of restarts.

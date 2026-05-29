@@ -114,6 +114,25 @@ def fetch_bambu_preview(ip: str, access_code: str, subtask_name: str) -> Optiona
     return _parse_3mf(buf)
 
 
+def download_bambu_file(ip: str, access_code: str, path: str) -> bytes:
+    """Download a file from Bambu printer SD via implicit FTPS."""
+    ftp = _ImplicitFTP_TLS()
+    remote = "/" + path.strip("/")
+    try:
+        ftp.connect(ip, 990, timeout=20)
+        ftp.login("bblp", access_code)
+        ftp.prot_p()
+        ftp.set_pasv(True)
+        buf = io.BytesIO()
+        ftp.retrbinary(f"RETR {remote}", buf.write)
+        return buf.getvalue()
+    finally:
+        try:
+            ftp.quit()
+        except Exception:
+            pass
+
+
 def upload_bambu_file(ip: str, access_code: str, filename: str, data: bytes) -> BambuPreview:
     """Upload a .gcode.3mf to the printer via FTPS and return parsed metadata.
 
