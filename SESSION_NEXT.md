@@ -1091,6 +1091,10 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Non-persistent RH rows show "Tracking before Mission Control alert" to make the quiet period visible.
 - Static cache-bust bumped to `style.css?v=97` and `app.js?v=111`.
 
+### Spool edit clear fix
+- Fixed `PUT /api/spools/{id}` so explicitly cleared optional fields, such as subtype, are written as `NULL` instead of being ignored.
+- This fixes the edit form reverting a removed subtype back to the old value.
+
 ### Closing fixes (shipped same session)
 - **Bambu filament metadata**: `get_preview()` now called proactively on first poll of any new print (same trigger as AMS snapshot). One-shot FTP call per job; cached on `subtask_name`. Ensures `filament_weight_g` and `material` are always populated for spool deduction, even when nobody views the detail page.
 - **Spool snapshot overwrite on restart**: `write_slot_snapshot` now uses `WHERE ams_slot_snapshot IS NULL`. Post-restart the snapshot condition re-fires (in-memory state resets), but the original DB row is preserved. Spool deduction uses correct print-start slot assignments regardless of restarts.

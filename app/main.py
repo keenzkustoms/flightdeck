@@ -1208,7 +1208,7 @@ async def create_spool(body: SpoolCreate):
 
 @app.put("/api/spools/{spool_id}")
 async def update_spool(spool_id: int, body: SpoolUpdate):
-    fields = {k: v for k, v in body.model_dump().items() if v is not None}
+    fields = body.model_dump(exclude_unset=True)
     if not db.update_spool(spool_id, **fields):
         raise HTTPException(status_code=404, detail="Spool not found")
     return {"ok": True}
