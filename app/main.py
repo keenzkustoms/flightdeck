@@ -323,6 +323,10 @@ class FileQueueRequest(BaseModel):
     printer_id: str
 
 
+class BambuSdClearRequest(BaseModel):
+    confirm: str = ""
+
+
 @app.get("/", include_in_schema=False)
 def index():
     return FileResponse(_STATIC / "index.html")
@@ -548,6 +552,22 @@ async def queue_file_from_file_desk(body: FileQueueRequest):
     )
     db.log_decision(printer_id, "filedesk_queued", f"{source_id}:{source_path} -> job #{job_id}")
     return {"id": job_id}
+
+
+@app.post("/api/files/bambu/{printer_id}/clear")
+async def clear_bambu_sd_print_files(printer_id: str, body: BambuSdClearRequest):
+    if body.confirm.strip().upper() != "CLEAR":
+        raise HTTPException(status_code=422, detail="Type CLEAR to confirm")
+    printer = _find_bambu(printer_id)
+    if not printer:
+        raise HTTPException(status_code=404, detail="Bambu printer not found")
+    state = (_latest_printers.get(printer_id) or {}).get("state")
+    if state in ("printing", "paused"):
+        raise HTTPException(status_code=409, detail="Cannot clear SD while printer has an active print")
+    from .printers.bambu_ftp import clear_bambu_print_files
+    result = await asyncio.to_thread(clear_bambu_print_files, printer._ip, printer._access_code)
+    db.log_decision(printer_id, "bambu_sd_cleared", f"Deleted {len(result.get('deleted', []))} print files")
+    return {"ok": True, **result}
 
 
 

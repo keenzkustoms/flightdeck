@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 29 May 2026 (Session 28.51 File Desk and Queue native dialog cleanup)_
+_Last updated 29 May 2026 (Session 28.52 File Desk Bambu SD cleanout)_
 
 ## Current state
 
@@ -1145,6 +1145,13 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Queue job removal now uses the in-app Flightdeck confirmation modal instead of the browser `confirm()` dialog.
 - Queue action failures now use Flightdeck toast errors instead of browser alerts.
 - Static cache-bust bumped to `app.js?v=119`.
+
+### File Desk Bambu SD cleanout
+- Added guarded Bambu-only SD cleanout from File Desk.
+- Backend endpoint: `POST /api/files/bambu/{printer_id}/clear`.
+- The action requires typed `CLEAR`, refuses to run while the printer is printing/paused, and deletes printable `.3mf` jobs from the SD root while leaving utility folders alone.
+- UI exposes `Clear SD prints` only on Bambu File Desk targets, with an in-app confirmation dialog and toast result.
+- Static cache-bust bumped to `style.css?v=103` and `app.js?v=120`.
 
 ### Closing fixes (shipped same session)
 - **Bambu filament metadata**: `get_preview()` now called proactively on first poll of any new print (same trigger as AMS snapshot). One-shot FTP call per job; cached on `subtask_name`. Ensures `filament_weight_g` and `material` are always populated for spool deduction, even when nobody views the detail page.

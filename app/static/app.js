@@ -2663,7 +2663,10 @@ function _fileDeskTargetHtml(target) {
       <td>${esc(_fileModifiedLabel(f.modified))}</td>
     </tr>`).join('') : `<tr><td colspan="4" class="filedesk-empty">${target.error ? esc(target.error) : 'No files found.'}</td></tr>`;
   const formatNote = target.actions?.format_sd
-    ? `<span class="filedesk-format-note">Bambu SD format: guarded action planned</span>`
+    ? `<div class="filedesk-format-row">
+        <span class="filedesk-format-note">Bambu SD cleanout deletes printable jobs only and keeps utility folders.</span>
+        <button class="filedesk-danger-btn" data-file-action="clear-sd" data-source-id="${esc(target.id)}">Clear SD prints</button>
+      </div>`
     : '';
   return `<section class="filedesk-target filedesk-${target.kind}">
     <div class="filedesk-target-head">
@@ -2736,6 +2739,12 @@ function _attachFileDeskEvents(el) {
       _openFileQueueDialog({ sourceId, path, file, printers });
     });
   });
+  el.querySelectorAll('[data-file-action="clear-sd"]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const target = _fileDeskTargets.find(t => t.id === btn.dataset.sourceId);
+      if (target?.kind === 'bambu') _openBambuSdClearDialog(target);
+    });
+  });
 }
 
 function _openFileQueueDialog({ sourceId, path, file, printers }) {
@@ -2796,6 +2805,73 @@ function _openFileQueueDialog({ sourceId, path, file, printers }) {
         overlay.querySelectorAll('.filedesk-printer-choice').forEach(b => { b.disabled = false; });
       });
   });
+}
+
+function _openBambuSdClearDialog(target) {
+  document.querySelector('.filedesk-clear-dialog')?.remove();
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay filedesk-clear-dialog';
+  overlay.innerHTML = `
+    <div class="modal-box filedesk-queue-box" role="dialog" aria-modal="true" aria-label="Clear Bambu SD prints">
+      <div class="filedesk-queue-head">
+        <div>
+          <div class="mission-eyebrow">Bambu SD</div>
+          <h3>Clear printable files from ${esc(target.label || target.id)}</h3>
+          <span>This deletes .3mf print jobs from the SD root. Utility folders are left alone.</span>
+        </div>
+        <button class="filedesk-dialog-close" data-dialog-close aria-label="Close">x</button>
+      </div>
+      <label class="filedesk-confirm-label">
+        Type CLEAR to confirm
+        <input class="filedesk-confirm-input" autocomplete="off" spellcheck="false">
+      </label>
+      <div class="filedesk-dialog-error" hidden></div>
+      <div class="modal-actions">
+        <button class="modal-btn" data-dialog-close>Cancel</button>
+        <button class="modal-btn modal-btn-danger" data-clear-confirm>Clear SD prints</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  const input = overlay.querySelector('.filedesk-confirm-input');
+  const errEl = overlay.querySelector('.filedesk-dialog-error');
+  const confirmBtn = overlay.querySelector('[data-clear-confirm]');
+  const close = () => overlay.remove();
+  const run = async () => {
+    const confirm = input.value.trim();
+    if (confirm.toUpperCase() !== 'CLEAR') {
+      errEl.textContent = 'Type CLEAR to unlock this action.';
+      errEl.hidden = false;
+      return;
+    }
+    confirmBtn.disabled = true;
+    confirmBtn.textContent = 'Clearing...';
+    try {
+      const r = await fetch(`/api/files/bambu/${encodeURIComponent(target.id)}/clear`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirm }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.detail || 'Unable to clear SD files');
+      showToast('Bambu SD cleaned', `${data.deleted?.length || 0} print files removed`, 'success');
+      _fileDeskLastHtml = '';
+      close();
+      renderFileDeskView();
+    } catch (err) {
+      errEl.textContent = err.message || 'Unable to clear SD files';
+      errEl.hidden = false;
+      confirmBtn.disabled = false;
+      confirmBtn.textContent = 'Clear SD prints';
+    }
+  };
+  overlay.addEventListener('click', e => {
+    if (e.target === overlay || e.target.closest('[data-dialog-close]')) close();
+    if (e.target.closest('[data-clear-confirm]')) run();
+  });
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') run();
+  });
+  setTimeout(() => input.focus(), 0);
 }
 
 function _queuePreflightBadge(preflight) {

@@ -207,3 +207,32 @@ def list_bambu_files(ip: str, access_code: str, path: str = "/") -> list[dict]:
         except Exception:
             pass
     return sorted(rows, key=lambda r: (r["kind"] != "dir", r["name"].lower()))
+
+
+def clear_bambu_print_files(ip: str, access_code: str) -> dict:
+    """Delete printable job files from the Bambu SD root, leaving utility folders alone."""
+    printable_ext = (".3mf", ".gcode.3mf")
+    rows = list_bambu_files(ip, access_code)
+    ftp = _ImplicitFTP_TLS()
+    deleted: list[str] = []
+    skipped: list[str] = []
+    try:
+        ftp.connect(ip, 990, timeout=20)
+        ftp.login("bblp", access_code)
+        ftp.prot_p()
+        ftp.set_pasv(True)
+        for row in rows:
+            name = row.get("name") or ""
+            path = (row.get("path") or name).lstrip("/")
+            lower = name.lower()
+            if row.get("kind") == "dir" or not lower.endswith(printable_ext):
+                skipped.append(path)
+                continue
+            ftp.delete(f"/{path}")
+            deleted.append(path)
+    finally:
+        try:
+            ftp.quit()
+        except Exception:
+            pass
+    return {"deleted": deleted, "skipped": skipped}
