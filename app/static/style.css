@@ -2878,6 +2878,177 @@ header {
 
 .modal-btn-danger:hover { background: rgba(153,27,27,0.7); }
 
+/* ── Command palette ── */
+.command-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2400;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 8vh 1rem 1rem;
+  background: rgba(3, 5, 12, 0.58);
+  backdrop-filter: blur(8px);
+}
+
+.command-palette {
+  width: min(42rem, 100%);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 0.8rem;
+  background: #111119;
+  box-shadow: 0 28px 70px rgba(0,0,0,0.55);
+}
+
+.command-head,
+.command-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.8rem 0.95rem;
+}
+
+.command-head {
+  border-bottom: 1px solid var(--border);
+}
+
+.command-head strong {
+  display: block;
+  font-size: 0.95rem;
+}
+
+.command-head span,
+.command-foot {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.command-input {
+  width: calc(100% - 1.4rem);
+  margin: 0.7rem;
+  padding: 0.78rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 0.55rem;
+  background: #090a10;
+  color: var(--text);
+  font-size: 1rem;
+  outline: none;
+}
+
+.command-input:focus {
+  border-color: var(--printing);
+  box-shadow: 0 0 0 2px rgba(59,130,246,0.18);
+}
+
+.command-list {
+  max-height: min(30rem, 58vh);
+  overflow: auto;
+  padding: 0 0.7rem 0.7rem;
+}
+
+.command-item {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.72rem 0.8rem;
+  border: 1px solid transparent;
+  border-radius: 0.55rem;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.command-item.active,
+.command-item:hover {
+  border-color: rgba(59,130,246,0.55);
+  background: rgba(59,130,246,0.14);
+}
+
+.command-item-main {
+  min-width: 0;
+}
+
+.command-item-main strong,
+.command-item-main small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.command-item-main strong {
+  font-size: 0.88rem;
+}
+
+.command-item-main small {
+  margin-top: 0.18rem;
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.command-item-group {
+  color: var(--accent);
+  font-size: 0.64rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.command-empty {
+  padding: 1.2rem;
+  color: var(--muted);
+  text-align: center;
+}
+
+.command-foot {
+  justify-content: flex-start;
+  border-top: 1px solid var(--border);
+}
+
+.command-foot span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.command-palette kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.35rem;
+  height: 1.25rem;
+  padding: 0 0.35rem;
+  border: 1px solid var(--border);
+  border-radius: 0.3rem;
+  background: rgba(255,255,255,0.04);
+  color: var(--muted);
+  font-size: 0.66rem;
+  font-family: inherit;
+}
+
+@media (max-width: 520px) {
+  .command-overlay {
+    padding: 0.7rem;
+  }
+  .command-palette {
+    max-height: calc(100vh - 1.4rem);
+  }
+  .command-list {
+    max-height: calc(100vh - 13rem);
+  }
+  .command-item {
+    grid-template-columns: 1fr;
+    gap: 0.25rem;
+  }
+  .command-item-group {
+    justify-self: start;
+  }
+}
+
 /* ── AMS panel ── */
 #detail-ams:empty { display: none; }
 

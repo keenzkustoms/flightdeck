@@ -1287,6 +1287,15 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Replaced the small live dot with a larger animated radar sweep for live/reconnect state.
 - Static cache-bust bumped to `style.css?v=127` and `app.js?v=144`.
 
+### Command palette
+- Added a global command palette opened with `Ctrl/Cmd+K`.
+- Palette supports searchable navigation for Dashboard, Flight Tower, Telemetry, Cameras, Queue, Files, Failures, Spools, and Settings.
+- Added printer commands for live, history, and maintenance subtabs.
+- Added spool commands for opening individual active spools, low-stock/loaded filters, cabinet view, and Add Spool.
+- Palette supports keyboard operation: arrows to move, Enter to run, Escape to close.
+- Empty palette now keeps the core navigation order before search ranking kicks in.
+- Static cache-bust bumped to `style.css?v=128` and `app.js?v=146`.
+
 ### Closing fixes (shipped same session)
 - **Bambu filament metadata**: `get_preview()` now called proactively on first poll of any new print (same trigger as AMS snapshot). One-shot FTP call per job; cached on `subtask_name`. Ensures `filament_weight_g` and `material` are always populated for spool deduction, even when nobody views the detail page.
 - **Spool snapshot overwrite on restart**: `write_slot_snapshot` now uses `WHERE ams_slot_snapshot IS NULL`. Post-restart the snapshot condition re-fires (in-memory state resets), but the original DB row is preserved. Spool deduction uses correct print-start slot assignments regardless of restarts.

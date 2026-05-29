@@ -429,6 +429,293 @@ function _inputModal({ title, message = '', value = '', placeholder = '', inputT
   });
 }
 
+// ── Command palette ───────────────────────────────────────────────────────
+
+let _commandPalette = null;
+
+function _commandNavigate(hash, after = null) {
+  if (location.hash === hash) router();
+  else location.hash = hash;
+  if (after) setTimeout(after, 120);
+}
+
+function _commandSpoolTitle(s) {
+  const name = [s.color_name, s.material, s.subtype].filter(Boolean).join(' ');
+  const brand = s.brand ? ` · ${s.brand}` : '';
+  return `Spool #${s.id} · ${name || 'Filament'}${brand}`;
+}
+
+function _commandSpoolMeta(s) {
+  const grams = Number(s.remaining_g ?? 0);
+  const where = s.location_printer_id
+    ? `${_printerNavLabel(_latestPrinters.find(p => p.id === s.location_printer_id) || { id: s.location_printer_id })}${s.location_slot ? ` · ${s.location_slot}` : ''}`
+    : (s.storage_location_name || 'Shelved');
+  return `${Math.round(grams)}g · ${where}`;
+}
+
+function _commandItem({ label, meta = '', group = 'General', keywords = '', run }) {
+  return { label, meta, group, keywords: `${label} ${meta} ${group} ${keywords}`.toLowerCase(), run };
+}
+
+function _commandStaticItems() {
+  const nav = [
+    ['Dashboard', '#/', 'Overview and printer cards'],
+    ['Flight Tower', '#/mission', 'Dispatch and queue intelligence'],
+    ['Telemetry', '#/stats', 'Stats, RH, utilisation'],
+    ['Cameras', '#/cameras', 'All live feeds'],
+    ['Queue', '#/queue', 'Pending print jobs'],
+    ['Files', '#/files', 'Pi library and printer storage'],
+    ['Failures', '#/failures', 'Failure review'],
+    ['Spools', '#/spools', 'Spool inventory'],
+    ['Settings', '#/settings', 'Configuration'],
+  ].map(([label, hash, meta]) => _commandItem({
+    label: `Go to ${label}`,
+    meta,
+    group: 'Navigate',
+    keywords: hash,
+    run: () => _commandNavigate(hash),
+  }));
+
+  const spoolViews = [
+    _commandItem({
+      label: 'Open spool cabinet',
+      meta: 'Shelf view',
+      group: 'Spools',
+      keywords: 'cabinet shelves locations',
+      run: () => {
+        _spoolsViewMode = 'cabinet';
+        _commandNavigate('#/spools', () => { if (location.hash === '#/spools') renderSpoolsView(); });
+      },
+    }),
+    _commandItem({
+      label: 'Show low stock spools',
+      meta: 'Inventory below threshold',
+      group: 'Spools',
+      keywords: 'filament low remaining',
+      run: () => _commandNavigate('#/spools?filter=low'),
+    }),
+    _commandItem({
+      label: 'Show loaded spools',
+      meta: 'Currently in printers',
+      group: 'Spools',
+      keywords: 'ams slots loaded filament',
+      run: () => _commandNavigate('#/spools?filter=loaded'),
+    }),
+    _commandItem({
+      label: 'Add spool',
+      meta: 'Create and label a new roll',
+      group: 'Spools',
+      keywords: 'new filament roll inventory',
+      run: async () => {
+        _commandNavigate('#/spools');
+        const costs = await fetch('/api/filament/costs').then(r => r.json()).catch(() => []);
+        setTimeout(() => _openSpoolModal(costs, _refreshSpoolsSurface), 160);
+      },
+    }),
+  ];
+
+  const settings = ['Printers', 'Hardware', 'Appearance', 'Slicer', 'Filament', 'Locations'].map(label => {
+    const id = label.toLowerCase();
+    return _commandItem({
+      label: `Settings: ${label}`,
+      meta: 'Configuration',
+      group: 'Settings',
+      keywords: id,
+      run: () => _commandNavigate(`#/settings/${id}`),
+    });
+  });
+
+  return [...nav, ...spoolViews, ...settings];
+}
+
+function _commandPrinterItems() {
+  return (_latestPrinters || []).flatMap(p => {
+    const name = _printerNavLabel(p);
+    return [
+      _commandItem({
+        label: `Open ${name}`,
+        meta: `${p.model_name || p.kind || 'Printer'} · Live`,
+        group: 'Printers',
+        keywords: `${p.id} ${p.custom_name || ''} ${p.shop_name || ''}`,
+        run: () => _commandNavigate(`#/printer/${p.id}`),
+      }),
+      _commandItem({
+        label: `${name} history`,
+        meta: 'Finished prints',
+        group: 'Printers',
+        keywords: `${p.id} prints calendar`,
+        run: () => _commandNavigate(`#/printer/${p.id}/history`),
+      }),
+      _commandItem({
+        label: `${name} maintenance`,
+        meta: 'Service schedule',
+        group: 'Printers',
+        keywords: `${p.id} service tasks`,
+        run: () => _commandNavigate(`#/printer/${p.id}/maintenance`),
+      }),
+    ];
+  });
+}
+
+function _commandSpoolItems() {
+  return (_allSpools || [])
+    .filter(s => !s.archived_at)
+    .map(s => _commandItem({
+      label: _commandSpoolTitle(s),
+      meta: _commandSpoolMeta(s),
+      group: 'Spools',
+      keywords: `${s.id} ${s.material || ''} ${s.subtype || ''} ${s.brand || ''} ${s.color_name || ''} ${s.color_hex || ''}`,
+      run: () => _commandNavigate(`#/spool/${s.id}`),
+    }));
+}
+
+function _commandAllItems() {
+  return [
+    ..._commandStaticItems(),
+    ..._commandPrinterItems(),
+    ..._commandSpoolItems(),
+  ];
+}
+
+function _commandScore(item, query) {
+  const q = query.trim().toLowerCase();
+  if (!q) return 1;
+  const hay = item.keywords;
+  const tokens = q.split(/\s+/).filter(Boolean);
+  if (!tokens.every(t => hay.includes(t))) return 0;
+  let score = 10;
+  if (item.label.toLowerCase().startsWith(q)) score += 8;
+  if (item.label.toLowerCase().includes(q)) score += 4;
+  score += Math.max(0, 3 - item.group.length / 10);
+  return score;
+}
+
+function _commandRender() {
+  if (!_commandPalette) return;
+  const q = _commandPalette.input.value || '';
+  const all = _commandAllItems();
+  const ranked = q.trim()
+    ? all
+      .map(item => ({ item, score: _commandScore(item, q) }))
+      .filter(x => x.score > 0)
+      .sort((a, b) => b.score - a.score || a.item.group.localeCompare(b.item.group) || a.item.label.localeCompare(b.item.label))
+      .slice(0, 12)
+      .map(x => x.item)
+    : all.slice(0, 12);
+  _commandPalette.items = ranked;
+  _commandPalette.selected = Math.min(_commandPalette.selected, Math.max(0, ranked.length - 1));
+  _commandPalette.list.innerHTML = ranked.length
+    ? ranked.map((item, i) => `
+        <button class="command-item${i === _commandPalette.selected ? ' active' : ''}" data-command-index="${i}" type="button">
+          <span class="command-item-main">
+            <strong>${esc(item.label)}</strong>
+            <small>${esc(item.meta)}</small>
+          </span>
+          <span class="command-item-group">${esc(item.group)}</span>
+        </button>`).join('')
+    : `<div class="command-empty">No matching commands.</div>`;
+}
+
+async function _commandWarmData() {
+  const needsSpools = !_allSpools?.length;
+  const needsPrinters = !_latestPrinters?.length;
+  await Promise.all([
+    needsPrinters ? fetch('/api/printers').then(r => r.ok ? r.json() : []).then(p => { _latestPrinters = p; }).catch(() => {}) : Promise.resolve(),
+    needsSpools ? fetch('/api/spools').then(r => r.ok ? r.json() : []).then(s => { _allSpools = s; }).catch(() => {}) : Promise.resolve(),
+  ]);
+}
+
+function _closeCommandPalette() {
+  if (!_commandPalette) return;
+  _commandPalette.overlay.remove();
+  _commandPalette = null;
+}
+
+async function _runCommandPaletteItem(item) {
+  if (!item) return;
+  _closeCommandPalette();
+  try {
+    await item.run();
+  } catch (err) {
+    showToast('Command failed', err.message || '', 'error');
+  }
+}
+
+async function openCommandPalette() {
+  if (_commandPalette) {
+    _commandPalette.input.focus();
+    _commandPalette.input.select();
+    return;
+  }
+
+  const overlay = document.createElement('div');
+  overlay.className = 'command-overlay';
+  overlay.innerHTML = `
+    <div class="command-palette" role="dialog" aria-modal="true" aria-label="Command palette">
+      <div class="command-head">
+        <div>
+          <strong>Command</strong>
+          <span>Jump anywhere in Flightdeck</span>
+        </div>
+        <kbd>Esc</kbd>
+      </div>
+      <input class="command-input" type="search" autocomplete="off" spellcheck="false" placeholder="Search printers, spools, pages...">
+      <div class="command-list"></div>
+      <div class="command-foot">
+        <span><kbd>Enter</kbd> run</span>
+        <span><kbd>↑</kbd><kbd>↓</kbd> move</span>
+        <span><kbd>Ctrl</kbd><kbd>K</kbd> open</span>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  _commandPalette = {
+    overlay,
+    input: overlay.querySelector('.command-input'),
+    list: overlay.querySelector('.command-list'),
+    items: [],
+    selected: 0,
+  };
+
+  overlay.addEventListener('click', e => { if (e.target === overlay) _closeCommandPalette(); });
+  _commandPalette.input.addEventListener('input', () => {
+    _commandPalette.selected = 0;
+    _commandRender();
+  });
+  _commandPalette.input.addEventListener('keydown', e => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      _closeCommandPalette();
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      _commandPalette.selected = Math.min(_commandPalette.selected + 1, _commandPalette.items.length - 1);
+      _commandRender();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      _commandPalette.selected = Math.max(_commandPalette.selected - 1, 0);
+      _commandRender();
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      _runCommandPaletteItem(_commandPalette.items[_commandPalette.selected]);
+    }
+  });
+  _commandPalette.list.addEventListener('mousemove', e => {
+    const btn = e.target.closest('[data-command-index]');
+    if (!btn) return;
+    _commandPalette.selected = Number(btn.dataset.commandIndex);
+    _commandRender();
+  });
+  _commandPalette.list.addEventListener('click', e => {
+    const btn = e.target.closest('[data-command-index]');
+    if (!btn) return;
+    _runCommandPaletteItem(_commandPalette.items[Number(btn.dataset.commandIndex)]);
+  });
+
+  _commandRender();
+  _commandPalette.input.focus();
+  await _commandWarmData();
+  _commandRender();
+}
+
 function formatTime(seconds) {
   if (!seconds) return '—';
   const h = Math.floor(seconds / 3600);
@@ -460,7 +747,13 @@ document.addEventListener('fullscreenchange', () => {
 });
 
 document.addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+    e.preventDefault();
+    openCommandPalette();
+    return;
+  }
   if (e.key !== 'Escape') return;
+  if (_commandPalette) { _closeCommandPalette(); return; }
   if (_tempModal.isOpen()) { _tempModal.close(); return; }
   if (_camZoom !== 1) return;
   // ESC in wide mode (state 1) — browser handles ESC for fullscreen (state 2)
