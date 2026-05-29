@@ -4,7 +4,10 @@ import csv
 import io
 import json
 import logging
+import os
 import re
+import sqlite3
+import subprocess
 import urllib.request
 from contextlib import asynccontextmanager
 from dataclasses import asdict
@@ -32,7 +35,7 @@ from . import db, relay
 from .camera import BambuCameraProxy
 from .label_printer import LabelPrinter
 from .models import PrintPreview
-from .paths import PRINT_LIBRARY_DIR
+from .paths import APP_DIR, DATA_DIR, DB_PATH, PRINTERS_CONFIG_PATH, PRINT_LIBRARY_DIR, UPLOADS_DIR
 from .printer_config import BambuConnection, BambuRtspCamera, MjpegDirectCamera, MoonrakerConnection, NtfyConfig, PrinterEntry, load, save
 from .printers import moonraker
 from .printers.bambu import BambuPrinter
@@ -1225,6 +1228,173 @@ def _label_base_url() -> str:
 def _label_spool(spool: dict) -> dict:
     settings = db.get_all_settings()
     return {**spool, "_label_preferences": settings}
+
+
+def _setup_check(
+    key: str,
+    label: str,
+    ok: bool,
+    detail: str,
+    level: str | None = None,
+    optional: bool = False,
+) -> dict:
+    if level is None:
+        level = "ok" if ok else ("optional" if optional else "warn")
+    return {"key": key, "label": label, "ok": ok, "level": level, "detail": detail, "optional": optional}
+
+
+def _is_writable_dir(path: Path) -> bool:
+    path.mkdir(parents=True, exist_ok=True)
+    probe = path / ".flightdeck-write-test"
+    try:
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink(missing_ok=True)
+        return True
+    except Exception:
+        return False
+
+
+def _systemd_status() -> tuple[bool, str]:
+    try:
+        active = subprocess.run(
+            ["systemctl", "is-active", "flightdeck.service"],
+            text=True,
+            capture_output=True,
+            timeout=2,
+        )
+        enabled = subprocess.run(
+            ["systemctl", "is-enabled", "flightdeck.service"],
+            text=True,
+            capture_output=True,
+            timeout=2,
+        )
+        state = active.stdout.strip() or active.stderr.strip() or "unknown"
+        enable_state = enabled.stdout.strip() or enabled.stderr.strip() or "unknown"
+        return active.returncode == 0, f"{state}, {enable_state}"
+    except Exception as exc:
+        return False, str(exc)
+
+
+def _tailnet_hint(url: str) -> tuple[bool, str]:
+    if not url:
+        return False, "No base URL configured"
+    if ".ts.net" in url or "tailscale" in url.lower():
+        return True, url
+    return True, f"{url} (LAN or custom URL)"
+
+
+@app.get("/api/setup/health")
+async def setup_health():
+    settings = db.get_all_settings()
+    checks: list[dict] = []
+
+    checks.append(_setup_check(
+        "app_dir",
+        "App checkout",
+        APP_DIR.exists(),
+        str(APP_DIR),
+    ))
+    checks.append(_setup_check(
+        "data_dir",
+        "Data directory",
+        DATA_DIR.exists() and os.access(DATA_DIR, os.R_OK | os.W_OK),
+        f"{DATA_DIR} ({'portable' if DATA_DIR != APP_DIR else 'repo-local legacy mode'})",
+        level="ok" if DATA_DIR.exists() and os.access(DATA_DIR, os.R_OK | os.W_OK) else "warn",
+    ))
+    db_ok = False
+    db_detail = str(DB_PATH)
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute("SELECT 1").fetchone()
+        db_ok = True
+    except Exception as exc:
+        db_detail = f"{DB_PATH} ({exc})"
+    checks.append(_setup_check("database", "SQLite database", db_ok, db_detail))
+
+    checks.append(_setup_check(
+        "uploads",
+        "Uploads directory",
+        _is_writable_dir(UPLOADS_DIR),
+        str(UPLOADS_DIR),
+    ))
+    checks.append(_setup_check(
+        "print_library",
+        "Print library",
+        _is_writable_dir(PRINT_LIBRARY_DIR),
+        str(PRINT_LIBRARY_DIR),
+    ))
+
+    try:
+        config = load()
+        printer_count = len(config.printers)
+        checks.append(_setup_check(
+            "printer_config",
+            "Printer config",
+            printer_count > 0,
+            f"{PRINTERS_CONFIG_PATH} ({printer_count} printer{'s' if printer_count != 1 else ''})",
+        ))
+        ntfy_ok = bool(config.ntfy and config.ntfy.topic)
+        checks.append(_setup_check(
+            "ntfy",
+            "ntfy alerts",
+            ntfy_ok,
+            f"{config.ntfy.url} / {config.ntfy.topic}" if ntfy_ok else "Not configured",
+            optional=True,
+        ))
+    except Exception as exc:
+        checks.append(_setup_check("printer_config", "Printer config", False, f"{PRINTERS_CONFIG_PATH} ({exc})"))
+        checks.append(_setup_check("ntfy", "ntfy alerts", False, "Unavailable until printer config loads", optional=True))
+
+    base_ok, base_detail = _tailnet_hint(settings.get("system_base_url", ""))
+    checks.append(_setup_check("base_url", "Base URL", base_ok, base_detail))
+
+    scale_status = _scale.is_available()
+    checks.append(_setup_check(
+        "scale",
+        "Dymo scale",
+        scale_status,
+        "Detected" if scale_status else (_scale.last_error or "Not detected"),
+        optional=True,
+    ))
+    label_status = _label_printer.status()
+    checks.append(_setup_check(
+        "label_printer",
+        "QL-700 label printer",
+        label_status.available,
+        "Detected" if label_status.available else (label_status.last_error or "Not detected"),
+        optional=True,
+    ))
+
+    systemd_ok, systemd_detail = _systemd_status()
+    checks.append(_setup_check(
+        "systemd",
+        "systemd service",
+        systemd_ok,
+        systemd_detail,
+        optional=True,
+    ))
+
+    required = [c for c in checks if not c["optional"]]
+    optional = [c for c in checks if c["optional"]]
+    status = "ready" if all(c["ok"] for c in required) else "needs_attention"
+    return {
+        "status": status,
+        "summary": {
+            "required_ok": sum(1 for c in required if c["ok"]),
+            "required_total": len(required),
+            "optional_ok": sum(1 for c in optional if c["ok"]),
+            "optional_total": len(optional),
+        },
+        "paths": {
+            "app_dir": str(APP_DIR),
+            "data_dir": str(DATA_DIR),
+            "database": str(DB_PATH),
+            "uploads": str(UPLOADS_DIR),
+            "printer_config": str(PRINTERS_CONFIG_PATH),
+            "print_library": str(PRINT_LIBRARY_DIR),
+        },
+        "checks": checks,
+    }
 
 
 # ── Scale and label hardware ──────────────────────────────────────────────

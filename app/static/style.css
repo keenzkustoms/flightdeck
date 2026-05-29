@@ -6709,6 +6709,130 @@ select.settings-input { cursor: pointer; }
   font-size: 0.82rem;
 }
 
+.setup-health-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.setup-health-badge {
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  padding: 0.25rem 0.65rem;
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.setup-health-ready {
+  border-color: rgba(34,197,94,0.4);
+  color: #86efac;
+  background: rgba(34,197,94,0.12);
+}
+.setup-health-needs_attention {
+  border-color: rgba(245,158,11,0.45);
+  color: #fcd34d;
+  background: rgba(245,158,11,0.12);
+}
+.setup-health-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+.setup-health-summary div {
+  border: 1px solid var(--border);
+  border-radius: 0.45rem;
+  background: rgba(255,255,255,0.025);
+  padding: 0.7rem 0.8rem;
+}
+.setup-health-summary strong {
+  display: block;
+  color: var(--text);
+  font-size: 1.15rem;
+}
+.setup-health-summary span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-top: 0.15rem;
+}
+.setup-check-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+  gap: 0.65rem;
+}
+.setup-check {
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--card-bg);
+  padding: 0.75rem;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+.setup-check-main {
+  display: flex;
+  gap: 0.65rem;
+  min-width: 0;
+}
+.setup-check-dot {
+  width: 0.62rem;
+  height: 0.62rem;
+  border-radius: 999px;
+  margin-top: 0.25rem;
+  background: #f59e0b;
+  flex: 0 0 auto;
+}
+.setup-check-ok .setup-check-dot { background: #22c55e; }
+.setup-check-optional .setup-check-dot { background: #64748b; }
+.setup-check-warn .setup-check-dot { background: #f59e0b; }
+.setup-check strong {
+  display: block;
+  color: var(--text);
+  font-size: 0.86rem;
+}
+.setup-check small {
+  display: block;
+  color: var(--muted);
+  font-size: 0.74rem;
+  line-height: 1.35;
+  margin-top: 0.18rem;
+  overflow-wrap: anywhere;
+}
+.setup-check-status {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.setup-path-list {
+  display: grid;
+  gap: 0.45rem;
+}
+.setup-path-row {
+  display: grid;
+  grid-template-columns: 10rem minmax(0, 1fr);
+  gap: 0.75rem;
+  align-items: baseline;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  padding-bottom: 0.45rem;
+}
+.setup-path-row span {
+  color: var(--muted);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.setup-path-row code {
+  color: var(--text);
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 1100px) {
   .filedesk-grid { grid-template-columns: 1fr; }
   .filedesk-hero { align-items: flex-start; flex-direction: column; }

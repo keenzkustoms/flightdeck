@@ -1040,7 +1040,7 @@ function router() {
   if (route.view === 'settings' && route.category) {
     _settingsCategory = _SETTINGS_CATEGORIES.some(c => c.id === route.category)
       ? route.category
-      : 'printers';
+      : 'setup';
   }
 
   // Abort MJPEG streams when leaving their view — mobile browsers don't close
@@ -1087,7 +1087,8 @@ function router() {
       (route.view === 'spools'   && href === '#/spools') ||
       (route.view === 'settings' && (
         href === '#/settings' ||
-        href === `#/settings/${_settingsCategory}`
+        href === `#/settings/${_settingsCategory}` ||
+        (href === '#/settings' && _settingsCategory === 'setup')
       ))
     );
   });
@@ -4661,6 +4662,7 @@ function connectWS() {
 let _settingsCategory = 'printers';
 
 const _SETTINGS_CATEGORIES = [
+  { id: 'setup',      label: 'Setup'      },
   { id: 'printers',   label: 'Printers'   },
   { id: 'hardware',   label: 'Hardware'   },
   { id: 'preferences', label: 'Preferences' },
@@ -5461,6 +5463,48 @@ function _settingToggle(key, options, current) {
     `<button class="setting-toggle-btn${current === value ? ' setting-toggle-active' : ''}"
        data-setting-key="${key}" data-setting-value="${value}">${label}</button>`
   ).join('');
+}
+
+function _setupHealthHtml(health) {
+  const checks = health?.checks || [];
+  const summary = health?.summary || {};
+  const requiredText = `${summary.required_ok ?? 0}/${summary.required_total ?? 0}`;
+  const optionalText = `${summary.optional_ok ?? 0}/${summary.optional_total ?? 0}`;
+  const statusText = health?.status === 'ready' ? 'Ready' : 'Needs attention';
+  const rows = checks.map(c => `
+    <div class="setup-check setup-check-${esc(c.level || 'warn')}">
+      <div class="setup-check-main">
+        <span class="setup-check-dot"></span>
+        <div>
+          <strong>${esc(c.label)}</strong>
+          <small>${esc(c.detail)}</small>
+        </div>
+      </div>
+      <span class="setup-check-status">${c.ok ? 'OK' : (c.optional ? 'Optional' : 'Check')}</span>
+    </div>
+  `).join('');
+  const pathRows = Object.entries(health?.paths || {}).map(([key, value]) => `
+    <div class="setup-path-row"><span>${esc(key.replaceAll('_', ' '))}</span><code>${esc(value)}</code></div>
+  `).join('');
+  return `
+    <div class="settings-section setup-health-panel">
+      <div class="setup-health-head">
+        <div>
+          <div class="settings-section-title">Setup Health</div>
+          <div class="settings-hint">Flightdeck install readiness from the running service.</div>
+        </div>
+        <span class="setup-health-badge setup-health-${health?.status || 'needs_attention'}">${statusText}</span>
+      </div>
+      <div class="setup-health-summary">
+        <div><strong>${requiredText}</strong><span>required</span></div>
+        <div><strong>${optionalText}</strong><span>optional</span></div>
+      </div>
+      <div class="setup-check-grid">${rows}</div>
+    </div>
+    <div class="settings-section">
+      <div class="settings-section-title">Runtime Paths</div>
+      <div class="setup-path-list">${pathRows}</div>
+    </div>`;
 }
 
 async function _saveSetting(key, value) {
@@ -7269,7 +7313,11 @@ async function _renderSettingsContent(category) {
   if (!el) return;
   el.classList.remove('settings-content-spools', 'settings-content-locations');
 
-  if (category === 'printers') {
+  if (category === 'setup') {
+    el.innerHTML = `<div class="detail-placeholder" style="min-height:10rem">Checking install…</div>`;
+    const health = await fetch('/api/setup/health').then(r => r.json()).catch(() => null);
+    el.innerHTML = health ? _setupHealthHtml(health) : `<div class="settings-empty">Setup health is unavailable.</div>`;
+  } else if (category === 'printers') {
     el.innerHTML = `<div class="detail-placeholder" style="min-height:10rem">Loading…</div>`;
     let printers = [];
     try {
@@ -7371,7 +7419,7 @@ async function renderSettingsView() {
         const href = tab.getAttribute('href');
         tab.classList.toggle('active',
           (href === `#/settings/${_settingsCategory}`) ||
-          (href === '#/settings' && _settingsCategory === 'printers')
+          (href === '#/settings' && _settingsCategory === 'setup')
         );
       });
       _renderSettingsContent(_settingsCategory);
