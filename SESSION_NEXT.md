@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 29 May 2026 (Session 28.64 Live compact light control)_
+_Last updated 29 May 2026 (Session 28.65 Live transport controls)_
 
 ## Current state
 
@@ -9,6 +9,25 @@ Service running at:
 - `http://flightdeck.local:8000`
 - `http://192.168.4.127:8000`
 - **`https://flightdeck.tail7de73e.ts.net`** (Tailscale Serve — HTTPS, used for PWA / notifications)
+
+---
+
+## What was built — Session 28.65 (Live transport controls — 29 May)
+
+The Live tab print controls were moved into the cockpit header as a compact transport deck.
+
+### Frontend
+- Replaced the large RHS command card with header-level transport controls.
+- Controls now sit in line with the `Now printing` status:
+  - Pause
+  - Resume/play
+  - Cancel/stop
+  - E-stop
+  - compact Light control
+- The transport buttons keep the existing command handlers and confirmation flow.
+- Static cache-bust bumped:
+  - `style.css?v=140`
+  - `app.js?v=159`
 
 ---
 

@@ -1325,10 +1325,45 @@ function _detailControls(id, p) {
     </div>`;
 }
 
+function _detailTransportControls(id, p) {
+  const pending = _pendingControls[id];
+  const transportButton = (action, icon, label, cls = '') => {
+    const canDo = _canDo(p.state, action);
+    const isPending = pending?.action === action;
+    const disabled = !canDo || (pending && !isPending) ? ' disabled' : '';
+    const loadingCls = isPending ? ' ctrl-loading' : '';
+    return `<button class="transport-btn ${cls}${loadingCls}" data-action="${action}" data-printer-id="${id}" title="${esc(label)}"${disabled}>
+      <span aria-hidden="true">${isPending ? '...' : icon}</span>
+      <em>${esc(label)}</em>
+    </button>`;
+  };
+  const lightControl = p.kind === 'bambu'
+    ? _bambuLightWordHtml(p)
+    : p.kind === 'moonraker'
+      ? `<div class="transport-bars">
+          ${transportButton('light_on', '☀', 'Bars on', 'transport-light')}
+          ${transportButton('light_off', '☾', 'Bars off', 'transport-light')}
+        </div>`
+      : '';
+  const firmwareRestartBtn = p.kind === 'moonraker' && _canDo(p.state, 'firmware_restart')
+    ? transportButton('firmware_restart', '↻', 'Firmware restart', 'transport-warn')
+    : '';
+  return `<div class="live-transport detail-controls-wrap" aria-label="Printer transport controls">
+    ${lightControl}
+    <div class="transport-deck">
+      ${transportButton('pause', 'Ⅱ', 'Pause')}
+      ${transportButton('resume', '▶', 'Resume', 'transport-play')}
+      ${transportButton('cancel', '■', 'Cancel')}
+      ${transportButton('estop', '!', 'E-stop', 'transport-estop')}
+      ${firmwareRestartBtn}
+    </div>
+  </div>`;
+}
+
 function _updateControlsWidget(id) {
   const p = _latestPrinters.find(x => x.id === id);
   const el = document.querySelector('.detail-controls-wrap');
-  if (el && p) el.innerHTML = _detailControls(id, p);
+  if (el && p) el.outerHTML = _detailTransportControls(id, p);
 }
 
 async function sendControl(id, action) {
@@ -1671,6 +1706,7 @@ function _detailLiveHeader(p, printerColor, bannerTextColor) {
       <small>${esc(statusMeta)}</small>
     </div>
     <span class="badge badge-${esc(p.state || 'idle')} live-state-badge">${esc(stateLabel)}</span>
+    ${_detailTransportControls(p.id, p)}
     ${signals ? `<div class="live-signal-row">${signals}</div>` : ''}
   </div>`;
 }
@@ -3217,7 +3253,6 @@ async function renderPrinterDetail(id, subtab = 'live') {
           <div class="live-strip" id="detail-live-strip">${_detailLiveStrip(p)}</div>
         </div>
         <div class="detail-right">
-          <div class="detail-controls detail-controls-wrap">${_detailControls(id, p)}</div>
           <div class="detail-panels">
             <div class="detail-panel" id="detail-print">${_detailPrintPanel(p)}</div>
           </div>
@@ -3272,8 +3307,6 @@ async function renderPrinterDetail(id, subtab = 'live') {
       camImg.src = camSrc;
     }
 
-    const ctrlEl = el.querySelector('.detail-controls-wrap');
-    if (ctrlEl) ctrlEl.innerHTML = _detailControls(id, p);
     const printerColor = _printerColor(id);
     const bannerTextColor = p.icon === 'bambu' ? '#22c55e' : p.icon === 'voron' ? '#ef4444' : 'var(--text)';
     const headEl = el.querySelector('#detail-live-head');

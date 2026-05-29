@@ -2483,7 +2483,7 @@ header {
 
 .live-command-header {
   display: grid;
-  grid-template-columns: minmax(10rem, 0.85fr) minmax(0, 1.5fr) auto;
+  grid-template-columns: minmax(8rem, 0.7fr) minmax(0, 1.25fr) auto auto;
   align-items: center;
   gap: 0.75rem;
   margin-bottom: 0.55rem;
@@ -2549,6 +2549,111 @@ header {
 .live-state-badge {
   justify-self: end;
   white-space: nowrap;
+}
+
+.live-transport {
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.transport-deck,
+.transport-bars {
+  display: inline-flex;
+  align-items: stretch;
+  overflow: hidden;
+  border: 1px solid rgba(96,165,250,0.24);
+  border-radius: 0.65rem;
+  background: rgba(3,7,18,0.45);
+}
+
+.transport-btn {
+  min-width: 2.35rem;
+  min-height: 2.2rem;
+  display: inline-grid;
+  place-items: center;
+  gap: 0.08rem;
+  padding: 0.18rem 0.38rem;
+  border: 0;
+  border-right: 1px solid rgba(96,165,250,0.18);
+  background: transparent;
+  color: #dbeafe;
+  cursor: pointer;
+}
+
+.transport-btn:last-child {
+  border-right: 0;
+}
+
+.transport-btn:hover:not(:disabled) {
+  background: rgba(96,165,250,0.13);
+}
+
+.transport-btn:disabled {
+  color: #64748b;
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.transport-btn span {
+  font-size: 0.95rem;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.transport-btn em {
+  color: inherit;
+  font-size: 0.48rem;
+  font-style: normal;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.transport-play:not(:disabled) {
+  color: #86efac;
+}
+
+.transport-light:not(:disabled) {
+  color: #bfdbfe;
+}
+
+.transport-estop {
+  color: #fca5a5;
+  background: rgba(127,29,29,0.18);
+}
+
+.transport-estop:hover:not(:disabled) {
+  background: rgba(153,27,27,0.32);
+}
+
+.transport-warn:not(:disabled) {
+  color: #fcd34d;
+}
+
+.live-transport .bambu-light-control {
+  width: 2.55rem;
+  min-height: 2.2rem;
+  padding: 0.24rem 0.18rem;
+  border-radius: 0.65rem;
+  font-size: 0.48rem;
+}
+
+.live-transport .bambu-light-bulb {
+  width: 0.72rem;
+  height: 0.72rem;
+  border-width: 1.5px;
+}
+
+.live-transport .bambu-light-bulb::after {
+  bottom: -0.32rem;
+  width: 0.4rem;
+  height: 0.25rem;
+  border-width: 1.5px;
+  border-top: 0;
 }
 
 .live-signal-row {
@@ -2904,6 +3009,10 @@ header {
   }
   .live-state-badge {
     justify-self: start;
+  }
+  .live-transport {
+    justify-self: start;
+    flex-wrap: wrap;
   }
   .camera-hud {
     left: 0.6rem;
