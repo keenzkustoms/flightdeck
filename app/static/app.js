@@ -1656,6 +1656,7 @@ function _detailLiveHeader(p, printerColor, bannerTextColor) {
   const statusMeta = job
     ? [progress != null ? `${progress}%` : '', _liveEtaText(p)].filter(Boolean).join(' · ')
     : _dashboardIssueText(p);
+  const signals = _detailLiveSignals(p);
   return `<div class="live-command-header" style="--tab-accent:${printerColor}">
     <div class="live-printer-mark" style="color:${bannerTextColor}">
       <span class="live-printer-name">${esc(p.model_name || p.custom_name || p.id)}</span>
@@ -1667,7 +1668,55 @@ function _detailLiveHeader(p, printerColor, bannerTextColor) {
       <small>${esc(statusMeta)}</small>
     </div>
     <span class="badge badge-${esc(p.state || 'idle')} live-state-badge">${esc(stateLabel)}</span>
+    ${signals ? `<div class="live-signal-row">${signals}</div>` : ''}
   </div>`;
+}
+
+function _detailLiveSignals(p) {
+  const signals = [];
+  if (p.state === 'estop') signals.push({ cls: 'danger', label: 'E-stop active' });
+  else if (p.state === 'error') signals.push({ cls: 'danger', label: p.error || 'Printer fault' });
+  else if (p.state === 'paused') signals.push({ cls: 'warn', label: 'Print paused' });
+  else if (p.state === 'offline') signals.push({ cls: 'danger', label: `Offline ${fmtLastSeen(p.last_seen)}` });
+
+  if (p.health?.reasons?.length) {
+    const reason = p.health.reasons[0].message;
+    signals.push({ cls: _healthIsActionable(p.health) ? 'warn' : 'info', label: reason });
+  }
+
+  const loaded = _latestSpoolsByPrinter[p.id] || [];
+  const low = loaded
+    .filter(s => s.label_weight_g > 0 && (Number(s.remaining_g || 0) / Number(s.label_weight_g || 1)) < 0.2)
+    .slice(0, 3);
+  low.forEach(s => signals.push({
+    cls: 'warn',
+    label: `Low spool #${s.id}: ${Math.round(Number(s.remaining_g || 0))}g`,
+  }));
+
+  const mismatches = [];
+  (p.ams || []).forEach(unit => (unit.slots || []).forEach(slot => {
+    const flatSlot = unit.unit * 4 + slot.idx;
+    const loadedSpool = loaded.find(s => Number(s.location_slot) === flatSlot);
+    const mismatch = _slotMismatch(loadedSpool, slot);
+    if (mismatch) mismatches.push(`${_amsSlotLabel(p, flatSlot)} ${mismatch}`);
+  }));
+  if (mismatches.length) {
+    signals.push({ cls: 'warn', label: `${mismatches.length} AMS mismatch${mismatches.length > 1 ? 'es' : ''}` });
+  }
+
+  const unique = [];
+  const seen = new Set();
+  signals.forEach(signal => {
+    const key = `${signal.cls}:${signal.label}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    unique.push(signal);
+  });
+
+  if (!unique.length) return `<span class="live-signal live-signal-ok">Clear skies</span>`;
+  return unique.slice(0, 5).map(signal => `
+    <span class="live-signal live-signal-${signal.cls}">${esc(signal.label)}</span>
+  `).join('');
 }
 
 function _detailLiveTempChips(p, limit = 4) {
@@ -1705,15 +1754,16 @@ function _detailCameraHud(p) {
     : `<strong>${esc(_liveStateLabel(p.state))}</strong><span>${esc(_dashboardIssueText(p))}</span>`;
   return `<div class="camera-hud-main">${status}</div>
     ${job ? `<div class="camera-hud-progress"><span style="width:${progress}%"></span></div>` : ''}
-    <div class="camera-hud-chips">${_detailLiveTempChips(p, 3)}</div>`;
+    ${job ? `<div class="camera-hud-chips">${_detailLiveTempChips(p, 3)}</div>` : ''}`;
 }
 
 function _detailLiveStrip(p) {
   const spoolChips = _detailLiveSpoolChips(p);
-  return `<div class="live-strip-group">
-      <span class="live-strip-label">Temperatures</span>
-      <div class="live-chip-row">${_detailLiveTempChips(p)}</div>
-    </div>
+  const tempGroup = `<div class="live-strip-group">
+    <span class="live-strip-label">Temperatures</span>
+    <div class="live-chip-row">${_detailLiveTempChips(p)}</div>
+  </div>`;
+  return `${tempGroup}
     <div class="live-strip-group">
       <span class="live-strip-label">Loaded</span>
       <div class="live-chip-row">${spoolChips || '<span class="live-strip-empty">No Flightdeck spools assigned</span>'}</div>
@@ -3118,7 +3168,6 @@ async function renderPrinterDetail(id, subtab = 'live') {
           <div class="detail-controls detail-controls-wrap">${_detailControls(id, p)}</div>
           <div class="detail-panels">
             <div class="detail-panel" id="detail-print">${_detailPrintPanel(p)}</div>
-            <div class="detail-panel" id="detail-temps">${_detailTempsPanel(p)}</div>
           </div>
           <div id="detail-ams">${_detailAmsPanel(p)}</div>
           <div id="detail-mmu">${_detailMmuPanel(p)}</div>

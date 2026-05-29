@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 29 May 2026 (Session 28.58 Live screen cockpit pass)_
+_Last updated 29 May 2026 (Session 28.59 Live screen signal pass)_
 
 ## Current state
 
@@ -9,6 +9,27 @@ Service running at:
 - `http://flightdeck.local:8000`
 - `http://192.168.4.127:8000`
 - **`https://flightdeck.tail7de73e.ts.net`** (Tailscale Serve — HTTPS, used for PWA / notifications)
+
+---
+
+## What was built — Session 28.59 (Live screen signal pass — 29 May)
+
+The printer Live tab got a second cockpit polish pass focused on surfacing useful signals without duplicating panels.
+
+### Frontend
+- Added a live signal row in the printer cockpit header:
+  - clear state shows `Clear skies`
+  - faults, paused/offline state, reliability notes, low loaded spools, and AMS mismatches surface as chips
+- Styled signal chips with calm/blue, warning/amber, and danger/red treatments.
+- Wrapped the Live command controls in a clearer `Command` card.
+- Kept temperatures in the cockpit strip and removed the duplicate RHS Live temperature card.
+- Static cache-bust bumped:
+  - `style.css?v=134`
+  - `app.js?v=153`
+
+### Verification
+- JavaScript syntax check: `node --check app/static/app.js`
+- Whitespace check: `git diff --check`
 
 ---
 

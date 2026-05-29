@@ -2487,6 +2487,54 @@ header {
   white-space: nowrap;
 }
 
+.live-signal-row {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  min-width: 0;
+  padding-top: 0.65rem;
+  border-top: 1px solid rgba(255,255,255,0.07);
+}
+
+.live-signal {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  padding: 0.28rem 0.55rem;
+  border: 1px solid rgba(96,165,250,0.25);
+  border-radius: 999px;
+  background: rgba(96,165,250,0.08);
+  color: #bfdbfe;
+  font-size: 0.72rem;
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+.live-signal-ok {
+  border-color: rgba(34,197,94,0.32);
+  background: rgba(34,197,94,0.1);
+  color: #86efac;
+}
+
+.live-signal-warn {
+  border-color: rgba(245,158,11,0.4);
+  background: rgba(245,158,11,0.1);
+  color: #fcd34d;
+}
+
+.live-signal-danger {
+  border-color: rgba(239,68,68,0.44);
+  background: rgba(239,68,68,0.12);
+  color: #fca5a5;
+}
+
+.live-signal-info {
+  border-color: rgba(96,165,250,0.32);
+  background: rgba(96,165,250,0.08);
+  color: #bfdbfe;
+}
+
 /* Camera hero */
 .camera-hero {
   width: 100%;
@@ -2586,7 +2634,7 @@ header {
 
 .live-strip {
   display: grid;
-  grid-template-columns: 0.9fr 1.1fr;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
   gap: 0.75rem;
   margin-top: 0.75rem;
   flex-shrink: 0;
@@ -2826,6 +2874,22 @@ header {
   gap: 1rem;
   flex-wrap: wrap;
   flex-shrink: 0;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  background:
+    linear-gradient(180deg, rgba(96,165,250,0.05), rgba(96,165,250,0.015)),
+    var(--surface);
+}
+
+.detail-controls::before {
+  content: "Command";
+  flex: 0 0 100%;
+  color: var(--muted);
+  font-size: 0.6rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
 }
 
 .controls-primary,
