@@ -3769,14 +3769,173 @@ function updateDashboard(printers) {
     `<span>${printers.length} printers · ${active} active · ${idle} idle</span>`;
 }
 
-function renderStatsView() {
+let _statsRenderInFlight = false;
+let _statsLastHtml = '';
+
+function _statsPct(value, total) {
+  if (!total || total <= 0) return 0;
+  return Math.max(2, Math.min(100, Math.round(value * 100 / total)));
+}
+
+function _statsStateCounts(printers) {
+  return printers.reduce((acc, p) => {
+    const state = p.state || 'unknown';
+    acc[state] = (acc[state] || 0) + 1;
+    return acc;
+  }, {});
+}
+
+function _statsBarRows(rows, opts = {}) {
+  const items = (rows || []).filter(r => Number(r.grams || r.count || 0) > 0).slice(0, opts.limit || 8);
+  const total = opts.total ?? items.reduce((sum, r) => sum + Number(r.grams || r.count || 0), 0);
+  if (!items.length) return `<div class="stats-empty">No data yet</div>`;
+  return `<div class="stats-bars">${items.map(r => {
+    const value = Number(r.grams || r.count || 0);
+    const label = opts.label ? opts.label(r) : (r.material || r.key || r.printer_id || 'Unknown');
+    const display = opts.value ? opts.value(r) : (r.grams != null ? _fmtGrams(r.grams) : String(r.count || 0));
+    return `<div class="stats-bar-row">
+      <div class="stats-bar-label"><span>${esc(label)}</span><strong>${esc(display)}</strong></div>
+      <div class="stats-bar-track"><div class="stats-bar-fill" style="width:${_statsPct(value, total)}%"></div></div>
+    </div>`;
+  }).join('')}</div>`;
+}
+
+function _statsMonthRows(rows) {
+  const items = [...(rows || [])].reverse();
+  if (!items.length) return `<div class="stats-empty">Usage timeline will appear after completed prints.</div>`;
+  const max = Math.max(...items.map(r => Number(r.grams || 0)), 1);
+  return `<div class="stats-months">${items.map(r => {
+    const [y, mo] = String(r.month || '').split('-');
+    const label = y && mo ? new Date(+y, +mo - 1).toLocaleString('default', { month: 'short' }) : r.month;
+    return `<div class="stats-month">
+      <div class="stats-month-bar" style="height:${_statsPct(Number(r.grams || 0), max)}%"></div>
+      <span>${esc(label || '')}</span>
+    </div>`;
+  }).join('')}</div>`;
+}
+
+function _statsPrinterRows(printers, filamentSummary, failureSummary, allSpools = []) {
+  const byPrinter = Object.fromEntries((filamentSummary.by_printer || []).map(r => [r.printer_id, r.grams]));
+  const failures = Object.fromEntries((failureSummary.by_printer || []).map(r => [r.key, r.count]));
+  if (!printers.length) return `<div class="stats-empty">No printers configured.</div>`;
+  return `<div class="stats-printer-list">${printers.map(p => {
+    const loaded = allSpools.filter(s => s.location_printer_id === p.id && !s.archived_at);
+    const loadedG = loaded.reduce((sum, s) => sum + Number(s.remaining_g || 0), 0);
+    return `<a class="stats-printer-row" href="#/printer/${p.id}">
+      <div>
+        <strong>${esc(_dashboardPrinterName(p))}</strong>
+        <span>${esc(p.custom_name || '')}</span>
+      </div>
+      <div><b>${esc(p.state || 'unknown')}</b><span>state</span></div>
+      <div><b>${_fmtGrams(byPrinter[p.id] || 0)}</b><span>used</span></div>
+      <div><b>${_fmtGrams(loadedG)}</b><span>loaded</span></div>
+      <div><b>${failures[p.id] || 0}</b><span>failures</span></div>
+    </a>`;
+  }).join('')}</div>`;
+}
+
+function _statsActionSummary(jobs, printers) {
+  const pending = jobs.filter(j => j.status === 'pending').length;
+  const blocked = jobs.filter(j => _missionJobReadiness(j).cls === 'blocked').length;
+  const active = printers.filter(p => p.state === 'printing' || p.state === 'paused').length;
+  const offline = printers.filter(p => p.state === 'offline').length;
+  const cls = blocked || offline ? 'stats-pulse-bad' : pending || active ? 'stats-pulse-watch' : 'stats-pulse-ok';
+  const label = blocked ? `${blocked} blocked` : offline ? `${offline} offline` : pending ? `${pending} queued` : active ? `${active} active` : 'clear';
+  return `<div class="stats-pulse ${cls}">
+    <span>Operator pulse</span>
+    <strong>${esc(label)}</strong>
+  </div>`;
+}
+
+async function renderStatsView() {
   const el = document.getElementById('stats-page');
   if (!el) return;
-  el.innerHTML = `
-    <div class="stats-page">
-      <div class="settings-section-title">Fleet Stats</div>
-      ${_renderDashboardOverview(_latestPrinters || [])}
-    </div>`;
+  if (_statsRenderInFlight) return;
+  _statsRenderInFlight = true;
+  if (!_statsLastHtml) el.innerHTML = `<div class="detail-placeholder" style="min-height:40vh">Loading stats...</div>`;
+
+  try {
+    const [filament, spools, allSpools, intel, failures, jobs] = await Promise.all([
+      fetch('/api/filament/summary').then(r => r.ok ? r.json() : {}),
+      fetch('/api/spools/summary').then(r => r.ok ? r.json() : {}),
+      fetch('/api/spools').then(r => r.ok ? r.json() : []),
+      fetch('/api/spools/intelligence?days=30').then(r => r.ok ? r.json() : {}),
+      fetch('/api/failures?days=30').then(r => r.ok ? r.json() : {}),
+      fetch('/api/queue').then(r => r.ok ? r.json() : []),
+    ]);
+
+    const printers = _latestPrinters || [];
+    const states = _statsStateCounts(printers);
+    const totalPrints30 = (failures.summary?.by_printer || []).reduce((sum, r) => sum + Number(r.count || 0), 0);
+    const spoolAlerts = intel.alerts || [];
+    const topSpools = intel.by_spool || [];
+    const active = printers.filter(p => p.state === 'printing' || p.state === 'paused').length;
+    const html = `
+      <div class="stats-page">
+        <section class="stats-hero">
+          <div>
+            <div class="mission-eyebrow">Fleet Stats</div>
+            <h1>Shop telemetry</h1>
+            <p>${printers.length} printers · ${active} active · ${_fmtGrams(filament.total_grams || 0)} recorded filament · ${spools.total_count || 0} live spools</p>
+          </div>
+          ${_statsActionSummary(jobs, printers)}
+        </section>
+
+        <section class="stats-kpi-grid">
+          <a class="stats-kpi-card" href="#/stats"><strong>${printers.length}</strong><span>Printers</span><small>${states.idle || 0} idle · ${active} active</small></a>
+          <a class="stats-kpi-card" href="#/settings/filament"><strong>${_fmtGrams(filament.total_grams || 0)}</strong><span>Filament used</span><small>${filament.total_cost != null ? `$${filament.total_cost.toFixed(2)} estimated` : 'cost pending'}</small></a>
+          <a class="stats-kpi-card" href="#/spools"><strong>${_fmtGrams(spools.total_remaining_g || 0)}</strong><span>Inventory</span><small>${spools.total_count || 0} spools · ${spools.in_printer_count || 0} loaded</small></a>
+          <a class="stats-kpi-card ${spools.low_stock_count ? 'stats-kpi-warn' : ''}" href="#/spools?filter=low"><strong>${spools.low_stock_count || 0}</strong><span>Low stock</span><small>Below ${Math.round(spools.low_stock_pct || 20)}%</small></a>
+          <a class="stats-kpi-card ${failures.total ? 'stats-kpi-warn' : ''}" href="#/failures?days=30"><strong>${failures.total || 0}</strong><span>Failure review</span><small>Last 30 days</small></a>
+        </section>
+
+        <section class="stats-layout">
+          <div class="stats-panel stats-panel-wide">
+            <div class="stats-panel-head"><span>Filament Trend</span><a href="#/settings/filament">Catalogue</a></div>
+            ${_statsMonthRows(filament.by_month || [])}
+          </div>
+          <div class="stats-panel">
+            <div class="stats-panel-head"><span>By Material</span><a href="#/spools">Spools</a></div>
+            ${_statsBarRows(filament.by_material || [], { total: filament.total_grams || 0 })}
+          </div>
+          <div class="stats-panel">
+            <div class="stats-panel-head"><span>Inventory Mix</span><a href="#/spools">Open</a></div>
+            ${_statsBarRows(spools.by_material || [], { total: spools.total_remaining_g || 0 })}
+          </div>
+          <div class="stats-panel">
+            <div class="stats-panel-head"><span>Spool Tracking</span><a href="#/spools">Inventory</a></div>
+            <div class="stats-alert-list">
+              ${spoolAlerts.map(a => `<div class="stats-alert stats-alert-${a.level}">${esc(a.message)}</div>`).join('')}
+            </div>
+            <div class="stats-mini-grid">
+              <div><strong>${_fmtGrams(intel.summary?.deducted_g || 0)}</strong><span>deducted 30d</span></div>
+              <div><strong>${intel.summary?.tracked_prints || intel.summary?.deducted_prints || 0}</strong><span>tracked prints</span></div>
+              <div><strong>${intel.summary?.unattributed_prints || 0}</strong><span>unattributed</span></div>
+            </div>
+          </div>
+          <div class="stats-panel">
+            <div class="stats-panel-head"><span>Most Used Spools</span><a href="#/spools">Manage</a></div>
+            ${_statsBarRows(topSpools, {
+              total: topSpools.reduce((sum, r) => sum + Number(r.grams || 0), 0),
+              label: r => `#${r.spool_id} ${[r.color_name, r.material].filter(Boolean).join(' · ')}`,
+            })}
+          </div>
+          <div class="stats-panel stats-panel-wide">
+            <div class="stats-panel-head"><span>Printer Balance</span><a href="#/">Dashboard</a></div>
+            ${_statsPrinterRows(printers, filament, failures.summary || {}, allSpools)}
+          </div>
+        </section>
+      </div>`;
+
+    if (html !== _statsLastHtml) {
+      _statsLastHtml = html;
+      el.innerHTML = html;
+    }
+  } catch (err) {
+    if (!_statsLastHtml) el.innerHTML = `<div class="detail-placeholder">Stats unavailable.</div>`;
+  } finally {
+    _statsRenderInFlight = false;
+  }
 }
 
 // ── WebSocket client ───────────────────────────────────────────────────────

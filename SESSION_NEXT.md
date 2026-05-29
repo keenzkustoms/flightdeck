@@ -1053,6 +1053,12 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Empty state now reads `Clear deck` so the panel still confirms there is nothing active to do.
 - Static cache-bust bumped to `style.css?v=92` and `app.js?v=105`.
 
+### Stats page upgrade
+- Reworked Stats from a plain dashboard KPI repeat into a fleet telemetry page.
+- Added operator pulse, fleet/material/inventory/reliability KPI cards, filament trend chart, material and inventory bar panels, spool tracking panel, most-used spools, and printer balance table.
+- Stats uses existing endpoints only: `/api/filament/summary`, `/api/spools/summary`, `/api/spools`, `/api/spools/intelligence`, `/api/failures`, and `/api/queue`.
+- Static cache-bust bumped to `style.css?v=93` and `app.js?v=106`.
+
 ### Closing fixes (shipped same session)
 - **Bambu filament metadata**: `get_preview()` now called proactively on first poll of any new print (same trigger as AMS snapshot). One-shot FTP call per job; cached on `subtask_name`. Ensures `filament_weight_g` and `material` are always populated for spool deduction, even when nobody views the detail page.
 - **Spool snapshot overwrite on restart**: `write_slot_snapshot` now uses `WHERE ams_slot_snapshot IS NULL`. Post-restart the snapshot condition re-fires (in-memory state resets), but the original DB row is preserved. Spool deduction uses correct print-start slot assignments regardless of restarts.
