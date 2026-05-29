@@ -60,6 +60,7 @@ class BambuPrinter:
         self._seen_finish_this_session = False
         self._current_job_key: Optional[str] = None
         self._error_job_key: Optional[str] = None  # job_key of active in-session error
+        self._error_seen_at: float = 0.0
         self._cancel_requested = False
         self._estimated_stored = False   # True once slicer estimate written for this job
         self._job_started_at: float = 0.0  # monotonic time when _current_job_key was set
@@ -254,6 +255,7 @@ class BambuPrinter:
             self._job_started_at = 0.0
             self._error_job_key = None
             self._error_print_id = None
+            self._error_seen_at = 0.0
             if self._seen_finish_this_session:
                 db.clear_finished_at(self.id)
                 self._seen_finish_this_session = False
@@ -319,6 +321,7 @@ class BambuPrinter:
             self._seen_finish_this_session = False
             self._error_job_key = None
             self._error_print_id = None
+            self._error_seen_at = 0.0
             if self._current_job_key is None:
                 self._current_job_key = self._make_job_key(subtask)
                 self._job_started_at = time.monotonic()
@@ -367,11 +370,11 @@ class BambuPrinter:
             self._estimated_stored = False
             self._job_started_at = 0.0
             db.clear_finished_at(self.id)
+            err_code = self._printer.mqtt_dump().get("print", {}).get("print_error", 0)
 
             if self._current_job_key:
                 # In-session failure: close the job and start showing the error.
                 job_key = self._current_job_key
-                err_code = self._printer.mqtt_dump().get("print", {}).get("print_error", 0)
                 err_msg = f"Bambu error: {err_code}" if err_code else "Print failed"
                 print_id = db.on_print_ended(
                     self.id, job_key,
@@ -384,12 +387,26 @@ class BambuPrinter:
                 self._cancel_requested = False
                 self._error_job_key = job_key
                 self._error_print_id = print_id
+                self._error_seen_at = time.monotonic()
                 if print_id:
                     db.log_decision(self.id, "error_resolved", err_msg, print_id=print_id)
                 return "error"
 
             if self._error_job_key:
-                # Already showing this in-session error; keep showing it until IDLE.
+                # Bambu can retain FAILED after the printer UI has been cleared.
+                # Keep a real error visible, but release a closed, code-free fault
+                # after a short grace period so queue preflight stops blocking.
+                age = time.monotonic() - self._error_seen_at if self._error_seen_at else 999.0
+                if not err_code and age >= 15.0 and db.is_print_closed(self.id, self._error_job_key):
+                    if self._error_print_id:
+                        db.log_decision(self.id, "error_cleared",
+                                       "Bambu FAILED state retained with no active error code; live fault cleared",
+                                       print_id=self._error_print_id)
+                    self._error_job_key = None
+                    self._error_print_id = None
+                    self._error_seen_at = 0.0
+                    return "idle"
+                # Already showing this in-session error; keep showing it while active.
                 return "error"
 
             # No in-session job — stale FAILED state from before service started.
@@ -400,7 +417,6 @@ class BambuPrinter:
 
             # Pre-existing failure not yet in DB — close it and show error once.
             if job_key:
-                err_code = self._printer.mqtt_dump().get("print", {}).get("print_error", 0)
                 err_msg = f"Bambu error: {err_code}" if err_code else "Print failed"
                 print_id = db.on_print_ended(
                     self.id, job_key,
@@ -410,6 +426,7 @@ class BambuPrinter:
                 )
                 self._error_job_key = job_key
                 self._error_print_id = print_id
+                self._error_seen_at = time.monotonic()
                 if print_id:
                     db.log_decision(self.id, "error_resolved",
                                    f"Stale error at service start: {err_msg}",

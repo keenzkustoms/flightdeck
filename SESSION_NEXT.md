@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 30 May 2026 (Session 28.66 Live environment band)_
+_Last updated 30 May 2026 (Session 28.67 Bambu stale fault clear)_
 
 ## Current state
 
@@ -9,6 +9,20 @@ Service running at:
 - `http://flightdeck.local:8000`
 - `http://192.168.4.127:8000`
 - **`https://flightdeck.tail7de73e.ts.net`** (Tailscale Serve — HTTPS, used for PWA / notifications)
+
+---
+
+## What was built — Session 28.67 (Bambu stale fault clear — 30 May)
+
+Flightdeck now releases stale Bambu fault state after the printer has already recorded the failed job and no longer reports an active error code.
+
+### Backend
+- Bambu printer adapter now tracks when an in-session error was first seen.
+- If Bambu keeps reporting `FAILED` for an already-closed print but `print_error` is clear, Flightdeck logs `error_cleared` and returns the printer to `idle` after a short grace period.
+- Queue preflight still blocks real active `error` states, but no longer stays blocked on a retained Bambu failure from a physically cleared printer.
+
+### Verification
+- `python3 -m py_compile app/printers/bambu.py`
 
 ---
 
