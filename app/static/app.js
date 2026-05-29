@@ -453,6 +453,30 @@ function _commandSpoolMeta(s) {
   return `${Math.round(grams)}g · ${where}`;
 }
 
+async function _commandEnsureSpools() {
+  if (_allSpools?.length) return;
+  _allSpools = await fetch('/api/spools').then(r => r.ok ? r.json() : []).catch(() => []);
+}
+
+async function _commandOpenSpoolEditor(spoolId) {
+  await _commandEnsureSpools();
+  const spool = _allSpools.find(s => String(s.id) === String(spoolId));
+  if (!spool) throw new Error(`Spool #${spoolId} not found`);
+  const costs = await fetch('/api/filament/costs').then(r => r.json()).catch(() => []);
+  _openSpoolModal(costs, _refreshSpoolsSurface, spool);
+}
+
+async function _commandOpenSpoolActions(spoolId) {
+  await _commandEnsureSpools();
+  const spool = _allSpools.find(s => String(s.id) === String(spoolId));
+  if (!spool) throw new Error(`Spool #${spoolId} not found`);
+  if (!location.hash.startsWith('#/spools')) _commandNavigate('#/spools');
+  setTimeout(() => {
+    const host = document.getElementById('spools-content') || document.body;
+    _openSpoolActionModal(spoolId, host, _refreshSpoolsSurface);
+  }, 180);
+}
+
 function _commandItem({ label, meta = '', group = 'General', keywords = '', run }) {
   return { label, meta, group, keywords: `${label} ${meta} ${group} ${keywords}`.toLowerCase(), run };
 }
@@ -560,6 +584,13 @@ function _commandPrinterItems() {
         keywords: `${p.id} service tasks`,
         run: () => _commandNavigate(`#/printer/${p.id}/maintenance`),
       }),
+      _commandItem({
+        label: `${name} lights`,
+        meta: p.kind === 'bambu' ? 'Open live light control' : 'Open live LED controls',
+        group: 'Printers',
+        keywords: `${p.id} light lights led bambu chamber`,
+        run: () => _commandNavigate(`#/printer/${p.id}`),
+      }),
     ];
   });
 }
@@ -567,13 +598,32 @@ function _commandPrinterItems() {
 function _commandSpoolItems() {
   return (_allSpools || [])
     .filter(s => !s.archived_at)
-    .map(s => _commandItem({
-      label: _commandSpoolTitle(s),
-      meta: _commandSpoolMeta(s),
-      group: 'Spools',
-      keywords: `${s.id} ${s.material || ''} ${s.subtype || ''} ${s.brand || ''} ${s.color_name || ''} ${s.color_hex || ''}`,
-      run: () => _commandNavigate(`#/spool/${s.id}`),
-    }));
+    .flatMap(s => {
+      const spoolWords = `${s.id} ${s.material || ''} ${s.subtype || ''} ${s.brand || ''} ${s.color_name || ''} ${s.color_hex || ''}`;
+      return [
+        _commandItem({
+          label: _commandSpoolTitle(s),
+          meta: _commandSpoolMeta(s),
+          group: 'Spools',
+          keywords: spoolWords,
+          run: () => _commandNavigate(`#/spool/${s.id}`),
+        }),
+        _commandItem({
+          label: `Edit spool #${s.id}`,
+          meta: [s.color_name, s.material, s.brand].filter(Boolean).join(' · '),
+          group: 'Spool actions',
+          keywords: `${spoolWords} edit change update tare weight colour color`,
+          run: () => _commandOpenSpoolEditor(s.id),
+        }),
+        _commandItem({
+          label: `Actions for spool #${s.id}`,
+          meta: 'Label, weigh, copy, reset, archive',
+          group: 'Spool actions',
+          keywords: `${spoolWords} action actions label print weigh weight copy reset archive delete`,
+          run: () => _commandOpenSpoolActions(s.id),
+        }),
+      ];
+    });
 }
 
 function _commandAllItems() {
