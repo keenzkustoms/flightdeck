@@ -822,17 +822,16 @@ header {
   display: flex;
   align-items: center;
   position: relative;
-  padding: 1.25rem 2rem;
+  padding: 1.35rem 2rem;
   border-bottom: 1px solid var(--border);
   gap: 0.75rem;
-  min-height: 4.6rem;
+  min-height: 5rem;
 }
 
 .header-status {
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  min-width: 0;
   min-width: 22rem;
 }
 
@@ -1025,7 +1024,7 @@ header {
   flex-direction: column;
   line-height: 1.1;
   font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
-  font-size: 0.875rem;
+  font-size: 1.02rem;
   font-weight: 500;
   letter-spacing: 0.14em;
 }

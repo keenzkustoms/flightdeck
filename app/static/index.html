@@ -8,15 +8,16 @@
   <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
   <link rel="manifest" href="/static/manifest.json">
   <meta name="theme-color" content="#0a0a0f">
-  <link rel="stylesheet" href="/static/style.css?v=122">
+  <link rel="stylesheet" href="/static/style.css?v=124">
 </head>
 <body>
   <header>
     <div class="header-status">
+      <span id="refresh-time"></span>
       <span id="status-pill" class="status-pill"></span>
     </div>
     <a class="wordmark" href="#/">
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="30" height="30" aria-hidden="true">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="38" height="38" aria-hidden="true">
         <path d="M10,52 L42,52 C44,52 46,51 47,49 L55,39 C56,37 56,36 54,36 L22,36 C20,36 18,37 17,39 L11,49 C10,51 10,52 12,52 Z" fill="#EF4444" opacity="0.3"/>
         <path d="M10,38 L42,38 C44,38 46,37 47,35 L55,25 C56,23 56,22 54,22 L22,22 C20,22 18,23 17,25 L11,35 C10,37 10,38 12,38 Z" fill="#EF4444" opacity="0.6"/>
         <path d="M10,24 L42,24 C44,24 46,23 47,21 L55,11 C56,9 56,8 54,8 L22,8 C20,8 18,9 17,11 L11,21 C10,23 10,24 12,24 Z" fill="#EF4444" opacity="1.0"/>
@@ -29,7 +30,6 @@
       </span>
     </a>
     <div class="header-right">
-      <span id="refresh-time"></span>
       <div id="live-indicator">
         <div class="live-radar live-connecting" id="live-dot" aria-hidden="true">
           <span class="live-radar-sweep"></span>
@@ -112,6 +112,6 @@
     </div>
   </div>
 
-  <script type="module" src="/static/app.js?v=140"></script>
+  <script type="module" src="/static/app.js?v=142"></script>
 </body>
 </html>
