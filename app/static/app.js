@@ -773,6 +773,8 @@ async function openCommandPalette() {
   _commandRender();
 }
 
+document.getElementById('command-btn')?.addEventListener('click', openCommandPalette);
+
 function formatTime(seconds) {
   if (!seconds) return '—';
   const h = Math.floor(seconds / 3600);

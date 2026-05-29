@@ -771,6 +771,9 @@ body {
     min-width: 0;
     gap: 0.5rem;
   }
+  .command-header-btn kbd {
+    display: none;
+  }
   .notif-panel {
     left: auto;
     right: 1rem;
@@ -859,6 +862,42 @@ header {
 .notif-shell {
   position: relative;
   z-index: 900;
+}
+
+.command-header-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 1.9rem;
+  padding: 0.3rem 0.55rem 0.3rem 0.68rem;
+  border: 1px solid transparent;
+  border-radius: 0.5rem;
+  background: rgba(255,255,255,0.03);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.command-header-btn:hover {
+  border-color: var(--border);
+  background: rgba(255,255,255,0.07);
+}
+
+.command-header-btn kbd {
+  display: inline-flex;
+  align-items: center;
+  height: 1.05rem;
+  padding: 0 0.32rem;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 0.28rem;
+  background: rgba(0,0,0,0.22);
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 0.6rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
 }
 
 .notif-btn {
@@ -1075,6 +1114,9 @@ header {
     gap: 0.5rem;
     min-width: 0;
   }
+  .command-header-btn kbd {
+    display: none;
+  }
   .notif-panel {
     left: auto;
     right: 1rem;
@@ -1161,6 +1203,9 @@ header {
     min-width: 0;
     order: 3;
     position: static;
+  }
+  .command-header-btn kbd {
+    display: none;
   }
   .notif-panel {
     top: 8.25rem;
