@@ -5572,6 +5572,67 @@ function _spoolTableHtml(spools) {
   </div>`;
 }
 
+function _spoolCabinetTileHtml(s) {
+  const pct = s.label_weight_g > 0 ? Math.round(s.remaining_g * 100 / s.label_weight_g) : 0;
+  const bandColor = s.color_hex || '#404040';
+  const textColor = _spoolTextColor(bandColor);
+  const pctCls = pct < 20 ? ' spool-low' : pct < 50 ? ' spool-amber' : '';
+  return `<div class="spool-cabinet-tile" data-spool-id="${s.id}">
+    <a class="spool-cabinet-swatch" href="#/spool/${s.id}" style="background:${bandColor};color:${textColor}" title="#${s.id} ${esc(s.color_name || '')}">
+      <span>${esc(s.color_name || bandColor)}</span>
+      <b>#${s.id}</b>
+    </a>
+    <div class="spool-cabinet-info">
+      <strong>${esc(s.material)}${s.subtype ? ` ${esc(s.subtype)}` : ''}</strong>
+      <span>${esc(s.brand || '')}</span>
+      <em class="${pctCls}">${Math.round(s.remaining_g || 0)}g · ${pct}%</em>
+    </div>
+    <div class="spool-cabinet-actions">
+      <button class="spool-action-btn spool-action-label" data-action="label" data-id="${s.id}" title="Print label">Label</button>
+      <button class="spool-action-btn spool-action-edit" data-action="edit" data-id="${s.id}" title="Edit">Edit</button>
+    </div>
+  </div>`;
+}
+
+function _spoolCabinetHtml(spools) {
+  const stored = [...spools].filter(s => !s.location_printer_id && !s.archived_at);
+  const loaded = [...spools].filter(s => s.location_printer_id && !s.archived_at);
+  const locations = _spoolLocations.length
+    ? _spoolLocations
+    : [{ id: '', name: 'Unassigned', notes: '' }];
+  const laneHtml = locations.map(loc => {
+    const items = stored
+      .filter(s => String(s.storage_location_id ?? '') === String(loc.id ?? ''))
+      .sort((a, b) => Number(a.id || 0) - Number(b.id || 0));
+    const grams = items.reduce((sum, s) => sum + Number(s.remaining_g || 0), 0);
+    return `<section class="spool-cabinet-lane">
+      <div class="spool-cabinet-lane-head">
+        <div>
+          <strong>${esc(loc.name || 'Unassigned')}</strong>
+          <span>${esc(loc.notes || 'Storage shelf')}</span>
+        </div>
+        <b>${items.length} · ${(grams / 1000).toFixed(2)}kg</b>
+      </div>
+      <div class="spool-cabinet-tiles">
+        ${items.length ? items.map(_spoolCabinetTileHtml).join('') : '<div class="spool-cabinet-empty">No spools here.</div>'}
+      </div>
+    </section>`;
+  }).join('');
+  const loadedHtml = loaded.length ? `<section class="spool-cabinet-lane spool-cabinet-lane-loaded">
+    <div class="spool-cabinet-lane-head">
+      <div>
+        <strong>Loaded</strong>
+        <span>Currently sitting in printers</span>
+      </div>
+      <b>${loaded.length}</b>
+    </div>
+    <div class="spool-cabinet-tiles">
+      ${loaded.sort((a, b) => Number(a.id || 0) - Number(b.id || 0)).map(_spoolCabinetTileHtml).join('')}
+    </div>
+  </section>` : '';
+  return `<div class="spool-cabinet-view">${laneHtml}${loadedHtml}</div>`;
+}
+
 function _applySpoolFilters(spools) {
   const f = _spoolsFilter;
   const thresh = _latestLowStockPct;
@@ -5618,6 +5679,9 @@ function _renderSpoolList(el) {
         _renderSpoolList(el);
       });
     });
+  } else if (_spoolsViewMode === 'cabinet') {
+    listEl.className = '';
+    listEl.innerHTML = _spoolCabinetHtml(filtered);
   } else {
     listEl.className = 'spool-card-grid';
     listEl.innerHTML = [...filtered].sort((a, b) => Number(a.id || 0) - Number(b.id || 0)).map(_spoolCardHtml).join('');
@@ -5694,6 +5758,7 @@ function _spoolsCategoryHtml(spools, summary, costs, intelligence = {}) {
         <div class="spool-view-toggle">
           <button class="spool-view-btn${_spoolsViewMode==='cards'?' active':''}" data-view="cards">Cards</button>
           <button class="spool-view-btn${_spoolsViewMode==='table'?' active':''}" data-view="table">Table</button>
+          <button class="spool-view-btn${_spoolsViewMode==='cabinet'?' active':''}" data-view="cabinet">Cabinet</button>
         </div>
         <select class="spool-filter-sel" data-fkey="material">${matOpts}</select>
         <select class="spool-filter-sel" data-fkey="brand">${brandOpts}</select>
