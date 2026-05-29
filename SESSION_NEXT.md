@@ -1296,6 +1296,13 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Empty palette now keeps the core navigation order before search ranking kicks in.
 - Static cache-bust bumped to `style.css?v=128` and `app.js?v=146`.
 
+### Spools catalogue workflow
+- Add/Edit Spool modal now keeps the catalogue pane in its own scrollable column so the form/actions remain reachable.
+- Moved filament catalogue management into Spools as a `Catalogue` view alongside Cards/Table/Cabinet.
+- Removed Filament from the Settings side navigation; legacy `#/settings/filament` redirects into `#/spools?view=catalogue`.
+- Updated filament stats/catalogue links and command palette entry to point at the Spools catalogue view.
+- Static cache-bust bumped to `style.css?v=129` and `app.js?v=147`.
+
 ### Closing fixes (shipped same session)
 - **Bambu filament metadata**: `get_preview()` now called proactively on first poll of any new print (same trigger as AMS snapshot). One-shot FTP call per job; cached on `subtask_name`. Ensures `filament_weight_g` and `material` are always populated for spool deduction, even when nobody views the detail page.
 - **Spool snapshot overwrite on restart**: `write_slot_snapshot` now uses `WHERE ams_slot_snapshot IS NULL`. Post-restart the snapshot condition re-fires (in-memory state resets), but the original DB row is preserved. Spool deduction uses correct print-start slot assignments regardless of restarts.

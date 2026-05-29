@@ -488,6 +488,13 @@ function _commandStaticItems() {
       },
     }),
     _commandItem({
+      label: 'Open filament catalogue',
+      meta: 'Materials, brands, costs and tare weights',
+      group: 'Spools',
+      keywords: 'filament catalogue cost material brand tare',
+      run: () => _commandNavigate('#/spools?view=catalogue'),
+    }),
+    _commandItem({
       label: 'Show low stock spools',
       meta: 'Inventory below threshold',
       group: 'Spools',
@@ -514,7 +521,7 @@ function _commandStaticItems() {
     }),
   ];
 
-  const settings = ['Printers', 'Hardware', 'Appearance', 'Slicer', 'Filament', 'Locations'].map(label => {
+  const settings = ['Printers', 'Hardware', 'Appearance', 'Slicer', 'Locations'].map(label => {
     const id = label.toLowerCase();
     return _commandItem({
       label: `Settings: ${label}`,
@@ -1364,6 +1371,7 @@ function parseRoute() {
   if (hash === '#/spools' || hash.startsWith('#/spools?')) return { view: 'spools' };
   const settingsMatch = hash.match(/^#\/settings\/([^/]+)/);
   if (settingsMatch?.[1] === 'spools') return { view: 'spools' };
+  if (settingsMatch?.[1] === 'filament') return { view: 'spools', legacyFilament: true };
   if (settingsMatch) return { view: 'settings', category: settingsMatch[1] };
   if (hash === '#/settings') return { view: 'settings' };
   return { view: 'dashboard' };
@@ -1378,6 +1386,10 @@ function _routeParams(prefix) {
 
 function router() {
   const route = parseRoute();
+  if (route.legacyFilament) {
+    _spoolsViewMode = 'catalogue';
+    history.replaceState(null, '', '#/spools?view=catalogue');
+  }
   const categoryBeforeRoute = _settingsCategory;
   if (route.view === 'settings' && route.category) {
     _settingsCategory = _SETTINGS_CATEGORIES.some(c => c.id === route.category)
@@ -4990,7 +5002,7 @@ async function renderStatsView() {
 
         <section class="stats-kpi-grid">
           <a class="stats-kpi-card" href="#/stats?focus=printers"><strong>${printers.length}</strong><span>Printers</span><small>${states.idle || 0} idle · ${active} active</small></a>
-          <a class="stats-kpi-card" href="#/settings/filament"><strong>${_fmtGrams(filament.total_grams || 0)}</strong><span>Filament used</span><small>${filament.total_cost != null ? `$${filament.total_cost.toFixed(2)} estimated` : 'cost pending'}</small></a>
+          <a class="stats-kpi-card" href="#/spools?view=catalogue"><strong>${_fmtGrams(filament.total_grams || 0)}</strong><span>Filament used</span><small>${filament.total_cost != null ? `$${filament.total_cost.toFixed(2)} estimated` : 'cost pending'}</small></a>
           <a class="stats-kpi-card" href="#/spools"><strong>${_fmtGrams(spools.total_remaining_g || 0)}</strong><span>Inventory</span><small>${spools.total_count || 0} spools · ${spools.in_printer_count || 0} loaded</small></a>
           <a class="stats-kpi-card ${maxRh != null && maxRh >= 35 ? 'stats-kpi-warn' : ''}" href="#/stats?focus=rh"><strong>${avgRh != null ? `${avgRh}%` : '--'}</strong><span>AMS RH</span><small>${maxRh != null ? `Max ${Math.round(maxRh)}% · ${rhReadings.length} sensors` : 'no telemetry'}</small></a>
           <a class="stats-kpi-card ${spools.low_stock_count ? 'stats-kpi-warn' : ''}" href="#/spools?filter=low"><strong>${spools.low_stock_count || 0}</strong><span>Low stock</span><small>Below ${Math.round(spools.low_stock_pct || 20)}%</small></a>
@@ -5001,7 +5013,7 @@ async function renderStatsView() {
 
         <section class="stats-layout">
           <div class="stats-panel stats-panel-wide">
-            <div class="stats-panel-head"><span>Filament Trend</span><a href="#/settings/filament">Catalogue</a></div>
+            <div class="stats-panel-head"><span>Filament Trend</span><a href="#/spools?view=catalogue">Catalogue</a></div>
             ${_statsMonthRows(filament.by_month || [])}
           </div>
           <div class="stats-panel">
@@ -5108,7 +5120,6 @@ const _SETTINGS_CATEGORIES = [
   { id: 'preferences', label: 'Preferences' },
   { id: 'appearance', label: 'Appearance' },
   { id: 'slicer',     label: 'Slicer'     },
-  { id: 'filament',   label: 'Filament'   },
   { id: 'locations',  label: 'Locations'  },
 ];
 
@@ -5742,7 +5753,7 @@ function _filamentCategoryHtml(summary, costs) {
     </div>`;
 }
 
-function _attachFilamentEvents(el) {
+function _attachFilamentEvents(el, refresh = () => _renderSettingsContent('filament')) {
   async function _putBrand(mat, brand, cpg, comment, emptySpoolWeightG = null) {
     const r = await fetch(
       `/api/filament/costs/${encodeURIComponent(mat)}/${encodeURIComponent(brand)}`,
@@ -5784,7 +5795,7 @@ function _attachFilamentEvents(el) {
         await _putBrand(mat, brand, cpg, noteEl.value.trim(), tare);
         brandEl.value = ''; cpgEl.value = ''; tareEl.value = ''; noteEl.value = '';
         btn.textContent = 'Add'; btn.disabled = false;
-        _renderSettingsContent('filament');
+        refresh();
       } catch {
         btn.textContent = 'Error';
         setTimeout(() => { btn.textContent = 'Add'; btn.disabled = false; }, 2000);
@@ -5811,7 +5822,7 @@ function _attachFilamentEvents(el) {
           <button class="cost-edit-cancel-btn modal-btn" style="min-height:unset;padding:0.2rem 0.5rem;font-size:0.75rem">✕</button>
         </td>`;
       tr.querySelector('.cost-edit-cancel-btn').addEventListener('click', () =>
-        _renderSettingsContent('filament')
+        refresh()
       );
       tr.querySelector('.cost-edit-save-btn').addEventListener('click', async () => {
         const cpg  = parseFloat(tr.querySelector('.cost-new-cpg').value);
@@ -5822,7 +5833,7 @@ function _attachFilamentEvents(el) {
         if (tare !== null && (isNaN(tare) || tare < 0)) return;
         try {
           await _putBrand(mat, brand, cpg, note, tare);
-          _renderSettingsContent('filament');
+          refresh();
         } catch {}
       });
     });
@@ -5880,7 +5891,7 @@ function _attachFilamentEvents(el) {
         await _putBrand(mat, brand, cpg, commentEl.value.trim(), tare);
         nameEl.value = ''; brandEl.value = ''; costEl.value = ''; tareEl.value = ''; commentEl.value = '';
         addBtn.textContent = 'Add'; addBtn.disabled = false;
-        _renderSettingsContent('filament');
+          refresh();
       } catch {
         addBtn.textContent = 'Error';
         setTimeout(() => { addBtn.textContent = 'Add'; addBtn.disabled = false; }, 2000);
@@ -6236,6 +6247,8 @@ let _spoolsViewMode = 'cards';
 let _spoolsSortKey = 'material';
 let _spoolsSortDir = 1;
 let _spoolsFilter = { search: '', status: 'active', slotFilter: 'all', material: '', brand: '', printer: '' };
+let _spoolsFilamentSummary = {};
+let _spoolsFilamentCosts = [];
 let _spoolLocations = [];
 let _latestSpoolsByPrinter = {};   // printer_id → [spool, ...]
 let _latestLowStockPct = 20;
@@ -6894,6 +6907,12 @@ function _applySpoolFilters(spools) {
 function _renderSpoolList(el) {
   const listEl = el.querySelector('#spool-list');
   if (!listEl) return;
+  if (_spoolsViewMode === 'catalogue') {
+    listEl.className = 'spool-catalogue-settings';
+    listEl.innerHTML = _filamentCategoryHtml(_spoolsFilamentSummary, _spoolsFilamentCosts);
+    _attachFilamentEvents(listEl, () => _renderSpoolsContent(el));
+    return;
+  }
   const filtered = _applySpoolFilters(_allSpools);
   if (filtered.length === 0) {
     listEl.className = '';
@@ -6934,7 +6953,7 @@ function _spoolIntelligenceHtml(intel = {}) {
         <div class="settings-section-title">Spool Intelligence</div>
         <div class="spool-intel-sub">${intel.days || 30} day tracking window</div>
       </div>
-      <a class="spool-intel-link" href="#/settings/filament">Filament stats</a>
+      <a class="spool-intel-link" href="#/spools?view=catalogue">Filament catalogue</a>
     </div>
     <div class="spool-intel-stats">
       <div class="spool-intel-stat"><strong>${fmtKg(s.deducted_g)}</strong><span>auto-deducted</span></div>
@@ -6990,6 +7009,7 @@ function _spoolsCategoryHtml(spools, summary, costs, intelligence = {}) {
           <button class="spool-view-btn${_spoolsViewMode==='cards'?' active':''}" data-view="cards">Cards</button>
           <button class="spool-view-btn${_spoolsViewMode==='table'?' active':''}" data-view="table">Table</button>
           <button class="spool-view-btn${_spoolsViewMode==='cabinet'?' active':''}" data-view="cabinet">Cabinet</button>
+          <button class="spool-view-btn${_spoolsViewMode==='catalogue'?' active':''}" data-view="catalogue">Catalogue</button>
         </div>
         <select class="spool-filter-sel" data-fkey="material">${matOpts}</select>
         <select class="spool-filter-sel" data-fkey="brand">${brandOpts}</select>
@@ -7971,15 +7991,22 @@ async function _renderSpoolsContent(el) {
     const filter = params.get('filter');
     if (['all', 'loaded', 'storage', 'low'].includes(filter)) _spoolsFilter.slotFilter = filter;
   }
+  if (params.has('view')) {
+    const view = params.get('view');
+    if (['cards', 'table', 'cabinet', 'catalogue'].includes(view)) _spoolsViewMode = view;
+  }
   _spoolsFilter.printer = params.get('printer') || '';
-  const [spools, summary, costs, locations, intelligence] = await Promise.all([
+  const [spools, summary, costs, filamentSummary, locations, intelligence] = await Promise.all([
     fetch('/api/spools').then(r => r.json()).catch(() => []),
     fetch('/api/spools/summary').then(r => r.json()).catch(() => ({})),
     fetch('/api/filament/costs').then(r => r.json()).catch(() => []),
+    fetch('/api/filament/summary').then(r => r.json()).catch(() => ({})),
     fetch('/api/spool-locations').then(r => r.json()).catch(() => []),
     fetch('/api/spools/intelligence').then(r => r.json()).catch(() => ({})),
   ]);
   _spoolLocations = locations;
+  _spoolsFilamentSummary = filamentSummary;
+  _spoolsFilamentCosts = costs;
   el.innerHTML = _spoolsCategoryHtml(spools, summary, costs, intelligence);
   _attachSpoolsEvents(el, costs);
 }
