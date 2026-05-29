@@ -807,6 +807,7 @@ header {
 
 .notif-shell {
   position: relative;
+  z-index: 900;
 }
 
 .notif-btn {
@@ -885,7 +886,7 @@ header {
   position: absolute;
   top: calc(100% + 0.6rem);
   right: 0;
-  z-index: 60;
+  z-index: 1200;
   width: min(24rem, calc(100vw - 2rem));
   max-height: min(34rem, calc(100vh - 7rem));
   overflow: auto;
@@ -5117,12 +5118,10 @@ select.settings-input { cursor: pointer; }
 }
 
 .spool-group-card {
-  grid-column: span 2;
   border-color: rgba(122,162,216,0.32);
 }
 
 @media (max-width: 740px) {
-  .spool-group-card { grid-column: span 1; }
   .spool-group-roll { grid-template-columns: auto minmax(0, 1fr) auto; }
   .spool-group-roll .spool-action-label,
   .spool-group-roll .spool-action-edit { display: none; }
@@ -5132,7 +5131,7 @@ select.settings-input { cursor: pointer; }
   display: flex;
   flex-wrap: wrap;
   gap: 0.18rem;
-  margin-top: 0.05rem;
+  margin-top: 0.02rem;
 }
 
 .spool-roll-chip {
@@ -5207,9 +5206,7 @@ select.settings-input { cursor: pointer; }
 }
 
 .spool-group-details {
-  margin-top: 0.22rem;
-  padding-top: 0.24rem;
-  border-top: 1px solid rgba(255,255,255,0.04);
+  margin-top: 0.12rem;
 }
 
 .spool-group-summary {
@@ -5223,7 +5220,7 @@ select.settings-input { cursor: pointer; }
   color: var(--accent);
   border: 1px solid rgba(122,162,216,0.34);
   border-radius: 0.25rem;
-  padding: 0.08rem 0.24rem;
+  padding: 0.04rem 0.18rem;
   font-size: 0.58rem;
   font-weight: 800;
   line-height: 1.2;

@@ -6370,9 +6370,8 @@ function _spoolGroupCardHtml(group) {
         <span class="spool-location-badge" title="${esc(locationSummary)}">${esc(locationSummary)}</span>
       </div>
       <div class="spool-card-row spool-brand">${esc(first.brand || 'Unknown brand')}</div>
-      <div class="spool-roll-chips">${rollChips}</div>
       <div class="spool-remaining-row">
-        <span class="spool-remaining-label">Combined</span>
+        <span class="spool-remaining-label">Combined ${group.length} rolls</span>
         <span class="spool-remaining-pct${pct < 20 ? ' spool-low' : pct < 50 ? ' spool-amber' : ''}">${pct}%</span>
         <span class="spool-remaining-g">${Math.round(totalRemaining)}g</span>
       </div>
@@ -6381,9 +6380,9 @@ function _spoolGroupCardHtml(group) {
       </div>
       <div class="spool-meta-row">
         <span class="spool-meta">${Math.round(totalLabel)}g total</span>
-        <span class="spool-meta">${Math.round(used)}g used</span>
         ${confidenceAvg != null ? `<span class="spool-meta">${confidenceAvg}% trust</span>` : ''}
       </div>
+      <div class="spool-roll-chips">${rollChips}</div>
       <details class="spool-group-details">
         <summary class="spool-group-summary">Rolls <span>${group.length}</span></summary>
         <div class="spool-group-rolls">${rows}</div>
