@@ -4,3 +4,10 @@ __pycache__/
 *.pyo
 .env
 *.db
+flightdeck-data/
+data/
+uploads/
+print_library/
+printers.yaml
+backup_metadata.json
+spools.db

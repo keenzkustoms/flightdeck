@@ -3,13 +3,11 @@ import sqlite3
 import logging
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import Optional
 
-log = logging.getLogger(__name__)
+from .paths import DB_PATH, UPLOADS_DIR
 
-DB_PATH = Path(__file__).parent.parent / "flightdeck.db"
-UPLOADS_DIR = Path(__file__).parent.parent / "uploads"
+log = logging.getLogger(__name__)
 
 
 def init() -> None:

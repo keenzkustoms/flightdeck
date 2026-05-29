@@ -1,11 +1,12 @@
 from __future__ import annotations
-from pathlib import Path
 from typing import Annotated, Literal, Optional, Union
 
 import yaml
 from pydantic import BaseModel, Field
 
-CONFIG_PATH = Path(__file__).parent.parent / "printers.yaml"
+from .paths import PRINTERS_CONFIG_PATH
+
+CONFIG_PATH = PRINTERS_CONFIG_PATH
 
 VALID_ICONS = {"voron", "bambu", "generic"}
 

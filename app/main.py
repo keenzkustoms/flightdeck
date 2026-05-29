@@ -32,6 +32,7 @@ from . import db, relay
 from .camera import BambuCameraProxy
 from .label_printer import LabelPrinter
 from .models import PrintPreview
+from .paths import PRINT_LIBRARY_DIR
 from .printer_config import BambuConnection, BambuRtspCamera, MjpegDirectCamera, MoonrakerConnection, NtfyConfig, PrinterEntry, load, save
 from .printers import moonraker
 from .printers.bambu import BambuPrinter
@@ -311,7 +312,7 @@ async def lifespan(app: FastAPI):
 
 
 _STATIC = Path(__file__).parent / "static"
-_PRINT_LIBRARY = Path("/home/flightdeck/print_library")
+_PRINT_LIBRARY = PRINT_LIBRARY_DIR
 
 app = FastAPI(title="Flightdeck", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=_STATIC), name="static")

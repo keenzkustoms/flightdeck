@@ -1181,6 +1181,15 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - The DOM only swaps when the actual file-list HTML changes, removing the brief loading/blank flash after commands.
 - Static cache-bust bumped to `app.js?v=124`.
 
+### Portable runtime data paths
+- Added `app/paths.py` as the single runtime path resolver.
+- Flightdeck now reads `.env` early and supports `FLIGHTDECK_DATA_DIR` plus explicit overrides for DB, uploads, printer config, and print library paths.
+- Current Pi behavior is preserved until migration: repo-local `flightdeck.db`, repo-local `uploads/`, repo-local `printers.yaml`, and `/home/flightdeck/print_library`.
+- Clean installs can keep live data outside git in `~/flightdeck-data`.
+- Added `printers.yaml.example`, `flightdeck.service.example`, `scripts/install.sh`, `scripts/install-systemd.sh`, and `scripts/migrate-to-portable-data.sh`.
+- Updated README install/migration notes.
+- `printers.yaml` should be untracked from git so real printer IPs, access codes, and serials never ship in a clean clone.
+
 ### Closing fixes (shipped same session)
 - **Bambu filament metadata**: `get_preview()` now called proactively on first poll of any new print (same trigger as AMS snapshot). One-shot FTP call per job; cached on `subtask_name`. Ensures `filament_weight_g` and `material` are always populated for spool deduction, even when nobody views the detail page.
 - **Spool snapshot overwrite on restart**: `write_slot_snapshot` now uses `WHERE ams_slot_snapshot IS NULL`. Post-restart the snapshot condition re-fires (in-memory state resets), but the original DB row is preserved. Spool deduction uses correct print-start slot assignments regardless of restarts.

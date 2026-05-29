@@ -122,63 +122,78 @@ Flightdeck collapses that into one interface, owned by me, running on my network
 
 ## Installation
 
-> **Status:** Tier 1 scaffolding in progress. Expect breakage.
+> **Status:** active homelab project. The default install keeps runtime data outside the git checkout so updates can be pulled cleanly.
 
 ### Prerequisites
 
 - Raspberry Pi 5 (or equivalent Linux host) with at least 4 GB RAM
 - Debian 13 (Trixie) or similar
 - Python 3.13+
-- Node 24+ (recommended via `nvm`)
 - Network reachability to all printers
 
 ### Setup
 
 ```bash
 # Clone
-git clone https://github.com/YOUR_USER/flightdeck.git
+git clone https://github.com/Kidabah/flightdeck.git
 cd flightdeck
 
-# Backend
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+# Creates .venv, .env, the data directory, SQLite DB, uploads, and print library.
+./scripts/install.sh
+```
 
-# Frontend
-cd frontend
-npm install
-npm run build
-cd ..
+By default the installer stores live data in `~/flightdeck-data`:
 
-# Configure
-cp config/flightdeck.example.toml config/flightdeck.toml
-$EDITOR config/flightdeck.toml   # add printer IPs, MQTT credentials, etc.
+- `flightdeck.db`
+- `printers.yaml`
+- `uploads/`
+- `print_library/`
 
-# Run
-python -m flightdeck
+That keeps your printer config, queue/history database, uploaded files, and SD/library cache out of git. A fresh clone starts clean, and an existing install can pull updates without overwriting real data.
+
+Run manually:
+
+```bash
+FLIGHTDECK_DATA_DIR=~/flightdeck-data .venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+Install or update the systemd service for this checkout:
+
+```bash
+./scripts/install-systemd.sh
 ```
 
 The dashboard will be available at `http://<host>:8000`.
 
 ### Configuration
 
-Printers are declared in `config/flightdeck.toml`:
+Printers are declared in the data directory's `printers.yaml`. The installer creates it from `printers.yaml.example` if it does not already exist.
 
-```toml
-[[printers]]
-name = "Greyhound Elite V2"
-kind = "klipper"
-moonraker_url = "http://192.168.4.42:7125"
-
-[[printers]]
-name = "Bambu H2D"
-kind = "bambu"
-ip = "192.168.4.50"
-serial = "XXXXXXXXXXXXX"
-access_code = "XXXXXXXX"
+```bash
+$EDITOR ~/flightdeck-data/printers.yaml
 ```
 
-Sensitive values can live in environment variables and be referenced with `${VAR}` syntax.
+Runtime paths can be overridden in `.env`:
+
+```env
+FLIGHTDECK_DATA_DIR=/home/flightdeck/flightdeck-data
+# FLIGHTDECK_DB_PATH=/home/flightdeck/flightdeck-data/flightdeck.db
+# FLIGHTDECK_UPLOADS_DIR=/home/flightdeck/flightdeck-data/uploads
+# FLIGHTDECK_PRINTERS_CONFIG=/home/flightdeck/flightdeck-data/printers.yaml
+# FLIGHTDECK_PRINT_LIBRARY=/home/flightdeck/flightdeck-data/print_library
+```
+
+### Migrating an Existing Pi Install
+
+The portable migration script moves the live DB, printer config, uploads, and print library into `~/flightdeck-data`, then updates `.env`.
+
+```bash
+sudo systemctl stop flightdeck.service
+./scripts/migrate-to-portable-data.sh
+./scripts/install-systemd.sh
+```
+
+The script asks you to type `MIGRATE` before it moves anything.
 
 ---
 

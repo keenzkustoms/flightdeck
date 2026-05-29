@@ -1,0 +1,51 @@
+ntfy:
+  topic: flightdeck
+  url: https://ntfy.sh
+
+printers:
+  - id: voron
+    model_name: Voron
+    custom_name: Voron
+    icon: voron
+    connection:
+      type: moonraker
+      host: 192.168.1.10
+      port: 7125
+    camera:
+      type: mjpeg_direct
+      stream_url: http://192.168.1.10/webcam/?action=stream
+      snapshot_url: http://192.168.1.10/webcam/?action=snapshot
+    temperature_presets:
+      hotend:
+        - { label: PLA, value: 220 }
+        - { label: PETG, value: 245 }
+        - { label: ASA, value: 255 }
+        - { label: ABS, value: 250 }
+      bed:
+        - { label: PLA, value: 65 }
+        - { label: PETG, value: 80 }
+        - { label: ASA, value: 110 }
+        - { label: ABS, value: 100 }
+
+  - id: bambu
+    model_name: X1C
+    custom_name: Bambu
+    icon: bambu
+    connection:
+      type: bambu
+      host: 192.168.1.20
+      access_code: CHANGE_ME
+      serial: CHANGE_ME
+    camera:
+      type: bambu_rtsp
+    temperature_presets:
+      hotend:
+        - { label: PLA, value: 220 }
+        - { label: PETG, value: 245 }
+        - { label: ASA, value: 255 }
+        - { label: ABS, value: 250 }
+      bed:
+        - { label: PLA, value: 65 }
+        - { label: PETG, value: 80 }
+        - { label: ASA, value: 100 }
+        - { label: ABS, value: 100 }
