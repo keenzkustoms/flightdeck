@@ -5203,7 +5203,8 @@ select.settings-input { cursor: pointer; }
 
 .spool-group-roll-actions {
   grid-column: 1 / -1;
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.16rem;
   min-width: 0;
 }
@@ -5219,6 +5220,7 @@ select.settings-input { cursor: pointer; }
   padding: 0.02rem 0.14rem;
   text-decoration: none;
   opacity: 0.9;
+  text-align: center;
 }
 
 .spool-group-roll-action:hover {
@@ -5266,13 +5268,20 @@ select.settings-input { cursor: pointer; }
 
 .spool-card-actions {
   position: relative;
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.16rem;
-  justify-content: space-between;
-  flex-wrap: wrap;
   margin-top: 0.18rem;
   padding-top: 0.24rem;
   border-top: 1px solid rgba(255,255,255,0.04);
+}
+
+.spool-card-actions > .spool-action-btn,
+.spool-card-actions > .spool-action-menu > .spool-action-more {
+  width: 100%;
+  box-sizing: border-box;
+  justify-content: center;
+  text-align: center;
 }
 
 .spool-action-btn {
@@ -5320,7 +5329,8 @@ select.settings-input { cursor: pointer; }
   position: relative;
 }
 .spool-action-menu {
-  margin-left: auto;
+  margin-left: 0;
+  min-width: 0;
 }
 .spool-action-menu[open] {
   z-index: 40;
