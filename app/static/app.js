@@ -1293,6 +1293,8 @@ function _canDo(state, action) {
 
 function _detailControls(id, p) {
   const pending = _pendingControls[id];
+  const pauseResumeAction = p.state === 'paused' ? 'resume' : 'pause';
+  const pauseResumeLabel = p.state === 'paused' ? 'Resume' : 'Pause';
 
   function btn(action, label, cls = '') {
     const canDo = _canDo(p.state, action);
@@ -1315,8 +1317,7 @@ function _detailControls(id, p) {
   return `
     ${lightControls ? `<div class="controls-lights">${lightControls}</div>` : ''}
     <div class="controls-primary">
-      ${btn('pause', 'Pause')}
-      ${btn('resume', 'Resume')}
+      ${btn(pauseResumeAction, pauseResumeLabel)}
       ${btn('cancel', 'Cancel')}
     </div>
     <div class="controls-destructive">
@@ -1327,6 +1328,10 @@ function _detailControls(id, p) {
 
 function _detailTransportControls(id, p) {
   const pending = _pendingControls[id];
+  const pauseResumeAction = p.state === 'paused' ? 'resume' : 'pause';
+  const pauseResumeIcon = p.state === 'paused' ? '▶' : 'Ⅱ';
+  const pauseResumeLabel = p.state === 'paused' ? 'Resume' : 'Pause';
+  const pauseResumeClass = p.state === 'paused' ? 'transport-play' : '';
   const transportButton = (action, icon, label, cls = '') => {
     const canDo = _canDo(p.state, action);
     const isPending = pending?.action === action;
@@ -1351,8 +1356,7 @@ function _detailTransportControls(id, p) {
   return `<div class="live-transport detail-controls-wrap" aria-label="Printer transport controls">
     ${lightControl}
     <div class="transport-deck">
-      ${transportButton('pause', 'Ⅱ', 'Pause')}
-      ${transportButton('resume', '▶', 'Resume', 'transport-play')}
+      ${transportButton(pauseResumeAction, pauseResumeIcon, pauseResumeLabel, pauseResumeClass)}
       ${transportButton('cancel', '■', 'Cancel')}
       ${transportButton('estop', '!', 'E-stop', 'transport-estop')}
       ${firmwareRestartBtn}
@@ -1434,6 +1438,8 @@ document.getElementById('view-printer').addEventListener('click', e => {
   if (!id) return;
 
   const CONFIRM = {
+    pause:            'Pause this print?',
+    resume:           'Resume this print?',
     cancel:           'Cancel the print? This will stop the print immediately and discard progress.',
     estop:            'Emergency stop? The printer will halt all motion and require a manual reset to continue.',
     firmware_restart: 'Restart printer firmware? Klipper will reinitialise and the printer will need to home before printing.',

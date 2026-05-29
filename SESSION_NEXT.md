@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 30 May 2026 (Session 28.68 Bambu object skip metadata)_
+_Last updated 30 May 2026 (Session 28.69 Pause/resume control polish)_
 
 ## Current state
 
@@ -9,6 +9,25 @@ Service running at:
 - `http://flightdeck.local:8000`
 - `http://192.168.4.127:8000`
 - **`https://flightdeck.tail7de73e.ts.net`** (Tailscale Serve — HTTPS, used for PWA / notifications)
+
+---
+
+## What was built — Session 28.69 (Pause/resume control polish — 30 May)
+
+Live printer controls now use one state-aware Pause/Resume button instead of separate buttons.
+
+### Frontend
+- Transport deck shows `Pause` while printing and `Resume` while paused.
+- Pause and resume now both ask for confirmation before sending the command.
+- Older detail control renderer was kept in sync for any fallback surfaces.
+- Static cache-bust bumped to `app.js?v=162`.
+
+### Backend
+- Bambu `pause()` and `resume()` now raise an error if the MQTT command is not accepted instead of silently returning success.
+
+### Verification
+- `python3 -m py_compile app/printers/bambu.py app/printers/bambu_ftp.py app/main.py`
+- `node --check app/static/app.js`
 
 ---
 

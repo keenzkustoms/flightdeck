@@ -447,10 +447,12 @@ class BambuPrinter:
     # ── Controls ───────────────────────────────────────────────────────────
 
     def pause(self) -> None:
-        self._printer.pause_print()
+        if not self._printer.pause_print():
+            raise RuntimeError("Bambu pause command was not accepted")
 
     def resume(self) -> None:
-        self._printer.resume_print()
+        if not self._printer.resume_print():
+            raise RuntimeError("Bambu resume command was not accepted")
 
     def cancel(self) -> None:
         self._cancel_requested = True
