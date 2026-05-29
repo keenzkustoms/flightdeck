@@ -1059,6 +1059,11 @@ header {
   grid-column: span 2;
 }
 
+.stats-panel-focus {
+  border-color: rgba(59,130,246,0.58);
+  box-shadow: 0 0 0 1px rgba(59,130,246,0.12);
+}
+
 .stats-panel-head {
   display: flex;
   align-items: center;
@@ -1264,6 +1269,53 @@ header {
 .stats-rh-warn b { color: #fcd34d; }
 .stats-rh-bad b { color: #fca5a5; }
 
+.stats-drill-panel {
+  border: 1px solid var(--border);
+  border-radius: 0.65rem;
+  background: var(--surface);
+  padding: 0.95rem;
+  margin-bottom: 1rem;
+}
+
+.stats-rh-drill-ok { border-color: rgba(34,197,94,0.32); }
+.stats-rh-drill-warn { border-color: rgba(245,158,11,0.58); }
+.stats-rh-drill-bad { border-color: rgba(239,68,68,0.55); }
+
+.stats-rh-focus {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 0.55rem;
+  background: rgba(255,255,255,0.025);
+  padding: 0.8rem 0.9rem;
+  margin-bottom: 0.75rem;
+}
+
+.stats-rh-focus strong {
+  display: block;
+  color: var(--text);
+  font-size: 1.4rem;
+  line-height: 1;
+}
+
+.stats-rh-focus span,
+.stats-rh-focus p {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.stats-rh-focus span {
+  display: block;
+  margin-top: 0.3rem;
+}
+
+.stats-rh-focus p {
+  margin: 0;
+  text-align: right;
+}
+
 .stats-printer-list {
   display: grid;
   gap: 0.45rem;
@@ -1331,6 +1383,8 @@ header {
   .stats-kpi-grid,
   .stats-layout { grid-template-columns: 1fr; }
   .stats-panel-wide { grid-column: auto; }
+  .stats-rh-focus { align-items: flex-start; flex-direction: column; }
+  .stats-rh-focus p { text-align: left; }
   .stats-months { grid-template-columns: repeat(6, minmax(1.5rem, 1fr)); height: 9rem; }
   .stats-printer-row { grid-template-columns: minmax(0, 1fr) repeat(2, minmax(3.5rem, 1fr)); }
   .stats-printer-row > div:nth-child(4),

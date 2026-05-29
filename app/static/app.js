@@ -1014,7 +1014,7 @@ function parseRoute() {
   if (spoolMatch) return { view: 'spool', id: parseInt(spoolMatch[1], 10) };
   if (hash === '#/mission' || hash.startsWith('#/mission?')) return { view: 'mission' };
   if (hash === '#/cameras') return { view: 'cameras' };
-  if (hash === '#/stats') return { view: 'stats' };
+  if (hash === '#/stats' || hash.startsWith('#/stats?')) return { view: 'stats' };
   if (hash === '#/queue') return { view: 'queue' };
   if (hash === '#/failures' || hash.startsWith('#/failures?')) return { view: 'failures' };
   if (hash === '#/spools' || hash.startsWith('#/spools?')) return { view: 'spools' };
@@ -3878,6 +3878,31 @@ function _statsRhPanel(readings) {
   }).join('')}</div>`;
 }
 
+function _statsRhDetail(readings) {
+  if (!readings.length) return '';
+  const highest = readings[0];
+  const risk = _statsRhClass(highest.rh);
+  const riskText = risk === 'bad'
+    ? 'Drying strongly suggested'
+    : risk === 'warn'
+      ? 'Keep an eye on this bay'
+      : 'Humidity is in a comfortable range';
+  return `<section class="stats-drill-panel stats-rh-drill stats-rh-drill-${risk}" id="rh">
+    <div class="stats-panel-head">
+      <span>Humidity Detail</span>
+      <a href="#/stats">Telemetry</a>
+    </div>
+    <div class="stats-rh-focus">
+      <div>
+        <strong>${Math.round(highest.rh)}% RH</strong>
+        <span>${esc(highest.label)} · ${esc(highest.printer)}</span>
+      </div>
+      <p>${riskText}</p>
+    </div>
+    ${_statsRhPanel(readings)}
+  </section>`;
+}
+
 function _statsActionSummary(jobs, printers) {
   const pending = jobs.filter(j => j.status === 'pending').length;
   const blocked = jobs.filter(j => _missionJobReadiness(j).cls === 'blocked').length;
@@ -3897,6 +3922,8 @@ async function renderStatsView() {
   if (_statsRenderInFlight) return;
   _statsRenderInFlight = true;
   if (!_statsLastHtml) el.innerHTML = `<div class="detail-placeholder" style="min-height:40vh">Loading telemetry...</div>`;
+  const params = _routeParams('#/stats');
+  const focus = params.get('focus') || '';
 
   try {
     const [filament, spools, allSpools, intel, failures, jobs] = await Promise.all([
@@ -3931,13 +3958,15 @@ async function renderStatsView() {
         </section>
 
         <section class="stats-kpi-grid">
-          <a class="stats-kpi-card" href="#/stats"><strong>${printers.length}</strong><span>Printers</span><small>${states.idle || 0} idle · ${active} active</small></a>
+          <a class="stats-kpi-card" href="#/stats?focus=printers"><strong>${printers.length}</strong><span>Printers</span><small>${states.idle || 0} idle · ${active} active</small></a>
           <a class="stats-kpi-card" href="#/settings/filament"><strong>${_fmtGrams(filament.total_grams || 0)}</strong><span>Filament used</span><small>${filament.total_cost != null ? `$${filament.total_cost.toFixed(2)} estimated` : 'cost pending'}</small></a>
           <a class="stats-kpi-card" href="#/spools"><strong>${_fmtGrams(spools.total_remaining_g || 0)}</strong><span>Inventory</span><small>${spools.total_count || 0} spools · ${spools.in_printer_count || 0} loaded</small></a>
-          <a class="stats-kpi-card ${maxRh != null && maxRh >= 35 ? 'stats-kpi-warn' : ''}" href="#/stats"><strong>${avgRh != null ? `${avgRh}%` : '--'}</strong><span>AMS RH</span><small>${maxRh != null ? `Max ${Math.round(maxRh)}% · ${rhReadings.length} sensors` : 'no telemetry'}</small></a>
+          <a class="stats-kpi-card ${maxRh != null && maxRh >= 35 ? 'stats-kpi-warn' : ''}" href="#/stats?focus=rh"><strong>${avgRh != null ? `${avgRh}%` : '--'}</strong><span>AMS RH</span><small>${maxRh != null ? `Max ${Math.round(maxRh)}% · ${rhReadings.length} sensors` : 'no telemetry'}</small></a>
           <a class="stats-kpi-card ${spools.low_stock_count ? 'stats-kpi-warn' : ''}" href="#/spools?filter=low"><strong>${spools.low_stock_count || 0}</strong><span>Low stock</span><small>Below ${Math.round(spools.low_stock_pct || 20)}%</small></a>
           <a class="stats-kpi-card ${failures.total ? 'stats-kpi-warn' : ''}" href="#/failures?days=30"><strong>${failures.total || 0}</strong><span>Failure review</span><small>Last 30 days</small></a>
         </section>
+
+        ${focus === 'rh' ? _statsRhDetail(rhReadings) : ''}
 
         <section class="stats-layout">
           <div class="stats-panel stats-panel-wide">
@@ -3953,7 +3982,7 @@ async function renderStatsView() {
             ${_statsBarRows(spools.by_material || [], { total: spools.total_remaining_g || 0 })}
           </div>
           <div class="stats-panel">
-            <div class="stats-panel-head"><span>AMS Humidity</span><a href="#/">Live</a></div>
+            <div class="stats-panel-head"><span>AMS Humidity</span><a href="#/stats?focus=rh">Detail</a></div>
             ${_statsRhPanel(rhReadings)}
           </div>
           <div class="stats-panel">
@@ -3974,7 +4003,7 @@ async function renderStatsView() {
               label: r => `#${r.spool_id} ${[r.color_name, r.material].filter(Boolean).join(' · ')}`,
             })}
           </div>
-          <div class="stats-panel stats-panel-wide">
+          <div class="stats-panel stats-panel-wide${focus === 'printers' ? ' stats-panel-focus' : ''}">
             <div class="stats-panel-head"><span>Printer Balance</span><a href="#/">Dashboard</a></div>
             ${_statsPrinterRows(printers, filament, failures.summary || {}, allSpools)}
           </div>
