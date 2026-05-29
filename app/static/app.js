@@ -6349,10 +6349,8 @@ function _spoolGroupCardHtml(group) {
       : _spoolStorageLocationName(s.storage_location_id);
     return `<div class="spool-group-roll">
       <a class="spool-group-roll-id" href="#/spool/${s.id}">#${s.id}</a>
-      <span class="spool-group-roll-loc" title="${esc(loc)}">${esc(loc)}</span>
       <span class="spool-group-roll-grams${cls}">${Math.round(s.remaining_g || 0)}g</span>
-      <button class="spool-action-btn spool-action-label" data-action="label" data-id="${s.id}" title="Print label">Label</button>
-      <button class="spool-action-btn spool-action-edit" data-action="edit" data-id="${s.id}" title="Edit">Edit</button>
+      <span class="spool-group-roll-loc" title="${esc(loc)}">${esc(loc)}</span>
       <details class="spool-action-menu spool-group-menu">
         <summary class="spool-action-btn spool-action-more" title="More actions">Actions</summary>
         <div class="spool-action-menu-panel">${_SPOOL_ACTIONS.map(a => _spoolActionControl(a, s.id, true)).join('')}</div>
