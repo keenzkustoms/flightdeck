@@ -323,6 +323,15 @@ class FileQueueRequest(BaseModel):
     printer_id: str
 
 
+class FileDeskPathRequest(BaseModel):
+    source_id: str
+    path: str
+
+
+class FileDeskDeleteRequest(FileDeskPathRequest):
+    confirm: str = ""
+
+
 class BambuSdClearRequest(BaseModel):
     confirm: str = ""
 
@@ -417,6 +426,14 @@ async def _download_moonraker_file(base_url: str, path: str) -> bytes:
         return r.content
 
 
+async def _delete_moonraker_file(base_url: str, path: str) -> None:
+    from urllib.parse import quote
+    safe = quote(path.lstrip("/"), safe="/")
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        r = await client.delete(f"{base_url.rstrip('/')}/server/files/gcodes/{safe}")
+        r.raise_for_status()
+
+
 def _queue_file_extension(filename: str) -> str:
     if filename.endswith(".gcode.3mf"):
         return ".3mf"
@@ -447,6 +464,51 @@ def _queue_file_metadata(filename: str, data: bytes) -> dict:
         "filament_type": filament_type,
         "filament_colors": filament_colors,
     }
+
+
+async def _read_file_desk_source(source_id: str, source_path: str) -> tuple[str, bytes]:
+    source_id = source_id.strip()
+    source_path = source_path.strip().lstrip("/")
+    if not source_path:
+        raise HTTPException(status_code=422, detail="File path required")
+    filename = source_path.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+    ext = _queue_file_extension(filename)
+    if ext not in (_ALLOWED_BAMBU_EXT | _ALLOWED_MOONRAKER_EXT):
+        raise HTTPException(status_code=422, detail="Unsupported file type")
+
+    if source_id == "library":
+        data = _safe_library_path(source_path).read_bytes()
+    else:
+        bambu = _find_bambu(source_id)
+        if bambu:
+            from .printers.bambu_ftp import download_bambu_file
+            data = await asyncio.to_thread(download_bambu_file, bambu._ip, bambu._access_code, source_path)
+        else:
+            mr_url = _find_moonraker_url(source_id)
+            if not mr_url:
+                raise HTTPException(status_code=404, detail="Source not found")
+            data = await _download_moonraker_file(mr_url, source_path)
+
+    if not data:
+        raise HTTPException(status_code=422, detail="Empty file")
+    return filename, data
+
+
+def _library_import_path(filename: str) -> Path:
+    safe = re.sub(r"[^A-Za-z0-9._ -]+", "_", filename).strip(" ._") or "print_file"
+    dest = (_PRINT_LIBRARY / safe).resolve()
+    root = _PRINT_LIBRARY.resolve()
+    if root != dest and root not in dest.parents:
+        raise HTTPException(status_code=400, detail="Invalid destination path")
+    if not dest.exists():
+        return dest
+    stem = dest.stem
+    suffix = dest.suffix
+    for i in range(2, 1000):
+        candidate = root / f"{stem}_{i}{suffix}"
+        if not candidate.exists():
+            return candidate
+    raise HTTPException(status_code=409, detail="Too many files with this name in Pi Library")
 
 
 @app.get("/api/files")
@@ -503,14 +565,12 @@ async def queue_file_from_file_desk(body: FileQueueRequest):
     printer_id = body.printer_id.strip()
     source_id = body.source_id.strip()
     source_path = body.path.strip().lstrip("/")
-    if not source_path:
-        raise HTTPException(status_code=422, detail="File path required")
 
     target_kind = _printer_kind(printer_id)
     if target_kind is None:
         raise HTTPException(status_code=404, detail="Target printer not found")
 
-    filename = source_path.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+    filename, data = await _read_file_desk_source(source_id, source_path)
     ext = _queue_file_extension(filename)
     allowed = _ALLOWED_BAMBU_EXT if target_kind == "bambu" else _ALLOWED_MOONRAKER_EXT
     if ext not in allowed:
@@ -518,22 +578,6 @@ async def queue_file_from_file_desk(body: FileQueueRequest):
             status_code=422,
             detail=f"Unsupported file type '{ext}' for {target_kind} printer. Expected: {', '.join(sorted(allowed))}",
         )
-
-    if source_id == "library":
-        data = _safe_library_path(source_path).read_bytes()
-    else:
-        bambu = _find_bambu(source_id)
-        if bambu:
-            from .printers.bambu_ftp import download_bambu_file
-            data = await asyncio.to_thread(download_bambu_file, bambu._ip, bambu._access_code, source_path)
-        else:
-            mr_url = _find_moonraker_url(source_id)
-            if not mr_url:
-                raise HTTPException(status_code=404, detail="Source not found")
-            data = await _download_moonraker_file(mr_url, source_path)
-
-    if not data:
-        raise HTTPException(status_code=422, detail="Empty file")
 
     import uuid as _uuid
     safe_name = f"{_uuid.uuid4().hex[:8]}_{filename}"
@@ -552,6 +596,52 @@ async def queue_file_from_file_desk(body: FileQueueRequest):
     )
     db.log_decision(printer_id, "filedesk_queued", f"{source_id}:{source_path} -> job #{job_id}")
     return {"id": job_id}
+
+
+@app.post("/api/files/library/copy", status_code=201)
+async def copy_file_to_library(body: FileDeskPathRequest):
+    source_id = body.source_id.strip()
+    source_path = body.path.strip().lstrip("/")
+    if source_id == "library":
+        raise HTTPException(status_code=422, detail="File is already in the Pi Library")
+    filename, data = await _read_file_desk_source(source_id, source_path)
+    _PRINT_LIBRARY.mkdir(parents=True, exist_ok=True)
+    dest = _library_import_path(filename)
+    dest.write_bytes(data)
+    return {
+        "ok": True,
+        "name": dest.name,
+        "path": dest.relative_to(_PRINT_LIBRARY).as_posix(),
+        "size": len(data),
+    }
+
+
+@app.delete("/api/files")
+async def delete_file_from_file_desk(body: FileDeskDeleteRequest):
+    source_id = body.source_id.strip()
+    source_path = body.path.strip().lstrip("/")
+    if body.confirm.strip().upper() != "DELETE":
+        raise HTTPException(status_code=422, detail="Type DELETE to confirm")
+    if not source_path:
+        raise HTTPException(status_code=422, detail="File path required")
+    filename = source_path.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+    ext = _queue_file_extension(filename)
+    if ext not in (_ALLOWED_BAMBU_EXT | _ALLOWED_MOONRAKER_EXT):
+        raise HTTPException(status_code=422, detail="Unsupported file type")
+
+    if source_id == "library":
+        _safe_library_path(source_path).unlink()
+    else:
+        bambu = _find_bambu(source_id)
+        if bambu:
+            from .printers.bambu_ftp import delete_bambu_file
+            await asyncio.to_thread(delete_bambu_file, bambu._ip, bambu._access_code, source_path)
+        else:
+            mr_url = _find_moonraker_url(source_id)
+            if not mr_url:
+                raise HTTPException(status_code=404, detail="Source not found")
+            await _delete_moonraker_file(mr_url, source_path)
+    return {"ok": True, "deleted": source_path}
 
 
 @app.post("/api/files/bambu/{printer_id}/clear")

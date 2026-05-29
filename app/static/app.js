@@ -2645,9 +2645,13 @@ function _fileCompatiblePrinters(file) {
 
 function _fileDeskTargetHtml(target) {
   const files = (target.files || []).filter(f => f.kind !== 'dir' && _fileCompatiblePrinters(f).length);
-  const queueButton = f => {
-    if (f.kind === 'dir' || !_fileCompatiblePrinters(f).length) return '';
-    return `<button class="filedesk-action-btn" data-file-action="queue" data-source-id="${esc(target.id)}" data-path="${esc(f.path || f.name)}">Queue</button>`;
+  const rowActions = f => {
+    const path = esc(f.path || f.name);
+    return `<span class="filedesk-row-actions">
+      <button class="filedesk-action-btn" data-file-action="queue" data-source-id="${esc(target.id)}" data-path="${path}">Queue</button>
+      ${target.id === 'library' ? '' : `<button class="filedesk-action-btn filedesk-copy-btn" data-file-action="copy-library" data-source-id="${esc(target.id)}" data-path="${path}">Copy</button>`}
+      <button class="filedesk-action-btn filedesk-delete-btn" data-file-action="delete-file" data-source-id="${esc(target.id)}" data-path="${path}">Delete</button>
+    </span>`;
   };
   const rows = files.length ? files.map(f => `
     <tr>
@@ -2657,7 +2661,7 @@ function _fileDeskTargetHtml(target) {
           <strong class="filedesk-name">${esc(f.name || f.path || 'File')}</strong>
           <span class="filedesk-inline-path">${esc(f.path || '')}</span>
         </span>
-        ${queueButton(f)}
+        ${rowActions(f)}
       </td>
       <td>${_fmtBytes(f.size)}</td>
       <td>${esc(_fileModifiedLabel(f.modified))}</td>
@@ -2745,6 +2749,16 @@ function _attachFileDeskEvents(el) {
       if (target?.kind === 'bambu') _openBambuSdClearDialog(target);
     });
   });
+  el.querySelectorAll('[data-file-action="copy-library"]').forEach(btn => {
+    btn.addEventListener('click', () => _copyFileToLibrary(btn));
+  });
+  el.querySelectorAll('[data-file-action="delete-file"]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const target = _fileDeskTargets.find(t => t.id === btn.dataset.sourceId);
+      const file = (target?.files || []).find(f => (f.path || f.name) === btn.dataset.path);
+      if (target && file) _openFileDeleteDialog({ target, file, path: btn.dataset.path });
+    });
+  });
 }
 
 function _openFileQueueDialog({ sourceId, path, file, printers }) {
@@ -2805,6 +2819,95 @@ function _openFileQueueDialog({ sourceId, path, file, printers }) {
         overlay.querySelectorAll('.filedesk-printer-choice').forEach(b => { b.disabled = false; });
       });
   });
+}
+
+async function _copyFileToLibrary(btn) {
+  const old = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Copying';
+  try {
+    const r = await fetch('/api/files/library/copy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source_id: btn.dataset.sourceId, path: btn.dataset.path }),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.detail || 'Unable to copy file');
+    showToast('Copied to Pi Library', data.name || '', 'success');
+    _fileDeskLastHtml = '';
+    renderFileDeskView();
+  } catch (err) {
+    showToast('Copy failed', err.message || '', 'error');
+    btn.disabled = false;
+    btn.textContent = old;
+  }
+}
+
+function _openFileDeleteDialog({ target, file, path }) {
+  document.querySelector('.filedesk-delete-dialog')?.remove();
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay filedesk-delete-dialog';
+  overlay.innerHTML = `
+    <div class="modal-box filedesk-queue-box" role="dialog" aria-modal="true" aria-label="Delete file">
+      <div class="filedesk-queue-head">
+        <div>
+          <div class="mission-eyebrow">Delete File</div>
+          <h3>${esc(file.name || path || 'File')}</h3>
+          <span>${esc(target.label || target.id)} · ${esc(path || '')}</span>
+        </div>
+        <button class="filedesk-dialog-close" data-dialog-close aria-label="Close">x</button>
+      </div>
+      <label class="filedesk-confirm-label">
+        Type DELETE to confirm
+        <input class="filedesk-confirm-input" autocomplete="off" spellcheck="false">
+      </label>
+      <div class="filedesk-dialog-error" hidden></div>
+      <div class="modal-actions">
+        <button class="modal-btn" data-dialog-close>Cancel</button>
+        <button class="modal-btn modal-btn-danger" data-delete-confirm>Delete file</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  const input = overlay.querySelector('.filedesk-confirm-input');
+  const errEl = overlay.querySelector('.filedesk-dialog-error');
+  const confirmBtn = overlay.querySelector('[data-delete-confirm]');
+  const close = () => overlay.remove();
+  const run = async () => {
+    const confirm = input.value.trim();
+    if (confirm.toUpperCase() !== 'DELETE') {
+      errEl.textContent = 'Type DELETE to unlock this action.';
+      errEl.hidden = false;
+      return;
+    }
+    confirmBtn.disabled = true;
+    confirmBtn.textContent = 'Deleting...';
+    try {
+      const r = await fetch('/api/files', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source_id: target.id, path, confirm }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.detail || 'Unable to delete file');
+      showToast('File deleted', file.name || path || '', 'success');
+      _fileDeskLastHtml = '';
+      close();
+      renderFileDeskView();
+    } catch (err) {
+      errEl.textContent = err.message || 'Unable to delete file';
+      errEl.hidden = false;
+      confirmBtn.disabled = false;
+      confirmBtn.textContent = 'Delete file';
+    }
+  };
+  overlay.addEventListener('click', e => {
+    if (e.target === overlay || e.target.closest('[data-dialog-close]')) close();
+    if (e.target.closest('[data-delete-confirm]')) run();
+  });
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') run();
+  });
+  setTimeout(() => input.focus(), 0);
 }
 
 function _openBambuSdClearDialog(target) {

@@ -236,3 +236,25 @@ def clear_bambu_print_files(ip: str, access_code: str) -> dict:
         except Exception:
             pass
     return {"deleted": deleted, "skipped": skipped}
+
+
+def delete_bambu_file(ip: str, access_code: str, path: str) -> None:
+    """Delete one printable file from a Bambu SD card."""
+    clean_path = path.strip().lstrip("/")
+    if not clean_path:
+        raise FileNotFoundError("Bambu file path required")
+    name = clean_path.rsplit("/", 1)[-1].lower()
+    if not (name.endswith(".3mf") or name.endswith(".gcode.3mf")):
+        raise ValueError("Only printable Bambu .3mf files can be deleted")
+    ftp = _ImplicitFTP_TLS()
+    try:
+        ftp.connect(ip, 990, timeout=20)
+        ftp.login("bblp", access_code)
+        ftp.prot_p()
+        ftp.set_pasv(True)
+        ftp.delete(f"/{clean_path}")
+    finally:
+        try:
+            ftp.quit()
+        except Exception:
+            pass

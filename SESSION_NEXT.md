@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 29 May 2026 (Session 28.52 File Desk Bambu SD cleanout)_
+_Last updated 29 May 2026 (Session 28.53 File Desk copy and delete actions)_
 
 ## Current state
 
@@ -1152,6 +1152,14 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - The action requires typed `CLEAR`, refuses to run while the printer is printing/paused, and deletes printable `.3mf` jobs from the SD root while leaving utility folders alone.
 - UI exposes `Clear SD prints` only on Bambu File Desk targets, with an in-app confirmation dialog and toast result.
 - Static cache-bust bumped to `style.css?v=103` and `app.js?v=120`.
+
+### File Desk copy and delete actions
+- Added `Copy` row action for pulling Bambu SD or Voron Moonraker files into the Pi Library.
+- Backend endpoint: `POST /api/files/library/copy`; duplicate filenames are kept by adding a numeric suffix.
+- Added guarded `Delete` row action for Pi Library, Bambu SD, and Moonraker files.
+- Backend endpoint: `DELETE /api/files`; requires typed `DELETE` and only permits supported printable file types.
+- File Desk rows now show `Queue`, `Copy` (when not already in library), and `Delete` grouped beside the filename.
+- Static cache-bust bumped to `style.css?v=104` and `app.js?v=121`.
 
 ### Closing fixes (shipped same session)
 - **Bambu filament metadata**: `get_preview()` now called proactively on first poll of any new print (same trigger as AMS snapshot). One-shot FTP call per job; cached on `subtask_name`. Ensures `filament_weight_g` and `material` are always populated for spool deduction, even when nobody views the detail page.
