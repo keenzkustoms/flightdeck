@@ -1,6 +1,7 @@
 // ── Settings cache & display helpers ──────────────────────────────────────
 
 let _serverSettings = {};
+let _moistureWatchMemory = {};
 
 function _toDisplayTemp(celsius) {
   return _serverSettings.temp_unit === 'F'
@@ -3091,7 +3092,7 @@ function _missionActionInbox(jobs, printers, spools, maint) {
   const add = (level, title, detail, href) => items.push({ level, title, detail, href });
 
   _moistureWatch(_statsRhReadings(printers))
-    .filter(item => item.level !== 'ok')
+    .filter(item => item.level !== 'ok' && item.persistent)
     .forEach(item => {
       add(item.level === 'bad' ? 'bad' : 'warn', item.title, item.detail, '#/stats?focus=rh');
     });
@@ -3847,6 +3848,8 @@ function _statsRhReadings(printers) {
       if (unit.humidity == null) return;
       const rh = Number(unit.humidity);
       rows.push({
+        id: `${p.id}:${unit.unit ?? unit.label ?? rows.length}`,
+        printerId: p.id,
         printer: _dashboardPrinterName(p),
         custom: p.custom_name || '',
         href: `#/printer/${p.id}`,
@@ -3866,12 +3869,59 @@ function _statsRhClass(rh) {
   return 'ok';
 }
 
+function _moistureWatchState(readings) {
+  const now = Date.now();
+  const key = 'fd_moisture_watch_state_v1';
+  let state = _moistureWatchMemory;
+  try {
+    if (typeof localStorage !== 'undefined') {
+      state = JSON.parse(localStorage.getItem(key) || '{}') || state;
+    }
+  } catch {}
+  const live = new Set((readings || []).map(r => r.id));
+  Object.keys(state).forEach(id => { if (!live.has(id)) delete state[id]; });
+  (readings || []).forEach(r => {
+    const level = _statsRhClass(r.rh);
+    if (level === 'ok') {
+      delete state[r.id];
+      return;
+    }
+    const prev = state[r.id];
+    state[r.id] = prev && prev.level === level
+      ? { ...prev, lastSeen: now, rh: r.rh }
+      : { level, since: now, lastSeen: now, rh: r.rh };
+  });
+  _moistureWatchMemory = state;
+  try {
+    if (typeof localStorage !== 'undefined') localStorage.setItem(key, JSON.stringify(state));
+  } catch {}
+  return { state, now };
+}
+
+function _durationLabel(ms) {
+  const mins = Math.max(0, Math.floor(ms / 60000));
+  if (mins < 1) return '<1m';
+  if (mins < 60) return `${mins}m`;
+  const hours = Math.floor(mins / 60);
+  const rem = mins % 60;
+  return rem ? `${hours}h ${rem}m` : `${hours}h`;
+}
+
 function _moistureWatch(readings) {
+  const { state, now } = _moistureWatchState(readings);
   return (readings || []).map(r => {
     const cls = _statsRhClass(r.rh);
-    const title = cls === 'bad' ? 'Drying suggested' : cls === 'warn' ? 'Moisture watch' : 'Stable';
-    const detail = `${r.label} · ${r.printer} · ${Math.round(r.rh)}% RH${r.drying ? ' · drying' : ''}`;
-    return { ...r, level: cls, title, detail };
+    const tracked = state[r.id];
+    const ageMs = tracked ? now - Number(tracked.since || now) : 0;
+    const persistent = cls === 'bad' ? ageMs >= 5 * 60000 : cls === 'warn' ? ageMs >= 15 * 60000 : false;
+    const age = tracked ? _durationLabel(ageMs) : '';
+    const title = cls === 'bad'
+      ? persistent ? 'Drying suggested' : 'Drying threshold'
+      : cls === 'warn'
+        ? persistent ? 'Moisture watch' : 'Moisture rising'
+        : 'Stable';
+    const detail = `${r.label} · ${r.printer} · ${Math.round(r.rh)}% RH${age ? ` · ${age}` : ''}${r.drying ? ' · drying' : ''}`;
+    return { ...r, level: cls, title, detail, persistent, age };
   });
 }
 
@@ -3902,6 +3952,7 @@ function _statsMoistureWatchPanel(readings) {
       <div>
         <strong>${esc(w.title)}</strong>
         <span>${esc(w.detail)}</span>
+        ${w.level !== 'ok' && !w.persistent ? '<em>Tracking before Mission Control alert</em>' : ''}
       </div>
       <b>${w.level === 'bad' ? 'Dry' : w.level === 'warn' ? 'Watch' : 'Stable'}</b>
     </a>`).join('');

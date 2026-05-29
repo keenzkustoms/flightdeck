@@ -1085,6 +1085,12 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Mission Control Action Inbox now surfaces amber/red Moisture Watch items as operator actions linking to `#/stats?focus=rh`.
 - Static cache-bust bumped to `style.css?v=96` and `app.js?v=110`.
 
+### Moisture Watch persistence
+- Moisture Watch now keeps a lightweight browser-side timer per AMS bay so alerts include how long the RH condition has persisted; it uses local storage with an in-memory fallback for embedded browsers.
+- Telemetry still shows current watch/dry conditions immediately, but Mission Control only raises operator actions after persistence thresholds: watch for 15m, dry for 5m.
+- Non-persistent RH rows show "Tracking before Mission Control alert" to make the quiet period visible.
+- Static cache-bust bumped to `style.css?v=97` and `app.js?v=111`.
+
 ### Closing fixes (shipped same session)
 - **Bambu filament metadata**: `get_preview()` now called proactively on first poll of any new print (same trigger as AMS snapshot). One-shot FTP call per job; cached on `subtask_name`. Ensures `filament_weight_g` and `material` are always populated for spool deduction, even when nobody views the detail page.
 - **Spool snapshot overwrite on restart**: `write_slot_snapshot` now uses `WHERE ams_slot_snapshot IS NULL`. Post-restart the snapshot condition re-fires (in-memory state resets), but the original DB row is preserved. Spool deduction uses correct print-start slot assignments regardless of restarts.

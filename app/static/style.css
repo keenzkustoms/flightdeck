@@ -1314,6 +1314,14 @@ header {
   font-size: 0.68rem;
 }
 
+.stats-moisture-row em {
+  display: block;
+  margin-top: 0.18rem;
+  color: #7aa2d8;
+  font-size: 0.64rem;
+  font-style: normal;
+}
+
 .stats-moisture-row b {
   flex-shrink: 0;
   border-radius: 999px;
