@@ -3086,6 +3086,73 @@ function _missionDispatchIntel(jobs, printers, spools, maint) {
   }).join('');
 }
 
+function _missionActionInbox(jobs, printers, spools, maint) {
+  const items = [];
+  const add = (level, title, detail, href) => items.push({ level, title, detail, href });
+
+  printers.forEach(p => {
+    const name = _dashboardPrinterName(p);
+    if (p.state === 'estop' || p.state === 'error') {
+      add('bad', `${name} fault`, p.error || 'Printer is in a fault state', `#/printer/${p.id}`);
+    } else if (p.state === 'offline') {
+      add('bad', `${name} offline`, fmtLastSeen(p.last_seen), `#/printer/${p.id}`);
+    } else if (p.state === 'paused') {
+      add('warn', `${name} paused`, 'Resolve or cancel the active print', `#/printer/${p.id}`);
+    }
+
+    const dueMaint = (maint[p.id] || []).filter(i => !i.archived_at && (i.status === 'due' || i.due));
+    if (dueMaint.length) {
+      const label = dueMaint.slice(0, 2).map(i => i.name || i.title || 'maintenance').join(', ');
+      add('warn', `${name} maintenance`, `${label}${dueMaint.length > 2 ? ` +${dueMaint.length - 2}` : ''}`, `#/printer/${p.id}/maintenance`);
+    }
+  });
+
+  _missionDedupPendingJobs(jobs).forEach(job => {
+    const name = String(job.filename || '').replace(/.*[\\/]/, '');
+    const p = printers.find(x => x.id === job.printer_id);
+    const printerName = p ? _dashboardPrinterName(p) : job.printer_id;
+    if (job.status === 'failed') {
+      add('bad', `Queue failed`, `${printerName} · ${name}`, '#/queue');
+      return;
+    }
+    if (job.status !== 'pending' || !job.preflight) return;
+
+    const blockers = (job.preflight.issues || []).filter(i => i.level === 'block' || i.level === 'wait');
+    const warnings = (job.preflight.issues || []).filter(i => i.level === 'warn');
+    if (blockers.length) {
+      add('bad', `Blocked queue`, `${printerName} · ${blockers[0].message}`, '#/queue');
+    } else if (warnings.length) {
+      add('warn', `Queue caution`, `${printerName} · ${warnings[0].message}`, '#/queue');
+    }
+  });
+
+  const rank = { bad: 0, warn: 1, ok: 2 };
+  const unique = [];
+  const seen = new Set();
+  items
+    .sort((a, b) => rank[a.level] - rank[b.level] || a.title.localeCompare(b.title))
+    .forEach(item => {
+      const key = `${item.level}:${item.title}:${item.detail}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        unique.push(item);
+      }
+    });
+
+  if (!unique.length) {
+    return `<div class="mission-action-empty">
+      <strong>Clear deck</strong>
+      <span>No current operator actions</span>
+    </div>`;
+  }
+
+  return unique.slice(0, 7).map(item => `
+    <a class="mission-action-item mission-action-${item.level}" href="${item.href}">
+      <span>${esc(item.title)}</span>
+      <strong>${esc(item.detail)}</strong>
+    </a>`).join('');
+}
+
 async function renderMissionControl() {
   const el = document.getElementById('mission-page');
   if (!el) return;
@@ -3230,6 +3297,10 @@ async function renderMissionControl() {
       <section class="mission-grid">
         <div class="mission-lanes">${lanes}</div>
         <aside class="mission-sidebar-panel">
+          <div class="mission-panel-title">Action Inbox</div>
+          <div class="mission-action-list">${_missionActionInbox(jobs, printers, spools, maint)}</div>
+          <div class="mission-panel-title">Legend</div>
+          <div class="mission-note">Action Inbox is for current operator work. Reliability history stays on dashboard cards and Failure Review.</div>
           <div class="mission-panel-title">Dispatch Ready</div>
           <div class="mission-job-list">${dispatchReady}</div>
           <div class="mission-panel-title">Blocked</div>

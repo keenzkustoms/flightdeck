@@ -422,6 +422,78 @@ body {
   gap: 0.42rem;
 }
 
+.mission-action-list {
+  display: grid;
+  gap: 0.42rem;
+}
+
+.mission-action-item {
+  display: block;
+  min-width: 0;
+  border: 1px solid rgba(122,162,216,0.22);
+  border-left-width: 3px;
+  border-radius: 0.45rem;
+  background: rgba(255,255,255,0.025);
+  color: var(--text);
+  padding: 0.58rem 0.65rem;
+  text-decoration: none;
+}
+
+.mission-action-item span,
+.mission-action-item strong,
+.mission-action-empty strong,
+.mission-action-empty span {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mission-action-item span {
+  color: var(--text);
+  font-size: 0.76rem;
+  font-weight: 900;
+}
+
+.mission-action-item strong {
+  margin-top: 0.22rem;
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 600;
+}
+
+.mission-action-bad {
+  border-color: rgba(239,68,68,0.52);
+  background: rgba(239,68,68,0.08);
+}
+
+.mission-action-warn {
+  border-color: rgba(245,158,11,0.58);
+  background: rgba(245,158,11,0.07);
+}
+
+.mission-action-bad strong { color: #fca5a5; }
+.mission-action-warn strong { color: #fcd34d; }
+
+.mission-action-empty {
+  border: 1px solid rgba(34,197,94,0.24);
+  border-radius: 0.45rem;
+  background: rgba(34,197,94,0.055);
+  padding: 0.6rem 0.65rem;
+}
+
+.mission-action-empty strong {
+  color: #86efac;
+  font-size: 0.78rem;
+}
+
+.mission-action-empty span {
+  margin-top: 0.18rem;
+  color: var(--muted);
+  font-size: 0.68rem;
+}
+
 .mission-job-row,
 .mission-intel-row {
   min-width: 0;
