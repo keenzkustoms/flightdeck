@@ -4934,7 +4934,7 @@ select.settings-input { cursor: pointer; }
   position: relative;
   z-index: 1;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(124px, 1fr));
   gap: 0.45rem;
 }
 @media (max-width: 740px) { .spool-card-grid { grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); } }
@@ -5123,7 +5123,7 @@ select.settings-input { cursor: pointer; }
 
 @media (max-width: 740px) {
   .spool-group-roll { grid-template-columns: auto auto minmax(0, 1fr); }
-  .spool-group-roll-actions { grid-column: 1 / -1; justify-content: flex-start; }
+  .spool-group-manage { grid-column: 1 / -1; width: fit-content; }
 }
 
 .spool-roll-chips {
@@ -5164,7 +5164,7 @@ select.settings-input { cursor: pointer; }
 .spool-group-roll {
   position: relative;
   display: grid;
-  grid-template-columns: auto auto minmax(0, 1fr);
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 0.1rem 0.22rem;
   min-width: 0;
@@ -5201,30 +5201,8 @@ select.settings-input { cursor: pointer; }
   padding: 0.02rem 0.14rem !important;
 }
 
-.spool-group-roll-actions {
-  grid-column: 1 / -1;
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.16rem;
-  min-width: 0;
-}
-
-.spool-group-roll-action {
-  background: none;
-  border: 1px solid currentColor;
-  border-radius: 0.22rem;
-  cursor: pointer;
-  font-size: 0.55rem;
-  font-weight: 700;
-  line-height: 1.1;
-  padding: 0.02rem 0.14rem;
-  text-decoration: none;
-  opacity: 0.9;
-  text-align: center;
-}
-
-.spool-group-roll-action:hover {
-  opacity: 1;
+.spool-group-manage {
+  white-space: nowrap;
 }
 
 .spool-group-details {
@@ -5363,6 +5341,23 @@ select.settings-input { cursor: pointer; }
   text-align: left;
   justify-content: flex-start;
   padding: 0.16rem 0.35rem !important;
+}
+
+.spool-action-modal {
+  width: min(22rem, calc(100vw - 2rem));
+}
+
+.spool-action-modal-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.35rem;
+}
+
+.spool-action-modal-grid .spool-action-btn {
+  width: 100%;
+  justify-content: center;
+  text-align: center;
+  padding: 0.35rem 0.45rem !important;
 }
 
 /* Add Spool modal */

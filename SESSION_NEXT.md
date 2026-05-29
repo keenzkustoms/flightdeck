@@ -1265,6 +1265,11 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Grouped drawer rows use the same three-slot alignment for `Label / Edit / Info`.
 - Static cache-bust bumped to `style.css?v=117` and `app.js?v=136`.
 
+### Spool card breathing room
+- Increased colour-chart card minimum width slightly so `Actions` fits cleanly.
+- Grouped drawer rows now use one compact `Manage` button per physical roll, opening a centred spool action picker.
+- Static cache-bust bumped to `style.css?v=118` and `app.js?v=137`.
+
 ### Closing fixes (shipped same session)
 - **Bambu filament metadata**: `get_preview()` now called proactively on first poll of any new print (same trigger as AMS snapshot). One-shot FTP call per job; cached on `subtask_name`. Ensures `filament_weight_g` and `material` are always populated for spool deduction, even when nobody views the detail page.
 - **Spool snapshot overwrite on restart**: `write_slot_snapshot` now uses `WHERE ams_slot_snapshot IS NULL`. Post-restart the snapshot condition re-fires (in-memory state resets), but the original DB row is preserved. Spool deduction uses correct print-start slot assignments regardless of restarts.

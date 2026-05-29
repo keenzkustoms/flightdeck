@@ -6280,6 +6280,29 @@ function _spoolCardActionsHtml(spoolId) {
   </div>`;
 }
 
+function _openSpoolActionModal(spoolId, el, refresh = _refreshSpoolsSurface) {
+  const spool = _allSpools.find(s => String(s.id) === String(spoolId));
+  const title = spool
+    ? `Spool #${spool.id} · ${[spool.color_name, spool.material, spool.subtype].filter(Boolean).join(' ')}`
+    : `Spool #${spoolId}`;
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  const actions = _SPOOL_ACTIONS.map(a => _spoolActionControl(a, spoolId, true)).join('');
+  overlay.innerHTML = `
+    <div class="modal-box spool-action-modal">
+      <div class="modal-header">
+        <span class="modal-title">${esc(title)}</span>
+        <button class="modal-close-btn">✕</button>
+      </div>
+      <div class="spool-action-modal-grid">${actions}</div>
+    </div>`;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  overlay.querySelector('.modal-close-btn')?.addEventListener('click', close);
+  overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+  _attachSpoolListEvents(el, overlay, refresh);
+}
+
 function _spoolGroupKey(s) {
   return [
     s.material || '',
@@ -6360,11 +6383,7 @@ function _spoolGroupCardHtml(group) {
       <a class="spool-group-roll-id" href="#/spool/${s.id}">#${s.id}</a>
       <span class="spool-group-roll-grams${cls}">${Math.round(s.remaining_g || 0)}g</span>
       <span class="spool-group-roll-loc" title="${esc(loc)}">${esc(loc)}</span>
-      <span class="spool-group-roll-actions">
-        <button class="spool-group-roll-action spool-action-label" data-action="label" data-id="${s.id}" title="Print label">Label</button>
-        <button class="spool-group-roll-action spool-action-edit" data-action="edit" data-id="${s.id}" title="Edit">Edit</button>
-        <a class="spool-group-roll-action spool-action-detail" href="#/spool/${s.id}" title="Details">Info</a>
-      </span>
+      <button class="spool-group-manage spool-action-btn spool-action-more" data-action="manage" data-id="${s.id}" title="Spool actions">Manage</button>
     </div>`;
   }).join('');
   return `<div class="spool-card spool-group-card" data-spool-group="${esc(_spoolGroupKey(first))}">
@@ -6730,7 +6749,9 @@ function _attachSpoolListEvents(el, listEl, refresh = _refreshSpoolsSurface) {
       e.stopPropagation();
       const { action, id } = btn.dataset;
       const costs = await fetch('/api/filament/costs').then(r => r.json()).catch(() => []);
-      if (action === 'edit') {
+      if (action === 'manage') {
+        _openSpoolActionModal(id, el, refresh);
+      } else if (action === 'edit') {
         const spool = _allSpools.find(s => s.id == id);
         if (spool) _openSpoolModal(costs, refresh, spool);
       } else if (action === 'label') {
