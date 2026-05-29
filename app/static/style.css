@@ -2587,6 +2587,10 @@ header {
   pointer-events: none;
 }
 
+.camera-hud:empty {
+  display: none;
+}
+
 .camera-hud-main {
   display: flex;
   align-items: baseline;

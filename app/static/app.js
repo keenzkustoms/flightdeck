@@ -1748,13 +1748,12 @@ function _detailLiveSpoolChips(p) {
 
 function _detailCameraHud(p) {
   const job = p.job;
+  if (!job) return '';
   const progress = job?.progress != null ? Math.round(job.progress * 100) : 0;
-  const status = job
-    ? `<strong>${esc(jobDisplayName(job))}</strong><span>${progress}% · ${esc(_liveEtaText(p))}</span>`
-    : `<strong>${esc(_liveStateLabel(p.state))}</strong><span>${esc(_dashboardIssueText(p))}</span>`;
+  const status = `<strong>${esc(jobDisplayName(job))}</strong><span>${progress}% · ${esc(_liveEtaText(p))}</span>`;
   return `<div class="camera-hud-main">${status}</div>
-    ${job ? `<div class="camera-hud-progress"><span style="width:${progress}%"></span></div>` : ''}
-    ${job ? `<div class="camera-hud-chips">${_detailLiveTempChips(p, 3)}</div>` : ''}`;
+    <div class="camera-hud-progress"><span style="width:${progress}%"></span></div>
+    <div class="camera-hud-chips">${_detailLiveTempChips(p, 3)}</div>`;
 }
 
 function _detailLiveStrip(p) {

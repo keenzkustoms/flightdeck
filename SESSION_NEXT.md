@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 29 May 2026 (Session 28.59 Live screen signal pass)_
+_Last updated 29 May 2026 (Session 28.60 Live idle HUD cleanup)_
 
 ## Current state
 
@@ -9,6 +9,22 @@ Service running at:
 - `http://flightdeck.local:8000`
 - `http://192.168.4.127:8000`
 - **`https://flightdeck.tail7de73e.ts.net`** (Tailscale Serve — HTTPS, used for PWA / notifications)
+
+---
+
+## What was built — Session 28.60 (Live idle HUD cleanup — 29 May)
+
+Small Live screen polish after real visual review.
+
+### Frontend
+- Camera HUD now hides when there is no active job, avoiding duplicated idle/status text already shown in the cockpit header.
+- Camera HUD still appears for active jobs with job name, progress, ETA, and key temperatures.
+- Static cache-bust bumped:
+  - `style.css?v=135`
+  - `app.js?v=154`
+
+### Verification
+- JavaScript syntax check: `node --check app/static/app.js`
 
 ---
 
