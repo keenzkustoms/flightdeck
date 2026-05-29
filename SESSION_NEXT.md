@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 30 May 2026 (Session 28.69 Pause/resume control polish)_
+_Last updated 30 May 2026 (Session 28.70 Live environment compact pass)_
 
 ## Current state
 
@@ -9,6 +9,22 @@ Service running at:
 - `http://flightdeck.local:8000`
 - `http://192.168.4.127:8000`
 - **`https://flightdeck.tail7de73e.ts.net`** (Tailscale Serve — HTTPS, used for PWA / notifications)
+
+---
+
+## What was built — Session 28.70 (Live environment compact pass — 30 May)
+
+The Live tab Environment panel was tightened so it no longer creates a large empty temperature column under the camera.
+
+### Frontend
+- Environment now uses one compact header row containing the title and temperature chips.
+- Loaded AMS rows now run full-width underneath the header.
+- AMS rows were changed to compact two-column instrument rows: metadata/dry control on the left, slot swatches on the right.
+- Dry buttons and AMS slot swatches were slightly reduced so the panel supports the camera-first layout.
+- Static cache-bust bumped to `style.css?v=142` and `app.js?v=163`.
+
+### Verification
+- `node --check app/static/app.js`
 
 ---
 

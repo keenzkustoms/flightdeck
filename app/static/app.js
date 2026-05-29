@@ -1854,9 +1854,8 @@ function _detailCameraHud(p) {
 function _detailLiveStrip(p) {
   const loadedHtml = _detailLiveAmsRows(p) || _detailLiveSpoolChips(p);
   return `<div class="live-environment-panel">
-    <span class="live-strip-label live-environment-title">Environment</span>
-    <div class="live-environment-section live-environment-temps">
-      <span class="live-strip-label">Temperatures</span>
+    <div class="live-environment-head">
+      <span class="live-strip-label live-environment-title">Environment</span>
       <div class="live-chip-row">${_detailLiveTempChips(p)}</div>
     </div>
     <div class="live-environment-section live-environment-loaded">
