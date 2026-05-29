@@ -1078,6 +1078,13 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Humidity Detail shows the highest RH bay first with a dry/watch/ok recommendation and the full AMS RH list underneath.
 - Static cache-bust bumped to `style.css?v=95` and `app.js?v=109`.
 
+### Moisture Watch
+- Added a current-conditions Moisture Watch classifier using AMS RH telemetry.
+- Status thresholds match RH colours: stable under 35%, watch from 35%, drying suggested from 45%.
+- Telemetry RH detail now separates Moisture Watch recommendations from raw sensor readings.
+- Mission Control Action Inbox now surfaces amber/red Moisture Watch items as operator actions linking to `#/stats?focus=rh`.
+- Static cache-bust bumped to `style.css?v=96` and `app.js?v=110`.
+
 ### Closing fixes (shipped same session)
 - **Bambu filament metadata**: `get_preview()` now called proactively on first poll of any new print (same trigger as AMS snapshot). One-shot FTP call per job; cached on `subtask_name`. Ensures `filament_weight_g` and `material` are always populated for spool deduction, even when nobody views the detail page.
 - **Spool snapshot overwrite on restart**: `write_slot_snapshot` now uses `WHERE ams_slot_snapshot IS NULL`. Post-restart the snapshot condition re-fires (in-memory state resets), but the original DB row is preserved. Spool deduction uses correct print-start slot assignments regardless of restarts.

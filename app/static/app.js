@@ -3090,6 +3090,12 @@ function _missionActionInbox(jobs, printers, spools, maint) {
   const items = [];
   const add = (level, title, detail, href) => items.push({ level, title, detail, href });
 
+  _moistureWatch(_statsRhReadings(printers))
+    .filter(item => item.level !== 'ok')
+    .forEach(item => {
+      add(item.level === 'bad' ? 'bad' : 'warn', item.title, item.detail, '#/stats?focus=rh');
+    });
+
   printers.forEach(p => {
     const name = _dashboardPrinterName(p);
     if (p.state === 'estop' || p.state === 'error') {
@@ -3860,6 +3866,15 @@ function _statsRhClass(rh) {
   return 'ok';
 }
 
+function _moistureWatch(readings) {
+  return (readings || []).map(r => {
+    const cls = _statsRhClass(r.rh);
+    const title = cls === 'bad' ? 'Drying suggested' : cls === 'warn' ? 'Moisture watch' : 'Stable';
+    const detail = `${r.label} · ${r.printer} · ${Math.round(r.rh)}% RH${r.drying ? ' · drying' : ''}`;
+    return { ...r, level: cls, title, detail };
+  });
+}
+
 function _statsRhPanel(readings) {
   if (!readings.length) return `<div class="stats-empty">No AMS humidity telemetry yet.</div>`;
   return `<div class="stats-rh-list">${readings.map(r => {
@@ -3876,6 +3891,21 @@ function _statsRhPanel(readings) {
       </div>
     </a>`;
   }).join('')}</div>`;
+}
+
+function _statsMoistureWatchPanel(readings) {
+  const watch = _moistureWatch(readings);
+  if (!watch.length) return `<div class="stats-empty">No AMS humidity telemetry yet.</div>`;
+  const active = watch.filter(w => w.level !== 'ok');
+  const rows = (active.length ? active : watch.slice(0, 3)).map(w => `
+    <a class="stats-moisture-row stats-moisture-${w.level}" href="${w.href}">
+      <div>
+        <strong>${esc(w.title)}</strong>
+        <span>${esc(w.detail)}</span>
+      </div>
+      <b>${w.level === 'bad' ? 'Dry' : w.level === 'warn' ? 'Watch' : 'Stable'}</b>
+    </a>`).join('');
+  return `<div class="stats-moisture-list">${rows}</div>`;
 }
 
 function _statsRhDetail(readings) {
@@ -3899,6 +3929,9 @@ function _statsRhDetail(readings) {
       </div>
       <p>${riskText}</p>
     </div>
+    <div class="stats-panel-head stats-panel-subhead"><span>Moisture Watch</span></div>
+    ${_statsMoistureWatchPanel(readings)}
+    <div class="stats-panel-head stats-panel-subhead"><span>All Sensors</span></div>
     ${_statsRhPanel(readings)}
   </section>`;
 }
@@ -3981,8 +4014,12 @@ async function renderStatsView() {
             <div class="stats-panel-head"><span>Inventory Mix</span><a href="#/spools">Open</a></div>
             ${_statsBarRows(spools.by_material || [], { total: spools.total_remaining_g || 0 })}
           </div>
-          <div class="stats-panel">
+          ${focus !== 'rh' ? `<div class="stats-panel">
             <div class="stats-panel-head"><span>AMS Humidity</span><a href="#/stats?focus=rh">Detail</a></div>
+            ${_statsMoistureWatchPanel(rhReadings)}
+          </div>` : ''}
+          <div class="stats-panel">
+            <div class="stats-panel-head"><span>AMS Sensors</span><a href="#/stats?focus=rh">Detail</a></div>
             ${_statsRhPanel(rhReadings)}
           </div>
           <div class="stats-panel">
