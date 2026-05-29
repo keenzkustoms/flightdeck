@@ -1746,6 +1746,56 @@ function _detailLiveSpoolChips(p) {
   }).join('');
 }
 
+function _detailLiveAmsRows(p) {
+  if (!p.ams?.length) return '';
+  const loaded = _latestSpoolsByPrinter[p.id] || [];
+  return p.ams.map(unit => {
+    const drying = !!unit.drying;
+    const preset = unit.dry_setting || {};
+    const dryTime = unit.dry_time ? formatEta(unit.dry_time * 60) : '';
+    const meta = [
+      unit.humidity != null ? `${unit.humidity}% RH` : '',
+      unit.temperature != null ? `${Math.round(unit.temperature)}°` : '',
+      preset.filament && preset.temperature > 0 ? `${preset.filament} ${preset.temperature}°` : '',
+      drying && dryTime ? `${dryTime} left` : '',
+    ].filter(Boolean).join(' · ');
+    const dryControl = unit.dry_capable
+      ? `<button class="live-ams-dry${drying ? ' live-ams-dry-active' : ''}"
+          data-ams-dry data-printer-id="${p.id}" data-ams-id="${unit.unit}" data-enabled="${drying ? 'false' : 'true'}"
+          title="${drying ? 'Stop AMS drying' : 'Start AMS drying'}">${drying ? 'Stop' : 'Dry'}</button>`
+      : '';
+    const slots = (unit.slots || []).map(slot => {
+      const flatSlot = unit.unit * 4 + slot.idx;
+      const loadedSpool = loaded.find(s => Number(s.location_slot) === flatSlot);
+      const mismatch = _slotMismatch(loadedSpool, slot);
+      const style = (!slot.empty && slot.color) ? `style="background:${slot.color}"` : '';
+      const slotLabel = _amsSlotLabel(p, flatSlot);
+      const slotText = loadedSpool
+        ? `#${loadedSpool.id}`
+        : (slot.empty ? 'Empty' : (slot.type || slotLabel));
+      const title = [
+        slotLabel,
+        loadedSpool ? [loadedSpool.color_name, loadedSpool.material, loadedSpool.brand, `${Math.round(Number(loadedSpool.remaining_g || 0))}g`].filter(Boolean).join(' · ') : '',
+        !loadedSpool && !slot.empty ? [slot.type, slot.brand].filter(Boolean).join(' · ') : '',
+        mismatch,
+      ].filter(Boolean).join(' · ');
+      return `<button class="live-ams-slot${slot.empty ? ' live-ams-slot-empty' : ''}${loadedSpool ? ' live-ams-slot-loaded' : ''}${mismatch ? ' live-ams-slot-warning' : ''}"
+        ${style} data-slot-edit data-printer-id="${p.id}" data-slot-index="${flatSlot}" data-slot-label="${esc(slotLabel)}"
+        title="${esc(title)}">
+        <span>${esc(slotText)}</span>
+      </button>`;
+    }).join('');
+    return `<div class="live-ams-row">
+      <div class="live-ams-head">
+        <strong>${esc(unit.label ?? `AMS ${unit.unit + 1}`)}</strong>
+        ${meta ? `<span>${esc(meta)}</span>` : ''}
+        ${dryControl}
+      </div>
+      <div class="live-ams-slots">${slots}</div>
+    </div>`;
+  }).join('');
+}
+
 function _detailCameraHud(p) {
   const job = p.job;
   if (!job) return '';
@@ -1757,7 +1807,7 @@ function _detailCameraHud(p) {
 }
 
 function _detailLiveStrip(p) {
-  const spoolChips = _detailLiveSpoolChips(p);
+  const loadedHtml = _detailLiveAmsRows(p) || _detailLiveSpoolChips(p);
   const tempGroup = `<div class="live-strip-group">
     <span class="live-strip-label">Temperatures</span>
     <div class="live-chip-row">${_detailLiveTempChips(p)}</div>
@@ -1765,7 +1815,7 @@ function _detailLiveStrip(p) {
   return `${tempGroup}
     <div class="live-strip-group">
       <span class="live-strip-label">Loaded</span>
-      <div class="live-chip-row">${spoolChips || '<span class="live-strip-empty">No Flightdeck spools assigned</span>'}</div>
+      <div class="live-loaded-stack">${loadedHtml || '<span class="live-strip-empty">No Flightdeck spools assigned</span>'}</div>
     </div>`;
 }
 
@@ -3168,7 +3218,6 @@ async function renderPrinterDetail(id, subtab = 'live') {
           <div class="detail-panels">
             <div class="detail-panel" id="detail-print">${_detailPrintPanel(p)}</div>
           </div>
-          <div id="detail-ams">${_detailAmsPanel(p)}</div>
           <div id="detail-mmu">${_detailMmuPanel(p)}</div>
           <div id="detail-objects"></div>
         </div>
@@ -3238,8 +3287,6 @@ async function renderPrinterDetail(id, subtab = 'live') {
     }
     const tempsEl = el.querySelector('#detail-temps');
     if (tempsEl) tempsEl.innerHTML = _detailTempsPanel(p);
-    const amsEl = el.querySelector('#detail-ams');
-    if (amsEl) amsEl.innerHTML = _detailAmsPanel(p);
     const mmuEl = el.querySelector('#detail-mmu');
     if (mmuEl) mmuEl.innerHTML = _detailMmuPanel(p);
   }

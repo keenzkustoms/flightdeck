@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 29 May 2026 (Session 28.60 Live idle HUD cleanup)_
+_Last updated 29 May 2026 (Session 28.61 Live AMS loaded rows)_
 
 ## Current state
 
@@ -9,6 +9,29 @@ Service running at:
 - `http://flightdeck.local:8000`
 - `http://192.168.4.127:8000`
 - **`https://flightdeck.tail7de73e.ts.net`** (Tailscale Serve — HTTPS, used for PWA / notifications)
+
+---
+
+## What was built — Session 28.61 (Live AMS loaded rows — 29 May)
+
+The Live tab `Loaded` cockpit block now mirrors the actual feeder layout for AMS printers.
+
+### Frontend
+- Bambu AMS printers now show loaded filament as feeder rows:
+  - `AMS 1` row with RH/temp/dry status and colour slots
+  - `AMS HT` row with RH/temp/dry status and colour slot
+- Slot swatches keep the same click-to-edit behaviour as the existing AMS panel.
+- Dry controls are available directly from the cockpit Loaded block.
+- Non-AMS printers still fall back to loaded spool chips.
+- Removed the duplicate RHS AMS card from Live so AMS state lives in one place.
+- Static cache-bust bumped:
+  - `style.css?v=136`
+  - `app.js?v=155`
+
+### Verification
+- JavaScript syntax check: `node --check app/static/app.js`
+- Whitespace check: `git diff --check`
+- Browser check on `#/printer/h2d` confirmed two live AMS rows, five slot buttons, two Dry controls, and no duplicate RHS AMS card.
 
 ---
 
