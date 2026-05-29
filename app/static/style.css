@@ -770,8 +770,9 @@ body {
     gap: 0.5rem;
   }
   .notif-panel {
-    left: 50%;
-    transform: translateX(-50%);
+    left: auto;
+    right: 1rem;
+    transform: none;
   }
   .mission-page { padding: 1rem; }
   .mission-kpis { grid-template-columns: repeat(2, 1fr); }
@@ -895,9 +896,9 @@ header {
   padding: 0 0.2rem;
 }
 .notif-panel {
-  position: absolute;
-  top: calc(100% + 0.6rem);
-  left: 0;
+  position: fixed;
+  top: 4.75rem;
+  right: 1rem;
   z-index: 1200;
   width: min(24rem, calc(100vw - 2rem));
   max-height: min(34rem, calc(100vh - 7rem));
@@ -1064,8 +1065,9 @@ header {
     min-width: 0;
   }
   .notif-panel {
-    left: 50%;
-    transform: translateX(-50%);
+    left: auto;
+    right: 1rem;
+    transform: none;
   }
 }
 

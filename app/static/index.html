@@ -8,7 +8,7 @@
   <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
   <link rel="manifest" href="/static/manifest.json">
   <meta name="theme-color" content="#0a0a0f">
-  <link rel="stylesheet" href="/static/style.css?v=124">
+  <link rel="stylesheet" href="/static/style.css?v=126">
 </head>
 <body>
   <header>
@@ -30,6 +30,13 @@
       </span>
     </a>
     <div class="header-right">
+      <div class="notif-shell">
+        <button id="notif-btn" class="notif-btn notif-text-btn" title="Alerts">
+          <span class="notif-label">Alerts</span>
+          <span id="notif-count" class="notif-count" hidden></span>
+        </button>
+        <div id="notif-panel" class="notif-panel" hidden></div>
+      </div>
       <div id="live-indicator">
         <div class="live-radar live-connecting" id="live-dot" aria-hidden="true">
           <span class="live-radar-sweep"></span>
@@ -37,13 +44,6 @@
           <span class="live-radar-blip live-radar-blip-b"></span>
         </div>
         <span id="live-text">Connecting…</span>
-      </div>
-      <div class="notif-shell">
-        <button id="notif-btn" class="notif-btn notif-text-btn" title="Alerts">
-          <span class="notif-label">Alerts</span>
-          <span id="notif-count" class="notif-count" hidden></span>
-        </button>
-        <div id="notif-panel" class="notif-panel" hidden></div>
       </div>
     </div>
   </header>
@@ -112,6 +112,6 @@
     </div>
   </div>
 
-  <script type="module" src="/static/app.js?v=142"></script>
+  <script type="module" src="/static/app.js?v=144"></script>
 </body>
 </html>
