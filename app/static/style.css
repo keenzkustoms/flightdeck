@@ -4804,6 +4804,53 @@ select.settings-input { cursor: pointer; }
   white-space: nowrap;
 }
 
+.spool-confidence-row {
+  justify-content: flex-start;
+}
+
+.spool-confidence {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
+  width: fit-content;
+  max-width: 100%;
+  border: 1px solid rgba(122,162,216,0.28);
+  border-radius: 999px;
+  padding: 0.12rem 0.4rem;
+  background: rgba(122,162,216,0.08);
+  color: #bfdbfe;
+  font-size: 0.62rem;
+  line-height: 1.1;
+}
+
+.spool-confidence b,
+.spool-confidence small {
+  display: block;
+  white-space: nowrap;
+}
+
+.spool-confidence b {
+  font-size: 0.62rem;
+}
+
+.spool-confidence small {
+  color: currentColor;
+  opacity: 0.86;
+  font-weight: 700;
+}
+
+.spool-confidence-verified {
+  border-color: rgba(34,197,94,0.4);
+  background: rgba(34,197,94,0.1);
+  color: #86efac;
+}
+
+.spool-confidence-weigh {
+  border-color: rgba(245,158,11,0.55);
+  background: rgba(245,158,11,0.12);
+  color: #fcd34d;
+}
+
 .spool-location-badge {
   font-size: 0.6rem;
   color: var(--printing);
@@ -5792,6 +5839,56 @@ select.settings-input { cursor: pointer; }
   padding: 0 1.25rem 1rem;
   color: var(--muted);
   font-size: 0.78rem;
+}
+
+.spool-detail-confidence {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  margin: 0 1.25rem 0.85rem;
+  border: 1px solid rgba(122,162,216,0.25);
+  border-radius: 0.55rem;
+  background: rgba(122,162,216,0.06);
+  padding: 0.75rem 0.85rem;
+}
+
+.spool-detail-confidence span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.spool-detail-confidence strong {
+  display: block;
+  margin-top: 0.2rem;
+  color: var(--text);
+}
+
+.spool-confidence-reasons {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.spool-confidence-reasons span {
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 999px;
+  padding: 0.18rem 0.42rem;
+  background: rgba(255,255,255,0.035);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.spool-detail-confidence-verified {
+  border-color: rgba(34,197,94,0.35);
+}
+
+.spool-detail-confidence-weigh {
+  border-color: rgba(245,158,11,0.5);
 }
 
 .spool-detail-notes {

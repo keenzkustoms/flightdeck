@@ -1361,7 +1361,9 @@ def get_spools(include_archived: bool = False) -> list:
                 FROM spools {where}
                 ORDER BY material, brand, id"""
         ).fetchall()
-    return [dict(r) for r in rows]
+        spools = [dict(r) for r in rows]
+        _attach_spool_confidence(conn, spools)
+    return spools
 
 
 def get_spool(spool_id: int) -> Optional[dict]:
@@ -1375,7 +1377,134 @@ def get_spool(spool_id: int) -> Optional[dict]:
                FROM spools WHERE id = ?""",
             (spool_id,),
         ).fetchone()
-    return dict(row) if row else None
+        if not row:
+            return None
+        spool = dict(row)
+        _attach_spool_confidence(conn, [spool])
+    return spool
+
+
+def _parse_ts(value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).replace(tzinfo=None)
+    except Exception:
+        try:
+            return datetime.strptime(str(value).split(".")[0], "%Y-%m-%d %H:%M:%S")
+        except Exception:
+            return None
+
+
+def _attach_spool_confidence(conn: sqlite3.Connection, spools: list[dict]) -> None:
+    """Add a simple trust signal to spool remaining weights."""
+    if not spools:
+        return
+    import json
+    spool_ids = {int(s["id"]) for s in spools}
+    stats = {
+        sid: {
+            "usage_count": 0,
+            "deducted_g": 0.0,
+            "reconciled_count": 0,
+            "last_usage_at": None,
+            "last_reconciled_at": None,
+            "overdrawn": False,
+        }
+        for sid in spool_ids
+    }
+    rows = conn.execute(
+        """SELECT id, ended_at, started_at, spool_usage
+           FROM prints
+           WHERE spool_usage IS NOT NULL
+           ORDER BY COALESCE(ended_at, started_at) DESC"""
+    ).fetchall()
+    for row in rows:
+        when = _parse_ts(row["ended_at"] or row["started_at"])
+        try:
+            entries = json.loads(row["spool_usage"] or "[]")
+        except Exception:
+            entries = []
+        for entry in entries:
+            sid = int(entry.get("spool_id") or 0)
+            if sid not in stats:
+                continue
+            rec = stats[sid]
+            grams = float(entry.get("actual_grams") or entry.get("grams") or 0)
+            rec["usage_count"] += 1
+            rec["deducted_g"] += max(0.0, grams)
+            if when and (rec["last_usage_at"] is None or when > rec["last_usage_at"]):
+                rec["last_usage_at"] = when
+            if entry.get("reconciled_at"):
+                rec["reconciled_count"] += 1
+                rwhen = _parse_ts(entry.get("reconciled_at"))
+                if rwhen and (rec["last_reconciled_at"] is None or rwhen > rec["last_reconciled_at"]):
+                    rec["last_reconciled_at"] = rwhen
+
+    overdraw_rows = conn.execute(
+        "SELECT detail FROM decisions WHERE event = 'spool_overdrawn' ORDER BY logged_at DESC LIMIT 200"
+    ).fetchall()
+    for row in overdraw_rows:
+        detail = row["detail"] or ""
+        for sid in spool_ids:
+            if f"Spool #{sid} " in detail or f"Spool #{sid}:" in detail:
+                stats[sid]["overdrawn"] = True
+
+    now = datetime.utcnow()
+    for spool in spools:
+        sid = int(spool["id"])
+        rec = stats[sid]
+        label_weight = float(spool.get("label_weight_g") or 0)
+        remaining = float(spool.get("remaining_g") or 0)
+        pct = (remaining * 100 / label_weight) if label_weight > 0 else 0
+        added_at = _parse_ts(spool.get("added_at"))
+        age_days = (now - added_at).days if added_at else None
+        score = 84
+        reasons = []
+        if rec["reconciled_count"]:
+            score = 95
+            reasons.append("scale reconciled")
+        elif rec["usage_count"]:
+            score -= min(28, rec["usage_count"] * 4)
+            reasons.append(f"{rec['usage_count']} print deduction{'s' if rec['usage_count'] != 1 else ''}")
+        else:
+            reasons.append("entered weight")
+        if spool.get("empty_spool_weight_g") is not None:
+            score += 4
+            reasons.append("tare set")
+        if age_days is not None and age_days > 60 and not rec["reconciled_count"]:
+            score -= 8
+            reasons.append(f"{age_days}d since added")
+        if pct < 10 and not rec["reconciled_count"]:
+            score -= 18
+            reasons.append("near empty")
+        elif pct < 20 and not rec["reconciled_count"]:
+            score -= 8
+            reasons.append("low spool")
+        if rec["overdrawn"]:
+            score -= 25
+            reasons.append("overdraw event")
+        score = max(0, min(100, int(round(score))))
+        if score >= 85:
+            level = "verified"
+            label = "Verified"
+        elif score >= 60:
+            level = "estimated"
+            label = "Estimated"
+        else:
+            level = "weigh"
+            label = "Needs weigh-in"
+        spool["confidence"] = {
+            "score": score,
+            "level": level,
+            "label": label,
+            "reasons": reasons[:3],
+            "usage_count": rec["usage_count"],
+            "deducted_g": round(rec["deducted_g"], 1),
+            "reconciled_count": rec["reconciled_count"],
+            "last_usage_at": rec["last_usage_at"].isoformat() if rec["last_usage_at"] else None,
+            "last_reconciled_at": rec["last_reconciled_at"].isoformat() if rec["last_reconciled_at"] else None,
+        }
 
 
 def get_spool_trace(spool_id: int) -> Optional[dict]:

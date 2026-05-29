@@ -2257,6 +2257,8 @@ async function renderSpoolDetail(spoolId) {
   const textColor = _spoolTextColor(bandColor);
   const progressColor = _spoolProgressColor(pct);
   const trace = data.usage || [];
+  const confidence = data.confidence || {};
+  const confidenceReasons = (confidence.reasons || []).map(r => `<span>${esc(r)}</span>`).join('');
 
   el.innerHTML = `<div class="spool-detail-page">
     <div class="spool-detail-top">
@@ -2278,6 +2280,13 @@ async function renderSpoolDetail(spoolId) {
           <span>${Math.round(data.remaining_g)}g</span>
           <small>remaining of ${Math.round(data.label_weight_g)}g</small>
         </div>
+      </div>
+      <div class="spool-detail-confidence spool-detail-confidence-${confidence.level || 'estimated'}">
+        <div>
+          <span>Weight Confidence</span>
+          <strong>${esc(confidence.label || 'Estimated')} · ${confidence.score != null ? Math.round(confidence.score) : '--'}%</strong>
+        </div>
+        <div class="spool-confidence-reasons">${confidenceReasons || '<span>No confidence notes yet</span>'}</div>
       </div>
       <div class="spool-progress-bar spool-detail-progress">
         <div class="spool-progress-fill" style="width:${pct}%;background:${progressColor}"></div>
@@ -5435,6 +5444,18 @@ function _spoolProgressColor(pct) {
   return 'var(--error)';
 }
 
+function _spoolConfidenceHtml(s, compact = false) {
+  const c = s.confidence || {};
+  const level = c.level || 'estimated';
+  const label = c.label || 'Estimated';
+  const score = c.score != null ? `${Math.round(c.score)}%` : '--';
+  const reasons = (c.reasons || []).join(' · ');
+  const title = [score, reasons].filter(Boolean).join(' · ');
+  return `<span class="spool-confidence spool-confidence-${level}" title="${esc(title)}">
+    ${compact ? '' : `<b>${esc(label)}</b>`}<small>${esc(score)}</small>
+  </span>`;
+}
+
 const _SWATCH_COLORS = [
   '#1a1a1a','#ffffff','#c0c0c0','#808080',
   '#ef4444','#f97316','#eab308','#22c55e',
@@ -5484,6 +5505,7 @@ function _spoolCardHtml(s) {
         <span class="spool-material">${s.material}${s.subtype ? ' ' + s.subtype : ''}</span>
         ${locBadge}
       </div>
+      <div class="spool-card-row spool-confidence-row">${_spoolConfidenceHtml(s)}</div>
       <div class="spool-card-row spool-brand">${s.brand}</div>
       <div class="spool-remaining-row">
         <span class="spool-remaining-label">Remaining</span>
@@ -5521,6 +5543,7 @@ function _spoolTableHtml(spools) {
       <td class="spool-td spool-td-muted">${s.subtype || '—'}</td>
       <td class="spool-td">${s.brand}</td>
       <td class="spool-td spool-td-muted">${loc}</td>
+      <td class="spool-td">${_spoolConfidenceHtml(s, true)}</td>
       <td class="spool-td spool-td-num">${Math.round(s.label_weight_g)}g</td>
       <td class="spool-td spool-td-num"><span class="${pctCls}">${Math.round(s.remaining_g)}g (${pct}%)</span></td>
       <td class="spool-td spool-td-actions">
@@ -5541,7 +5564,7 @@ function _spoolTableHtml(spools) {
         ${th('id','#')}${th('added_at','Added')}
         <th class="spool-th">Colour</th>
         ${th('material','Material')}${th('subtype','Subtype')}${th('brand','Brand')}
-        ${th('location_printer_id','Location')}${th('label_weight_g','Label')}${th('remaining_g','Remaining')}
+        ${th('location_printer_id','Location')}<th class="spool-th">Trust</th>${th('label_weight_g','Label')}${th('remaining_g','Remaining')}
         <th class="spool-th">Actions</th>
       </tr></thead>
       <tbody>${rows}</tbody>
