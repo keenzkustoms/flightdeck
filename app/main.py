@@ -326,6 +326,7 @@ class FileQueueRequest(BaseModel):
 class FileDeskPathRequest(BaseModel):
     source_id: str
     path: str
+    replace: bool = False
 
 
 class FileDeskDeleteRequest(FileDeskPathRequest):
@@ -500,15 +501,7 @@ def _library_import_path(filename: str) -> Path:
     root = _PRINT_LIBRARY.resolve()
     if root != dest and root not in dest.parents:
         raise HTTPException(status_code=400, detail="Invalid destination path")
-    if not dest.exists():
-        return dest
-    stem = dest.stem
-    suffix = dest.suffix
-    for i in range(2, 1000):
-        candidate = root / f"{stem}_{i}{suffix}"
-        if not candidate.exists():
-            return candidate
-    raise HTTPException(status_code=409, detail="Too many files with this name in Pi Library")
+    return dest
 
 
 @app.get("/api/files")
@@ -607,12 +600,19 @@ async def copy_file_to_library(body: FileDeskPathRequest):
     filename, data = await _read_file_desk_source(source_id, source_path)
     _PRINT_LIBRARY.mkdir(parents=True, exist_ok=True)
     dest = _library_import_path(filename)
+    replaced = dest.exists()
+    if replaced and not body.replace:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "exists", "name": dest.name, "message": "File already exists in Pi Library"},
+        )
     dest.write_bytes(data)
     return {
         "ok": True,
         "name": dest.name,
         "path": dest.relative_to(_PRINT_LIBRARY).as_posix(),
         "size": len(data),
+        "replaced": replaced,
     }
 
 

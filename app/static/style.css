@@ -6699,6 +6699,15 @@ select.settings-input { cursor: pointer; }
   max-height: 8rem;
   overflow: auto;
 }
+.filedesk-replace-copy {
+  border: 1px solid rgba(245,158,11,0.28);
+  border-radius: 0.45rem;
+  background: rgba(245,158,11,0.07);
+  color: #fcd34d;
+  padding: 0.65rem 0.75rem;
+  margin: 0 0 0.9rem;
+  font-size: 0.82rem;
+}
 
 @media (max-width: 1100px) {
   .filedesk-grid { grid-template-columns: 1fr; }

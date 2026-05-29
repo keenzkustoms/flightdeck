@@ -2870,18 +2870,25 @@ async function _copySelectedFiles(root, btn) {
   btn.disabled = true;
   btn.textContent = 'Copying';
   let copied = 0;
+  let skipped = 0;
   try {
     for (const file of files) {
-      const r = await fetch('/api/files/library/copy', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ source_id: file.sourceId, path: file.path }),
-      });
-      const data = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(data.detail || `Unable to copy ${file.name}`);
+      let data = await _copyOneFileToLibrary(file, false);
+      if (data?.conflict) {
+        const replace = await _confirmLibraryReplace(data.name || file.name);
+        if (!replace) {
+          skipped += 1;
+          continue;
+        }
+        data = await _copyOneFileToLibrary(file, true);
+      }
       copied += 1;
     }
-    showToast('Copied to Pi Library', `${copied} file${copied === 1 ? '' : 's'} copied`, 'success');
+    showToast(
+      'Copied to Pi Library',
+      `${copied} copied${skipped ? ` · ${skipped} skipped` : ''}`,
+      'success'
+    );
     _fileDeskLastHtml = '';
     renderFileDeskView();
   } catch (err) {
@@ -2889,6 +2896,61 @@ async function _copySelectedFiles(root, btn) {
     btn.disabled = false;
     btn.textContent = old;
   }
+}
+
+async function _copyOneFileToLibrary(file, replace) {
+  const r = await fetch('/api/files/library/copy', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ source_id: file.sourceId, path: file.path, replace }),
+  });
+  const data = await r.json().catch(() => ({}));
+  if (r.status === 409) {
+    const detail = data.detail || {};
+    if (detail.code === 'exists') {
+      return { conflict: true, name: detail.name || file.name };
+    }
+  }
+  if (!r.ok) {
+    const detail = data.detail;
+    const msg = typeof detail === 'string' ? detail : detail?.message;
+    throw new Error(msg || `Unable to copy ${file.name}`);
+  }
+  return data;
+}
+
+function _confirmLibraryReplace(name) {
+  return new Promise(resolve => {
+    document.querySelector('.filedesk-replace-dialog')?.remove();
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay filedesk-replace-dialog';
+    overlay.innerHTML = `
+      <div class="modal-box filedesk-queue-box" role="dialog" aria-modal="true" aria-label="Replace existing file">
+        <div class="filedesk-queue-head">
+          <div>
+            <div class="mission-eyebrow">Pi Library</div>
+            <h3>File already exists</h3>
+            <span>${esc(name)} is already in the Pi Library.</span>
+          </div>
+          <button class="filedesk-dialog-close" data-replace-choice="skip" aria-label="Close">x</button>
+        </div>
+        <div class="filedesk-replace-copy">Replace the existing file?</div>
+        <div class="modal-actions">
+          <button class="modal-btn" data-replace-choice="skip">Skip</button>
+          <button class="modal-btn modal-btn-danger" data-replace-choice="replace">Replace</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    const finish = value => {
+      overlay.remove();
+      resolve(value);
+    };
+    overlay.addEventListener('click', e => {
+      if (e.target === overlay) finish(false);
+      const choice = e.target.closest('[data-replace-choice]')?.dataset.replaceChoice;
+      if (choice) finish(choice === 'replace');
+    });
+  });
 }
 
 function _openFileDeleteDialog({ target, files }) {
