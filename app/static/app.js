@@ -2828,7 +2828,6 @@ function _openFileQueueDialog({ sourceId, path, file, printers }) {
       .then(async r => {
         const data = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(data.detail || 'Unable to queue file');
-        _fileDeskLastHtml = '';
         close();
         location.hash = '#/queue';
       })
@@ -2889,7 +2888,6 @@ async function _copySelectedFiles(root, btn) {
       `${copied} copied${skipped ? ` · ${skipped} skipped` : ''}`,
       'success'
     );
-    _fileDeskLastHtml = '';
     renderFileDeskView();
   } catch (err) {
     showToast('Copy failed', err.message || '', 'error');
@@ -3008,7 +3006,6 @@ function _openFileDeleteDialog({ target, files }) {
         deleted += 1;
       }
       showToast('Files deleted', `${deleted} file${deleted === 1 ? '' : 's'} removed`, 'success');
-      _fileDeskLastHtml = '';
       close();
       renderFileDeskView();
     } catch (err) {
@@ -3075,7 +3072,6 @@ function _openBambuSdClearDialog(target) {
       const data = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(data.detail || 'Unable to clear SD files');
       showToast('Bambu SD cleaned', `${data.deleted?.length || 0} print files removed`, 'success');
-      _fileDeskLastHtml = '';
       close();
       renderFileDeskView();
     } catch (err) {

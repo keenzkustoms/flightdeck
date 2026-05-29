@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 29 May 2026 (Session 28.55 File Desk copy replace prompt)_
+_Last updated 29 May 2026 (Session 28.56 File Desk command refresh polish)_
 
 ## Current state
 
@@ -1174,6 +1174,12 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - `POST /api/files/library/copy` returns `409` with conflict metadata when a matching Pi Library filename already exists.
 - The bulk copy UI now asks whether to `Replace` or `Skip` each conflicting file and continues through the selected set.
 - Static cache-bust bumped to `style.css?v=106` and `app.js?v=123`.
+
+### File Desk command refresh polish
+- File Desk commands no longer clear the render cache before refreshing.
+- Copy, delete, clear-SD, and queue actions now keep the current File Desk visible while the refresh runs.
+- The DOM only swaps when the actual file-list HTML changes, removing the brief loading/blank flash after commands.
+- Static cache-bust bumped to `app.js?v=124`.
 
 ### Closing fixes (shipped same session)
 - **Bambu filament metadata**: `get_preview()` now called proactively on first poll of any new print (same trigger as AMS snapshot). One-shot FTP call per job; cached on `subtask_name`. Ensures `filament_weight_g` and `material` are always populated for spool deduction, even when nobody views the detail page.
