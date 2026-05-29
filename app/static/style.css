@@ -2806,19 +2806,32 @@ header {
 }
 
 .live-strip {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
-  gap: 0.55rem;
   margin-top: 0.55rem;
   flex-shrink: 0;
 }
 
-.live-strip-group {
+.live-environment-panel {
+  display: grid;
+  grid-template-columns: minmax(12rem, 0.72fr) minmax(20rem, 1.28fr);
+  gap: 0.65rem 0.8rem;
   min-width: 0;
-  padding: 0.52rem;
+  padding: 0.58rem;
   border: 1px solid var(--border);
   border-radius: 0.7rem;
   background: rgba(255,255,255,0.025);
+}
+
+.live-environment-title {
+  grid-column: 1 / -1;
+}
+
+.live-environment-section {
+  min-width: 0;
+}
+
+.live-environment-loaded {
+  border-left: 1px solid rgba(255,255,255,0.07);
+  padding-left: 0.8rem;
 }
 
 .live-chip-row {
@@ -3001,8 +3014,14 @@ header {
   .camera-hero { flex: none; aspect-ratio: 16 / 9; }
   .detail-right { width: auto; overflow-y: visible; }
   .live-command-header,
-  .live-strip {
+  .live-environment-panel {
     grid-template-columns: 1fr;
+  }
+  .live-environment-loaded {
+    border-left: 0;
+    border-top: 1px solid rgba(255,255,255,0.07);
+    padding-left: 0;
+    padding-top: 0.65rem;
   }
   .live-ams-row {
     grid-template-columns: 1fr;

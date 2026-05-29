@@ -1847,15 +1847,17 @@ function _detailCameraHud(p) {
 
 function _detailLiveStrip(p) {
   const loadedHtml = _detailLiveAmsRows(p) || _detailLiveSpoolChips(p);
-  const tempGroup = `<div class="live-strip-group">
-    <span class="live-strip-label">Temperatures</span>
-    <div class="live-chip-row">${_detailLiveTempChips(p)}</div>
-  </div>`;
-  return `${tempGroup}
-    <div class="live-strip-group">
+  return `<div class="live-environment-panel">
+    <span class="live-strip-label live-environment-title">Environment</span>
+    <div class="live-environment-section live-environment-temps">
+      <span class="live-strip-label">Temperatures</span>
+      <div class="live-chip-row">${_detailLiveTempChips(p)}</div>
+    </div>
+    <div class="live-environment-section live-environment-loaded">
       <span class="live-strip-label">Loaded</span>
       <div class="live-loaded-stack">${loadedHtml || '<span class="live-strip-empty">No Flightdeck spools assigned</span>'}</div>
-    </div>`;
+    </div>
+  </div>`;
 }
 
 function _detailPrintPanel(p) {

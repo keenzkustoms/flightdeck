@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 29 May 2026 (Session 28.65 Live transport controls)_
+_Last updated 30 May 2026 (Session 28.66 Live environment band)_
 
 ## Current state
 
@@ -9,6 +9,28 @@ Service running at:
 - `http://flightdeck.local:8000`
 - `http://192.168.4.127:8000`
 - **`https://flightdeck.tail7de73e.ts.net`** (Tailscale Serve — HTTPS, used for PWA / notifications)
+
+---
+
+## What was built — Session 28.66 (Live environment band — 30 May)
+
+The Live tab now uses the space under the camera as one coherent Environment band instead of separate half-empty cards.
+
+### Frontend
+- Combined `Temperatures` and `Loaded` into a single `Environment` panel.
+- Environment panel uses a compact two-column layout:
+  - temperatures on the left
+  - AMS/loaded feeder rows on the right
+- RHS remains available for Print Details and object exclusion during multi-part prints.
+- Mobile/narrow layout stacks the same sections cleanly.
+- Static cache-bust bumped:
+  - `style.css?v=141`
+  - `app.js?v=160`
+
+### Verification
+- JavaScript syntax check: `node --check app/static/app.js`
+- Whitespace check: `git diff --check`
+- Browser check on `#/printer/h2d` confirmed one Environment panel with temperature and loaded sections.
 
 ---
 
