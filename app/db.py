@@ -189,6 +189,22 @@ def init() -> None:
 
             CREATE INDEX IF NOT EXISTS idx_maintenance_printer_active
                 ON maintenance_items(printer_id, archived_at, due_at);
+
+            CREATE TABLE IF NOT EXISTS notifications (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                level       TEXT NOT NULL DEFAULT 'info',
+                title       TEXT NOT NULL,
+                message     TEXT,
+                printer_id  TEXT,
+                print_id    INTEGER,
+                link        TEXT,
+                created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+                read_at     TEXT,
+                cleared_at  TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_notifications_active
+                ON notifications(cleared_at, created_at DESC);
         """)
     # Migrate existing DB: add columns if missing
     with _conn() as conn:
@@ -966,6 +982,83 @@ def set_setting(key: str, value: str) -> None:
                SET value = excluded.value, updated_at = excluded.updated_at""",
             (key, value),
         )
+
+
+# ── notifications ─────────────────────────────────────────────────────────
+
+def add_notification(
+    level: str,
+    title: str,
+    message: str = "",
+    *,
+    printer_id: Optional[str] = None,
+    print_id: Optional[int] = None,
+    link: Optional[str] = None,
+) -> int:
+    with _conn() as conn:
+        cur = conn.execute(
+            """INSERT INTO notifications (level, title, message, printer_id, print_id, link)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (level, title, message, printer_id, print_id, link),
+        )
+    return int(cur.lastrowid)
+
+
+def list_notifications(limit: int = 50, include_cleared: bool = False) -> list[dict]:
+    where = "" if include_cleared else "WHERE cleared_at IS NULL"
+    with _conn() as conn:
+        rows = conn.execute(
+            f"""SELECT id, level, title, message, printer_id, print_id, link,
+                       created_at, read_at, cleared_at
+                FROM notifications
+                {where}
+                ORDER BY created_at DESC, id DESC
+                LIMIT ?""",
+            (limit,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def unread_notification_count() -> int:
+    with _conn() as conn:
+        row = conn.execute(
+            """SELECT COUNT(*) AS n FROM notifications
+               WHERE cleared_at IS NULL AND read_at IS NULL"""
+        ).fetchone()
+    return int(row["n"] or 0)
+
+
+def mark_notifications_read() -> int:
+    with _conn() as conn:
+        cur = conn.execute(
+            """UPDATE notifications
+               SET read_at = COALESCE(read_at, datetime('now'))
+               WHERE cleared_at IS NULL"""
+        )
+    return cur.rowcount
+
+
+def clear_notification(notification_id: int) -> bool:
+    with _conn() as conn:
+        cur = conn.execute(
+            """UPDATE notifications
+               SET cleared_at = COALESCE(cleared_at, datetime('now')),
+                   read_at = COALESCE(read_at, datetime('now'))
+               WHERE id = ? AND cleared_at IS NULL""",
+            (notification_id,),
+        )
+    return cur.rowcount > 0
+
+
+def clear_all_notifications() -> int:
+    with _conn() as conn:
+        cur = conn.execute(
+            """UPDATE notifications
+               SET cleared_at = COALESCE(cleared_at, datetime('now')),
+                   read_at = COALESCE(read_at, datetime('now'))
+               WHERE cleared_at IS NULL"""
+        )
+    return cur.rowcount
 
 
 # ── maintenance schedule ─────────────────────────────────────────────────

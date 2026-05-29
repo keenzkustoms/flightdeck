@@ -1205,6 +1205,13 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Added `Settings > Setup` as the first settings tab with required/optional readiness summary and runtime path readout.
 - Static cache-bust bumped to `style.css?v=107` and `app.js?v=126`.
 
+### Notification centre
+- Added persistent `notifications` table plus APIs to list, mark read, clear one, and clear all.
+- Print complete, error, paused, and cancelled transitions now create in-app notifications while keeping ntfy/browser notifications.
+- Header bell now opens a notification centre with unread count, recent events, click-through links, and clear actions.
+- Browser notification permission can be enabled from inside the notification centre.
+- Static cache-bust bumped to `style.css?v=108` and `app.js?v=127`.
+
 ### Closing fixes (shipped same session)
 - **Bambu filament metadata**: `get_preview()` now called proactively on first poll of any new print (same trigger as AMS snapshot). One-shot FTP call per job; cached on `subtask_name`. Ensures `filament_weight_g` and `material` are always populated for spool deduction, even when nobody views the detail page.
 - **Spool snapshot overwrite on restart**: `write_slot_snapshot` now uses `WHERE ams_slot_snapshot IS NULL`. Post-restart the snapshot condition re-fires (in-memory state resets), but the original DB row is preserved. Spool deduction uses correct print-start slot assignments regardless of restarts.

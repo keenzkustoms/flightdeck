@@ -4152,6 +4152,66 @@ function updateTitle(printers) {
 
 const _prevStates = {};
 let _notifSeeded = false;
+let _notificationsOpen = false;
+
+function _notifAge(ts) {
+  const d = parseUtcDate(ts);
+  if (!d) return '';
+  const sec = Math.max(0, Math.floor((Date.now() - d.getTime()) / 1000));
+  if (sec < 60) return `${sec}s`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m`;
+  const hrs = Math.floor(min / 60);
+  if (hrs < 24) return `${hrs}h`;
+  return `${Math.floor(hrs / 24)}d`;
+}
+
+function _notifLevelClass(level) {
+  return ['success', 'error', 'warn', 'info'].includes(level) ? level : 'info';
+}
+
+async function loadNotifications(markRead = false) {
+  const panel = document.getElementById('notif-panel');
+  const countEl = document.getElementById('notif-count');
+  try {
+    const data = await fetch('/api/notifications').then(r => r.json());
+    if (countEl) {
+      countEl.hidden = !data.unread;
+      countEl.textContent = data.unread > 9 ? '9+' : String(data.unread || '');
+    }
+    if (panel && _notificationsOpen) {
+      const items = data.items || [];
+      panel.innerHTML = `
+        <div class="notif-panel-head">
+          <div><strong>Notifications</strong><span>${items.length ? `${items.length} recent` : 'Clear skies'}</span></div>
+          <button class="notif-clear-all"${items.length ? '' : ' disabled'}>Clear all</button>
+        </div>
+        <div class="notif-list">
+          ${items.length ? items.map(n => `
+            <div class="notif-item notif-item-${_notifLevelClass(n.level)}${n.read_at ? '' : ' notif-item-unread'}" data-id="${n.id}">
+              <a class="notif-item-main" href="${esc(n.link || '#/')}">
+                <strong>${esc(n.title)}</strong>
+                <span>${esc(n.message || '')}</span>
+                <small>${esc(_notifAge(n.created_at))} ago</small>
+              </a>
+              <button class="notif-clear-one" title="Clear notification">x</button>
+            </div>
+          `).join('') : '<div class="notif-empty">No notifications.</div>'}
+        </div>
+        ${('Notification' in window && window.isSecureContext && Notification.permission !== 'granted')
+          ? '<button class="notif-browser-enable">Enable browser notifications</button>' : ''}`;
+      if (markRead && data.unread) {
+        fetch('/api/notifications/read', { method: 'POST' }).then(() => loadNotifications(false)).catch(() => {});
+      }
+    }
+  } catch {}
+}
+
+function _closeNotifications() {
+  const panel = document.getElementById('notif-panel');
+  _notificationsOpen = false;
+  if (panel) panel.hidden = true;
+}
 
 function _detectTransitions(printers) {
   if (!_notifSeeded) {
@@ -4181,6 +4241,7 @@ function _detectTransitions(printers) {
       const toastOpts = (toastType === 'success') ? { addNote: true, printerId: p.id } : {};
       showToast(toastMsg, p.custom_name, toastType, toastOpts);
     }
+    loadNotifications(false);
 
     // Browser notification: only when tab is hidden (ntfy covers the closed-browser case)
     if (Notification.permission === 'granted' && document.visibilityState === 'hidden') {
@@ -4193,27 +4254,52 @@ function _detectTransitions(printers) {
 
 function initNotifBtn() {
   const btn = document.getElementById('notif-btn');
+  const panel = document.getElementById('notif-panel');
   if (!btn) return;
-  if (!('Notification' in window) || !window.isSecureContext) {
-    btn.classList.add('notif-unavailable');
-    btn.title = `Notifications require HTTPS — open ${window.location.hostname} via https://`;
-    return;
-  }
   const update = () => {
-    const perm = Notification.permission;
+    const supported = ('Notification' in window) && window.isSecureContext;
+    const perm = supported ? Notification.permission : 'unavailable';
     btn.classList.toggle('notif-on',          perm === 'granted');
     btn.classList.toggle('notif-off',         perm === 'denied');
-    btn.classList.remove('notif-unavailable');
-    btn.title = perm === 'granted' ? 'Browser notifications on — fires when tab is in background'
+    btn.classList.toggle('notif-unavailable', perm === 'unavailable');
+    btn.title = perm === 'granted' ? 'Notifications'
               : perm === 'denied'  ? 'Notifications blocked — check browser site settings'
-              : 'Enable browser notifications';
+              : 'Notifications';
   };
   update();
-  btn.addEventListener('click', async () => {
-    if (Notification.permission === 'denied') return;
-    await Notification.requestPermission();
-    update();
+  loadNotifications(false);
+  btn.addEventListener('click', e => {
+    e.stopPropagation();
+    _notificationsOpen = !_notificationsOpen;
+    if (panel) panel.hidden = !_notificationsOpen;
+    if (_notificationsOpen) loadNotifications(true);
   });
+  panel?.addEventListener('click', async e => {
+    e.stopPropagation();
+    const enable = e.target.closest('.notif-browser-enable');
+    if (enable && 'Notification' in window && Notification.permission !== 'denied') {
+      await Notification.requestPermission();
+      update();
+      loadNotifications(false);
+      return;
+    }
+    const clearAll = e.target.closest('.notif-clear-all');
+    if (clearAll && !clearAll.disabled) {
+      await fetch('/api/notifications', { method: 'DELETE' }).catch(() => {});
+      loadNotifications(false);
+      return;
+    }
+    const clearOne = e.target.closest('.notif-clear-one');
+    if (clearOne) {
+      const item = clearOne.closest('.notif-item');
+      if (item?.dataset.id) await fetch(`/api/notifications/${item.dataset.id}`, { method: 'DELETE' }).catch(() => {});
+      loadNotifications(false);
+      return;
+    }
+    const link = e.target.closest('.notif-item-main');
+    if (link) _closeNotifications();
+  });
+  document.addEventListener('click', _closeNotifications);
 }
 
 async function _updateQueueBadge() {

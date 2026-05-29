@@ -185,6 +185,13 @@ async def _send_ntfy(title: str, message: str, tags: list[str], priority: int = 
         log.warning("ntfy send failed: %s", exc)
 
 
+def _notify(level: str, title: str, message: str = "", *, printer_id: Optional[str] = None, print_id: Optional[int] = None, link: Optional[str] = None) -> None:
+    try:
+        db.add_notification(level, title, message, printer_id=printer_id, print_id=print_id, link=link)
+    except Exception as exc:
+        log.warning("notification insert failed: %s", exc)
+
+
 def _check_transitions(data: list[dict]) -> None:
     for p in data:
         pid = p["id"]
@@ -203,6 +210,7 @@ def _check_transitions(data: list[dict]) -> None:
 
         if prev == "printing" and curr == "finished":
             msg = f"{name}" + (f" · {label}" if label else "")
+            _notify("success", "Print complete", msg, printer_id=pid, link=f"#/printer/{pid}/history")
             asyncio.create_task(_send_ntfy("Print complete", msg, ["white_check_mark"]))
             asyncio.create_task(_on_print_finished_queue(pid))
         elif curr in ("error", "estop"):
@@ -212,13 +220,16 @@ def _check_transitions(data: list[dict]) -> None:
                 asyncio.create_task(_do_failure_snapshot(pid, error_pid))
             if curr == "error" and is_print_failure:
                 msg = f"{name}" + (f" · {label}" if label else "")
+                _notify("error", "Print error", msg, printer_id=pid, print_id=error_pid, link=f"#/printer/{pid}/live")
                 asyncio.create_task(_send_ntfy("Print error", msg, ["warning"], priority=4))
                 db.queue_cancel_active(pid, "failed")
         elif prev == "printing" and curr == "paused":
             msg = f"{name}" + (f" · {label}" if label else "")
+            _notify("info", "Print paused", msg, printer_id=pid, link=f"#/printer/{pid}/live")
             asyncio.create_task(_send_ntfy("Print paused", msg, ["double_vertical_bar"]))
         elif prev == "printing" and curr == "idle":
             msg = f"{name}" + (f" · {label}" if label else "")
+            _notify("warn", "Print cancelled", msg, printer_id=pid, link=f"#/printer/{pid}/history")
             asyncio.create_task(_send_ntfy("Print cancelled", msg, ["x"]))
             db.queue_cancel_active(pid, "cancelled")
 
@@ -1219,6 +1230,32 @@ async def get_settings():
 async def put_setting(key: str, body: SettingUpdate):
     db.set_setting(key, body.value)
     return {"ok": True}
+
+
+@app.get("/api/notifications")
+async def get_notifications(limit: int = 50):
+    limit = max(1, min(limit, 100))
+    return {
+        "unread": db.unread_notification_count(),
+        "items": db.list_notifications(limit=limit),
+    }
+
+
+@app.post("/api/notifications/read")
+async def read_notifications():
+    return {"ok": True, "updated": db.mark_notifications_read()}
+
+
+@app.delete("/api/notifications/{notification_id}")
+async def delete_notification(notification_id: int):
+    if not db.clear_notification(notification_id):
+        raise HTTPException(status_code=404, detail="Notification not found")
+    return {"ok": True}
+
+
+@app.delete("/api/notifications")
+async def delete_notifications():
+    return {"ok": True, "cleared": db.clear_all_notifications()}
 
 
 def _label_base_url() -> str:
