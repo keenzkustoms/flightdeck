@@ -2649,12 +2649,13 @@ function _fileDeskTargetHtml(target) {
     const path = esc(f.path || f.name);
     return `<span class="filedesk-row-actions">
       <button class="filedesk-action-btn" data-file-action="queue" data-source-id="${esc(target.id)}" data-path="${path}">Queue</button>
-      ${target.id === 'library' ? '' : `<button class="filedesk-action-btn filedesk-copy-btn" data-file-action="copy-library" data-source-id="${esc(target.id)}" data-path="${path}">Copy</button>`}
-      <button class="filedesk-action-btn filedesk-delete-btn" data-file-action="delete-file" data-source-id="${esc(target.id)}" data-path="${path}">Delete</button>
     </span>`;
   };
   const rows = files.length ? files.map(f => `
     <tr>
+      <td class="filedesk-select-cell">
+        <input type="checkbox" class="filedesk-select" data-source-id="${esc(target.id)}" data-path="${esc(f.path || f.name)}" data-name="${esc(f.name || f.path || 'File')}">
+      </td>
       <td><span class="filedesk-kind filedesk-kind-${_fileKindClass(f.kind)}">${esc(f.kind || 'file')}</span></td>
       <td class="filedesk-name-cell" title="${esc(f.path || f.name)}">
         <span class="filedesk-name-main">
@@ -2665,13 +2666,20 @@ function _fileDeskTargetHtml(target) {
       </td>
       <td>${_fmtBytes(f.size)}</td>
       <td>${esc(_fileModifiedLabel(f.modified))}</td>
-    </tr>`).join('') : `<tr><td colspan="4" class="filedesk-empty">${target.error ? esc(target.error) : 'No files found.'}</td></tr>`;
+    </tr>`).join('') : `<tr><td colspan="5" class="filedesk-empty">${target.error ? esc(target.error) : 'No files found.'}</td></tr>`;
   const formatNote = target.actions?.format_sd
     ? `<div class="filedesk-format-row">
         <span class="filedesk-format-note">Bambu SD cleanout deletes printable jobs only and keeps utility folders.</span>
         <button class="filedesk-danger-btn" data-file-action="clear-sd" data-source-id="${esc(target.id)}">Clear SD prints</button>
       </div>`
     : '';
+  const bulkBar = files.length ? `<div class="filedesk-bulk-row" data-bulk-source="${esc(target.id)}">
+    <span class="filedesk-bulk-count">No files selected</span>
+    <div class="filedesk-bulk-actions">
+      ${target.id === 'library' ? '' : `<button class="filedesk-action-btn filedesk-copy-btn" data-file-action="copy-selected" data-source-id="${esc(target.id)}" disabled>Copy selected</button>`}
+      <button class="filedesk-action-btn filedesk-delete-btn" data-file-action="delete-selected" data-source-id="${esc(target.id)}" disabled>Delete selected</button>
+    </div>
+  </div>` : '';
   return `<section class="filedesk-target filedesk-${target.kind}">
     <div class="filedesk-target-head">
       <div>
@@ -2684,9 +2692,10 @@ function _fileDeskTargetHtml(target) {
       </div>
     </div>
     ${formatNote}
+    ${bulkBar}
     <div class="filedesk-table-wrap">
       <table class="filedesk-table">
-        <thead><tr><th>Type</th><th>Name</th><th>Size</th><th>Modified</th></tr></thead>
+        <thead><tr><th class="filedesk-select-cell"><input type="checkbox" class="filedesk-select-all" data-source-id="${esc(target.id)}" ${files.length ? '' : 'disabled'}></th><th>Type</th><th>Name</th><th>Size</th><th>Modified</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
     </div>
@@ -2749,14 +2758,25 @@ function _attachFileDeskEvents(el) {
       if (target?.kind === 'bambu') _openBambuSdClearDialog(target);
     });
   });
-  el.querySelectorAll('[data-file-action="copy-library"]').forEach(btn => {
-    btn.addEventListener('click', () => _copyFileToLibrary(btn));
+  el.querySelectorAll('.filedesk-select').forEach(inp => {
+    inp.addEventListener('change', () => _updateFileDeskBulk(el, inp.dataset.sourceId));
   });
-  el.querySelectorAll('[data-file-action="delete-file"]').forEach(btn => {
+  el.querySelectorAll('.filedesk-select-all').forEach(inp => {
+    inp.addEventListener('change', () => {
+      el.querySelectorAll(`.filedesk-select[data-source-id="${CSS.escape(inp.dataset.sourceId)}"]`).forEach(rowInp => {
+        rowInp.checked = inp.checked;
+      });
+      _updateFileDeskBulk(el, inp.dataset.sourceId);
+    });
+  });
+  el.querySelectorAll('[data-file-action="copy-selected"]').forEach(btn => {
+    btn.addEventListener('click', () => _copySelectedFiles(el, btn));
+  });
+  el.querySelectorAll('[data-file-action="delete-selected"]').forEach(btn => {
     btn.addEventListener('click', () => {
       const target = _fileDeskTargets.find(t => t.id === btn.dataset.sourceId);
-      const file = (target?.files || []).find(f => (f.path || f.name) === btn.dataset.path);
-      if (target && file) _openFileDeleteDialog({ target, file, path: btn.dataset.path });
+      const files = _selectedFileDeskRows(el, btn.dataset.sourceId);
+      if (target && files.length) _openFileDeleteDialog({ target, files });
     });
   });
 }
@@ -2821,19 +2841,47 @@ function _openFileQueueDialog({ sourceId, path, file, printers }) {
   });
 }
 
-async function _copyFileToLibrary(btn) {
+function _selectedFileDeskRows(root, sourceId) {
+  return [...root.querySelectorAll(`.filedesk-select[data-source-id="${CSS.escape(sourceId)}"]:checked`)]
+    .map(inp => ({ sourceId, path: inp.dataset.path, name: inp.dataset.name || inp.dataset.path }));
+}
+
+function _updateFileDeskBulk(root, sourceId) {
+  const selected = _selectedFileDeskRows(root, sourceId);
+  const total = root.querySelectorAll(`.filedesk-select[data-source-id="${CSS.escape(sourceId)}"]`).length;
+  const bulk = root.querySelector(`[data-bulk-source="${CSS.escape(sourceId)}"]`);
+  const all = root.querySelector(`.filedesk-select-all[data-source-id="${CSS.escape(sourceId)}"]`);
+  if (bulk) {
+    bulk.querySelector('.filedesk-bulk-count').textContent = selected.length
+      ? `${selected.length} selected`
+      : 'No files selected';
+    bulk.querySelectorAll('button').forEach(btn => { btn.disabled = selected.length === 0; });
+  }
+  if (all) {
+    all.checked = !!selected.length && selected.length === total;
+    all.indeterminate = selected.length > 0 && selected.length < total;
+  }
+}
+
+async function _copySelectedFiles(root, btn) {
+  const files = _selectedFileDeskRows(root, btn.dataset.sourceId);
+  if (!files.length) return;
   const old = btn.textContent;
   btn.disabled = true;
   btn.textContent = 'Copying';
+  let copied = 0;
   try {
-    const r = await fetch('/api/files/library/copy', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ source_id: btn.dataset.sourceId, path: btn.dataset.path }),
-    });
-    const data = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(data.detail || 'Unable to copy file');
-    showToast('Copied to Pi Library', data.name || '', 'success');
+    for (const file of files) {
+      const r = await fetch('/api/files/library/copy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source_id: file.sourceId, path: file.path }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.detail || `Unable to copy ${file.name}`);
+      copied += 1;
+    }
+    showToast('Copied to Pi Library', `${copied} file${copied === 1 ? '' : 's'} copied`, 'success');
     _fileDeskLastHtml = '';
     renderFileDeskView();
   } catch (err) {
@@ -2843,20 +2891,24 @@ async function _copyFileToLibrary(btn) {
   }
 }
 
-function _openFileDeleteDialog({ target, file, path }) {
+function _openFileDeleteDialog({ target, files }) {
   document.querySelector('.filedesk-delete-dialog')?.remove();
+  const count = files.length;
+  const list = files.slice(0, 5).map(f => `<li>${esc(f.name || f.path)}</li>`).join('');
+  const more = count > 5 ? `<li>${count - 5} more...</li>` : '';
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay filedesk-delete-dialog';
   overlay.innerHTML = `
     <div class="modal-box filedesk-queue-box" role="dialog" aria-modal="true" aria-label="Delete file">
       <div class="filedesk-queue-head">
         <div>
-          <div class="mission-eyebrow">Delete File</div>
-          <h3>${esc(file.name || path || 'File')}</h3>
-          <span>${esc(target.label || target.id)} · ${esc(path || '')}</span>
+          <div class="mission-eyebrow">Delete Files</div>
+          <h3>Delete ${count} selected file${count === 1 ? '' : 's'}?</h3>
+          <span>${esc(target.label || target.id)}</span>
         </div>
         <button class="filedesk-dialog-close" data-dialog-close aria-label="Close">x</button>
       </div>
+      <ul class="filedesk-delete-list">${list}${more}</ul>
       <label class="filedesk-confirm-label">
         Type DELETE to confirm
         <input class="filedesk-confirm-input" autocomplete="off" spellcheck="false">
@@ -2882,14 +2934,18 @@ function _openFileDeleteDialog({ target, file, path }) {
     confirmBtn.disabled = true;
     confirmBtn.textContent = 'Deleting...';
     try {
-      const r = await fetch('/api/files', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ source_id: target.id, path, confirm }),
-      });
-      const data = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(data.detail || 'Unable to delete file');
-      showToast('File deleted', file.name || path || '', 'success');
+      let deleted = 0;
+      for (const file of files) {
+        const r = await fetch('/api/files', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ source_id: target.id, path: file.path, confirm }),
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(data.detail || `Unable to delete ${file.name}`);
+        deleted += 1;
+      }
+      showToast('Files deleted', `${deleted} file${deleted === 1 ? '' : 's'} removed`, 'success');
       _fileDeskLastHtml = '';
       close();
       renderFileDeskView();

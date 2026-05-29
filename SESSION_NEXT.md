@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 29 May 2026 (Session 28.53 File Desk copy and delete actions)_
+_Last updated 29 May 2026 (Session 28.54 File Desk bulk selection)_
 
 ## Current state
 
@@ -1160,6 +1160,14 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Backend endpoint: `DELETE /api/files`; requires typed `DELETE` and only permits supported printable file types.
 - File Desk rows now show `Queue`, `Copy` (when not already in library), and `Delete` grouped beside the filename.
 - Static cache-bust bumped to `style.css?v=104` and `app.js?v=121`.
+
+### File Desk bulk selection
+- Reworked File Desk file actions around checkbox selection.
+- Each target now has select-all plus per-file checkboxes.
+- Row actions are quieter: `Queue` stays inline, while `Copy selected` and `Delete selected` live in a per-target bulk toolbar.
+- Bulk copy runs selected files sequentially into Pi Library.
+- Bulk delete requires typed `DELETE` and shows the selected filenames before removing them.
+- Static cache-bust bumped to `style.css?v=105` and `app.js?v=122`.
 
 ### Closing fixes (shipped same session)
 - **Bambu filament metadata**: `get_preview()` now called proactively on first poll of any new print (same trigger as AMS snapshot). One-shot FTP call per job; cached on `subtask_name`. Ensures `filament_weight_g` and `material` are always populated for spool deduction, even when nobody views the detail page.

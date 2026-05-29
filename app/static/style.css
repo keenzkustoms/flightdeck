@@ -6591,10 +6591,22 @@ select.settings-input { cursor: pointer; }
   white-space: nowrap;
 }
 .filedesk-danger-btn:hover { background: rgba(239,68,68,0.18); color: white; }
+.filedesk-bulk-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.55rem 0.9rem;
+  border-bottom: 1px solid rgba(122,162,216,0.12);
+}
+.filedesk-bulk-count { color: var(--muted); font-size: 0.72rem; }
+.filedesk-bulk-actions { display: flex; align-items: center; gap: 0.35rem; flex-wrap: wrap; justify-content: flex-end; }
 .filedesk-table-wrap { max-height: 24rem; overflow: auto; }
 .filedesk-table { width: 100%; border-collapse: collapse; font-size: 0.74rem; }
 .filedesk-table th { position: sticky; top: 0; z-index: 1; background: var(--card); color: var(--muted); text-align: left; font-weight: 600; padding: 0.46rem 0.55rem; border-bottom: 1px solid var(--border); white-space: nowrap; }
 .filedesk-table td { padding: 0.42rem 0.55rem; border-bottom: 1px solid rgba(122,162,216,0.12); color: var(--text); vertical-align: middle; }
+.filedesk-select-cell { width: 2rem; text-align: center; }
+.filedesk-select, .filedesk-select-all { width: 0.9rem; height: 0.9rem; accent-color: var(--accent); cursor: pointer; }
 .filedesk-name-cell { min-width: 18rem; display: flex; align-items: center; justify-content: space-between; gap: 0.65rem; }
 .filedesk-name-main { min-width: 0; display: block; }
 .filedesk-name, .filedesk-path, .filedesk-inline-path { max-width: 20rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -6675,10 +6687,24 @@ select.settings-input { cursor: pointer; }
   font: inherit;
 }
 .filedesk-confirm-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 1px rgba(59,130,246,0.22); }
+.filedesk-delete-list {
+  margin: 0 0 0.9rem;
+  padding: 0.55rem 0.75rem 0.55rem 1.4rem;
+  border: 1px solid var(--border);
+  border-radius: 0.45rem;
+  background: rgba(255,255,255,0.025);
+  color: var(--muted);
+  font-size: 0.75rem;
+  line-height: 1.45;
+  max-height: 8rem;
+  overflow: auto;
+}
 
 @media (max-width: 1100px) {
   .filedesk-grid { grid-template-columns: 1fr; }
   .filedesk-hero { align-items: flex-start; flex-direction: column; }
   .filedesk-format-row { align-items: stretch; flex-direction: column; }
   .filedesk-danger-btn { align-self: flex-start; }
+  .filedesk-bulk-row { align-items: flex-start; flex-direction: column; }
+  .filedesk-bulk-actions { justify-content: flex-start; }
 }
