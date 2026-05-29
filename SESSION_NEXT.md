@@ -1040,6 +1040,13 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 
 ## Next session priorities
 
+### Latest dashboard attention cleanup
+- Dashboard card health badges now only appear for actionable items, not ordinary failure-history review.
+- Historical failure/success-rate context is shown as a quiet `Reliability` line that links to Failure Review.
+- Mission Control no longer buckets printers into `Needs attention` or penalises dispatch score purely because of reliability history or low loaded-spool percentage.
+- Mission Control attention is now reserved for current faults, paused/offline states, overdue maintenance, and failed queue jobs.
+- Static cache-bust bumped to `style.css?v=91` and `app.js?v=104`.
+
 ### Closing fixes (shipped same session)
 - **Bambu filament metadata**: `get_preview()` now called proactively on first poll of any new print (same trigger as AMS snapshot). One-shot FTP call per job; cached on `subtask_name`. Ensures `filament_weight_g` and `material` are always populated for spool deduction, even when nobody views the detail page.
 - **Spool snapshot overwrite on restart**: `write_slot_snapshot` now uses `WHERE ams_slot_snapshot IS NULL`. Post-restart the snapshot condition re-fires (in-memory state resets), but the original DB row is preserved. Spool deduction uses correct print-start slot assignments regardless of restarts.

@@ -5015,12 +5015,38 @@ select.settings-input { cursor: pointer; }
 }
 
 .health-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
   margin-top: 0.6rem;
   padding-top: 0.55rem;
   border-top: 1px solid rgba(255,255,255,0.04);
   color: var(--muted);
   font-size: 0.72rem;
   line-height: 1.35;
+  text-decoration: none;
+}
+
+.health-line span {
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.62rem;
+  flex-shrink: 0;
+}
+
+.health-line strong {
+  color: var(--accent);
+  font-weight: 500;
+  text-align: right;
+}
+
+.health-line:hover strong {
+  color: var(--text);
+}
+
+.health-line-action strong {
+  color: #fca5a5;
 }
 
 .spool-loaded-panel {
