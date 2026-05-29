@@ -5714,16 +5714,7 @@ function _filamentCategoryHtml(summary, costs) {
   }).join('');
 
   return `
-    <div class="settings-section">
-      <div class="settings-section-title">Usage</div>
-      ${statsHtml}${matHtml}${monthHtml}
-    </div>
-    <div class="settings-section">
-      <div class="settings-section-title">Filament catalogue</div>
-      <p class="filament-empty">Each material can have multiple brands with individual costs. Est. cost uses the average $/g across brands.</p>
-      <div class="cost-card-grid">${costCards}</div>
-    </div>
-    <div class="settings-section">
+    <div class="settings-section filament-add-section">
       <div class="settings-section-title">Add material type</div>
       <div class="cost-card cost-add-form">
         <div class="cost-card-fields">
@@ -5750,6 +5741,15 @@ function _filamentCategoryHtml(summary, costs) {
         </div>
         <button class="cost-add-btn">Add</button>
       </div>
+    </div>
+    <div class="settings-section">
+      <div class="settings-section-title">Usage</div>
+      ${statsHtml}${matHtml}${monthHtml}
+    </div>
+    <div class="settings-section filament-catalogue-list-section">
+      <div class="settings-section-title">Filament catalogue</div>
+      <p class="filament-empty">Each material can have multiple brands with individual costs. Est. cost uses the average $/g across brands.</p>
+      <div class="cost-card-grid">${costCards}</div>
     </div>`;
 }
 

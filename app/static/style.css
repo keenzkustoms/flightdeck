@@ -4797,6 +4797,35 @@ select.settings-input { cursor: pointer; }
   border-style: dashed;
 }
 
+.spool-catalogue-settings .filament-add-section {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: #111119;
+  border-bottom: 1px solid var(--border);
+  margin: -0.25rem 0 0;
+  padding-top: 0.25rem;
+  padding-bottom: 0.9rem;
+}
+
+.spool-catalogue-settings .cost-add-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(12rem, 0.42fr) auto;
+  align-items: end;
+}
+
+.spool-catalogue-settings .cost-add-form .cost-card-fields {
+  min-width: 0;
+}
+
+.spool-catalogue-settings .cost-add-form > .cost-field-group {
+  min-width: 0;
+}
+
+.spool-catalogue-settings .cost-add-form .cost-add-btn {
+  align-self: end;
+}
+
 .cost-card-header {
   display: flex;
   align-items: center;
@@ -4969,6 +4998,9 @@ select.settings-input { cursor: pointer; }
 
 @media (max-width: 640px) {
   .cost-card-grid { grid-template-columns: 1fr; }
+  .spool-catalogue-settings .cost-add-form {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 640px) {

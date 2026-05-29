@@ -1299,9 +1299,10 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 ### Spools catalogue workflow
 - Add/Edit Spool modal now keeps the catalogue pane in its own scrollable column so the form/actions remain reachable.
 - Moved filament catalogue management into Spools as a `Catalogue` view alongside Cards/Table/Cabinet.
+- Moved the catalogue `Add material type` form to the top of the Catalogue view and made it sticky while the catalogue list scrolls below.
 - Removed Filament from the Settings side navigation; legacy `#/settings/filament` redirects into `#/spools?view=catalogue`.
 - Updated filament stats/catalogue links and command palette entry to point at the Spools catalogue view.
-- Static cache-bust bumped to `style.css?v=129` and `app.js?v=147`.
+- Static cache-bust bumped to `style.css?v=130` and `app.js?v=148`.
 
 ### Closing fixes (shipped same session)
 - **Bambu filament metadata**: `get_preview()` now called proactively on first poll of any new print (same trigger as AMS snapshot). One-shot FTP call per job; cached on `subtask_name`. Ensures `filament_weight_g` and `material` are always populated for spool deduction, even when nobody views the detail page.
