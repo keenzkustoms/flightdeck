@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 29 May 2026 (Session 28.48 Demote dashboard low-stock badge)_
+_Last updated 29 May 2026 (Session 28.49 Demote historical health alarm)_
 
 ## Current state
 
@@ -134,6 +134,16 @@ First pass at making reconciliation useful without turning it into operator home
 - Loaded spool percentages still show low/amber/red inside each printer card.
 - Queue preflight and Mission Control continue to be the surfaces for actual print-impacting stock risk such as `Loaded filament short` or `Low filament margin`.
 - Static cache-bust bumped to `app.js?v=102`.
+
+---
+
+## What was built — Session 28.49 (Demote historical health alarm — 29 May)
+
+- Dashboard historical health signals now show as `Reliability` instead of `Needs attention`.
+- Historical failure/cancel/success-rate reasons still link to Failure Review and still appear as a small card note.
+- The dashboard `Needs attention` panel now only includes current printer states or actionable health items such as maintenance due / failed queue jobs.
+- The former `Health` KPI is now `Review`, so it counts historical review signals without implying an active fault.
+- Static cache-bust bumped to `app.js?v=103` and `style.css?v=90`.
 
 ---
 

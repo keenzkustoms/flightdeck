@@ -485,10 +485,29 @@ function renderTemp(label, reading) {
 
 const TEMP_LABELS = { hotend: 'Hotend', hotend_l: 'Left', hotend_r: 'Right', bed: 'Bed', chamber: 'Chamber' };
 
+function _healthIsActionable(health) {
+  return (health?.reasons || []).some(r => {
+    const msg = String(r.message || '').toLowerCase();
+    return msg.includes('maintenance due') || msg.includes('failed queue');
+  });
+}
+
+function _healthBadgeClass(health) {
+  if (!health) return '';
+  if (health.status === 'healthy') return 'health-healthy';
+  return _healthIsActionable(health) ? `health-${health.status}` : 'health-review';
+}
+
+function _healthBadgeLabel(health) {
+  if (!health) return '';
+  if (health.status === 'healthy') return 'Healthy';
+  return _healthIsActionable(health) ? health.label : 'Reliability';
+}
+
 function _healthBadge(health, printerId = '') {
   if (!health) return '';
   const href = `#/failures?printer=${encodeURIComponent(printerId)}`;
-  return `<a class="health-badge health-${health.status}" href="${href}" title="${esc((health.reasons || []).map(r => r.message).join(' · ') || health.label)}">${health.label}</a>`;
+  return `<a class="health-badge ${_healthBadgeClass(health)}" href="${href}" title="${esc((health.reasons || []).map(r => r.message).join(' · ') || health.label)}">${_healthBadgeLabel(health)}</a>`;
 }
 
 function _healthLine(health) {
@@ -507,8 +526,8 @@ function _dashboardStateRank(p) {
     idle: 6
   };
   let rank = stateRank[p.state] ?? 7;
-  if (p.health?.status === 'attention') rank = Math.min(rank, 1);
-  if (p.health?.status === 'watch') rank = Math.min(rank, 2);
+  if (_healthIsActionable(p.health) && p.health?.status === 'attention') rank = Math.min(rank, 1);
+  if (_healthIsActionable(p.health) && p.health?.status === 'watch') rank = Math.min(rank, 2);
   return rank;
 }
 
@@ -536,25 +555,26 @@ function _dashboardIssueText(p) {
 function _renderDashboardOverview(printers) {
   const counts = printers.reduce((acc, p) => {
     acc[p.state] = (acc[p.state] || 0) + 1;
-    if (p.health?.status === 'attention' || p.health?.status === 'watch') acc.health += 1;
+    if (_healthIsActionable(p.health)) acc.health += 1;
+    else if (p.health?.status === 'attention' || p.health?.status === 'watch') acc.review += 1;
     return acc;
-  }, { health: 0 });
+  }, { health: 0, review: 0 });
   const printing = counts.printing || 0;
   const paused = counts.paused || 0;
   const hardStops = (counts.error || 0) + (counts.estop || 0);
   const offline = counts.offline || 0;
   const attention = printers
-    .filter(p => ['estop', 'error', 'paused', 'offline'].includes(p.state) || ['attention', 'watch'].includes(p.health?.status))
+    .filter(p => ['estop', 'error', 'paused', 'offline'].includes(p.state) || _healthIsActionable(p.health))
     .sort((a, b) => _dashboardStateRank(a) - _dashboardStateRank(b) || _dashboardPrinterName(a).localeCompare(_dashboardPrinterName(b)))
     .slice(0, 5);
 
   const attentionHtml = attention.length ? attention.map(p => {
-    const severity = p.state === 'error' || p.state === 'estop' || p.health?.status === 'attention'
+    const severity = p.state === 'error' || p.state === 'estop' || (_healthIsActionable(p.health) && p.health?.status === 'attention')
       ? 'critical'
-      : p.state === 'paused' || p.health?.status === 'watch'
+      : p.state === 'paused' || (_healthIsActionable(p.health) && p.health?.status === 'watch')
         ? 'warn'
         : 'muted';
-    const href = p.health?.reasons?.length ? `#/failures?printer=${encodeURIComponent(p.id)}` : `#/printer/${encodeURIComponent(p.id)}`;
+    const href = _healthIsActionable(p.health) ? `#/failures?printer=${encodeURIComponent(p.id)}` : `#/printer/${encodeURIComponent(p.id)}`;
     return `<a class="dash-attention-item dash-attention-${severity}" href="${href}">
       <span class="dash-attention-name">${esc(_dashboardPrinterName(p))}</span>
       <span class="dash-attention-text">${esc(_dashboardIssueText(p))}</span>
@@ -584,9 +604,9 @@ function _renderDashboardOverview(printers) {
           <span class="dash-kpi-value">${hardStops}</span>
           <span class="dash-kpi-label">Faults</span>
         </div>
-        <div class="dash-kpi ${counts.health ? 'dash-kpi-warn' : ''}">
-          <span class="dash-kpi-value">${counts.health}</span>
-          <span class="dash-kpi-label">Health</span>
+        <div class="dash-kpi ${counts.review ? 'dash-kpi-warn' : ''}">
+          <span class="dash-kpi-value">${counts.review}</span>
+          <span class="dash-kpi-label">Review</span>
         </div>
         <div class="dash-kpi ${offline ? 'dash-kpi-muted' : ''}">
           <span class="dash-kpi-value">${offline}</span>
