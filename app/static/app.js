@@ -1104,7 +1104,7 @@ function buildTabs(printers) {
   nav.innerHTML = [
     `<a class="tab" href="#/">Dashboard</a>`,
     `<a class="tab" href="#/mission">Mission Control</a>`,
-    `<a class="tab" href="#/stats">Stats</a>`,
+    `<a class="tab" href="#/stats">Telemetry</a>`,
     `<div class="tab-section">Printers</div>`,
     ...printers.map((p, i) => {
       const color = _PRINTER_ACCENT_PALETTE[i % _PRINTER_ACCENT_PALETTE.length];
@@ -3896,7 +3896,7 @@ async function renderStatsView() {
   if (!el) return;
   if (_statsRenderInFlight) return;
   _statsRenderInFlight = true;
-  if (!_statsLastHtml) el.innerHTML = `<div class="detail-placeholder" style="min-height:40vh">Loading stats...</div>`;
+  if (!_statsLastHtml) el.innerHTML = `<div class="detail-placeholder" style="min-height:40vh">Loading telemetry...</div>`;
 
   try {
     const [filament, spools, allSpools, intel, failures, jobs] = await Promise.all([
@@ -3923,7 +3923,7 @@ async function renderStatsView() {
       <div class="stats-page">
         <section class="stats-hero">
           <div>
-            <div class="mission-eyebrow">Fleet Stats</div>
+            <div class="mission-eyebrow">Fleet Telemetry</div>
             <h1>Shop telemetry</h1>
             <p>${printers.length} printers · ${active} active · ${_fmtGrams(filament.total_grams || 0)} recorded filament · ${spools.total_count || 0} live spools</p>
           </div>
@@ -3986,7 +3986,7 @@ async function renderStatsView() {
       el.innerHTML = html;
     }
   } catch (err) {
-    if (!_statsLastHtml) el.innerHTML = `<div class="detail-placeholder">Stats unavailable.</div>`;
+    if (!_statsLastHtml) el.innerHTML = `<div class="detail-placeholder">Telemetry unavailable.</div>`;
   } finally {
     _statsRenderInFlight = false;
   }
