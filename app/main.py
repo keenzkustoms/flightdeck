@@ -1446,8 +1446,10 @@ async def get_scale_status():
 async def read_scale():
     reading = _scale.read_stable()
     if not reading:
-        db.log_decision("system", "scale_unavailable", _scale.last_error or "Scale read failed")
-        raise HTTPException(status_code=503, detail=_scale.last_error or "Scale unavailable")
+        message = _scale.last_error or "Scale unavailable"
+        db.log_decision("system", "scale_unavailable", message)
+        _notify("warn", "Scale unavailable", message, link="#/settings/hardware")
+        raise HTTPException(status_code=503, detail=message)
     db.log_decision("system", "scale_read", f"{reading.grams:.1f}g")
     return asdict(reading)
 
@@ -1466,6 +1468,7 @@ async def print_spool_label(spool_id: int):
     if not ok:
         message = _label_printer.last_error or "Label printer unavailable"
         db.log_decision("system", "label_print_failed", f"Spool #{spool_id}: {message}")
+        _notify("warn", "Label print failed", f"Spool #{spool_id}: {message}", link="#/settings/hardware")
         raise HTTPException(status_code=503, detail=message)
     db.log_decision("system", "label_printed", f"Spool #{spool_id}")
     return {"ok": True}
@@ -1477,6 +1480,7 @@ async def print_test_label():
     if not ok:
         message = _label_printer.last_error or "Label printer unavailable"
         db.log_decision("system", "label_printer_unavailable", message)
+        _notify("warn", "Label printer unavailable", message, link="#/settings/hardware")
         raise HTTPException(status_code=503, detail=message)
     db.log_decision("system", "label_printed", "Test label")
     return {"ok": True}
@@ -1585,6 +1589,7 @@ async def sync_filament_catalog():
         return await asyncio.to_thread(_sync_open_filament_catalog)
     except Exception as exc:
         _app_log.exception("filament catalog sync failed")
+        _notify("warn", "Filament catalogue sync failed", str(exc), link="#/settings/filament")
         raise HTTPException(status_code=502, detail=f"Filament catalogue sync failed: {exc}")
 
 
@@ -1747,7 +1752,9 @@ async def create_spool(body: SpoolCreate):
         if ok:
             db.log_decision("system", "label_printed", f"Spool #{spool_id} auto-print")
         else:
-            db.log_decision("system", "label_print_failed", f"Spool #{spool_id}: {_label_printer.last_error}")
+            message = _label_printer.last_error or "Label printer unavailable"
+            db.log_decision("system", "label_print_failed", f"Spool #{spool_id}: {message}")
+            _notify("warn", "Label print failed", f"Spool #{spool_id}: {message}", link="#/settings/hardware")
     if body.location_printer_id and body.location_slot is not None:
         spool = db.get_spool(spool_id)
         await _sync_bambu_ams_slot(body.location_printer_id, body.location_slot, spool)
@@ -1804,8 +1811,10 @@ async def correct_spool_weight(spool_id: int, body: SpoolWeightCorrection):
     else:
         reading = _scale.read_stable()
         if not reading:
-            db.log_decision("system", "scale_unavailable", _scale.last_error or "Scale read failed")
-            raise HTTPException(status_code=503, detail=_scale.last_error or "Scale unavailable")
+            message = _scale.last_error or "Scale unavailable"
+            db.log_decision("system", "scale_unavailable", message)
+            _notify("warn", "Scale unavailable", message, link="#/settings/hardware")
+            raise HTTPException(status_code=503, detail=message)
         remaining = float(reading.grams or 0) - float(empty_g or 0)
         body.reading_g = reading.grams
 
@@ -1841,8 +1850,10 @@ async def reconcile_print_spool_usage(print_id: int, spool_id: int, body: SpoolU
     else:
         reading = _scale.read_stable()
         if not reading:
-            db.log_decision("system", "scale_unavailable", _scale.last_error or "Scale read failed")
-            raise HTTPException(status_code=503, detail=_scale.last_error or "Scale unavailable")
+            message = _scale.last_error or "Scale unavailable"
+            db.log_decision("system", "scale_unavailable", message)
+            _notify("warn", "Scale unavailable", message, link="#/settings/hardware")
+            raise HTTPException(status_code=503, detail=message)
         body.reading_g = reading.grams
         remaining = float(reading.grams or 0) - float(empty_g or 0)
 

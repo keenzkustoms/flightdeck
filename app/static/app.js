@@ -380,6 +380,55 @@ const _modal = (() => {
   };
 })();
 
+function _confirmModal(message) {
+  return new Promise(resolve => {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `
+      <div class="modal-box">
+        <div class="modal-message">${esc(message)}</div>
+        <div class="modal-actions">
+          <button class="modal-btn" data-confirm-no>Cancel</button>
+          <button class="modal-btn modal-btn-danger" data-confirm-yes>Confirm</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    const close = result => { overlay.remove(); resolve(result); };
+    overlay.addEventListener('click', e => { if (e.target === overlay) close(false); });
+    overlay.querySelector('[data-confirm-no]').addEventListener('click', () => close(false));
+    overlay.querySelector('[data-confirm-yes]').addEventListener('click', () => close(true));
+  });
+}
+
+function _inputModal({ title, message = '', value = '', placeholder = '', inputType = 'text', okLabel = 'Save' }) {
+  return new Promise(resolve => {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `
+      <div class="modal-box input-modal">
+        <div class="modal-message">${esc(title)}</div>
+        ${message ? `<div class="modal-submessage">${esc(message)}</div>` : ''}
+        <input class="modal-input" type="${esc(inputType)}" value="${esc(value ?? '')}" placeholder="${esc(placeholder)}">
+        <div class="modal-actions">
+          <button class="modal-btn" data-input-cancel>Cancel</button>
+          <button class="modal-btn modal-btn-danger" data-input-ok>${esc(okLabel)}</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    const input = overlay.querySelector('.modal-input');
+    const close = result => { overlay.remove(); resolve(result); };
+    overlay.addEventListener('click', e => { if (e.target === overlay) close(null); });
+    overlay.querySelector('[data-input-cancel]').addEventListener('click', () => close(null));
+    overlay.querySelector('[data-input-ok]').addEventListener('click', () => close(input.value));
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Enter') close(input.value);
+      if (e.key === 'Escape') close(null);
+    });
+    input.focus();
+    input.select();
+  });
+}
+
 function formatTime(seconds) {
   if (!seconds) return '—';
   const h = Math.floor(seconds / 3600);
@@ -989,7 +1038,7 @@ document.getElementById('view-printer').addEventListener('click', e => {
     _setDryButtonPending(dryBtn, 'Stopping');
     sendAmsDry({ printerId: dryBtn.dataset.printerId, amsId: dryBtn.dataset.amsId, enabled: false })
       .then(() => setTimeout(() => refreshPrinters(), 900))
-      .catch(err => alert(err.message || 'AMS drying command failed'))
+      .catch(err => showToast('AMS drying command failed', err.message || '', 'error'))
       .finally(() => setTimeout(() => _clearDryButtonPending(dryBtn), 1200));
     return;
   }
@@ -1428,7 +1477,7 @@ function _openAmsDryDialog(printerId, amsId) {
       close();
       setTimeout(() => refreshPrinters(), 900);
     } catch (err) {
-      alert(err.message || 'AMS drying command failed');
+      showToast('AMS drying command failed', err.message || '', 'error');
       btn.disabled = false;
       btn.textContent = 'Stop drying';
     }
@@ -1450,7 +1499,7 @@ function _openAmsDryDialog(printerId, amsId) {
       close();
       setTimeout(() => refreshPrinters(), 900);
     } catch (err) {
-      alert(err.message || 'AMS drying command failed');
+      showToast('AMS drying command failed', err.message || '', 'error');
       btn.disabled = false;
       btn.textContent = 'Start drying';
     }
@@ -1831,29 +1880,41 @@ function _showPrintDetail(printerId, dateStr, print) {
       e.preventDefault();
       const printId = btn.dataset.printId;
       const spoolId = btn.dataset.spoolId;
-      const value = prompt(`Actual remaining grams for spool #${spoolId}`);
+      const value = await _inputModal({
+        title: `Reconcile spool #${spoolId}`,
+        message: 'Actual remaining grams after this print',
+        inputType: 'number',
+        placeholder: 'grams',
+        okLabel: 'Continue',
+      });
       if (value === null) return;
       const remaining = parseFloat(value);
       if (isNaN(remaining) || remaining < 0) {
-        alert('Enter a valid remaining gram value.');
+        showToast('Invalid gram value', 'Enter a valid remaining gram value.', 'error');
         return;
       }
       const usage = print.spool_usage.find(u => String(u.spool_id) === String(spoolId));
       let startRemaining = null;
       if (usage && usage.remaining_start_g == null) {
-        const startValue = prompt(`Starting grams for spool #${spoolId} before this print (optional)`, usage.remaining_before_g ?? '');
+        const startValue = await _inputModal({
+          title: `Starting weight for spool #${spoolId}`,
+          message: 'Optional. Leave blank to keep the existing model value.',
+          value: usage.remaining_before_g ?? '',
+          inputType: 'number',
+          okLabel: 'Continue',
+        });
         if (startValue === null) return;
         if (startValue.trim() !== '') {
           startRemaining = parseFloat(startValue);
           if (isNaN(startRemaining) || startRemaining < 0) {
-            alert('Enter a valid starting gram value.');
+            showToast('Invalid gram value', 'Enter a valid starting gram value.', 'error');
             return;
           }
         }
       }
       let exclusive = false;
       if (print.spool_usage.length > 1) {
-        exclusive = confirm('Was this the only spool actually used for this print? OK will remove the other usage rows and restore their deducted grams.');
+        exclusive = await _confirmModal('Was this the only spool actually used? Confirm will remove other usage rows and restore their deducted grams.');
       }
       const old = btn.textContent;
       btn.disabled = true;
@@ -1880,7 +1941,7 @@ function _showPrintDetail(printerId, dateStr, print) {
         await _refreshSpoolsByPrinter();
         _showPrintDetail(printerId, dateStr, print);
       } catch (err) {
-        alert(err.message || 'Reconcile failed');
+        showToast('Reconcile failed', err.message || '', 'error');
         btn.disabled = false;
         btn.textContent = old;
       }
@@ -5480,7 +5541,7 @@ function _attachFilamentEvents(el) {
       const tr    = btn.closest('.cost-brand-row');
       const mat   = tr.dataset.material;
       const brand = tr.dataset.brand;
-      if (!confirm(`Remove ${brand || '(unbranded)'} ${mat}?`)) return;
+      if (!await _confirmModal(`Remove ${brand || '(unbranded)'} ${mat}?`)) return;
       btn.disabled = true;
       try {
         await _deleteBrand(mat, brand);
@@ -5493,7 +5554,7 @@ function _attachFilamentEvents(el) {
   el.querySelectorAll('.cost-mat-del-btn').forEach(btn => {
     btn.addEventListener('click', async () => {
       const mat = btn.dataset.material;
-      if (!confirm(`Remove all "${mat}" entries from your catalogue?`)) return;
+      if (!await _confirmModal(`Remove all "${mat}" entries from your catalogue?`)) return;
       btn.disabled = true;
       const card = btn.closest('.cost-card');
       const rows = card.querySelectorAll('.cost-brand-row');
@@ -6109,7 +6170,7 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
         if (!r.ok) throw new Error((await r.json()).detail || 'Print failed');
         btn.textContent = 'Done';
       } catch (err) {
-        alert(err.message || 'Label print failed');
+        showToast('Label print failed', err.message || '', 'error');
         btn.textContent = old;
       } finally {
         setTimeout(() => { btn.disabled = false; btn.textContent = old; }, 1400);
@@ -6119,7 +6180,13 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
     body.querySelector('[data-slot-weigh]')?.addEventListener('click', async e => {
       const id = e.currentTarget.dataset.slotWeigh;
       const spool = _allSpools.find(s => String(s.id) === String(id));
-      const emptyText = prompt('Empty spool weight in grams (leave blank for 0)', spool?.empty_spool_weight_g ?? '');
+      const emptyText = await _inputModal({
+        title: 'Empty spool weight',
+        message: 'Leave blank to use 0g tare.',
+        value: spool?.empty_spool_weight_g ?? '',
+        inputType: 'number',
+        okLabel: 'Weigh',
+      });
       if (emptyText === null) return;
       const empty = emptyText.trim() === '' ? null : parseFloat(emptyText);
       if (emptyText.trim() !== '' && (isNaN(empty) || empty < 0)) return;
@@ -6551,7 +6618,7 @@ function _attachSpoolListEvents(el, listEl, refresh = _refreshSpoolsSurface) {
           if (!r.ok) throw new Error((await r.json()).detail || 'Print failed');
           btn.textContent = 'Done';
         } catch (err) {
-          alert(err.message || 'Label print failed');
+          showToast('Label print failed', err.message || '', 'error');
           btn.textContent = old;
         } finally {
           setTimeout(() => { btn.disabled = false; btn.textContent = old; }, 1400);
@@ -6559,7 +6626,13 @@ function _attachSpoolListEvents(el, listEl, refresh = _refreshSpoolsSurface) {
       } else if (action === 'weigh') {
         const spool = _allSpools.find(s => s.id == id);
         const currentEmpty = spool?.empty_spool_weight_g ?? '';
-        const emptyText = prompt('Empty spool weight in grams (leave blank for 0)', currentEmpty);
+        const emptyText = await _inputModal({
+          title: 'Empty spool weight',
+          message: 'Leave blank to use 0g tare.',
+          value: currentEmpty,
+          inputType: 'number',
+          okLabel: 'Weigh',
+        });
         if (emptyText === null) return;
         const empty = emptyText.trim() === '' ? null : parseFloat(emptyText);
         if (emptyText.trim() !== '' && (isNaN(empty) || empty < 0)) return;
@@ -6575,7 +6648,7 @@ function _attachSpoolListEvents(el, listEl, refresh = _refreshSpoolsSurface) {
           if (!r.ok) throw new Error(_scaleFriendlyMessage((await r.json()).detail || 'Scale read failed'));
           await refresh();
         } catch (err) {
-          alert(_scaleFriendlyMessage(err.message || 'Scale read failed'));
+          showToast('Scale read failed', _scaleFriendlyMessage(err.message || 'Scale read failed'), 'error');
           btn.textContent = old;
         } finally {
           btn.disabled = false;
@@ -6584,15 +6657,15 @@ function _attachSpoolListEvents(el, listEl, refresh = _refreshSpoolsSurface) {
         const spool = _allSpools.find(s => s.id == id);
         if (spool) _openSpoolModal(costs, refresh, {...spool, id: null, location_printer_id: null, location_slot: null});
       } else if (action === 'archive') {
-        if (!confirm('Archive this spool?')) return;
+        if (!await _confirmModal('Archive this spool?')) return;
         await fetch(`/api/spools/${id}/archive`, { method: 'POST' });
         refresh();
       } else if (action === 'reset') {
-        if (!confirm('Reset remaining weight to label weight?')) return;
+        if (!await _confirmModal('Reset remaining weight to label weight?')) return;
         await fetch(`/api/spools/${id}/reset_weight`, { method: 'POST' });
         refresh();
       } else if (action === 'delete') {
-        if (!confirm('Permanently delete this spool?')) return;
+        if (!await _confirmModal('Permanently delete this spool?')) return;
         await fetch(`/api/spools/${id}`, { method: 'DELETE' });
         refresh();
       }
@@ -6991,7 +7064,7 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
       catalogueSync.textContent = `${data.imported || 0}`;
       await searchCatalogue();
     } catch (err) {
-      alert(err.message || 'Catalogue sync failed');
+      showToast('Catalogue sync failed', err.message || '', 'error');
     } finally {
       setTimeout(() => { catalogueSync.disabled = false; catalogueSync.textContent = old; }, 1300);
     }
@@ -7079,7 +7152,7 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
       remainG.dataset.touched = '1';
       weighBtn.textContent = 'Done';
     } catch (err) {
-      alert(_scaleFriendlyMessage(err.message || 'Scale read failed'));
+      showToast('Scale read failed', _scaleFriendlyMessage(err.message || 'Scale read failed'), 'error');
       weighBtn.textContent = old;
     } finally {
       setTimeout(() => { weighBtn.disabled = false; weighBtn.textContent = old; }, 1200);
