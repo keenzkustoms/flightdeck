@@ -5163,14 +5163,6 @@ select.settings-input { cursor: pointer; }
   background: rgba(239,68,68,0.12);
 }
 
-.spool-group-rolls {
-  display: grid;
-  gap: 0.16rem;
-  margin-top: 0.22rem;
-  padding-top: 0.24rem;
-  border-top: 1px solid rgba(255,255,255,0.04);
-}
-
 .spool-group-roll {
   position: relative;
   display: grid;
@@ -5212,6 +5204,47 @@ select.settings-input { cursor: pointer; }
 
 .spool-group-menu {
   margin-left: 0;
+}
+
+.spool-group-details {
+  margin-top: 0.22rem;
+  padding-top: 0.24rem;
+  border-top: 1px solid rgba(255,255,255,0.04);
+}
+
+.spool-group-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.35rem;
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+  color: var(--accent);
+  border: 1px solid rgba(122,162,216,0.34);
+  border-radius: 0.25rem;
+  padding: 0.08rem 0.24rem;
+  font-size: 0.58rem;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.spool-group-summary::-webkit-details-marker {
+  display: none;
+}
+
+.spool-group-summary span {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.spool-group-details[open] .spool-group-summary {
+  margin-bottom: 0.22rem;
+}
+
+.spool-group-rolls {
+  display: grid;
+  gap: 0.16rem;
 }
 
 .spool-card-actions {

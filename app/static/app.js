@@ -6384,7 +6384,10 @@ function _spoolGroupCardHtml(group) {
         <span class="spool-meta">${Math.round(used)}g used</span>
         ${confidenceAvg != null ? `<span class="spool-meta">${confidenceAvg}% trust</span>` : ''}
       </div>
-      <div class="spool-group-rolls">${rows}</div>
+      <details class="spool-group-details">
+        <summary class="spool-group-summary">Rolls <span>${group.length}</span></summary>
+        <div class="spool-group-rolls">${rows}</div>
+      </details>
     </div>
   </div>`;
 }
