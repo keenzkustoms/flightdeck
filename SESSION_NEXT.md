@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 29 May 2026 (Session 28.62 Live AMS row alignment)_
+_Last updated 29 May 2026 (Session 28.64 Live compact light control)_
 
 ## Current state
 
@@ -9,6 +9,35 @@ Service running at:
 - `http://flightdeck.local:8000`
 - `http://192.168.4.127:8000`
 - **`https://flightdeck.tail7de73e.ts.net`** (Tailscale Serve — HTTPS, used for PWA / notifications)
+
+---
+
+## What was built — Session 28.64 (Live compact light control — 29 May)
+
+Live screen command panel polish.
+
+### Frontend
+- Replaced the large glowing `BAMBU` light toggle with a compact bulb-style `Light` control.
+- The control still reflects on/off state visually and uses the existing click handler.
+- Static cache-bust bumped:
+  - `style.css?v=139`
+  - `app.js?v=158`
+
+---
+
+## What was built — Session 28.63 (Live feed hero tightening — 29 May)
+
+The Live tab layout was tightened so the camera feed stays the visual hero.
+
+### Frontend
+- Reduced Live page spacing around the camera.
+- Made the cockpit header more compact.
+- Slimmed signal chips, camera HUD, temperature chips, Loaded cards, and AMS rows.
+- Reduced RHS panel spacing and detail panel padding.
+- Kept AMS Dry/slot controls compact after the alignment pass.
+- Static cache-bust bumped:
+  - `style.css?v=138`
+  - `app.js?v=157`
 
 ---
 

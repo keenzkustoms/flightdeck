@@ -46,10 +46,13 @@ function _printerModelHtml(p) {
 function _bambuLightWordHtml(p) {
   const lightState = _effectiveLightState(p);
   const lit = lightState === 'on';
-  return `<button class="bambu-light-word printer-model-bambu${lit ? ' printer-model-lit' : ''}"
+  return `<button class="bambu-light-control${lit ? ' bambu-light-on' : ''}"
     type="button"
     data-light-toggle="${p.id}"
-    title="Bambu chamber light: ${esc(lightState)}">Bambu</button>`;
+    title="Bambu chamber light: ${esc(lightState)}">
+      <span class="bambu-light-bulb" aria-hidden="true"></span>
+      <span>Light</span>
+    </button>`;
 }
 
 function _refreshLightBadges(id) {
