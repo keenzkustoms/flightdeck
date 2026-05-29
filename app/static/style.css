@@ -4972,20 +4972,26 @@ select.settings-input { cursor: pointer; }
 }
 
 .badge-loaded-low {
+  display: inline-flex;
+  align-items: center;
   background: #92400e;
   color: #fef3c7;
   font-size: 0.6rem;
   padding: 0.14rem 0.4rem;
   border-radius: 0.9rem;
+  text-decoration: none;
 }
 
 .health-badge {
+  display: inline-flex;
+  align-items: center;
   border-radius: 999px;
   padding: 0.14rem 0.4rem;
   font-size: 0.58rem;
   font-weight: 700;
   text-transform: uppercase;
   white-space: nowrap;
+  text-decoration: none;
 }
 
 .health-healthy {

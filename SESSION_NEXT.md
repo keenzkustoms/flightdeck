@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 29 May 2026 (Session 28.46 Reconciled usage state)_
+_Last updated 29 May 2026 (Session 28.47 Dashboard badge drill-downs)_
 
 ## Current state
 
@@ -115,6 +115,16 @@ First pass at making reconciliation useful without turning it into operator home
 
 - History spool usage rows that already have `actual_grams` now show a quiet green `Reconciled` state instead of continuing to show the `Reconcile` button.
 - Static cache-bust bumped to `app.js?v=100` and `style.css?v=88`.
+
+---
+
+## What was built — Session 28.47 (Dashboard badge drill-downs — 29 May)
+
+- Dashboard `Needs attention` badges now link to Failure Review filtered to that printer instead of leaving the operator on a Live screen with no visible explanation.
+- Dashboard `Low filament` badges now link to Spools filtered to low loaded spools for that printer.
+- Card click handling now ignores nested links/buttons, so badge drill-downs work without triggering the card's Live navigation.
+- Failure Review and Spools pages now read simple hash query filters such as `#/failures?printer=h2d` and `#/spools?filter=low&printer=h2d`.
+- Static cache-bust bumped to `app.js?v=101` and `style.css?v=89`.
 
 ---
 

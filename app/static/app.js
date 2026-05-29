@@ -390,7 +390,8 @@ function formatTime(seconds) {
 // ── Event wiring ───────────────────────────────────────────────────────────
 
 function attachCardEvents(card) {
-  card.addEventListener('click', () => {
+  card.addEventListener('click', e => {
+    if (e.target.closest('a, button, select, input, textarea')) return;
     location.hash = `#/printer/${card.dataset.printerId}`;
   });
   card.addEventListener('keydown', e => {
@@ -484,9 +485,10 @@ function renderTemp(label, reading) {
 
 const TEMP_LABELS = { hotend: 'Hotend', hotend_l: 'Left', hotend_r: 'Right', bed: 'Bed', chamber: 'Chamber' };
 
-function _healthBadge(health) {
+function _healthBadge(health, printerId = '') {
   if (!health) return '';
-  return `<span class="health-badge health-${health.status}" title="${esc((health.reasons || []).map(r => r.message).join(' · ') || health.label)}">${health.label}</span>`;
+  const href = `#/failures?printer=${encodeURIComponent(printerId)}`;
+  return `<a class="health-badge health-${health.status}" href="${href}" title="${esc((health.reasons || []).map(r => r.message).join(' · ') || health.label)}">${health.label}</a>`;
 }
 
 function _healthLine(health) {
@@ -552,7 +554,8 @@ function _renderDashboardOverview(printers) {
       : p.state === 'paused' || p.health?.status === 'watch'
         ? 'warn'
         : 'muted';
-    return `<a class="dash-attention-item dash-attention-${severity}" href="#/printer/${encodeURIComponent(p.id)}">
+    const href = p.health?.reasons?.length ? `#/failures?printer=${encodeURIComponent(p.id)}` : `#/printer/${encodeURIComponent(p.id)}`;
+    return `<a class="dash-attention-item dash-attention-${severity}" href="${href}">
       <span class="dash-attention-name">${esc(_dashboardPrinterName(p))}</span>
       <span class="dash-attention-text">${esc(_dashboardIssueText(p))}</span>
     </a>`;
@@ -678,9 +681,9 @@ function renderCard(p) {
   const lowStockPct = _latestLowStockPct;
   const hasLowStock = loadedSpools.some(s => s.label_weight_g > 0 && (s.remaining_g / s.label_weight_g * 100) < lowStockPct);
   const lowStockBadge = hasLowStock
-    ? `<span class="badge badge-loaded-low" title="Low filament on this printer">Low filament</span>`
+    ? `<a class="badge badge-loaded-low" href="#/spools?filter=low&printer=${encodeURIComponent(p.id)}" title="Show loaded low filament for this printer">Low filament</a>`
     : '';
-  const healthBadge = _healthBadge(p.health);
+  const healthBadge = _healthBadge(p.health, p.id);
   const healthLine = _healthLine(p.health);
 
   const loadedPanel = loadedSpools.length > 0 ? `
@@ -992,13 +995,20 @@ function parseRoute() {
   if (hash === '#/cameras') return { view: 'cameras' };
   if (hash === '#/stats') return { view: 'stats' };
   if (hash === '#/queue') return { view: 'queue' };
-  if (hash === '#/failures') return { view: 'failures' };
-  if (hash === '#/spools') return { view: 'spools' };
+  if (hash === '#/failures' || hash.startsWith('#/failures?')) return { view: 'failures' };
+  if (hash === '#/spools' || hash.startsWith('#/spools?')) return { view: 'spools' };
   const settingsMatch = hash.match(/^#\/settings\/([^/]+)/);
   if (settingsMatch?.[1] === 'spools') return { view: 'spools' };
   if (settingsMatch) return { view: 'settings', category: settingsMatch[1] };
   if (hash === '#/settings') return { view: 'settings' };
   return { view: 'dashboard' };
+}
+
+function _routeParams(prefix) {
+  const hash = location.hash || '';
+  if (!hash.startsWith(prefix)) return new URLSearchParams();
+  const qs = hash.includes('?') ? hash.slice(hash.indexOf('?') + 1) : '';
+  return new URLSearchParams(qs);
 }
 
 function router() {
@@ -2338,6 +2348,15 @@ async function renderFailuresView() {
   const el = document.getElementById('failures-page');
   if (!el) return;
   el.innerHTML = `<div class="detail-placeholder" style="min-height:40vh">Loading...</div>`;
+
+  const params = _routeParams('#/failures');
+  if (params.has('printer')) _failureFilter.printer = params.get('printer') || '';
+  if (params.has('state')) _failureFilter.state = params.get('state') || '';
+  if (params.has('material')) _failureFilter.material = params.get('material') || '';
+  if (params.has('days')) {
+    const days = parseInt(params.get('days'), 10);
+    if ([30, 90, 180, 365].includes(days)) _failureDays = days;
+  }
 
   let data = { total: 0, items: [], summary: {} };
   try {
@@ -4704,7 +4723,7 @@ let _allSpools = [];
 let _spoolsViewMode = 'cards';
 let _spoolsSortKey = 'material';
 let _spoolsSortDir = 1;
-let _spoolsFilter = { search: '', status: 'active', slotFilter: 'all', material: '', brand: '' };
+let _spoolsFilter = { search: '', status: 'active', slotFilter: 'all', material: '', brand: '', printer: '' };
 let _spoolLocations = [];
 let _latestSpoolsByPrinter = {};   // printer_id → [spool, ...]
 let _latestLowStockPct = 20;
@@ -5115,6 +5134,7 @@ function _applySpoolFilters(spools) {
   return spools.filter(s => {
     if (f.status === 'active'   && s.archived_at)  return false;
     if (f.status === 'archived' && !s.archived_at) return false;
+    if (f.printer && s.location_printer_id !== f.printer) return false;
     if (f.slotFilter === 'loaded'  && !s.location_printer_id) return false;
     if (f.slotFilter === 'storage' &&  s.location_printer_id) return false;
     if (f.slotFilter === 'low') {
@@ -6188,6 +6208,12 @@ async function _renderSpoolsContent(el) {
   if (!el) return;
   el.classList.add('settings-content-spools');
   el.innerHTML = `<div class="detail-placeholder" style="min-height:10rem">Loading…</div>`;
+  const params = _routeParams('#/spools');
+  if (params.has('filter')) {
+    const filter = params.get('filter');
+    if (['all', 'loaded', 'storage', 'low'].includes(filter)) _spoolsFilter.slotFilter = filter;
+  }
+  _spoolsFilter.printer = params.get('printer') || '';
   const [spools, summary, costs, locations, intelligence] = await Promise.all([
     fetch('/api/spools').then(r => r.json()).catch(() => []),
     fetch('/api/spools/summary').then(r => r.json()).catch(() => ({})),
