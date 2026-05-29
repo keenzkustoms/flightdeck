@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 29 May 2026 (Session 28.56 File Desk command refresh polish)_
+_Last updated 29 May 2026 (Session 28.57 Command palette result grouping)_
 
 ## Current state
 
@@ -9,6 +9,31 @@ Service running at:
 - `http://flightdeck.local:8000`
 - `http://192.168.4.127:8000`
 - **`https://flightdeck.tail7de73e.ts.net`** (Tailscale Serve — HTTPS, used for PWA / notifications)
+
+---
+
+## What was built — Session 28.57 (Command palette result grouping — 29 May)
+
+The command palette now groups spool-specific matches so searches like `spool 31`, `label 31`, or `weight spool 31` show one tidy spool result instead of scattering Open, Edit, and Actions through the general list.
+
+### Frontend
+- Command items now support optional grouping metadata:
+  - `cluster`
+  - `clusterLabel`
+  - `clusterMeta`
+  - `actionLabel`
+- Spool command results share a spool cluster and render as one grouped card when multiple actions match.
+- Grouped spool results expose quick action buttons:
+  - `Open`
+  - `Edit`
+  - `Actions`
+- Added compact grouped-result styling for desktop and mobile.
+- Static cache-bust bumped:
+  - `style.css?v=132`
+  - `app.js?v=151`
+
+### Verification
+- JavaScript syntax check: `node --check app/static/app.js`
 
 ---
 

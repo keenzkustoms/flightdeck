@@ -477,8 +477,28 @@ async function _commandOpenSpoolActions(spoolId) {
   }, 180);
 }
 
-function _commandItem({ label, meta = '', group = 'General', keywords = '', run }) {
-  return { label, meta, group, keywords: `${label} ${meta} ${group} ${keywords}`.toLowerCase(), run };
+function _commandItem({
+  label,
+  meta = '',
+  group = 'General',
+  keywords = '',
+  run,
+  cluster = '',
+  clusterLabel = '',
+  clusterMeta = '',
+  actionLabel = '',
+}) {
+  return {
+    label,
+    meta,
+    group,
+    cluster,
+    clusterLabel,
+    clusterMeta,
+    actionLabel: actionLabel || label,
+    keywords: `${label} ${meta} ${group} ${clusterLabel} ${clusterMeta} ${keywords}`.toLowerCase(),
+    run,
+  };
 }
 
 function _commandStaticItems() {
@@ -600,12 +620,19 @@ function _commandSpoolItems() {
     .filter(s => !s.archived_at)
     .flatMap(s => {
       const spoolWords = `${s.id} ${s.material || ''} ${s.subtype || ''} ${s.brand || ''} ${s.color_name || ''} ${s.color_hex || ''}`;
+      const cluster = `spool:${s.id}`;
+      const clusterLabel = _commandSpoolTitle(s);
+      const clusterMeta = _commandSpoolMeta(s);
       return [
         _commandItem({
           label: _commandSpoolTitle(s),
-          meta: _commandSpoolMeta(s),
+          meta: clusterMeta,
           group: 'Spools',
           keywords: spoolWords,
+          cluster,
+          clusterLabel,
+          clusterMeta,
+          actionLabel: 'Open',
           run: () => _commandNavigate(`#/spool/${s.id}`),
         }),
         _commandItem({
@@ -613,6 +640,10 @@ function _commandSpoolItems() {
           meta: [s.color_name, s.material, s.brand].filter(Boolean).join(' · '),
           group: 'Spool actions',
           keywords: `${spoolWords} edit change update tare weight colour color`,
+          cluster,
+          clusterLabel,
+          clusterMeta,
+          actionLabel: 'Edit',
           run: () => _commandOpenSpoolEditor(s.id),
         }),
         _commandItem({
@@ -620,6 +651,10 @@ function _commandSpoolItems() {
           meta: 'Label, weigh, copy, reset, archive',
           group: 'Spool actions',
           keywords: `${spoolWords} action actions label print weigh weight copy reset archive delete`,
+          cluster,
+          clusterLabel,
+          clusterMeta,
+          actionLabel: 'Actions',
           run: () => _commandOpenSpoolActions(s.id),
         }),
       ];
@@ -647,6 +682,34 @@ function _commandScore(item, query) {
   return score;
 }
 
+function _commandGroupedRows(items) {
+  const used = new Set();
+  const rows = [];
+  items.forEach((item, index) => {
+    if (used.has(index)) return;
+    if (!item.cluster) {
+      rows.push({ type: 'item', item, index });
+      return;
+    }
+    const matches = items
+      .map((candidate, candidateIndex) => ({ item: candidate, index: candidateIndex }))
+      .filter(candidate => candidate.item.cluster === item.cluster);
+    if (matches.length < 2) {
+      rows.push({ type: 'item', item, index });
+      return;
+    }
+    matches.forEach(match => used.add(match.index));
+    rows.push({
+      type: 'cluster',
+      label: item.clusterLabel || item.label,
+      meta: item.clusterMeta || item.meta,
+      group: item.group === 'Spool actions' ? 'Spool' : item.group,
+      items: matches,
+    });
+  });
+  return rows;
+}
+
 function _commandRender() {
   if (!_commandPalette) return;
   const q = _commandPalette.input.value || '';
@@ -661,14 +724,31 @@ function _commandRender() {
     : all.slice(0, 12);
   _commandPalette.items = ranked;
   _commandPalette.selected = Math.min(_commandPalette.selected, Math.max(0, ranked.length - 1));
-  _commandPalette.list.innerHTML = ranked.length
-    ? ranked.map((item, i) => `
-        <button class="command-item${i === _commandPalette.selected ? ' active' : ''}" data-command-index="${i}" type="button">
+  const rows = _commandGroupedRows(ranked);
+  _commandPalette.list.innerHTML = rows.length
+    ? rows.map(row => row.type === 'cluster'
+      ? `<div class="command-group-card">
+          <div class="command-group-head">
+            <span class="command-item-main">
+              <strong>${esc(row.label)}</strong>
+              <small>${esc(row.meta)}</small>
+            </span>
+            <span class="command-item-group">${esc(row.group)}</span>
+          </div>
+          <div class="command-group-actions">
+            ${row.items.map(({ item, index }) => `
+              <button class="command-mini-action${index === _commandPalette.selected ? ' active' : ''}" data-command-index="${index}" type="button">
+                ${esc(item.actionLabel)}
+              </button>`).join('')}
+          </div>
+        </div>`
+      : `
+        <button class="command-item${row.index === _commandPalette.selected ? ' active' : ''}" data-command-index="${row.index}" type="button">
           <span class="command-item-main">
-            <strong>${esc(item.label)}</strong>
-            <small>${esc(item.meta)}</small>
+            <strong>${esc(row.item.label)}</strong>
+            <small>${esc(row.item.meta)}</small>
           </span>
-          <span class="command-item-group">${esc(item.group)}</span>
+          <span class="command-item-group">${esc(row.item.group)}</span>
         </button>`).join('')
     : `<div class="command-empty">No matching commands.</div>`;
 }
