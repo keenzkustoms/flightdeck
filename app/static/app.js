@@ -6351,10 +6351,11 @@ function _spoolGroupCardHtml(group) {
       <a class="spool-group-roll-id" href="#/spool/${s.id}">#${s.id}</a>
       <span class="spool-group-roll-grams${cls}">${Math.round(s.remaining_g || 0)}g</span>
       <span class="spool-group-roll-loc" title="${esc(loc)}">${esc(loc)}</span>
-      <details class="spool-action-menu spool-group-menu">
-        <summary class="spool-action-btn spool-action-more" title="More actions">Actions</summary>
-        <div class="spool-action-menu-panel">${_SPOOL_ACTIONS.map(a => _spoolActionControl(a, s.id, true)).join('')}</div>
-      </details>
+      <span class="spool-group-roll-actions">
+        <button class="spool-group-roll-action spool-action-label" data-action="label" data-id="${s.id}" title="Print label">Label</button>
+        <button class="spool-group-roll-action spool-action-edit" data-action="edit" data-id="${s.id}" title="Edit">Edit</button>
+        <a class="spool-group-roll-action spool-action-detail" href="#/spool/${s.id}" title="Details">Info</a>
+      </span>
     </div>`;
   }).join('');
   return `<div class="spool-card spool-group-card" data-spool-group="${esc(_spoolGroupKey(first))}">
