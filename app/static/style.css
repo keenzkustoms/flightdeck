@@ -4934,7 +4934,7 @@ select.settings-input { cursor: pointer; }
   position: relative;
   z-index: 1;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(124px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
   gap: 0.45rem;
 }
 @media (max-width: 740px) { .spool-card-grid { grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); } }
@@ -5285,7 +5285,7 @@ select.settings-input { cursor: pointer; }
   letter-spacing: 0.02em;
   color: var(--accent);
   border: 1px solid currentColor !important;
-  padding: 0.04rem 0.18rem !important;
+  padding: 0.04rem 0.12rem !important;
 }
 .spool-action-utility {
   color: var(--muted);
