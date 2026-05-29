@@ -826,6 +826,45 @@ header {
 .notif-btn.notif-on { opacity: 1; filter: brightness(1.3); }
 .notif-btn.notif-off { opacity: 0.45; }
 .notif-btn.notif-unavailable { opacity: 0.45; }
+.radar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.38rem;
+  min-height: 1.85rem;
+  padding: 0.32rem 0.55rem;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+.radar-mark {
+  position: relative;
+  width: 0.72rem;
+  height: 0.72rem;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  opacity: 0.9;
+}
+.radar-mark::before {
+  content: '';
+  position: absolute;
+  inset: 0.16rem;
+  border-radius: 999px;
+  background: currentColor;
+}
+.radar-mark::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 0.34rem;
+  height: 1px;
+  background: currentColor;
+  transform-origin: left center;
+  transform: rotate(-38deg);
+}
+.radar-label {
+  line-height: 1;
+}
 .notif-count {
   position: absolute;
   top: -0.35rem;

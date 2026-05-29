@@ -4262,9 +4262,9 @@ function initNotifBtn() {
     btn.classList.toggle('notif-on',          perm === 'granted');
     btn.classList.toggle('notif-off',         perm === 'denied');
     btn.classList.toggle('notif-unavailable', perm === 'unavailable');
-    btn.title = perm === 'granted' ? 'Notifications'
-              : perm === 'denied'  ? 'Notifications blocked — check browser site settings'
-              : 'Notifications';
+    btn.title = perm === 'granted' ? 'Radar'
+              : perm === 'denied'  ? 'Radar · browser notifications blocked in site settings'
+              : 'Radar';
   };
   update();
   loadNotifications(false);
