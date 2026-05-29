@@ -1218,6 +1218,15 @@ async def put_setting(key: str, body: SettingUpdate):
     return {"ok": True}
 
 
+def _label_base_url() -> str:
+    return db.get_all_settings().get("system_base_url") or "https://flightdeck.tail7de73e.ts.net"
+
+
+def _label_spool(spool: dict) -> dict:
+    settings = db.get_all_settings()
+    return {**spool, "_label_preferences": settings}
+
+
 # ── Scale and label hardware ──────────────────────────────────────────────
 
 @app.get("/api/scale/status")
@@ -1246,7 +1255,7 @@ async def print_spool_label(spool_id: int):
     spool = db.get_spool(spool_id)
     if not spool:
         raise HTTPException(status_code=404, detail="Spool not found")
-    ok = await asyncio.to_thread(_label_printer.print_spool_label, spool)
+    ok = await asyncio.to_thread(_label_printer.print_spool_label, _label_spool(spool), _label_base_url())
     if not ok:
         message = _label_printer.last_error or "Label printer unavailable"
         db.log_decision("system", "label_print_failed", f"Spool #{spool_id}: {message}")
@@ -1527,7 +1536,7 @@ async def create_spool(body: SpoolCreate):
     )
     if db.get_all_settings().get("label_auto_print") == "true":
         spool = db.get_spool(spool_id)
-        ok = await asyncio.to_thread(_label_printer.print_spool_label, spool)
+        ok = await asyncio.to_thread(_label_printer.print_spool_label, _label_spool(spool), _label_base_url())
         if ok:
             db.log_decision("system", "label_printed", f"Spool #{spool_id} auto-print")
         else:
@@ -1869,6 +1878,8 @@ def _reported_slot_matches_requirement(slot: dict, req: dict) -> bool:
 def _queue_preflight(job: dict, printer_status: Optional[dict]) -> dict:
     issues: list[dict] = []
     state = (printer_status or {}).get("state")
+    settings = db.get_all_settings()
+    strict_colour = settings.get("queue_strict_colour", "true") == "true"
 
     if not printer_status:
         issues.append({"level": "wait", "message": "Waiting for printer telemetry"})
@@ -1903,7 +1914,10 @@ def _queue_preflight(job: dict, printer_status: Optional[dict]) -> dict:
             issues.append({"level": "block", "message": f"No loaded spool matches {material}"})
         elif color_reqs and not color_matches:
             wanted = ", ".join(_colour_label(c["color"]) for c in color_reqs)
-            issues.append({"level": "block", "message": f"No loaded spool matches required colour {wanted}"})
+            issues.append({
+                "level": "block" if strict_colour else "warn",
+                "message": f"No loaded spool matches required colour {wanted}",
+            })
         elif len(color_reqs) == 1 and active_reported:
             req = color_reqs[0]
             if not _reported_slot_matches_requirement(active_reported, req):
@@ -1915,7 +1929,7 @@ def _queue_preflight(job: dict, printer_status: Optional[dict]) -> dict:
                 ) or "unknown filament"
                 expected = f"{_colour_label(req['color'])} {req['material']}".strip()
                 issues.append({
-                    "level": "block",
+                    "level": "block" if strict_colour else "warn",
                     "message": f"Active AMS slot mismatch: printer is using {active_reported['label']} ({actual}), expected {expected}",
                 })
     else:
@@ -1927,7 +1941,7 @@ def _queue_preflight(job: dict, printer_status: Optional[dict]) -> dict:
             if missing:
                 detail = "; ".join(_coverage_label(c) for c in missing)
                 issues.append({
-                    "level": "block",
+                    "level": "block" if strict_colour else "warn",
                     "message": f"Loaded colour coverage short: {detail}",
                 })
             elif any(c["available_g"] < float(c["used_g"] or 0) * 1.15 for c in color_coverage):

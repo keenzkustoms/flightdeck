@@ -49,9 +49,13 @@ class LabelPrinter:
             return LabelStatus(False, last_error="QL-700 is in Editor Lite mass-storage mode; turn Editor Lite off on the printer")
         return LabelStatus(False, last_error="Brother QL-700 not detected")
 
-    def render_spool_label(self, spool: dict) -> Image.Image:
+    def render_spool_label(self, spool: dict, base_url: str = "https://flightdeck.tail7de73e.ts.net") -> Image.Image:
         img = Image.new("RGB", (self.LABEL_WIDTH_PX, 430), "white")
         draw = ImageDraw.Draw(img)
+        prefs = spool.get("_label_preferences") or {}
+        include_brand = prefs.get("label_include_brand", "true") == "true"
+        include_colour = prefs.get("label_include_colour", "true") == "true"
+        include_location = prefs.get("label_include_location", "true") == "true"
 
         font_bold = _font("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 46)
         font_body = _font("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 32)
@@ -72,13 +76,13 @@ class LabelPrinter:
             )
             location_line = f"Loc: {location}"
         draw.text((x, 42), _ellipsize(draw, material, font_bold, 420), fill="black", font=font_bold)
-        draw.text((x, 116), _ellipsize(draw, brand, font_body, 420), fill="black", font=font_body)
-        draw.text((x, 168), _ellipsize(draw, color_name, font_body, 300), fill="black", font=font_body)
-        if color_hex:
+        draw.text((x, 116), _ellipsize(draw, brand if include_brand else "Flightdeck spool", font_body, 420), fill="black", font=font_body)
+        draw.text((x, 168), _ellipsize(draw, color_name if include_colour else f"Spool #{spool.get('id', '-')}", font_body, 300), fill="black", font=font_body)
+        if color_hex and include_colour:
             draw.text((x, 210), color_hex, fill="black", font=font_badge)
         draw.text((x, 258), f"Spool #{spool.get('id', '-')}", fill="black", font=font_badge)
 
-        if location_line:
+        if location_line and include_location:
             draw.text((506, 42), "Loc:", fill="black", font=font_small)
             draw.text((506, 72), _ellipsize(draw, location_line[5:], font_body, 150), fill="black", font=font_body)
 
@@ -90,7 +94,8 @@ class LabelPrinter:
         bottom = f"{round(float(spool.get('label_weight_g') or 0))}g label weight  |  {added}"
         draw.text((x, 372), bottom, fill="black", font=font_small)
 
-        qr_url = f"https://flightdeck.tail7de73e.ts.net/#/spool/{spool.get('id')}"
+        qr_base = (base_url or "https://flightdeck.tail7de73e.ts.net").rstrip("/")
+        qr_url = f"{qr_base}/#/spool/{spool.get('id')}"
         qr = _qr_image(qr_url)
         if qr:
             img.paste(qr.resize((152, 152)), (506, 218))
@@ -99,12 +104,12 @@ class LabelPrinter:
             draw.text((558, 276), "QR", fill="black", font=font_body)
         return img
 
-    def print_spool_label(self, spool: dict) -> bool:
+    def print_spool_label(self, spool: dict, base_url: str = "https://flightdeck.tail7de73e.ts.net") -> bool:
         status = self.status()
         if not status.available:
             self.last_error = status.last_error
             return False
-        image = self.render_spool_label(spool)
+        image = self.render_spool_label(spool, base_url=base_url)
         try:
             from brother_ql.backends.helpers import send
             from brother_ql.conversion import convert

@@ -1190,6 +1190,15 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Updated README install/migration notes.
 - `printers.yaml` should be untracked from git so real printer IPs, access codes, and serials never ship in a clean clone.
 
+### Settings preferences
+- Added server-side default settings so fresh installs have sensible values before any UI changes.
+- Added `Settings > Preferences` for system base URL, spool thresholds, default label weight, printed label fields, and queue colour matching posture.
+- Label QR codes now use `system_base_url` instead of a hard-coded Tailscale URL.
+- Label field toggles can hide colour, brand, or storage location on future spool labels.
+- Add Spool now uses `default_label_weight_g`.
+- Queue preflight colour mismatches respect `queue_strict_colour`: strict blocks, advisory warns.
+- Static cache-bust bumped to `app.js?v=125`.
+
 ### Closing fixes (shipped same session)
 - **Bambu filament metadata**: `get_preview()` now called proactively on first poll of any new print (same trigger as AMS snapshot). One-shot FTP call per job; cached on `subtask_name`. Ensures `filament_weight_g` and `material` are always populated for spool deduction, even when nobody views the detail page.
 - **Spool snapshot overwrite on restart**: `write_slot_snapshot` now uses `WHERE ams_slot_snapshot IS NULL`. Post-restart the snapshot condition re-fires (in-memory state resets), but the original DB row is preserved. Spool deduction uses correct print-start slot assignments regardless of restarts.

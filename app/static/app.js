@@ -4663,6 +4663,7 @@ let _settingsCategory = 'printers';
 const _SETTINGS_CATEGORIES = [
   { id: 'printers',   label: 'Printers'   },
   { id: 'hardware',   label: 'Hardware'   },
+  { id: 'preferences', label: 'Preferences' },
   { id: 'appearance', label: 'Appearance' },
   { id: 'slicer',     label: 'Slicer'     },
   { id: 'filament',   label: 'Filament'   },
@@ -5460,6 +5461,106 @@ function _settingToggle(key, options, current) {
     `<button class="setting-toggle-btn${current === value ? ' setting-toggle-active' : ''}"
        data-setting-key="${key}" data-setting-value="${value}">${label}</button>`
   ).join('');
+}
+
+async function _saveSetting(key, value) {
+  _serverSettings[key] = String(value);
+  await fetch(`/api/settings/${encodeURIComponent(key)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ value: String(value) }),
+  });
+}
+
+function _prefBool(key, fallback = 'false') {
+  return (_serverSettings[key] ?? fallback) === 'true';
+}
+
+function _preferencesCategoryHtml() {
+  const systemUrl = _serverSettings.system_base_url ?? 'https://flightdeck.tail7de73e.ts.net';
+  const lowPct = _serverSettings.spool_low_stock_pct ?? '20';
+  const nearEmpty = _serverSettings.spool_near_empty_g ?? '50';
+  const confidence = _serverSettings.spool_confidence_warn_pct ?? '75';
+  const labelWeight = _serverSettings.default_label_weight_g ?? '1000';
+  return `
+    <div class="settings-section">
+      <div class="settings-section-title">System</div>
+      <div class="settings-form-row">
+        <label class="settings-label">Base URL</label>
+        <input class="settings-input pref-input" data-pref-key="system_base_url" type="url" value="${esc(systemUrl)}" placeholder="https://flightdeck.tail7de73e.ts.net">
+      </div>
+      <div class="settings-hint">Used for QR labels and links back into Flightdeck.</div>
+    </div>
+    <div class="settings-section">
+      <div class="settings-section-title">Spool Thresholds</div>
+      <div class="settings-form-row">
+        <label class="settings-label">Low stock</label>
+        <input class="settings-input pref-input" data-pref-key="spool_low_stock_pct" type="number" min="1" max="99" value="${esc(lowPct)}"> %
+      </div>
+      <div class="settings-form-row">
+        <label class="settings-label">Near empty</label>
+        <input class="settings-input pref-input" data-pref-key="spool_near_empty_g" type="number" min="0" value="${esc(nearEmpty)}"> g
+      </div>
+      <div class="settings-form-row">
+        <label class="settings-label">Confidence warning</label>
+        <input class="settings-input pref-input" data-pref-key="spool_confidence_warn_pct" type="number" min="1" max="100" value="${esc(confidence)}"> %
+      </div>
+    </div>
+    <div class="settings-section">
+      <div class="settings-section-title">Labels</div>
+      <div class="settings-form-row">
+        <label class="settings-label">Default spool weight</label>
+        <input class="settings-input pref-input" data-pref-key="default_label_weight_g" type="number" min="1" value="${esc(labelWeight)}"> g
+      </div>
+      <div class="settings-form-row">
+        <label class="settings-label">Print fields</label>
+        <div class="setting-toggle-group">
+          ${_settingToggle('label_include_colour', [{ value: 'true', label: 'Colour' }, { value: 'false', label: 'Hide colour' }], _prefBool('label_include_colour', 'true') ? 'true' : 'false')}
+          ${_settingToggle('label_include_brand', [{ value: 'true', label: 'Brand' }, { value: 'false', label: 'Hide brand' }], _prefBool('label_include_brand', 'true') ? 'true' : 'false')}
+          ${_settingToggle('label_include_location', [{ value: 'true', label: 'Location' }, { value: 'false', label: 'Hide location' }], _prefBool('label_include_location', 'true') ? 'true' : 'false')}
+        </div>
+      </div>
+    </div>
+    <div class="settings-section">
+      <div class="settings-section-title">Queue Matching</div>
+      <div class="settings-form-row">
+        <label class="settings-label">Colour match</label>
+        <div class="setting-toggle-group">
+          ${_settingToggle('queue_strict_colour', [{ value: 'true', label: 'Strict' }, { value: 'false', label: 'Advisory' }], _prefBool('queue_strict_colour', 'true') ? 'true' : 'false')}
+        </div>
+      </div>
+    </div>`;
+}
+
+function _attachPreferencesEvents(el) {
+  el.querySelectorAll('.pref-input').forEach(input => {
+    input.addEventListener('change', async () => {
+      const key = input.dataset.prefKey;
+      let value = input.value.trim();
+      if (input.type === 'url' && value) value = value.replace(/\/+$/, '');
+      if (input.type === 'number') {
+        const min = input.min === '' ? null : Number(input.min);
+        const max = input.max === '' ? null : Number(input.max);
+        let n = Number(value);
+        if (!Number.isFinite(n)) n = Number(input.defaultValue || 0);
+        if (min !== null) n = Math.max(min, n);
+        if (max !== null) n = Math.min(max, n);
+        value = String(n);
+        input.value = value;
+      }
+      try { await _saveSetting(key, value); } catch {}
+    });
+  });
+
+  el.querySelectorAll('.setting-toggle-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const { settingKey: key, settingValue: value } = btn.dataset;
+      try { await _saveSetting(key, value); } catch {}
+      el.querySelectorAll(`.setting-toggle-btn[data-setting-key="${key}"]`).forEach(b =>
+        b.classList.toggle('setting-toggle-active', b === btn)
+      );
+    });
+  });
 }
 
 function _appearanceCategoryHtml() {
@@ -6434,7 +6535,10 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
   }
   const materials = Object.keys(matBrands).sort();
 
+  const defaultLabelWeight = Number(_serverSettings.default_label_weight_g || 1000) || 1000;
   const p0 = prefill || {};
+  const initialLabelWeight = p0.label_weight_g ?? defaultLabelWeight;
+  const initialRemainingWeight = p0.remaining_g ?? p0.label_weight_g ?? defaultLabelWeight;
   const initHex = p0.color_hex || '#808080';
   const printerOpts = _latestPrinters.map(p =>
     `<option value="${p.id}" data-kind="${p.kind}"${p0.location_printer_id===p.id?' selected':''}>${p.custom_name}</option>`
@@ -6516,13 +6620,13 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
         <div class="spool-form-row">
           <label class="spool-form-label">Label weight *</label>
           <div class="spool-inline-row">
-            <input id="sm-label-g" class="spool-form-input spool-weight-input" type="number" min="1" value="${p0.label_weight_g||1000}"> g
+            <input id="sm-label-g" class="spool-form-input spool-weight-input" type="number" min="1" value="${initialLabelWeight}"> g
           </div>
         </div>
         <div class="spool-form-row">
           <label class="spool-form-label">Remaining</label>
           <div class="spool-inline-row">
-            <input id="sm-remaining-g" class="spool-form-input spool-weight-input" type="number" min="0" value="${p0.remaining_g??p0.label_weight_g??1000}"> g
+            <input id="sm-remaining-g" class="spool-form-input spool-weight-input" type="number" min="0" value="${initialRemainingWeight}"> g
             <button type="button" class="spool-inline-btn" id="sm-weigh-btn">Weigh</button>
             <span class="spool-form-hint">(defaults to label weight)</span>
           </div>
@@ -7182,6 +7286,9 @@ async function _renderSettingsContent(category) {
     ]);
     el.innerHTML = _hardwareCategoryHtml(scale, labelPrinter);
     _attachHardwareEvents(el);
+  } else if (category === 'preferences') {
+    el.innerHTML = _preferencesCategoryHtml();
+    _attachPreferencesEvents(el);
   } else if (category === 'appearance') {
     el.innerHTML = _appearanceCategoryHtml();
     _attachAppearanceEvents(el);

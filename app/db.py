@@ -9,6 +9,22 @@ from .paths import DB_PATH, UPLOADS_DIR
 
 log = logging.getLogger(__name__)
 
+DEFAULT_SETTINGS = {
+    "accent": "#3b82f6",
+    "temp_unit": "C",
+    "time_format": "24h",
+    "label_auto_print": "false",
+    "system_base_url": "https://flightdeck.tail7de73e.ts.net",
+    "spool_low_stock_pct": "20",
+    "spool_near_empty_g": "50",
+    "spool_confidence_warn_pct": "75",
+    "default_label_weight_g": "1000",
+    "label_include_colour": "true",
+    "label_include_brand": "true",
+    "label_include_location": "true",
+    "queue_strict_colour": "true",
+}
+
 
 def init() -> None:
     with _conn() as conn:
@@ -936,7 +952,9 @@ def get_calibration(printer_id: str) -> Optional[dict]:
 def get_all_settings() -> dict:
     with _conn() as conn:
         rows = conn.execute("SELECT key, value FROM settings").fetchall()
-    return {r["key"]: r["value"] for r in rows}
+    settings = dict(DEFAULT_SETTINGS)
+    settings.update({r["key"]: r["value"] for r in rows})
+    return settings
 
 
 def set_setting(key: str, value: str) -> None:
