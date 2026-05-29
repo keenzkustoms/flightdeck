@@ -1235,6 +1235,10 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - The default grouped card now reads like a paint-chart tile: colour, material, roll chips, combined remaining stock, and one compact drawer for individual actions.
 - Static cache-bust bumped to `style.css?v=112` and `app.js?v=131`.
 
+### App shell cache guard
+- Static files and the root app shell now send `Cache-Control: no-store` so UI updates do not get stuck behind an old browser module.
+- This requires a backend restart because it changes FastAPI static serving.
+
 ### Closing fixes (shipped same session)
 - **Bambu filament metadata**: `get_preview()` now called proactively on first poll of any new print (same trigger as AMS snapshot). One-shot FTP call per job; cached on `subtask_name`. Ensures `filament_weight_g` and `material` are always populated for spool deduction, even when nobody views the detail page.
 - **Spool snapshot overwrite on restart**: `write_slot_snapshot` now uses `WHERE ams_slot_snapshot IS NULL`. Post-restart the snapshot condition re-fires (in-memory state resets), but the original DB row is preserved. Spool deduction uses correct print-start slot assignments regardless of restarts.

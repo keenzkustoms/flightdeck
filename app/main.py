@@ -329,7 +329,17 @@ _STATIC = Path(__file__).parent / "static"
 _PRINT_LIBRARY = PRINT_LIBRARY_DIR
 
 app = FastAPI(title="Flightdeck", lifespan=lifespan)
-app.mount("/static", StaticFiles(directory=_STATIC), name="static")
+
+
+class NoCacheStaticFiles(StaticFiles):
+    async def get_response(self, path: str, scope):
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-store, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        return response
+
+
+app.mount("/static", NoCacheStaticFiles(directory=_STATIC), name="static")
 
 
 class FileQueueRequest(BaseModel):
@@ -354,7 +364,13 @@ class BambuSdClearRequest(BaseModel):
 
 @app.get("/", include_in_schema=False)
 def index():
-    return FileResponse(_STATIC / "index.html")
+    return FileResponse(
+        _STATIC / "index.html",
+        headers={
+            "Cache-Control": "no-store, max-age=0",
+            "Pragma": "no-cache",
+        },
+    )
 
 
 @app.get("/healthz")
