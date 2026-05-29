@@ -140,3 +140,51 @@ def upload_bambu_file(ip: str, access_code: str, filename: str, data: bytes) -> 
     except Exception:
         return BambuPreview(image_png=None, estimated_total_seconds=None,
                             filament_weight_g=None, filament_type=None)
+
+
+def list_bambu_files(ip: str, access_code: str, path: str = "/") -> list[dict]:
+    """List Bambu printer SD files via implicit FTPS."""
+    ftp = _ImplicitFTP_TLS()
+    rows: list[dict] = []
+    root = "/" + path.strip("/")
+    if root == "/":
+        root = "/"
+    try:
+        ftp.connect(ip, 990, timeout=15)
+        ftp.login("bblp", access_code)
+        ftp.prot_p()
+        ftp.set_pasv(True)
+        try:
+            entries = list(ftp.mlsd(root))
+            for name, facts in entries:
+                if name in (".", ".."):
+                    continue
+                kind = "dir" if facts.get("type") == "dir" else "file"
+                size = int(facts.get("size") or 0) if kind == "file" else None
+                modified = facts.get("modify")
+                rows.append({
+                    "name": name,
+                    "path": f"{root.rstrip('/')}/{name}".lstrip("/"),
+                    "kind": kind,
+                    "size": size,
+                    "modified": modified,
+                })
+        except Exception:
+            names = ftp.nlst(root)
+            for item in names:
+                name = item.rsplit("/", 1)[-1]
+                if not name or name in (".", ".."):
+                    continue
+                rows.append({
+                    "name": name,
+                    "path": item.lstrip("/"),
+                    "kind": "file",
+                    "size": None,
+                    "modified": None,
+                })
+    finally:
+        try:
+            ftp.quit()
+        except Exception:
+            pass
+    return sorted(rows, key=lambda r: (r["kind"] != "dir", r["name"].lower()))

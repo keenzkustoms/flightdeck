@@ -311,6 +311,7 @@ async def lifespan(app: FastAPI):
 
 
 _STATIC = Path(__file__).parent / "static"
+_PRINT_LIBRARY = Path("/home/flightdeck/print_library")
 
 app = FastAPI(title="Flightdeck", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=_STATIC), name="static")
@@ -328,6 +329,112 @@ def healthz():
         "ws_clients": len(_ws_clients),
         "broadcast_running": bool(_broadcast_task and not _broadcast_task.done()),
     }
+
+
+def _file_kind(name: str) -> str:
+    lower = name.lower()
+    if lower.endswith(".gcode.3mf") or lower.endswith(".3mf"):
+        return "3mf"
+    if lower.endswith(".gcode.gz"):
+        return "gcode.gz"
+    if lower.endswith(".gcode"):
+        return "gcode"
+    if lower.endswith(".ufp"):
+        return "ufp"
+    return "file"
+
+
+def _local_library_files() -> list[dict]:
+    _PRINT_LIBRARY.mkdir(parents=True, exist_ok=True)
+    rows = []
+    for path in sorted(_PRINT_LIBRARY.rglob("*")):
+        if path.is_dir():
+            continue
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        rel = path.relative_to(_PRINT_LIBRARY).as_posix()
+        rows.append({
+            "name": path.name,
+            "path": rel,
+            "kind": _file_kind(path.name),
+            "size": stat.st_size,
+            "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+        })
+        if len(rows) >= 400:
+            break
+    return rows
+
+
+async def _moonraker_files(base_url: str) -> list[dict]:
+    async with httpx.AsyncClient(timeout=8.0) as client:
+        r = await client.get(f"{base_url.rstrip('/')}/server/files/list", params={"root": "gcodes"})
+        r.raise_for_status()
+        result = r.json().get("result", [])
+    rows = []
+    for item in result:
+        path = item.get("path") or item.get("filename") or item.get("name") or ""
+        name = path.rsplit("/", 1)[-1]
+        if not name:
+            continue
+        rows.append({
+            "name": name,
+            "path": path,
+            "kind": "dir" if item.get("type") == "directory" else _file_kind(name),
+            "size": item.get("size"),
+            "modified": item.get("modified") or item.get("date"),
+        })
+    return sorted(rows, key=lambda r: (r["kind"] != "dir", r["path"].lower()))
+
+
+@app.get("/api/files")
+async def get_file_desk():
+    targets = [{
+        "id": "library",
+        "label": "Pi Library",
+        "kind": "library",
+        "path": str(_PRINT_LIBRARY),
+        "files": _local_library_files(),
+        "actions": {"format_sd": False},
+    }]
+
+    for (pid, model_name, custom_name, _icon, url) in _moonraker:
+        try:
+            files = await _moonraker_files(url)
+            error = None
+        except Exception as exc:
+            files = []
+            error = str(exc)
+        targets.append({
+            "id": pid,
+            "label": custom_name or model_name,
+            "model": model_name,
+            "kind": "moonraker",
+            "files": files,
+            "error": error,
+            "actions": {"format_sd": False},
+        })
+
+    for p in _bambu:
+        try:
+            from .printers.bambu_ftp import list_bambu_files
+            files = await asyncio.to_thread(list_bambu_files, p._ip, p._access_code)
+            error = None
+        except Exception as exc:
+            files = []
+            error = str(exc)
+        targets.append({
+            "id": p.id,
+            "label": p.custom_name or p.model_name,
+            "model": p.model_name,
+            "kind": "bambu",
+            "files": files,
+            "error": error,
+            "actions": {"format_sd": True, "format_sd_ready": False},
+        })
+
+    return {"library_path": str(_PRINT_LIBRARY), "targets": targets}
 
 
 

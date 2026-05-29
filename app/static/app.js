@@ -1017,6 +1017,7 @@ function parseRoute() {
   if (hash === '#/cameras') return { view: 'cameras' };
   if (hash === '#/stats' || hash.startsWith('#/stats?')) return { view: 'stats' };
   if (hash === '#/queue') return { view: 'queue' };
+  if (hash === '#/files') return { view: 'files' };
   if (hash === '#/failures' || hash.startsWith('#/failures?')) return { view: 'failures' };
   if (hash === '#/spools' || hash.startsWith('#/spools?')) return { view: 'spools' };
   const settingsMatch = hash.match(/^#\/settings\/([^/]+)/);
@@ -1067,6 +1068,7 @@ function router() {
   document.getElementById('view-spool').hidden     = route.view !== 'spool';
   document.getElementById('view-cameras').hidden   = route.view !== 'cameras';
   document.getElementById('view-queue').hidden     = route.view !== 'queue';
+  document.getElementById('view-files').hidden     = route.view !== 'files';
   document.getElementById('view-failures').hidden  = route.view !== 'failures';
   document.getElementById('view-spools').hidden    = route.view !== 'spools';
   document.getElementById('view-settings').hidden  = route.view !== 'settings';
@@ -1080,6 +1082,7 @@ function router() {
       (route.view === 'printer'  && href === `#/printer/${route.id}`) ||
       (route.view === 'cameras'  && href === '#/cameras') ||
       (route.view === 'queue'    && href === '#/queue') ||
+      (route.view === 'files'    && href === '#/files') ||
       (route.view === 'failures' && href === '#/failures') ||
       (route.view === 'spools'   && href === '#/spools') ||
       (route.view === 'settings' && (
@@ -1095,6 +1098,7 @@ function router() {
   if (route.view === 'spool') renderSpoolDetail(route.id);
   if (route.view === 'cameras') renderCamerasView();
   if (route.view === 'queue') renderQueueView();
+  if (route.view === 'files') renderFileDeskView();
   if (route.view === 'failures' && !wasOnFailures) renderFailuresView();
   if (route.view === 'spools' && !wasOnSpools) renderSpoolsView();
   if (route.view === 'settings' && (!wasOnSettings || categoryBeforeRoute !== _settingsCategory)) renderSettingsView();
@@ -1114,6 +1118,7 @@ function buildTabs(printers) {
     `<div class="tab-section">Operations</div>`,
     `<a class="tab" href="#/cameras">Cameras</a>`,
     `<a class="tab" href="#/queue">Queue</a>`,
+    `<a class="tab" href="#/files">Files</a>`,
     `<a class="tab" href="#/failures">Failures</a>`,
     `<a class="tab" href="#/spools">Spools</a>`,
     `<div class="tab-section">System</div>`,
@@ -2602,6 +2607,89 @@ const _QUEUE_STATUS_LABEL = {
 
 function _queueStatusBadge(status) {
   return `<span class="queue-badge queue-badge-${status}">${_QUEUE_STATUS_LABEL[status] || status}</span>`;
+}
+
+// ── File Desk ──────────────────────────────────────────────────────────────
+
+function _fmtBytes(bytes) {
+  if (bytes == null) return '—';
+  const n = Number(bytes || 0);
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+  return `${(n / 1024 / 1024 / 1024).toFixed(1)} GB`;
+}
+
+function _fileModifiedLabel(value) {
+  if (!value) return '—';
+  if (/^\d{14}$/.test(String(value))) {
+    const s = String(value);
+    return `${s.slice(6,8)}/${s.slice(4,6)}/${s.slice(0,4)} ${s.slice(8,10)}:${s.slice(10,12)}`;
+  }
+  const d = new Date(value);
+  return isNaN(d.getTime()) ? String(value) : d.toLocaleString([], { dateStyle: 'short', timeStyle: 'short' });
+}
+
+function _fileKindClass(kind) {
+  return String(kind || 'file').replace(/[^a-z0-9_-]/gi, '-').toLowerCase();
+}
+
+function _fileDeskTargetHtml(target) {
+  const files = target.files || [];
+  const rows = files.length ? files.map(f => `
+    <tr>
+      <td><span class="filedesk-kind filedesk-kind-${_fileKindClass(f.kind)}">${esc(f.kind || 'file')}</span></td>
+      <td class="filedesk-name" title="${esc(f.path || f.name)}">${esc(f.name || f.path || 'File')}</td>
+      <td>${_fmtBytes(f.size)}</td>
+      <td>${esc(_fileModifiedLabel(f.modified))}</td>
+      <td class="filedesk-path" title="${esc(f.path || '')}">${esc(f.path || '')}</td>
+    </tr>`).join('') : `<tr><td colspan="5" class="filedesk-empty">${target.error ? esc(target.error) : 'No files found.'}</td></tr>`;
+  const formatNote = target.actions?.format_sd
+    ? `<span class="filedesk-format-note">Bambu SD format: guarded action planned</span>`
+    : '';
+  return `<section class="filedesk-target filedesk-${target.kind}">
+    <div class="filedesk-target-head">
+      <div>
+        <h2>${esc(target.label)}</h2>
+        <span>${esc(target.model || target.path || target.kind)}</span>
+      </div>
+      <div class="filedesk-target-meta">
+        <strong>${files.length}</strong>
+        <span>${files.length === 1 ? 'file' : 'files'}</span>
+      </div>
+    </div>
+    ${formatNote}
+    <div class="filedesk-table-wrap">
+      <table class="filedesk-table">
+        <thead><tr><th>Type</th><th>Name</th><th>Size</th><th>Modified</th><th>Path</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  </section>`;
+}
+
+async function renderFileDeskView() {
+  const el = document.getElementById('filedesk-page');
+  if (!el) return;
+  el.innerHTML = `<div class="detail-placeholder">Loading File Desk...</div>`;
+  try {
+    const r = await fetch('/api/files');
+    if (!r.ok) throw new Error('Unable to load files');
+    const data = await r.json();
+    el.innerHTML = `<div class="filedesk-shell">
+      <section class="filedesk-hero">
+        <div>
+          <div class="mission-eyebrow">File Desk</div>
+          <h1>Printer files</h1>
+          <p>Read-only view of the Pi library, Voron files, and Bambu SD cards.</p>
+        </div>
+        <div class="filedesk-library-path">${esc(data.library_path || '')}</div>
+      </section>
+      <div class="filedesk-grid">${(data.targets || []).map(_fileDeskTargetHtml).join('')}</div>
+    </div>`;
+  } catch (err) {
+    el.innerHTML = `<div class="detail-placeholder">File Desk unavailable.</div>`;
+  }
 }
 
 function _queuePreflightBadge(preflight) {

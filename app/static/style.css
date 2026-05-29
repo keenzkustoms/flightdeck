@@ -6562,3 +6562,33 @@ select.settings-input { cursor: pointer; }
 
 .queue-act-retry { color: #a78bfa; border-color: #a78bfa; }
 .queue-act-retry:hover:not(:disabled) { background: rgba(167,139,250,0.1); }
+
+/* -- File Desk ------------------------------------------------------------- */
+.filedesk-page { min-height: 100%; }
+.filedesk-shell { max-width: 1480px; margin: 0 auto; padding: 2rem; }
+.filedesk-hero { display: flex; justify-content: space-between; align-items: flex-end; gap: 1rem; margin-bottom: 1rem; }
+.filedesk-hero h1 { margin-top: 0.25rem; font-size: 2rem; line-height: 1; }
+.filedesk-hero p, .filedesk-library-path { color: var(--muted); font-size: 0.82rem; }
+.filedesk-library-path { border: 1px solid var(--border); border-radius: 0.45rem; background: var(--surface); padding: 0.55rem 0.7rem; max-width: 34rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.filedesk-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.8rem; }
+.filedesk-target { min-width: 0; border: 1px solid var(--border); border-radius: 0.65rem; background: var(--surface); overflow: hidden; }
+.filedesk-target-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; border-bottom: 1px solid var(--border); background: rgba(255,255,255,0.025); padding: 0.8rem 0.9rem; }
+.filedesk-target-head h2 { margin: 0; color: var(--text); font-size: 1rem; }
+.filedesk-target-head span, .filedesk-target-meta span { display: block; margin-top: 0.2rem; color: var(--muted); font-size: 0.68rem; }
+.filedesk-target-meta { text-align: right; }
+.filedesk-target-meta strong { display: block; color: var(--text); font-size: 1.2rem; line-height: 1; }
+.filedesk-format-note { display: block; margin: 0.7rem 0.9rem 0; border: 1px solid rgba(245,158,11,0.28); border-radius: 0.45rem; background: rgba(245,158,11,0.07); color: #fcd34d; padding: 0.45rem 0.55rem; font-size: 0.72rem; }
+.filedesk-table-wrap { max-height: 24rem; overflow: auto; }
+.filedesk-table { width: 100%; border-collapse: collapse; font-size: 0.74rem; }
+.filedesk-table th { position: sticky; top: 0; z-index: 1; background: var(--card); color: var(--muted); text-align: left; font-weight: 600; padding: 0.46rem 0.55rem; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.filedesk-table td { padding: 0.42rem 0.55rem; border-bottom: 1px solid rgba(122,162,216,0.12); color: var(--text); vertical-align: middle; }
+.filedesk-name, .filedesk-path { max-width: 18rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.filedesk-path { color: var(--muted) !important; }
+.filedesk-kind { display: inline-flex; border: 1px solid rgba(122,162,216,0.28); border-radius: 999px; background: rgba(122,162,216,0.08); color: #bfdbfe; padding: 0.12rem 0.38rem; font-size: 0.6rem; text-transform: uppercase; white-space: nowrap; }
+.filedesk-kind-dir { color: #fcd34d; border-color: rgba(245,158,11,0.35); background: rgba(245,158,11,0.1); }
+.filedesk-empty { color: var(--muted) !important; text-align: center; padding: 1.5rem !important; }
+
+@media (max-width: 1100px) {
+  .filedesk-grid { grid-template-columns: 1fr; }
+  .filedesk-hero { align-items: flex-start; flex-direction: column; }
+}

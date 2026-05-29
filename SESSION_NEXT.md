@@ -1113,6 +1113,13 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Loaded printer spools appear in a separate Loaded lane when included by filters.
 - Static cache-bust bumped to `style.css?v=99` and `app.js?v=114`.
 
+### File Desk v1
+- Added a new `Files` navigation screen for a read-only file desk.
+- Pi print library defaults to `/home/flightdeck/print_library`.
+- `GET /api/files` lists the Pi library, Voron Moonraker gcodes, and Bambu SD cards through existing LAN/FTPS details.
+- Bambu targets expose `format_sd` capability metadata but no destructive format action is wired yet.
+- Static cache-bust bumped to `style.css?v=100` and `app.js?v=115`.
+
 ### Closing fixes (shipped same session)
 - **Bambu filament metadata**: `get_preview()` now called proactively on first poll of any new print (same trigger as AMS snapshot). One-shot FTP call per job; cached on `subtask_name`. Ensures `filament_weight_g` and `material` are always populated for spool deduction, even when nobody views the detail page.
 - **Spool snapshot overwrite on restart**: `write_slot_snapshot` now uses `WHERE ams_slot_snapshot IS NULL`. Post-restart the snapshot condition re-fires (in-memory state resets), but the original DB row is preserved. Spool deduction uses correct print-start slot assignments regardless of restarts.
