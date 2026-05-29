@@ -3458,6 +3458,27 @@ function _printBayFindMatch(print, targets) {
   return null;
 }
 
+function _printBayRunMemory(print, match) {
+  const memory = [];
+  const state = print.final_state;
+  if (state === 'FINISHED') memory.push({ cls: 'good', label: 'Last run completed' });
+  else if (state === 'CANCELLED') memory.push({ cls: 'warn', label: 'Last run cancelled' });
+  else memory.push({ cls: 'bad', label: 'Last run failed' });
+
+  if (match) {
+    const sameSource = match.target.id === print.printer_id;
+    memory.push({
+      cls: sameSource ? 'good' : 'info',
+      label: sameSource ? 'Source on same printer' : `Source in ${match.target.label || match.target.id}`,
+    });
+  } else {
+    memory.push({ cls: 'muted', label: 'Source file missing' });
+  }
+
+  if (print.filament_grams != null) memory.push({ cls: 'info', label: `${Number(print.filament_grams).toFixed(1)}g model` });
+  return memory.slice(0, 3).map(item => `<span class="printbay-memory printbay-memory-${item.cls}">${esc(item.label)}</span>`).join('');
+}
+
 function _printBayStateLabel(state) {
   if (state === 'FINISHED') return { cls: 'done', label: 'Printed' };
   if (state === 'CANCELLED') return { cls: 'warn', label: 'Cancelled' };
@@ -3478,6 +3499,7 @@ function _printBayReprintHtml(items, targets) {
     const action = match
       ? `<button class="filedesk-action-btn filedesk-queue-primary" data-file-action="queue" data-source-id="${esc(match.target.id)}" data-path="${esc(match.path)}">Queue</button>`
       : `<span class="printbay-history-only">No source file found</span>`;
+    const memory = _printBayRunMemory(print, match);
     return `<article class="printbay-reprint-card">
       <div class="printbay-reprint-thumb printbay-reprint-${state.cls}">${snapshot}</div>
       <div class="printbay-reprint-main">
@@ -3490,6 +3512,7 @@ function _printBayReprintHtml(items, targets) {
           ${duration ? `<span>${esc(duration)}</span>` : ''}
           ${material ? `<span>${esc(material)}</span>` : ''}
         </div>
+        <div class="printbay-memory-row">${memory}</div>
         <div class="printbay-reprint-foot">
           ${match ? `<span>${esc(match.target.label || match.target.id)}</span>` : '<span>History only</span>'}
           ${action}

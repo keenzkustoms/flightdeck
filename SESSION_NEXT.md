@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 30 May 2026 (Session 28.72 Reprint Bay first pass)_
+_Last updated 30 May 2026 (Session 28.73 Reprint Bay run memory)_
 
 ## Current state
 
@@ -9,6 +9,23 @@ Service running at:
 - `http://flightdeck.local:8000`
 - `http://192.168.4.127:8000`
 - **`https://flightdeck.tail7de73e.ts.net`** (Tailscale Serve — HTTPS, used for PWA / notifications)
+
+---
+
+## What was built — Session 28.73 (Reprint Bay run memory — 30 May)
+
+Reprint Bay cards now expose lightweight run-memory chips so the strip reads as dispatch context rather than a plain history list.
+
+### Frontend
+- Each Reprint Bay card now shows up to three memory chips:
+  - last run completed/cancelled/failed
+  - source match location or source file missing
+  - model grams when known
+- Source match chip distinguishes same-printer source vs another source panel.
+- Static cache-bust bumped to `style.css?v=145` and `app.js?v=166`.
+
+### Verification
+- `node --check app/static/app.js`
 
 ---
 
