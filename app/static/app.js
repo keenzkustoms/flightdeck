@@ -1104,7 +1104,7 @@ function buildTabs(printers) {
   const nav = document.getElementById('tab-strip');
   nav.innerHTML = [
     `<a class="tab" href="#/">Dashboard</a>`,
-    `<a class="tab" href="#/mission">Mission Control</a>`,
+    `<a class="tab" href="#/mission">Flight Tower</a>`,
     `<a class="tab" href="#/stats">Telemetry</a>`,
     `<div class="tab-section">Printers</div>`,
     ...printers.map((p, i) => {
@@ -3166,7 +3166,7 @@ async function renderMissionControl() {
   if (_missionRenderInFlight) return;
   _missionRenderInFlight = true;
   if (!_missionLastHtml) {
-    el.innerHTML = `<div class="detail-placeholder">Loading Mission Control...</div>`;
+    el.innerHTML = `<div class="detail-placeholder">Loading Flight Tower...</div>`;
   }
   try {
     const [printers, jobs, spools] = await Promise.all([
@@ -3286,7 +3286,7 @@ async function renderMissionControl() {
     const html = `
       <section class="mission-hero">
         <div>
-          <div class="mission-eyebrow">Mission Control</div>
+          <div class="mission-eyebrow">Flight Tower</div>
           <h1>Farm forecast</h1>
           <p>${missionPrinters.length} printers${prefs.sim ? ' simulated' : ''} · ${active} active · ${pendingJobs.length} pending · finish forecast ${esc(forecast)}</p>
         </div>
@@ -3326,7 +3326,7 @@ async function renderMissionControl() {
     }
   } catch (err) {
     if (!_missionLastHtml) {
-      el.innerHTML = `<div class="detail-placeholder">Mission Control unavailable.</div>`;
+      el.innerHTML = `<div class="detail-placeholder">Flight Tower unavailable.</div>`;
     }
   } finally {
     _missionRenderInFlight = false;
@@ -3952,7 +3952,7 @@ function _statsMoistureWatchPanel(readings) {
       <div>
         <strong>${esc(w.title)}</strong>
         <span>${esc(w.detail)}</span>
-        ${w.level !== 'ok' && !w.persistent ? '<em>Tracking before Mission Control alert</em>' : ''}
+        ${w.level !== 'ok' && !w.persistent ? '<em>Tracking before Flight Tower alert</em>' : ''}
       </div>
       <b>${w.level === 'bad' ? 'Dry' : w.level === 'warn' ? 'Watch' : 'Stable'}</b>
     </a>`).join('');
