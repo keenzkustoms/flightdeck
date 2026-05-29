@@ -2417,6 +2417,76 @@ header {
   flex-shrink: 0;
 }
 
+.live-command-header {
+  display: grid;
+  grid-template-columns: minmax(10rem, 0.85fr) minmax(0, 1.5fr) auto;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid rgba(96,165,250,0.24);
+  border-left: 4px solid var(--tab-accent, var(--accent));
+  border-radius: 0.75rem;
+  background:
+    linear-gradient(90deg, rgba(59,130,246,0.1), rgba(59,130,246,0.02)),
+    var(--surface);
+}
+
+.live-printer-mark,
+.live-job-brief {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.live-printer-name {
+  color: inherit;
+  font-size: 1.4rem;
+  font-weight: 900;
+  letter-spacing: 0.01em;
+  line-height: 1.05;
+}
+
+.live-printer-shop,
+.live-job-kicker,
+.live-job-brief small,
+.live-strip-label,
+.live-strip-empty {
+  color: var(--muted);
+}
+
+.live-printer-shop {
+  margin-top: 0.18rem;
+  font-size: 0.76rem;
+}
+
+.live-job-kicker,
+.live-strip-label {
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.live-job-brief strong {
+  overflow: hidden;
+  margin-top: 0.2rem;
+  color: var(--text);
+  font-size: 0.95rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.live-job-brief small {
+  margin-top: 0.18rem;
+  font-size: 0.73rem;
+}
+
+.live-state-badge {
+  justify-self: end;
+  white-space: nowrap;
+}
+
 /* Camera hero */
 .camera-hero {
   width: 100%;
@@ -2454,6 +2524,135 @@ header {
   letter-spacing: 0.04em;
 }
 
+.camera-hud {
+  position: absolute;
+  left: 1rem;
+  right: 1rem;
+  bottom: 1rem;
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.8rem;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 0.7rem;
+  background: linear-gradient(180deg, rgba(6,9,18,0.5), rgba(6,9,18,0.84));
+  box-shadow: 0 14px 36px rgba(0,0,0,0.45);
+  pointer-events: none;
+}
+
+.camera-hud-main {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.camera-hud-main strong,
+.camera-hud-main span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.camera-hud-main strong {
+  color: #fff;
+  font-size: 0.95rem;
+}
+
+.camera-hud-main span {
+  color: #bfdbfe;
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
+.camera-hud-progress {
+  height: 3px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.16);
+}
+
+.camera-hud-progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--printing);
+}
+
+.camera-hud-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.live-strip {
+  display: grid;
+  grid-template-columns: 0.9fr 1.1fr;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+  flex-shrink: 0;
+}
+
+.live-strip-group {
+  min-width: 0;
+  padding: 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 0.7rem;
+  background: rgba(255,255,255,0.025);
+}
+
+.live-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.5rem;
+}
+
+.live-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  max-width: 100%;
+  padding: 0.28rem 0.5rem;
+  border: 1px solid rgba(96,165,250,0.22);
+  border-radius: 999px;
+  background: rgba(96,165,250,0.08);
+  color: var(--text);
+  text-decoration: none;
+  font-size: 0.72rem;
+}
+
+.live-chip em {
+  overflow: hidden;
+  color: #7aa2d8;
+  font-style: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.live-chip strong {
+  color: var(--text);
+  font-size: 0.74rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.live-spool-chip.live-chip-warn {
+  border-color: rgba(245,158,11,0.35);
+  background: rgba(245,158,11,0.08);
+}
+
+.live-spool-chip.live-chip-low {
+  border-color: rgba(239,68,68,0.4);
+  background: rgba(239,68,68,0.1);
+}
+
+.live-spool-chip.live-chip-warn strong { color: #f59e0b; }
+.live-spool-chip.live-chip-low strong { color: #ff5c6c; }
+
+.live-strip-empty {
+  font-size: 0.75rem;
+}
+
 /* Data panels */
 .detail-panels {
   display: flex;
@@ -2470,6 +2669,24 @@ header {
   .detail-left { flex: none; }
   .camera-hero { flex: none; aspect-ratio: 16 / 9; }
   .detail-right { width: auto; overflow-y: visible; }
+  .live-command-header,
+  .live-strip {
+    grid-template-columns: 1fr;
+  }
+  .live-state-badge {
+    justify-self: start;
+  }
+  .camera-hud {
+    left: 0.6rem;
+    right: 0.6rem;
+    bottom: 0.6rem;
+    padding: 0.65rem;
+  }
+  .camera-hud-main {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
 }
 
 .detail-panel {

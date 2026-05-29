@@ -1625,6 +1625,101 @@ function _detailSubTabs(id, active) {
   </div>`;
 }
 
+function _liveStateLabel(state) {
+  const labels = {
+    estop: 'E-stop',
+    error: 'Fault',
+    paused: 'Paused',
+    printing: 'Printing',
+    finished: 'Complete',
+    offline: 'Offline',
+    idle: 'Idle',
+  };
+  return labels[state] || state || 'Unknown';
+}
+
+function _liveEtaText(p) {
+  const job = p.job;
+  if (!job?.eta_seconds) return 'ETA unknown';
+  if (p.eta_calibration?.ratio != null) {
+    return `Flightdeck ${formatEta(Math.round(job.eta_seconds * p.eta_calibration.ratio))}`;
+  }
+  return `Slicer ${formatEta(job.eta_seconds)}`;
+}
+
+function _detailLiveHeader(p, printerColor, bannerTextColor) {
+  const stateLabel = _liveStateLabel(p.state);
+  const shop = p.custom_name && p.custom_name !== p.model_name ? p.custom_name : (p.shop_name || p.id);
+  const job = p.job;
+  const progress = job?.progress != null ? Math.round(job.progress * 100) : null;
+  const jobName = job ? jobDisplayName(job) : (p.idle_info?.['Last print'] || 'Ready for the next job');
+  const statusMeta = job
+    ? [progress != null ? `${progress}%` : '', _liveEtaText(p)].filter(Boolean).join(' · ')
+    : _dashboardIssueText(p);
+  return `<div class="live-command-header" style="--tab-accent:${printerColor}">
+    <div class="live-printer-mark" style="color:${bannerTextColor}">
+      <span class="live-printer-name">${esc(p.model_name || p.custom_name || p.id)}</span>
+      <span class="live-printer-shop">${esc(shop)}</span>
+    </div>
+    <div class="live-job-brief">
+      <span class="live-job-kicker">${job ? 'Now printing' : 'Status'}</span>
+      <strong title="${esc(job?.filename || jobName)}">${esc(jobName)}</strong>
+      <small>${esc(statusMeta)}</small>
+    </div>
+    <span class="badge badge-${esc(p.state || 'idle')} live-state-badge">${esc(stateLabel)}</span>
+  </div>`;
+}
+
+function _detailLiveTempChips(p, limit = 4) {
+  return Object.entries(p.temps || {})
+    .sort(([a], [b]) => (_TEMP_SORT[a] ?? 99) - (_TEMP_SORT[b] ?? 99))
+    .slice(0, limit)
+    .map(([k, r]) => {
+      const label = _TEMP_LABELS[k] ?? TEMP_LABELS[k] ?? k;
+      const target = Number(r.target || 0) > 0 ? `/${_toDisplayTemp(r.target)}${_tempUnitLabel()}` : '';
+      return `<span class="live-chip">
+        <em>${esc(label)}</em>
+        <strong class="${_tempClass(r.actual).trim()}">${_toDisplayTemp(r.actual)}${_tempUnitLabel()}${target}</strong>
+      </span>`;
+    }).join('');
+}
+
+function _detailLiveSpoolChips(p) {
+  const spools = (_latestSpoolsByPrinter[p.id] || []).slice(0, 6);
+  if (!spools.length) return '';
+  return spools.map(s => {
+    const pct = s.label_weight_g > 0 ? Math.round(Number(s.remaining_g || 0) * 100 / Number(s.label_weight_g || 1)) : 0;
+    const cls = pct < 20 ? ' live-chip-low' : pct < 50 ? ' live-chip-warn' : '';
+    return `<a class="live-chip live-spool-chip${cls}" href="#/spool/${s.id}">
+      <em>${esc([s.material, s.brand].filter(Boolean).join(' · ') || `Spool #${s.id}`)}</em>
+      <strong>#${s.id} · ${Math.round(Number(s.remaining_g || 0))}g</strong>
+    </a>`;
+  }).join('');
+}
+
+function _detailCameraHud(p) {
+  const job = p.job;
+  const progress = job?.progress != null ? Math.round(job.progress * 100) : 0;
+  const status = job
+    ? `<strong>${esc(jobDisplayName(job))}</strong><span>${progress}% · ${esc(_liveEtaText(p))}</span>`
+    : `<strong>${esc(_liveStateLabel(p.state))}</strong><span>${esc(_dashboardIssueText(p))}</span>`;
+  return `<div class="camera-hud-main">${status}</div>
+    ${job ? `<div class="camera-hud-progress"><span style="width:${progress}%"></span></div>` : ''}
+    <div class="camera-hud-chips">${_detailLiveTempChips(p, 3)}</div>`;
+}
+
+function _detailLiveStrip(p) {
+  const spoolChips = _detailLiveSpoolChips(p);
+  return `<div class="live-strip-group">
+      <span class="live-strip-label">Temperatures</span>
+      <div class="live-chip-row">${_detailLiveTempChips(p)}</div>
+    </div>
+    <div class="live-strip-group">
+      <span class="live-strip-label">Loaded</span>
+      <div class="live-chip-row">${spoolChips || '<span class="live-strip-empty">No Flightdeck spools assigned</span>'}</div>
+    </div>`;
+}
+
 function _detailPrintPanel(p) {
   const title = `<div class="detail-panel-title">Print Details</div>`;
 
@@ -3015,8 +3110,9 @@ async function renderPrinterDetail(id, subtab = 'live') {
       _detailSubTabs(id, 'live') +
       `<div class="detail-body">
         <div class="detail-left">
-          <div class="camera-name-banner" style="--tab-accent:${printerColor};color:${bannerTextColor}">${p.custom_name}</div>
-          <div class="camera-hero">${camHtml}</div>
+          <div id="detail-live-head">${_detailLiveHeader(p, printerColor, bannerTextColor)}</div>
+          <div class="camera-hero">${camHtml}<div class="camera-hud" id="detail-camera-hud">${_detailCameraHud(p)}</div></div>
+          <div class="live-strip" id="detail-live-strip">${_detailLiveStrip(p)}</div>
         </div>
         <div class="detail-right">
           <div class="detail-controls detail-controls-wrap">${_detailControls(id, p)}</div>
@@ -3078,6 +3174,14 @@ async function renderPrinterDetail(id, subtab = 'live') {
 
     const ctrlEl = el.querySelector('.detail-controls-wrap');
     if (ctrlEl) ctrlEl.innerHTML = _detailControls(id, p);
+    const printerColor = _printerColor(id);
+    const bannerTextColor = p.icon === 'bambu' ? '#22c55e' : p.icon === 'voron' ? '#ef4444' : 'var(--text)';
+    const headEl = el.querySelector('#detail-live-head');
+    if (headEl) headEl.innerHTML = _detailLiveHeader(p, printerColor, bannerTextColor);
+    const hudEl = el.querySelector('#detail-camera-hud');
+    if (hudEl) hudEl.innerHTML = _detailCameraHud(p);
+    const stripEl = el.querySelector('#detail-live-strip');
+    if (stripEl) stripEl.innerHTML = _detailLiveStrip(p);
     const printEl = el.querySelector('#detail-print');
     if (printEl) {
       const thumbCollapsed = !!printEl.querySelector('.detail-thumb.collapsed');

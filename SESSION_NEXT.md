@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 29 May 2026 (Session 28.57 Command palette result grouping)_
+_Last updated 29 May 2026 (Session 28.58 Live screen cockpit pass)_
 
 ## Current state
 
@@ -9,6 +9,37 @@ Service running at:
 - `http://flightdeck.local:8000`
 - `http://192.168.4.127:8000`
 - **`https://flightdeck.tail7de73e.ts.net`** (Tailscale Serve — HTTPS, used for PWA / notifications)
+
+---
+
+## What was built — Session 28.58 (Live screen cockpit pass — 29 May)
+
+The printer Live tab now has a stronger operator cockpit layout.
+
+### Frontend
+- Added a live command header above the camera with:
+  - printer/model identity
+  - shop name
+  - current job or status summary
+  - state badge
+- Added a camera HUD overlay with:
+  - active job/status
+  - progress bar when printing
+  - compact temperature chips
+- Added a live strip under the camera with:
+  - temperature chips
+  - loaded Flightdeck spool chips with remaining grams
+  - low/warn colour treatment for low loaded spools
+- Live refreshes update the header, HUD, and strip without rebuilding the whole camera stream.
+- Mobile layout stacks the new cockpit blocks cleanly.
+- Static cache-bust bumped:
+  - `style.css?v=133`
+  - `app.js?v=152`
+
+### Verification
+- JavaScript syntax check: `node --check app/static/app.js`
+- Whitespace check: `git diff --check`
+- Browser check on `#/printer/h2d` confirmed the live header, camera HUD, live strip, and detail panels render.
 
 ---
 
