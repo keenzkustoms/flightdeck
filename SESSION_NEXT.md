@@ -1283,8 +1283,9 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Moved the clock into the left-hand system status cluster for better header balance.
 - Swapped `Alerts` before the live radar so its dropdown opens inward instead of clipping off-screen.
 - Made the alerts dropdown viewport-fixed so it cannot clip off the right edge on narrow windows.
+- Added a deliberate mobile header stack: logo row, status row, then Alerts/Live row.
 - Replaced the small live dot with a larger animated radar sweep for live/reconnect state.
-- Static cache-bust bumped to `style.css?v=126` and `app.js?v=144`.
+- Static cache-bust bumped to `style.css?v=127` and `app.js?v=144`.
 
 ### Closing fixes (shipped same session)
 - **Bambu filament metadata**: `get_preview()` now called proactively on first poll of any new print (same trigger as AMS snapshot). One-shot FTP call per job; cached on `subtask_name`. Ensures `filament_weight_g` and `material` are always populated for spool deduction, even when nobody views the detail page.
