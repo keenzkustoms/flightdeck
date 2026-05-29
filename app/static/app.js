@@ -2644,7 +2644,7 @@ function _fileCompatiblePrinters(file) {
 }
 
 function _fileDeskTargetHtml(target) {
-  const files = target.files || [];
+  const files = (target.files || []).filter(f => f.kind !== 'dir' && _fileCompatiblePrinters(f).length);
   const queueButton = f => {
     if (f.kind === 'dir' || !_fileCompatiblePrinters(f).length) return '';
     return `<button class="filedesk-action-btn" data-file-action="queue" data-source-id="${esc(target.id)}" data-path="${esc(f.path || f.name)}">Queue</button>`;
@@ -3700,8 +3700,18 @@ async function _queueHandleAction(e) {
   btn.disabled = true;
   try {
     if (action === 'delete') {
-      if (!confirm('Remove this job from the queue?')) { btn.disabled = false; return; }
-      await fetch(`/api/queue/${id}`, { method: 'DELETE' });
+      btn.disabled = false;
+      _modal.show('Remove this job from the queue?', async () => {
+        btn.disabled = true;
+        try {
+          await fetch(`/api/queue/${id}`, { method: 'DELETE' });
+          await renderQueueView();
+        } catch (err) {
+          showToast('Queue action failed', err.message || '', 'error');
+          btn.disabled = false;
+        }
+      });
+      return;
     } else if (action === 'up' || action === 'down') {
       await fetch(`/api/queue/${id}/reorder`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -3719,7 +3729,7 @@ async function _queueHandleAction(e) {
     await renderQueueView();
   } catch (err) {
     btn.disabled = false;
-    alert(`Failed: ${err.message}`);
+    showToast('Queue action failed', err.message || '', 'error');
   }
 }
 

@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 29 May 2026 (Session 28.50 File Desk queue picker polish)_
+_Last updated 29 May 2026 (Session 28.51 File Desk and Queue native dialog cleanup)_
 
 ## Current state
 
@@ -1139,6 +1139,12 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Removed the separate Path/Actions columns; the path now sits under the filename in muted text.
 - Queue cancel/close no longer leaves stale `Queued`/clicked button state behind when returning to Files.
 - Static cache-bust bumped to `style.css?v=102` and `app.js?v=118`.
+
+### File Desk and Queue native dialog cleanup
+- File Desk now hides non-printable rows, so Bambu utility folders such as `ipcam`, `timelapse`, and `System Volume Information` no longer appear as printable items even when the SD card reports them as files.
+- Queue job removal now uses the in-app Flightdeck confirmation modal instead of the browser `confirm()` dialog.
+- Queue action failures now use Flightdeck toast errors instead of browser alerts.
+- Static cache-bust bumped to `app.js?v=119`.
 
 ### Closing fixes (shipped same session)
 - **Bambu filament metadata**: `get_preview()` now called proactively on first poll of any new print (same trigger as AMS snapshot). One-shot FTP call per job; cached on `subtask_name`. Ensures `filament_weight_g` and `material` are always populated for spool deduction, even when nobody views the detail page.
