@@ -2645,15 +2645,23 @@ function _fileCompatiblePrinters(file) {
 
 function _fileDeskTargetHtml(target) {
   const files = target.files || [];
+  const queueButton = f => {
+    if (f.kind === 'dir' || !_fileCompatiblePrinters(f).length) return '';
+    return `<button class="filedesk-action-btn" data-file-action="queue" data-source-id="${esc(target.id)}" data-path="${esc(f.path || f.name)}">Queue</button>`;
+  };
   const rows = files.length ? files.map(f => `
     <tr>
       <td><span class="filedesk-kind filedesk-kind-${_fileKindClass(f.kind)}">${esc(f.kind || 'file')}</span></td>
-      <td class="filedesk-name" title="${esc(f.path || f.name)}">${esc(f.name || f.path || 'File')}</td>
+      <td class="filedesk-name-cell" title="${esc(f.path || f.name)}">
+        <span class="filedesk-name-main">
+          <strong class="filedesk-name">${esc(f.name || f.path || 'File')}</strong>
+          <span class="filedesk-inline-path">${esc(f.path || '')}</span>
+        </span>
+        ${queueButton(f)}
+      </td>
       <td>${_fmtBytes(f.size)}</td>
       <td>${esc(_fileModifiedLabel(f.modified))}</td>
-      <td class="filedesk-path" title="${esc(f.path || '')}">${esc(f.path || '')}</td>
-      <td class="filedesk-actions">${f.kind === 'dir' || !_fileCompatiblePrinters(f).length ? '' : `<button class="filedesk-action-btn" data-file-action="queue" data-source-id="${esc(target.id)}" data-path="${esc(f.path || f.name)}">Queue</button>`}</td>
-    </tr>`).join('') : `<tr><td colspan="6" class="filedesk-empty">${target.error ? esc(target.error) : 'No files found.'}</td></tr>`;
+    </tr>`).join('') : `<tr><td colspan="4" class="filedesk-empty">${target.error ? esc(target.error) : 'No files found.'}</td></tr>`;
   const formatNote = target.actions?.format_sd
     ? `<span class="filedesk-format-note">Bambu SD format: guarded action planned</span>`
     : '';
@@ -2671,7 +2679,7 @@ function _fileDeskTargetHtml(target) {
     ${formatNote}
     <div class="filedesk-table-wrap">
       <table class="filedesk-table">
-        <thead><tr><th>Type</th><th>Name</th><th>Size</th><th>Modified</th><th>Path</th><th>Actions</th></tr></thead>
+        <thead><tr><th>Type</th><th>Name</th><th>Size</th><th>Modified</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
     </div>
@@ -2718,40 +2726,75 @@ async function renderFileDeskView() {
 
 function _attachFileDeskEvents(el) {
   el.querySelectorAll('[data-file-action="queue"]').forEach(btn => {
-    btn.addEventListener('click', async () => {
+    btn.addEventListener('click', () => {
       const sourceId = btn.dataset.sourceId;
       const path = btn.dataset.path;
       const file = (_fileDeskTargets.find(t => t.id === sourceId)?.files || [])
         .find(f => (f.path || f.name) === path);
       const printers = _fileCompatiblePrinters(file);
       if (!printers.length) return;
-      const labels = printers.map((p, i) => `${i + 1}. ${p.custom_name || p.model_name}`).join('\n');
-      const pick = prompt(`Queue to which printer?\n${labels}`, '1');
-      if (pick === null) return;
-      const printer = printers[Number(pick) - 1];
-      if (!printer) {
-        alert('Invalid printer selection');
-        return;
-      }
-      const old = btn.textContent;
-      btn.disabled = true;
-      btn.textContent = 'Adding';
-      try {
-        const r = await fetch('/api/files/queue', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ source_id: sourceId, path, printer_id: printer.id }),
-        });
+      _openFileQueueDialog({ sourceId, path, file, printers });
+    });
+  });
+}
+
+function _openFileQueueDialog({ sourceId, path, file, printers }) {
+  document.querySelector('.filedesk-queue-dialog')?.remove();
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay filedesk-queue-dialog';
+  overlay.innerHTML = `
+    <div class="modal-box filedesk-queue-box" role="dialog" aria-modal="true" aria-label="Queue file">
+      <div class="filedesk-queue-head">
+        <div>
+          <div class="mission-eyebrow">Queue File</div>
+          <h3>${esc(file?.name || path || 'File')}</h3>
+          <span>${esc(path || '')}</span>
+        </div>
+        <button class="filedesk-dialog-close" data-dialog-close aria-label="Close">x</button>
+      </div>
+      <div class="filedesk-queue-options">
+        ${printers.map(p => `<button class="filedesk-printer-choice" data-printer-id="${esc(p.id)}">
+          <strong>${esc(p.custom_name || p.model_name || p.id)}</strong>
+          <span>${esc(p.shop_name || p.model_name || p.kind || '')}</span>
+        </button>`).join('')}
+      </div>
+      <div class="filedesk-dialog-error" hidden></div>
+      <div class="modal-actions">
+        <button class="modal-btn" data-dialog-close>Cancel</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+
+  const close = () => overlay.remove();
+  overlay.addEventListener('click', e => {
+    if (e.target === overlay || e.target.closest('[data-dialog-close]')) {
+      close();
+      return;
+    }
+    const choice = e.target.closest('[data-printer-id]');
+    if (!choice) return;
+    const errEl = overlay.querySelector('.filedesk-dialog-error');
+    overlay.querySelectorAll('.filedesk-printer-choice').forEach(b => { b.disabled = true; });
+    choice.classList.add('is-working');
+    choice.querySelector('span').textContent = 'Adding to queue...';
+    fetch('/api/files/queue', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source_id: sourceId, path, printer_id: choice.dataset.printerId }),
+    })
+      .then(async r => {
         const data = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(data.detail || 'Unable to queue file');
-        btn.textContent = 'Queued';
-        setTimeout(() => { location.hash = '#/queue'; }, 450);
-      } catch (err) {
-        alert(err.message || 'Unable to queue file');
-        btn.textContent = old;
-        btn.disabled = false;
-      }
-    });
+        _fileDeskLastHtml = '';
+        close();
+        location.hash = '#/queue';
+      })
+      .catch(err => {
+        errEl.textContent = err.message || 'Unable to queue file';
+        errEl.hidden = false;
+        choice.classList.remove('is-working');
+        overlay.querySelectorAll('.filedesk-printer-choice').forEach(b => { b.disabled = false; });
+      });
   });
 }
 

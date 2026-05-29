@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 29 May 2026 (Session 28.49 Demote historical health alarm)_
+_Last updated 29 May 2026 (Session 28.50 File Desk queue picker polish)_
 
 ## Current state
 
@@ -1132,6 +1132,13 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Queue action only appears for compatible target types: `.3mf/.gcode.3mf` to Bambu, `.gcode/.gcode.gz/.ufp` to Moonraker.
 - File Desk rows now have a `Queue` action that prompts for the compatible target printer and then jumps to Queue.
 - Static cache-bust bumped to `style.css?v=101` and `app.js?v=117`.
+
+### File Desk queue picker polish
+- Replaced the native browser `prompt()`/`alert()` queue flow with an in-app Flightdeck modal picker.
+- Moved the `Queue` action into the filename cell so it is visible without horizontal scrolling.
+- Removed the separate Path/Actions columns; the path now sits under the filename in muted text.
+- Queue cancel/close no longer leaves stale `Queued`/clicked button state behind when returning to Files.
+- Static cache-bust bumped to `style.css?v=102` and `app.js?v=118`.
 
 ### Closing fixes (shipped same session)
 - **Bambu filament metadata**: `get_preview()` now called proactively on first poll of any new print (same trigger as AMS snapshot). One-shot FTP call per job; cached on `subtask_name`. Ensures `filament_weight_g` and `material` are always populated for spool deduction, even when nobody views the detail page.
