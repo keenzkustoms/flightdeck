@@ -2344,6 +2344,21 @@ def queue_get(job_id: int) -> Optional[dict]:
     return dict(row) if row else None
 
 
+def queue_active_job(printer_id: str) -> Optional[dict]:
+    with _conn() as conn:
+        row = conn.execute(
+            """SELECT id, printer_id, filename, file_path, status,
+                      estimated_seconds, filament_weight_g, filament_type, filament_colors,
+                      started_at
+               FROM print_queue
+               WHERE printer_id = ? AND status IN ('printing', 'uploading')
+               ORDER BY started_at DESC, id DESC
+               LIMIT 1""",
+            (printer_id,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
 def queue_update_metadata(
     job_id: int,
     *,

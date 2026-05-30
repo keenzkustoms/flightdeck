@@ -170,6 +170,8 @@ class BambuPrinter:
             filename = self._printer.get_file_name()
             pct = self._printer.get_percentage()
             subtask = self._printer.subtask_name() or None
+            if _is_plate_gcode(filename) and not subtask:
+                subtask = _active_queue_subtask(self.id)
             if filename and pct is not None:
                 remaining = self._printer.get_time()
                 eta = int(remaining * 60) if remaining is not None else None
@@ -624,6 +626,9 @@ class BambuPrinter:
         if not self._connected:
             return None
         subtask = self._printer.subtask_name()
+        filename = self._printer.get_file_name()
+        if _is_plate_gcode(filename) and not subtask:
+            subtask = _active_queue_subtask(self.id)
         if not subtask:
             return None
         if self._preview_cache and self._preview_cache[0] == subtask:
@@ -787,6 +792,18 @@ def _build_bambu_ams_mappings(ams_mapping: list[int] | None) -> tuple[list[int],
             flat.append(tray_id)
             detailed.append({"ams_id": tray_id // 4, "slot_id": tray_id % 4})
     return flat, detailed
+
+
+def _is_plate_gcode(filename: Optional[str]) -> bool:
+    return bool(re.search(r"(?:^|[/\\])plate_\d+\.gcode$", str(filename or ""), re.IGNORECASE))
+
+
+def _active_queue_subtask(printer_id: str) -> Optional[str]:
+    row = db.queue_active_job(printer_id)
+    if not row:
+        return None
+    name = str(row.get("filename") or "").rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+    return name.removesuffix(".gcode.3mf").removesuffix(".3mf").removesuffix(".gcode") or None
 
 
 def _norm_bambu_hex(value: Optional[str]) -> str:

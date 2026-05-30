@@ -1,5 +1,18 @@
 # Flightdeck — next session brief
-_Last updated 30 May 2026 (Session 28.84 Bambu queue AMS mapping)_
+_Last updated 30 May 2026 (Session 28.85 Bambu queued plate display fallback)_
+
+## What was built - Session 28.85 (Bambu queued plate display fallback - 30 May)
+
+Flightdeck now keeps queued Bambu 3MF job names/previews visible when firmware reports only an internal plate file.
+
+### Backend
+- Added an active queue job lookup.
+- Bambu live status now resolves `/data/Metadata/plate_1.gcode` back to the active queue filename when the printer does not report a subtask name.
+- Bambu preview/object lookup now uses that active queue filename as the cache key, so queued multi-object 3MF previews and object exclusion can stay available.
+
+### Verification
+- `python3 -m py_compile app/db.py app/printers/bambu.py`
+- `git diff --check`
 
 ## What was built - Session 28.84 (Bambu queue AMS mapping - 30 May)
 
