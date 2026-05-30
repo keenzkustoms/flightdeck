@@ -7999,22 +7999,23 @@ select.settings-input { cursor: pointer; }
 
 /* -- File Desk ------------------------------------------------------------- */
 .filedesk-page { min-height: 100%; }
-.filedesk-shell { max-width: 1480px; margin: 0 auto; padding: 2rem; }
-.filedesk-hero { display: flex; justify-content: space-between; align-items: flex-end; gap: 1rem; margin-bottom: 0.8rem; }
-.filedesk-hero h1 { margin-top: 0.25rem; font-size: 2rem; line-height: 1; }
+.filedesk-shell { max-width: 1720px; margin: 0 auto; padding: 1.55rem; }
+.filedesk-hero { display: flex; justify-content: space-between; align-items: flex-end; gap: 1rem; margin-bottom: 0.65rem; }
+.filedesk-hero h1 { margin-top: 0.2rem; font-size: 1.72rem; line-height: 1; }
 .filedesk-hero p, .filedesk-library-path { color: var(--muted); font-size: 0.82rem; }
-.filedesk-library-path { border: 1px solid var(--border); border-radius: 0.45rem; background: var(--surface); padding: 0.55rem 0.7rem; max-width: 34rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.filedesk-hero p { margin: 0.35rem 0 0; }
+.filedesk-library-path { border: 1px solid var(--border); border-radius: 0.45rem; background: var(--surface); padding: 0.45rem 0.62rem; max-width: 34rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .filedesk-overview {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 0.65rem;
-  margin-bottom: 0.8rem;
+  gap: 0.5rem;
+  margin-bottom: 0.65rem;
 }
 .filedesk-overview div {
   border: 1px solid var(--border);
   border-radius: 0.55rem;
   background: rgba(255,255,255,0.025);
-  padding: 0.7rem 0.8rem;
+  padding: 0.55rem 0.68rem;
 }
 .filedesk-overview strong {
   display: block;
@@ -8031,7 +8032,7 @@ select.settings-input { cursor: pointer; }
   text-transform: uppercase;
 }
 .printbay-reprints {
-  margin-bottom: 0.8rem;
+  margin-bottom: 0.7rem;
   border: 1px solid var(--border);
   border-radius: 0.65rem;
   background: var(--surface);
@@ -8042,7 +8043,7 @@ select.settings-input { cursor: pointer; }
   align-items: flex-end;
   justify-content: space-between;
   gap: 1rem;
-  padding: 0.8rem 0.9rem;
+  padding: 0.62rem 0.78rem;
   border-bottom: 1px solid var(--border);
   background: rgba(255,255,255,0.025);
 }
@@ -8055,15 +8056,10 @@ select.settings-input { cursor: pointer; }
   color: var(--muted);
   font-size: 0.72rem;
 }
-.printbay-reprint-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
-  gap: 0.65rem;
-  padding: 0.8rem 0.9rem;
-}
+.printbay-reprint-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); gap: 0.5rem; padding: 0.62rem 0.78rem; }
 .printbay-reprint-card {
   display: grid;
-  grid-template-columns: 5.2rem minmax(0, 1fr);
+  grid-template-columns: 4.35rem minmax(0, 1fr);
   min-width: 0;
   border: 1px solid rgba(122,162,216,0.18);
   border-radius: 0.55rem;
@@ -8073,7 +8069,7 @@ select.settings-input { cursor: pointer; }
 .printbay-reprint-thumb {
   display: grid;
   place-items: center;
-  min-height: 5.2rem;
+  min-height: 4.35rem;
   background: rgba(3,7,18,0.45);
   color: var(--muted);
   font-size: 0.64rem;
@@ -8088,12 +8084,7 @@ select.settings-input { cursor: pointer; }
 .printbay-reprint-done { border-right: 2px solid #22c55e; }
 .printbay-reprint-warn { border-right: 2px solid #f59e0b; }
 .printbay-reprint-bad { border-right: 2px solid #ef4444; }
-.printbay-reprint-main {
-  display: grid;
-  gap: 0.38rem;
-  min-width: 0;
-  padding: 0.58rem 0.62rem;
-}
+.printbay-reprint-main { display: grid; gap: 0.28rem; min-width: 0; padding: 0.48rem 0.55rem; }
 .printbay-reprint-head {
   display: flex;
   justify-content: space-between;
@@ -8181,9 +8172,9 @@ select.settings-input { cursor: pointer; }
   color: var(--muted) !important;
   font-size: 0.64rem;
 }
-.filedesk-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.8rem; }
+.filedesk-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(26rem, 1fr)); gap: 0.7rem; align-items: start; }
 .filedesk-target { min-width: 0; border: 1px solid var(--border); border-radius: 0.65rem; background: var(--surface); overflow: hidden; }
-.filedesk-target-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; border-bottom: 1px solid var(--border); background: rgba(255,255,255,0.025); padding: 0.8rem 0.9rem; }
+.filedesk-target-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; border-bottom: 1px solid var(--border); background: rgba(255,255,255,0.025); padding: 0.62rem 0.72rem; }
 .filedesk-target-head h2 { margin: 0; color: var(--text); font-size: 1rem; }
 .filedesk-target-head span, .filedesk-target-meta span { display: block; margin-top: 0.2rem; color: var(--muted); font-size: 0.68rem; }
 .filedesk-target-meta { text-align: right; }
@@ -8192,7 +8183,7 @@ select.settings-input { cursor: pointer; }
   display: flex;
   flex-wrap: wrap;
   gap: 0.35rem;
-  padding: 0.55rem 0.9rem;
+  padding: 0.42rem 0.72rem;
   border-bottom: 1px solid rgba(122,162,216,0.12);
 }
 .filedesk-source-strip span {
@@ -8204,7 +8195,7 @@ select.settings-input { cursor: pointer; }
   font-size: 0.64rem;
 }
 .filedesk-source-strip strong { color: var(--text); }
-.filedesk-format-row { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; margin: 0.7rem 0.9rem 0; border: 1px solid rgba(245,158,11,0.28); border-radius: 0.45rem; background: rgba(245,158,11,0.07); padding: 0.45rem 0.55rem; }
+.filedesk-format-row { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; margin: 0.55rem 0.72rem 0; border: 1px solid rgba(245,158,11,0.28); border-radius: 0.45rem; background: rgba(245,158,11,0.07); padding: 0.38rem 0.5rem; }
 .filedesk-format-note { color: #fcd34d; font-size: 0.72rem; line-height: 1.35; }
 .filedesk-danger-btn {
   border: 1px solid #ef4444;
@@ -8223,7 +8214,7 @@ select.settings-input { cursor: pointer; }
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
-  padding: 0.55rem 0.9rem;
+  padding: 0.42rem 0.72rem;
   border-bottom: 1px solid rgba(122,162,216,0.12);
 }
 .filedesk-bulk-count { color: var(--muted); font-size: 0.72rem; }
@@ -8235,7 +8226,7 @@ select.settings-input { cursor: pointer; }
   display: flex;
   justify-content: space-between;
   gap: 1rem;
-  padding: 0.46rem 0.9rem;
+  padding: 0.38rem 0.72rem;
   border-bottom: 1px solid var(--border);
   background: var(--card);
   color: var(--muted);
@@ -8247,16 +8238,16 @@ select.settings-input { cursor: pointer; }
 .filedesk-list-head label { display: inline-flex; align-items: center; gap: 0.38rem; cursor: pointer; }
 .filedesk-list-wrap {
   display: grid;
-  max-height: 25rem;
+  max-height: clamp(18rem, 42vh, 34rem);
   overflow: auto;
 }
 .filedesk-select, .filedesk-select-all { width: 0.9rem; height: 0.9rem; accent-color: var(--accent); cursor: pointer; }
 .filedesk-file-row {
   display: grid;
-  grid-template-columns: auto minmax(0, 1.35fr) minmax(9rem, 0.7fr) auto;
-  gap: 0.65rem;
+  grid-template-columns: auto minmax(0, 1.15fr) minmax(7rem, 0.62fr) auto;
+  gap: 0.45rem;
   align-items: center;
-  padding: 0.55rem 0.9rem;
+  padding: 0.45rem 0.72rem;
   border-bottom: 1px solid rgba(122,162,216,0.12);
 }
 .filedesk-file-row:hover { background: rgba(96,165,250,0.035); }
@@ -8265,8 +8256,8 @@ select.settings-input { cursor: pointer; }
 .filedesk-file-meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.42rem;
-  margin-top: 0.18rem;
+  gap: 0.32rem;
+  margin-top: 0.12rem;
   color: var(--muted);
   font-size: 0.65rem;
 }

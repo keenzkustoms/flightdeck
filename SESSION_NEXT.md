@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 30 May 2026 (Session 28.73 Reprint Bay run memory)_
+_Last updated 30 May 2026 (Session 28.74 Print Bay density pass)_
 
 ## Current state
 
@@ -9,6 +9,22 @@ Service running at:
 - `http://flightdeck.local:8000`
 - `http://192.168.4.127:8000`
 - **`https://flightdeck.tail7de73e.ts.net`** (Tailscale Serve — HTTPS, used for PWA / notifications)
+
+---
+
+## What was built — Session 28.74 (Print Bay density pass — 30 May)
+
+Print Bay now uses the available screen space more like a dispatch board.
+
+### Frontend
+- Widened the Print Bay canvas for large desktop displays.
+- Compacted the hero, overview counters, and Reprint Bay cards.
+- Source panels now flow into more across-the-page lanes instead of being locked to two wide stacks.
+- File rows are tighter, with shorter spacing and a viewport-aware scroll inside each source lane.
+- Static cache-bust bumped to `style.css?v=146`.
+
+### Verification
+- `git diff --check`
 
 ---
 
