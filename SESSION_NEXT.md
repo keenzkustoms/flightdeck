@@ -1,5 +1,20 @@
 # Flightdeck — next session brief
-_Last updated 30 May 2026 (Session 28.80 Bambu pause alarm reasons)_
+_Last updated 30 May 2026 (Session 28.81 Bambu AMS mapping start command)_
+
+## What was built - Session 28.81 (Bambu AMS mapping start command - 30 May)
+
+Flightdeck now derives Bambu AMS mapping for relay-started multicolour jobs instead of always sending slot `[0]`.
+
+### Backend
+- Relay upload now stores parsed 3MF filament colour metadata in the pending Bambu upload record.
+- Added a flattened live AMS slot reader to `BambuPrinter`.
+- Bambu print start now builds `ams_mapping` by matching 3MF material/colour requirements to the printer's currently reported AMS slots.
+- Start decisions now log the mapping used and the material/colour-to-slot matches.
+- If metadata or live AMS slots are unavailable, Flightdeck falls back to slot `[0]` and records why in the decision log.
+
+### Verification
+- `python3 -m py_compile app/relay.py app/printers/bambu.py`
+- `git diff --check`
 
 ## What was built - Session 28.80 (Bambu pause alarm reasons - 30 May)
 

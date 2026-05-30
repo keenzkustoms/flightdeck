@@ -24,6 +24,96 @@ _pending: dict[tuple[str, str], dict] = {}
 _PENDING_TTL = 300  # seconds — stale entries from upload-without-start
 
 
+def _norm_hex(value: Optional[str]) -> str:
+    h = str(value or "").strip().lstrip("#")[:6].upper()
+    return f"#{h}" if re.fullmatch(r"[0-9A-F]{6}", h) else ""
+
+
+def _hex_dist(a: Optional[str], b: Optional[str]) -> float:
+    ha, hb = _norm_hex(a), _norm_hex(b)
+    if not ha or not hb:
+        return 999.0
+    va = [int(ha[i:i + 2], 16) for i in (1, 3, 5)]
+    vb = [int(hb[i:i + 2], 16) for i in (1, 3, 5)]
+    return sum((x - y) ** 2 for x, y in zip(va, vb)) ** 0.5
+
+
+def _norm_material(value: Optional[str]) -> str:
+    return re.sub(r"[^a-z0-9]+", "", (value or "").lower())
+
+
+def _bambu_preview_filaments(meta: dict) -> list[dict]:
+    raw = meta.get("filament_colors")
+    if not raw:
+        return []
+    if isinstance(raw, list):
+        rows = raw
+    else:
+        try:
+            rows = json.loads(raw)
+        except Exception:
+            return []
+    out = []
+    for row in rows if isinstance(rows, list) else []:
+        if not isinstance(row, dict):
+            continue
+        color = _norm_hex(row.get("color"))
+        material = _norm_material(row.get("type") or meta.get("filament_type"))
+        if color or material:
+            out.append({"color": color, "material": material, "used_g": row.get("used_g")})
+    return out
+
+
+def _bambu_ams_mapping(meta: dict, printer: "BambuPrinter") -> tuple[list[int], str]:
+    requirements = _bambu_preview_filaments(meta)
+    if not requirements:
+        return [0], "no 3MF filament metadata; fallback to slot 0"
+
+    try:
+        slots = printer.ams_slots()
+    except Exception as exc:
+        return [0], f"AMS slot read failed ({exc}); fallback to slot 0"
+
+    available = []
+    for slot in slots:
+        material = _norm_material(slot.get("type"))
+        color = _norm_hex(slot.get("color"))
+        if material:
+            available.append({**slot, "material_norm": material, "color_norm": color})
+    if not available:
+        return [0], "no loaded AMS slots reported; fallback to slot 0"
+
+    mapping: list[int] = []
+    used: set[int] = set()
+    notes: list[str] = []
+    for req in requirements:
+        material_matches = [
+            slot for slot in available
+            if req["material"] and (
+                req["material"] == slot["material_norm"]
+                or req["material"] in slot["material_norm"]
+                or slot["material_norm"] in req["material"]
+            )
+        ] or available
+        ranked = sorted(
+            material_matches,
+            key=lambda slot: (
+                slot["global_idx"] in used,
+                _hex_dist(req.get("color"), slot.get("color_norm")),
+                slot["global_idx"],
+            ),
+        )
+        best = ranked[0]
+        mapping.append(int(best["global_idx"]))
+        used.add(int(best["global_idx"]))
+        notes.append(
+            f"{req.get('material') or 'unknown'} {req.get('color') or ''}"
+            f"→{best['global_idx']} {best.get('type') or ''} {best.get('color') or ''}"
+        )
+
+    return mapping or [0], "; ".join(notes)
+
+
 def _evict_stale() -> None:
     cutoff = time.monotonic() - _PENDING_TTL
     stale = [k for k, v in _pending.items() if v["ts"] < cutoff]
@@ -71,6 +161,7 @@ async def bambu_upload(
         "estimated_seconds": preview.estimated_total_seconds if preview else None,
         "filament_g": preview.filament_weight_g if preview else None,
         "filament_type": preview.filament_type if preview else None,
+        "filament_colors": preview.filament_colors if preview else None,
         "ts": time.monotonic(),
     }
 
@@ -95,29 +186,28 @@ async def bambu_print_start(
     source_ip: str,
     printer: "BambuPrinter",
 ) -> None:
-    """Issue MQTT project_file command to Bambu printer.
-
-    SCOPE NOTE: ams_mapping defaults to [0] (single tray / AMS tray 0).
-    Multi-colour ams_mapping passthrough is a known gap — surface if needed.
-    """
+    """Issue MQTT project_file command to Bambu printer."""
+    meta = _pending.get((printer_id, filename), {})
+    ams_mapping, mapping_note = _bambu_ams_mapping(meta, printer)
     try:
         await asyncio.to_thread(
             printer._printer.start_print,
             filename,
             1,      # plate_number — OrcaSlicer sends single-plate 3mf
             True,   # use_ams
-            [0],    # ams_mapping — default; see scope note above
+            ams_mapping,
         )
     except Exception as exc:
         db.log_decision(printer_id, "relay_start_failed",
-                        f"file={filename} source={source_ip} error={exc}")
+                        f"file={filename} source={source_ip} mapping={ams_mapping} error={exc}")
         raise
 
-    meta = _pending.get((printer_id, filename), {})
     db.log_decision(printer_id, "relay_print_start", json.dumps({
         "file": filename,
         "source": source_ip,
         "eta_s": meta.get("estimated_seconds"),
+        "ams_mapping": ams_mapping,
+        "mapping_note": mapping_note,
     }))
     log.info("relay: print started %s → %s from %s", filename, printer_id, source_ip)
 

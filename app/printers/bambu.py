@@ -625,6 +625,19 @@ class BambuPrinter:
         """Pre-populate preview cache from relay upload; avoids FTP fetch for H2D."""
         self._preview_cache = (subtask_name, preview)
 
+    def ams_slots(self) -> list[dict]:
+        """Return flattened live AMS slots with Bambu's global slot index."""
+        dump = self._printer.mqtt_dump()
+        slots = []
+        for unit in _parse_ams(dump.get("print", {})):
+            unit_id = int(unit.get("unit", 0))
+            for slot in unit.get("slots") or []:
+                if slot.get("empty"):
+                    continue
+                idx = unit_id * 4 + int(slot.get("idx", 0))
+                slots.append({**slot, "unit": unit_id, "global_idx": idx})
+        return slots
+
     def send_file(self, file_path: str, filename: str) -> None:
         """Upload a .gcode.3mf to the printer via FTPS then send the MQTT print command."""
         from .bambu_ftp import upload_bambu_file
