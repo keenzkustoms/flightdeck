@@ -8,6 +8,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 import bambulabs_api as bl
+from bambulabs_api.filament_info import AMSFilamentSettings
 from bambulabs_api.mqtt_client import PrinterMQTTClient
 
 from .. import db
@@ -17,6 +18,71 @@ log = logging.getLogger(__name__)
 
 FINISHED_TTL = timedelta(minutes=30)
 _BAMBU_PREVIEW_FAILED = object()  # sentinel: FTP failed, don't retry until job changes
+_BAMBU_PROFILE_ALIASES = {
+    "P461bccf": {
+        "brand": "Siddament",
+        "profile": "Siddament ASA",
+        "material": "ASA",
+        "tray_info_idx": "P461bccf",
+        "tray_type": "ASA",
+        "nozzle_temp_min": 240,
+        "nozzle_temp_max": 280,
+    },
+    "GFB98": {
+        "brand": "Generic",
+        "profile": "Generic ASA",
+        "material": "ASA",
+        "tray_info_idx": "GFB98",
+        "tray_type": "ASA",
+        "nozzle_temp_min": 240,
+        "nozzle_temp_max": 270,
+    },
+    "GFB01": {
+        "brand": "Bambu Lab",
+        "profile": "Bambu ASA",
+        "material": "ASA",
+        "tray_info_idx": "GFB01",
+        "tray_type": "ASA",
+        "nozzle_temp_min": 240,
+        "nozzle_temp_max": 270,
+    },
+    "GFL99": {
+        "brand": "Generic",
+        "profile": "Generic PLA",
+        "material": "PLA",
+        "tray_info_idx": "GFL99",
+        "tray_type": "PLA",
+        "nozzle_temp_min": 190,
+        "nozzle_temp_max": 250,
+    },
+    "GFA00": {
+        "brand": "Bambu Lab",
+        "profile": "Bambu PLA Basic",
+        "material": "PLA",
+        "tray_info_idx": "GFA00",
+        "tray_type": "PLA",
+        "nozzle_temp_min": 190,
+        "nozzle_temp_max": 250,
+    },
+    "GFG99": {
+        "brand": "Generic",
+        "profile": "Generic PETG",
+        "material": "PETG",
+        "tray_info_idx": "GFG99",
+        "tray_type": "PETG",
+        "nozzle_temp_min": 220,
+        "nozzle_temp_max": 260,
+    },
+    "GFU99": {
+        "brand": "Generic",
+        "profile": "Generic TPU",
+        "material": "TPU",
+        "tray_info_idx": "GFU99",
+        "tray_type": "TPU",
+        "nozzle_temp_min": 200,
+        "nozzle_temp_max": 250,
+    },
+}
 
 
 class _SequencedMQTTClient(PrinterMQTTClient):
@@ -994,7 +1060,29 @@ def _split_ams_slot(slot: int) -> tuple[int, int]:
     return slot // 4, slot % 4
 
 
+def _bambu_profile_for_idx(idx: Optional[str]) -> dict:
+    return _BAMBU_PROFILE_ALIASES.get(str(idx or "").strip(), {})
+
+
+def _custom_filament_for_spool(spool: dict) -> Optional[AMSFilamentSettings]:
+    material = str(spool.get("material") or "").strip().upper()
+    brand = str(spool.get("brand") or "").strip().lower()
+    if material == "ASA" and "siddament" in brand:
+        profile = _BAMBU_PROFILE_ALIASES["P461bccf"]
+        return AMSFilamentSettings(
+            profile["tray_info_idx"],
+            profile["nozzle_temp_min"],
+            profile["nozzle_temp_max"],
+            profile["tray_type"],
+        )
+    return None
+
+
 def _filament_for_spool(spool: dict):
+    custom = _custom_filament_for_spool(spool)
+    if custom:
+        return custom
+
     material = str(spool.get("material") or "").upper()
     subtype = str(spool.get("subtype") or "").upper()
     label = f"{material} {subtype}"
@@ -1070,6 +1158,10 @@ def _parse_ams(dump: dict) -> list[dict]:
             tray_id = int(tray_data.get("id", 0))
             tray_type = tray_data.get("tray_type", "")
             empty = not tray_type
+            profile_id = str(tray_data.get("tray_info_idx") or "")
+            profile = _bambu_profile_for_idx(profile_id)
+            brand = tray_data.get("tray_sub_brands", "") or profile.get("brand", "")
+            profile_name = tray_data.get("tray_id_name", "") or profile.get("profile", "")
 
             hex_c = tray_data.get("tray_color", "")
             if len(hex_c) >= 6 and hex_c.upper() not in ("00000000", ""):
@@ -1083,7 +1175,9 @@ def _parse_ams(dump: dict) -> list[dict]:
                 "idx": tray_id,
                 "type": tray_type,
                 "color": color,
-                "brand": tray_data.get("tray_sub_brands", ""),
+                "brand": brand,
+                "profile_id": profile_id,
+                "profile_name": profile_name,
                 "active": active,
                 "empty": empty,
             })
@@ -1145,9 +1239,15 @@ def _snapshot_ams_slots(print_data: dict) -> dict[int, dict]:
             slot_index = unit_id * 4 + tray_id
             hex_c = tray_data.get("tray_color", "")
             color = f"#{hex_c[:6].upper()}" if len(hex_c) >= 6 and hex_c.upper() not in ("00000000", "") else ""
+            profile_id = str(tray_data.get("tray_info_idx") or "")
+            profile = _bambu_profile_for_idx(profile_id)
+            brand = tray_data.get("tray_sub_brands", "") or profile.get("brand", "")
+            profile_name = tray_data.get("tray_id_name", "") or profile.get("profile", "")
             result[slot_index] = {
                 "type": tray_type,
-                "brand": tray_data.get("tray_sub_brands", ""),
+                "brand": brand,
+                "profile_id": profile_id,
+                "profile_name": profile_name,
                 "color": color,
                 "uuid": tray_data.get("tray_uuid", ""),
                 "remain_pct": tray_data.get("remain", -1),

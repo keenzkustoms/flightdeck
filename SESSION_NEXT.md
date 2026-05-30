@@ -1877,6 +1877,15 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 
 ---
 
+### Bambu AMS profile aliases
+- Added a first-pass Bambu AMS profile alias table in `app/printers/bambu.py`.
+- Confirmed custom profile `P461bccf` is treated as **Siddament ASA** with ASA temp/profile metadata.
+- AMS parsing and print-start snapshots now fall back to alias brand/profile names when Bambu MQTT leaves `tray_sub_brands` / `tray_id_name` blank.
+- Assigning a Flightdeck Siddament ASA spool to a Bambu AMS slot now sends `P461bccf` instead of generic ASA, so Flightdeck can preserve the user-created Bambu profile where possible.
+- Built-in aliases also cover common Generic/Bambu PLA/ASA/PETG/TPU IDs for clearer future display.
+
+---
+
 ## Architecture decisions locked
 
 - Python + FastAPI backend
