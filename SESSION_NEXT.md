@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 30 May 2026 (Session 28.74 Print Bay density pass)_
+_Last updated 30 May 2026 (Session 28.75 Spool picker visibility)_
 
 ## Current state
 
@@ -9,6 +9,28 @@ Service running at:
 - `http://flightdeck.local:8000`
 - `http://192.168.4.127:8000`
 - **`https://flightdeck.tail7de73e.ts.net`** (Tailscale Serve — HTTPS, used for PWA / notifications)
+
+---
+
+## What was built — Session 28.75 (Spool picker visibility — 30 May)
+
+Spool cards and Add Spool previous-colour picks now make newly-added duplicate rolls easier to find.
+
+### Frontend
+- Add Spool `Previously used` colour picks are no longer capped at six results.
+- Previous picks now render as a scrollable paint-chart list with spool numbers.
+- Previous picks are sorted newest-first so fresh rolls/colours appear immediately.
+- Spool card search now matches spool numbers, hex colours, subtype, notes, storage location, and loaded printer ids.
+- Grouped duplicate cards now sort by latest roll id and show `latest #...` in the card badge.
+- Static cache-bust bumped to `style.css?v=147` and `app.js?v=167`.
+
+### Data note
+- Spool #64 exists and is grouped with matching `White / PLA+ / 3DFillies` rolls.
+- Spool #5 does not exist in the database; the id was skipped by SQLite during an earlier failed/conflicting insert.
+
+### Verification
+- `node --check app/static/app.js`
+- `git diff --check`
 
 ---
 

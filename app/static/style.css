@@ -7124,21 +7124,26 @@ select.settings-input { cursor: pointer; }
 /* ── Inline brand/material add in modal ────────────────────────────────────── */
 
 .spool-prev-picks {
-  display: flex;
-  align-items: center;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
   gap: 0.5rem;
-  flex-wrap: wrap;
   padding: 0.15rem 0;
+  min-width: 0;
 }
 .spool-prev-label {
   font-size: 0.75rem;
   color: var(--muted);
   white-space: nowrap;
+  padding-top: 0.22rem;
 }
 .spool-prev-swatches {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(6.4rem, 1fr));
   gap: 0.3rem;
-  flex-wrap: wrap;
+  max-height: 7.6rem;
+  overflow-y: auto;
+  padding-right: 0.2rem;
 }
 .spool-prev-swatch {
   display: flex;
@@ -7152,6 +7157,7 @@ select.settings-input { cursor: pointer; }
   font-size: 0.75rem;
   cursor: pointer;
   transition: background 0.15s, border-color 0.15s;
+  min-width: 0;
 }
 .spool-prev-swatch:hover { background: var(--hover); border-color: var(--muted); }
 .spool-prev-dot {
@@ -7162,9 +7168,15 @@ select.settings-input { cursor: pointer; }
   border: 1px solid rgba(255,255,255,0.15);
 }
 .spool-prev-name {
-  max-width: 6rem;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.spool-prev-id {
+  color: var(--muted);
+  font-size: 0.62rem;
+  font-weight: 800;
   white-space: nowrap;
 }
 

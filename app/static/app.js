@@ -7183,7 +7183,11 @@ function _spoolGroupedCards(spools) {
   }
   return [...groups.values()]
     .map(group => group.sort((a, b) => Number(a.id || 0) - Number(b.id || 0)))
-    .sort((a, b) => Number(a[0]?.id || 0) - Number(b[0]?.id || 0));
+    .sort((a, b) => {
+      const aLatest = Math.max(...a.map(s => Number(s.id || 0)));
+      const bLatest = Math.max(...b.map(s => Number(s.id || 0)));
+      return aLatest - bLatest;
+    });
 }
 
 function _spoolGroupCounts(spools) {
@@ -7198,6 +7202,8 @@ function _spoolGroupCounts(spools) {
 function _spoolGroupCardHtml(group) {
   if (group.length === 1) return _spoolCardHtml(group[0]);
   const first = group[0];
+  const latestId = Math.max(...group.map(s => Number(s.id || 0)));
+  const rollTitle = group.map(s => `#${s.id}`).join(', ');
   const totalRemaining = group.reduce((sum, s) => sum + Number(s.remaining_g || 0), 0);
   const totalLabel = group.reduce((sum, s) => sum + Number(s.label_weight_g || 0), 0);
   const used = Math.max(0, totalLabel - totalRemaining);
@@ -7232,7 +7238,7 @@ function _spoolGroupCardHtml(group) {
   return `<div class="spool-card spool-group-card" data-spool-group="${esc(_spoolGroupKey(first))}">
     <div class="spool-card-band" style="background:${bandColor};color:${textColor}">
       <span class="spool-color-name">${esc(first.color_name || '—')}</span>
-      <span class="spool-id-badge">${group.length} rolls</span>
+      <span class="spool-id-badge" title="${esc(rollTitle)}">${group.length} rolls · latest #${latestId}</span>
     </div>
     <div class="spool-card-body">
       <div class="spool-card-row">
@@ -7426,7 +7432,19 @@ function _applySpoolFilters(spools) {
     if (f.brand    && s.brand    !== f.brand)    return false;
     if (f.search) {
       const q = f.search.toLowerCase();
-      if (!(s.material + s.brand + (s.color_name||'') + (s.notes||'')).toLowerCase().includes(q)) return false;
+      const haystack = [
+        `#${s.id}`,
+        String(s.id || ''),
+        s.material,
+        s.brand,
+        s.subtype,
+        s.color_name,
+        s.color_hex,
+        s.notes,
+        s.storage_location_name,
+        s.location_printer_id,
+      ].filter(Boolean).join(' ').toLowerCase();
+      if (!haystack.includes(q)) return false;
     }
     return true;
   });
@@ -7917,7 +7935,7 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
     if (!mat || !brand) { prevPicks.classList.add('hidden'); return; }
     const seen = new Set();
     const picks = [];
-    for (const s of _allSpools) {
+    for (const s of [..._allSpools].sort((a, b) => Number(b.id || 0) - Number(a.id || 0))) {
       if (s.material !== mat || s.brand !== brand || s.archived_at) continue;
       const key = (s.color_hex || '') + '|' + (s.color_name || '') + '|' + (s.subtype || '');
       if (seen.has(key)) continue;
@@ -7926,11 +7944,12 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
     }
     if (!picks.length) { prevPicks.classList.add('hidden'); return; }
     prevPicks.innerHTML =
-      `<span class="spool-prev-label">Previously used:</span>` +
+      `<span class="spool-prev-label">Previously used (${picks.length}):</span>` +
       `<div class="spool-prev-swatches">` +
-      picks.slice(0, 6).map(s =>
-        `<button type="button" class="spool-prev-swatch" data-hex="${s.color_hex||'#808080'}" data-name="${s.color_name||''}" data-subtype="${s.subtype||''}" data-weight="${s.label_weight_g}" title="${s.color_name||s.color_hex}${s.subtype?' · '+s.subtype:''}">` +
+      picks.map(s =>
+        `<button type="button" class="spool-prev-swatch" data-hex="${s.color_hex||'#808080'}" data-name="${s.color_name||''}" data-subtype="${s.subtype||''}" data-weight="${s.label_weight_g}" title="#${s.id} · ${s.color_name||s.color_hex}${s.subtype?' · '+s.subtype:''}">` +
         `<span class="spool-prev-dot" style="background:${s.color_hex||'#808080'}"></span>` +
+        `<span class="spool-prev-id">#${s.id}</span>` +
         `<span class="spool-prev-name">${s.color_name || s.color_hex}</span>` +
         `</button>`
       ).join('') +
