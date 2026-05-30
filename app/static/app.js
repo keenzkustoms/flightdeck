@@ -6515,12 +6515,18 @@ function _setupHealthHtml(health) {
 }
 
 async function _saveSetting(key, value) {
-  _serverSettings[key] = String(value);
-  await fetch(`/api/settings/${encodeURIComponent(key)}`, {
+  const r = await fetch(`/api/settings/${encodeURIComponent(key)}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ value: String(value) }),
   });
+  if (!r.ok) {
+    const body = await r.json().catch(() => ({}));
+    throw new Error(body.detail || 'Setting save failed');
+  }
+  const body = await r.json().catch(() => ({}));
+  _serverSettings[key] = String(body.value ?? value);
+  return _serverSettings[key];
 }
 
 function _prefBool(key, fallback = 'false') {
@@ -6533,6 +6539,7 @@ function _preferencesCategoryHtml() {
   const nearEmpty = _serverSettings.spool_near_empty_g ?? '50';
   const confidence = _serverSettings.spool_confidence_warn_pct ?? '75';
   const labelWeight = _serverSettings.default_label_weight_g ?? '1000';
+  const vaultPath = _serverSettings.print_vault_path ?? '';
   return `
     <div class="settings-section">
       <div class="settings-section-title">System</div>
@@ -6541,6 +6548,11 @@ function _preferencesCategoryHtml() {
         <input class="settings-input pref-input" data-pref-key="system_base_url" type="url" value="${esc(systemUrl)}" placeholder="https://flightdeck.tail7de73e.ts.net">
       </div>
       <div class="settings-hint">Used for QR labels and links back into Flightdeck.</div>
+      <div class="settings-form-row">
+        <label class="settings-label">Print Vault</label>
+        <input class="settings-input pref-input" data-pref-key="print_vault_path" type="text" value="${esc(vaultPath)}" placeholder="/home/flightdeck/print_library">
+      </div>
+      <div class="settings-hint">Optional Pi, USB, or HDD-backed archive path for Print Bay. Leave blank to use the service default.</div>
     </div>
     <div class="settings-section">
       <div class="settings-section-title">Spool Thresholds</div>
@@ -6599,7 +6611,14 @@ function _attachPreferencesEvents(el) {
         value = String(n);
         input.value = value;
       }
-      try { await _saveSetting(key, value); } catch {}
+      try {
+        const saved = await _saveSetting(key, value);
+        input.value = saved;
+        if (key === 'print_vault_path') showToast('Print Vault path saved', saved || 'Using service default', 'success');
+      } catch (err) {
+        showToast('Setting save failed', err.message || '', 'error');
+        input.value = input.defaultValue;
+      }
     });
   });
 

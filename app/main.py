@@ -326,8 +326,6 @@ async def lifespan(app: FastAPI):
 
 
 _STATIC = Path(__file__).parent / "static"
-_PRINT_LIBRARY = PRINT_LIBRARY_DIR
-
 app = FastAPI(title="Flightdeck", lifespan=lifespan)
 
 
@@ -395,17 +393,42 @@ def _file_kind(name: str) -> str:
     return "file"
 
 
+def _print_library_path(raw: str | None = None) -> Path:
+    if raw is None:
+        raw = db.get_all_settings().get("print_vault_path") or ""
+    text = str(raw or "").strip()
+    if not text:
+        return PRINT_LIBRARY_DIR
+    path = Path(text).expanduser()
+    if not path.is_absolute():
+        path = (DATA_DIR / path).resolve()
+    return path
+
+
+def _validate_print_library_path(raw: str) -> Path:
+    path = _print_library_path(raw)
+    if path.exists() and not path.is_dir():
+        raise HTTPException(status_code=422, detail="Print Vault path must be a directory")
+    parent = path if path.exists() else path.parent
+    if not parent.exists():
+        raise HTTPException(status_code=422, detail=f"Parent directory does not exist: {parent}")
+    if not _is_writable_dir(path):
+        raise HTTPException(status_code=422, detail=f"Print Vault path is not writable: {path}")
+    return path
+
+
 def _local_library_files() -> list[dict]:
-    _PRINT_LIBRARY.mkdir(parents=True, exist_ok=True)
+    root = _print_library_path()
+    root.mkdir(parents=True, exist_ok=True)
     rows = []
-    for path in sorted(_PRINT_LIBRARY.rglob("*")):
+    for path in sorted(root.rglob("*")):
         if path.is_dir():
             continue
         try:
             stat = path.stat()
         except OSError:
             continue
-        rel = path.relative_to(_PRINT_LIBRARY).as_posix()
+        rel = path.relative_to(root).as_posix()
         rows.append({
             "name": path.name,
             "path": rel,
@@ -419,7 +442,7 @@ def _local_library_files() -> list[dict]:
 
 
 def _safe_library_path(rel_path: str) -> Path:
-    root = _PRINT_LIBRARY.resolve()
+    root = _print_library_path().resolve()
     target = (root / rel_path).resolve()
     if root != target and root not in target.parents:
         raise HTTPException(status_code=400, detail="Invalid library path")
@@ -528,8 +551,8 @@ async def _read_file_desk_source(source_id: str, source_path: str) -> tuple[str,
 
 def _library_import_path(filename: str) -> Path:
     safe = re.sub(r"[^A-Za-z0-9._ -]+", "_", filename).strip(" ._") or "print_file"
-    dest = (_PRINT_LIBRARY / safe).resolve()
-    root = _PRINT_LIBRARY.resolve()
+    root = _print_library_path().resolve()
+    dest = (root / safe).resolve()
     if root != dest and root not in dest.parents:
         raise HTTPException(status_code=400, detail="Invalid destination path")
     return dest
@@ -537,11 +560,12 @@ def _library_import_path(filename: str) -> Path:
 
 @app.get("/api/files")
 async def get_file_desk():
+    library_root = _print_library_path()
     targets = [{
         "id": "library",
-        "label": "Pi Library",
+        "label": "Print Vault",
         "kind": "library",
-        "path": str(_PRINT_LIBRARY),
+        "path": str(library_root),
         "files": _local_library_files(),
         "actions": {"format_sd": False},
     }]
@@ -581,7 +605,7 @@ async def get_file_desk():
             "actions": {"format_sd": True, "format_sd_ready": False},
         })
 
-    return {"library_path": str(_PRINT_LIBRARY), "targets": targets}
+    return {"library_path": str(library_root), "targets": targets}
 
 
 @app.get("/api/files/reprints")
@@ -646,21 +670,22 @@ async def copy_file_to_library(body: FileDeskPathRequest):
     source_id = body.source_id.strip()
     source_path = body.path.strip().lstrip("/")
     if source_id == "library":
-        raise HTTPException(status_code=422, detail="File is already in the Pi Library")
+        raise HTTPException(status_code=422, detail="File is already in the Print Vault")
     filename, data = await _read_file_desk_source(source_id, source_path)
-    _PRINT_LIBRARY.mkdir(parents=True, exist_ok=True)
+    library_root = _print_library_path()
+    library_root.mkdir(parents=True, exist_ok=True)
     dest = _library_import_path(filename)
     replaced = dest.exists()
     if replaced and not body.replace:
         raise HTTPException(
             status_code=409,
-            detail={"code": "exists", "name": dest.name, "message": "File already exists in Pi Library"},
+            detail={"code": "exists", "name": dest.name, "message": "File already exists in Print Vault"},
         )
     dest.write_bytes(data)
     return {
         "ok": True,
         "name": dest.name,
-        "path": dest.relative_to(_PRINT_LIBRARY).as_posix(),
+        "path": dest.relative_to(library_root).as_posix(),
         "size": len(data),
         "replaced": replaced,
     }
@@ -1275,8 +1300,11 @@ async def get_settings():
 
 @app.put("/api/settings/{key}")
 async def put_setting(key: str, body: SettingUpdate):
-    db.set_setting(key, body.value)
-    return {"ok": True}
+    value = body.value
+    if key == "print_vault_path":
+        value = "" if not value.strip() else str(_validate_print_library_path(value))
+    db.set_setting(key, value)
+    return {"ok": True, "value": value}
 
 
 @app.get("/api/notifications")
@@ -1403,9 +1431,9 @@ async def setup_health():
     ))
     checks.append(_setup_check(
         "print_library",
-        "Print library",
-        _is_writable_dir(PRINT_LIBRARY_DIR),
-        str(PRINT_LIBRARY_DIR),
+        "Print Vault",
+        _is_writable_dir(_print_library_path()),
+        str(_print_library_path()),
     ))
 
     try:
@@ -1475,7 +1503,7 @@ async def setup_health():
             "database": str(DB_PATH),
             "uploads": str(UPLOADS_DIR),
             "printer_config": str(PRINTERS_CONFIG_PATH),
-            "print_library": str(PRINT_LIBRARY_DIR),
+            "print_vault": str(_print_library_path()),
         },
         "checks": checks,
     }

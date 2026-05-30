@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 30 May 2026 (Session 28.76 Print Vault split)_
+_Last updated 30 May 2026 (Session 28.77 Configurable Print Vault)_
 
 ## Current state
 
@@ -9,6 +9,28 @@ Service running at:
 - `http://flightdeck.local:8000`
 - `http://192.168.4.127:8000`
 - **`https://flightdeck.tail7de73e.ts.net`** (Tailscale Serve — HTTPS, used for PWA / notifications)
+
+---
+
+## What was built — Session 28.77 (Configurable Print Vault — 30 May)
+
+Print Vault can now be pointed at a Pi, USB, or HDD-backed archive path from Flightdeck preferences.
+
+### Backend
+- Added `print_vault_path` setting support.
+- Print Bay resolves the vault path at request time, so path changes do not require a service restart after the backend update is running.
+- Validates the vault path is a writable directory before saving.
+- Setup Health now reports `Print Vault` using the configured runtime path.
+
+### Frontend
+- Added `Print Vault` path field under `Settings -> Preferences / System`.
+- Saving a vault path shows success/failure feedback.
+- Static cache-bust bumped to `style.css?v=149` and `app.js?v=169`.
+
+### Verification
+- `python3 -m py_compile app/main.py app/db.py`
+- `node --check app/static/app.js`
+- `git diff --check`
 
 ---
 
