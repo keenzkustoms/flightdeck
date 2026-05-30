@@ -1,5 +1,7 @@
 from __future__ import annotations
+import json
 import logging
+import re
 import threading
 import time
 from datetime import datetime, timezone, timedelta
@@ -696,8 +698,22 @@ class BambuPrinter:
         from .bambu_ftp import upload_bambu_file
         with open(file_path, "rb") as f:
             data = f.read()
-        upload_bambu_file(self._ip, self._access_code, filename, data)
-        self._printer.start_print(filename, 1)
+        preview = upload_bambu_file(self._ip, self._access_code, filename, data)
+        subtask_name = filename.removesuffix(".gcode.3mf")
+        if preview and preview.image_png:
+            self.seed_preview(subtask_name, preview)
+
+        ams_mapping, mapping_note = _derive_bambu_ams_mapping(
+            preview.filament_colors if preview else None,
+            preview.filament_type if preview else None,
+            self.ams_slots(),
+        )
+        db.log_decision(self.id, "queue_bambu_mapping", json.dumps({
+            "file": filename,
+            "ams_mapping": ams_mapping,
+            "mapping_note": mapping_note,
+        }))
+        self._printer.start_print(filename, 1, True, ams_mapping)
 
 
 def _read_dual_nozzle_temps(mqtt_dump: dict, model_name: str) -> dict[str, "TempReading"]:
@@ -771,6 +787,94 @@ def _build_bambu_ams_mappings(ams_mapping: list[int] | None) -> tuple[list[int],
             flat.append(tray_id)
             detailed.append({"ams_id": tray_id // 4, "slot_id": tray_id % 4})
     return flat, detailed
+
+
+def _norm_bambu_hex(value: Optional[str]) -> str:
+    h = str(value or "").strip().lstrip("#")[:6].upper()
+    return f"#{h}" if re.fullmatch(r"[0-9A-F]{6}", h) else ""
+
+
+def _bambu_hex_dist(a: Optional[str], b: Optional[str]) -> float:
+    ha, hb = _norm_bambu_hex(a), _norm_bambu_hex(b)
+    if not ha or not hb:
+        return 999.0
+    va = [int(ha[i:i + 2], 16) for i in (1, 3, 5)]
+    vb = [int(hb[i:i + 2], 16) for i in (1, 3, 5)]
+    return sum((x - y) ** 2 for x, y in zip(va, vb)) ** 0.5
+
+
+def _norm_bambu_material(value: Optional[str]) -> str:
+    return re.sub(r"[^a-z0-9]+", "", (value or "").lower())
+
+
+def _preview_filament_requirements(filament_colors, fallback_type: Optional[str]) -> list[dict]:
+    if not filament_colors:
+        return []
+    if isinstance(filament_colors, list):
+        rows = filament_colors
+    else:
+        try:
+            rows = json.loads(filament_colors)
+        except Exception:
+            return []
+    out = []
+    for row in rows if isinstance(rows, list) else []:
+        if not isinstance(row, dict):
+            continue
+        color = _norm_bambu_hex(row.get("color"))
+        material = _norm_bambu_material(row.get("type") or fallback_type)
+        if color or material:
+            out.append({"color": color, "material": material, "used_g": row.get("used_g")})
+    return out
+
+
+def _derive_bambu_ams_mapping(
+    filament_colors,
+    fallback_type: Optional[str],
+    slots: list[dict],
+) -> tuple[list[int], str]:
+    requirements = _preview_filament_requirements(filament_colors, fallback_type)
+    if not requirements:
+        return [0], "no 3MF filament metadata; fallback to slot 0"
+
+    available = []
+    for slot in slots:
+        material = _norm_bambu_material(slot.get("type"))
+        color = _norm_bambu_hex(slot.get("color"))
+        if material:
+            available.append({**slot, "material_norm": material, "color_norm": color})
+    if not available:
+        return [0], "no loaded AMS slots reported; fallback to slot 0"
+
+    mapping: list[int] = []
+    used: set[int] = set()
+    notes: list[str] = []
+    for req in requirements:
+        material_matches = [
+            slot for slot in available
+            if req["material"] and (
+                req["material"] == slot["material_norm"]
+                or req["material"] in slot["material_norm"]
+                or slot["material_norm"] in req["material"]
+            )
+        ] or available
+        ranked = sorted(
+            material_matches,
+            key=lambda slot: (
+                slot["bambu_tray_id"] in used,
+                _bambu_hex_dist(req.get("color"), slot.get("color_norm")),
+                slot["bambu_tray_id"],
+            ),
+        )
+        best = ranked[0]
+        mapping.append(int(best["bambu_tray_id"]))
+        used.add(int(best["bambu_tray_id"]))
+        notes.append(
+            f"{req.get('material') or 'unknown'} {req.get('color') or ''}"
+            f"->{best['bambu_tray_id']} {best.get('type') or ''} {best.get('color') or ''}"
+        )
+
+    return mapping or [0], "; ".join(notes)
 
 
 def _read_chamber_temp(mqtt_dump: dict, model_name: str) -> float | None:

@@ -1,5 +1,19 @@
 # Flightdeck — next session brief
-_Last updated 30 May 2026 (Session 28.83 Bambu AMS mapping2 start command)_
+_Last updated 30 May 2026 (Session 28.84 Bambu queue AMS mapping)_
+
+## What was built - Session 28.84 (Bambu queue AMS mapping - 30 May)
+
+Flightdeck queue starts now use the same Bambu AMS mapping logic as relay starts.
+
+### Backend
+- Bambu queue/file starts now parse the uploaded 3MF preview metadata and derive AMS tray mapping before starting the print.
+- Queue starts now send the derived `ams_mapping` through Flightdeck's BambuStudio-style `ams_mapping2` command path.
+- Added `queue_bambu_mapping` decision logging so future multi-colour failures show exactly which tray IDs Flightdeck sent.
+- Seeded the print preview cache from queue uploads so live/history previews stay in sync with the queued file.
+
+### Verification
+- `python3 -m py_compile app/printers/bambu.py`
+- `git diff --check`
 
 ## What was built - Session 28.83 (Bambu AMS mapping2 start command - 30 May)
 
