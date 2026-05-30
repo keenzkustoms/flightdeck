@@ -3610,6 +3610,7 @@ function _fileDeskTargetHtml(target) {
 let _fileDeskRenderInFlight = false;
 let _fileDeskLastHtml = '';
 let _fileDeskTargets = [];
+let _printBayVaultOpen = false;
 
 async function renderFileDeskView() {
   const el = document.getElementById('filedesk-page');
@@ -3649,7 +3650,7 @@ async function renderFileDeskView() {
         </div>
         <div class="filedesk-grid">${printerTargets.map(_fileDeskTargetHtml).join('')}</div>
       </section>
-      <details class="printbay-vault">
+      <details class="printbay-vault"${_printBayVaultOpen ? ' open' : ''}>
         <summary>
           <span><b>Print Vault</b><small>Pi / USB / HDD backup area</small></span>
           <em>${vaultCount} file${vaultCount === 1 ? '' : 's'}</em>
@@ -3707,6 +3708,9 @@ function _attachFileDeskEvents(el) {
       const files = _selectedFileDeskRows(el, btn.dataset.sourceId);
       if (target && files.length) _openFileDeleteDialog({ target, files });
     });
+  });
+  el.querySelector('.printbay-vault')?.addEventListener('toggle', e => {
+    _printBayVaultOpen = e.currentTarget.open;
   });
 }
 
@@ -3795,6 +3799,7 @@ async function _copySelectedFiles(root, btn) {
   const files = _selectedFileDeskRows(root, btn.dataset.sourceId);
   if (!files.length) return;
   const old = btn.textContent;
+  _printBayVaultOpen = true;
   btn.disabled = true;
   btn.textContent = 'Archiving';
   let copied = 0;
@@ -3817,6 +3822,7 @@ async function _copySelectedFiles(root, btn) {
       `${copied} archived${skipped ? ` · ${skipped} skipped` : ''}`,
       'success'
     );
+    _fileDeskLastHtml = '';
     renderFileDeskView();
   } catch (err) {
     showToast('Copy failed', err.message || '', 'error');

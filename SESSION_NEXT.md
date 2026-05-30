@@ -1,5 +1,19 @@
 # Flightdeck — next session brief
-_Last updated 30 May 2026 (Session 28.78 Print Vault archive indicators)_
+_Last updated 30 May 2026 (Session 28.79 Print Vault copy polish)_
+
+## What was built - Session 28.79 (Print Vault copy polish - 30 May)
+
+Print Bay copy-to-vault now keeps the archive area in view.
+
+### Frontend
+- Print Vault open/closed state is preserved during File Desk refreshes.
+- Copy-to-vault forces Print Vault open after a successful archive so the copied file stays visible.
+- File Desk refresh cache is invalidated after copy-to-vault so new vault state is fetched immediately.
+- Static cache-bust bumped to `app.js?v=171`.
+
+### Verification
+- `node --check app/static/app.js`
+- `git diff --check`
 
 ## Current state
 
