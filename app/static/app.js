@@ -1818,10 +1818,11 @@ function _detailLiveAmsRows(p) {
       const slotText = loadedSpool
         ? `#${loadedSpool.id}`
         : (slot.empty ? 'Empty' : (slot.type || slotLabel));
+      const printerReport = _slotProfileLabel(slot);
       const title = [
         slotLabel,
         loadedSpool ? [loadedSpool.color_name, loadedSpool.material, loadedSpool.brand, `${Math.round(Number(loadedSpool.remaining_g || 0))}g`].filter(Boolean).join(' · ') : '',
-        !loadedSpool && !slot.empty ? [slot.type, slot.brand].filter(Boolean).join(' · ') : '',
+        !slot.empty ? printerReport : '',
         mismatch,
       ].filter(Boolean).join(' · ');
       return `<button class="live-ams-slot${slot.empty ? ' live-ams-slot-empty' : ''}${loadedSpool ? ' live-ams-slot-loaded' : ''}${mismatch ? ' live-ams-slot-warning' : ''}"
@@ -2015,7 +2016,7 @@ function _detailAmsPanel(p) {
       const warnCls = mismatch ? ' ams-warning' : '';
       const tip = slot.empty
         ? `Slot ${slot.idx + 1}: empty`
-        : [slot.type, slot.brand].filter(Boolean).join(' · ');
+        : _slotProfileLabel(slot);
       return `<div class="ams-slot-wrap">
         <button class="ams-slot${activeCls}${emptyCls}${mappedCls}${warnCls}" ${style}
           data-slot-edit data-printer-id="${p.id}" data-slot-index="${flatSlot}"
@@ -6891,6 +6892,14 @@ function _hexDistance(a, b) {
 
 function _slotReportedMaterial(report) {
   return report?.type || report?.material || report?.filament_type || report?.filament_name || '';
+}
+
+function _slotProfileLabel(report) {
+  if (!report || report.empty) return '';
+  const profile = report.profile_name || report.type || report.material || '';
+  const bits = [profile, report.brand || ''].filter(Boolean);
+  if (report.profile_id && !report.profile_name) bits.push(report.profile_id);
+  return bits.join(' · ');
 }
 
 function _slotMismatch(spool, report) {

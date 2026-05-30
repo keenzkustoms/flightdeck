@@ -1883,6 +1883,8 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - AMS parsing and print-start snapshots now fall back to alias brand/profile names when Bambu MQTT leaves `tray_sub_brands` / `tray_id_name` blank.
 - Assigning a Flightdeck Siddament ASA spool to a Bambu AMS slot now sends `P461bccf` instead of generic ASA, so Flightdeck can preserve the user-created Bambu profile where possible.
 - Built-in aliases also cover common Generic/Bambu PLA/ASA/PETG/TPU IDs for clearer future display.
+- Frontend AMS tooltips now show the richer reported profile name/brand from Bambu (`Siddament ASA`, `Generic ASA`, etc.) instead of only the raw material.
+- Static cache-bust bumped to `app.js?v=174`.
 
 ---
 
