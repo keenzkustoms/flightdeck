@@ -3863,6 +3863,17 @@ header {
   line-height: 1.35;
 }
 
+.ams-dry-power-note {
+  margin-top: 0.65rem;
+  border: 1px solid rgba(245,158,11,0.42);
+  border-radius: 0.5rem;
+  background: rgba(245,158,11,0.1);
+  color: #fbbf24;
+  padding: 0.65rem 0.75rem;
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
 .ams-dry-field {
   display: grid;
   grid-template-columns: 1fr auto;

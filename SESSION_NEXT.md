@@ -1,5 +1,18 @@
 # Flightdeck — next session brief
-_Last updated 30 May 2026 (Session 28.81 Bambu AMS mapping start command)_
+_Last updated 30 May 2026 (Session 28.82 AMS drying power warning)_
+
+## What was built - Session 28.82 (AMS drying power warning - 30 May)
+
+Flightdeck now warns before starting AMS drying while the printer is active.
+
+### Frontend
+- AMS drying dialog shows an amber warning when the printer is printing/loading/paused: drying may need a separate AMS power supply for reliable drying.
+- The warning is advisory and does not block the command.
+- Static cache-bust bumped to `style.css?v=151` and `app.js?v=173`.
+
+### Verification
+- `node --check app/static/app.js`
+- `git diff --check`
 
 ## What was built - Session 28.81 (Bambu AMS mapping start command - 30 May)
 

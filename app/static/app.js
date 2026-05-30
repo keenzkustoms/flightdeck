@@ -2062,6 +2062,7 @@ function _openAmsDryDialog(printerId, amsId) {
   const p = _latestPrinters.find(x => x.id === printerId);
   const unit = (p?.ams || []).find(u => Number(u.unit) === Number(amsId));
   const reasonText = _amsDryReasonText(unit?.dry_sf_reason);
+  const powerLimited = p && !['idle', 'finished', 'offline'].includes(String(p.state || '').toLowerCase());
   const current = unit?.dry_setting || {};
   const startFilament = current.filament || 'PLA';
   const preset = _AMS_DRY_PRESETS[startFilament] || _AMS_DRY_PRESETS.PLA;
@@ -2092,6 +2093,9 @@ function _openAmsDryDialog(printerId, amsId) {
         <span class="ams-dry-status-chip ${drying ? 'ams-dry-running' : ''}">${drying ? `Drying${dryTime ? ` · ${dryTime} left` : ''}` : 'Idle'}</span>
       </div>
       ${reasonText ? `<div class="ams-dry-blocked">${esc(reasonText)}</div>` : ''}
+      ${powerLimited ? `<div class="ams-dry-power-note">
+        AMS drying while the printer is loading or printing may need a separate AMS power supply for reliable drying.
+      </div>` : ''}
       <div class="ams-dry-form">
         <label class="ams-dry-field" for="ams-dry-filament">
           <span>Filament</span>
