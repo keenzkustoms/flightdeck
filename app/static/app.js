@@ -3416,7 +3416,7 @@ function _printBayOverview(targets) {
     </div>
     <div>
       <strong>${libraryFiles}</strong>
-      <span>Pi library</span>
+      <span>vault files</span>
     </div>
     <div>
       <strong>${printerFiles}</strong>
@@ -3619,18 +3619,37 @@ async function renderFileDeskView() {
       .then(r => r.ok ? r.json() : { items: [] })
       .catch(() => ({ items: [] }));
     _fileDeskTargets = data.targets || [];
+    const vaultTargets = _fileDeskTargets.filter(t => t.id === 'library');
+    const printerTargets = _fileDeskTargets.filter(t => t.id !== 'library');
+    const vaultCount = vaultTargets.reduce((sum, t) => sum + (t.files || []).filter(f => f.kind !== 'dir' && _fileCompatiblePrinters(f).length).length, 0);
     const html = `<div class="filedesk-shell">
       <section class="filedesk-hero">
         <div>
           <div class="mission-eyebrow">Print Bay</div>
           <h1>Run-ready library</h1>
-          <p>Stage files, inspect printer storage, and queue compatible jobs without starting them.</p>
+          <p>Launch from printer bays, keep the deep archive in the vault, and queue compatible jobs without starting them.</p>
         </div>
         <div class="filedesk-library-path">${esc(data.library_path || '')}</div>
       </section>
       ${_printBayOverview(data.targets || [])}
       ${_printBayReprintHtml(reprints.items || [], data.targets || [])}
-      <div class="filedesk-grid">${(data.targets || []).map(_fileDeskTargetHtml).join('')}</div>
+      <section class="printbay-active-bays">
+        <div class="printbay-section-head printbay-section-head-compact">
+          <div>
+            <div class="mission-eyebrow">Printer Bays</div>
+            <h2>Active storage</h2>
+          </div>
+          <span>${printerTargets.length} bay${printerTargets.length === 1 ? '' : 's'}</span>
+        </div>
+        <div class="filedesk-grid">${printerTargets.map(_fileDeskTargetHtml).join('')}</div>
+      </section>
+      <details class="printbay-vault">
+        <summary>
+          <span><b>Print Vault</b><small>Pi / USB / HDD backup area</small></span>
+          <em>${vaultCount} file${vaultCount === 1 ? '' : 's'}</em>
+        </summary>
+        <div class="filedesk-grid printbay-vault-grid">${vaultTargets.map(_fileDeskTargetHtml).join('')}</div>
+      </details>
     </div>`;
     if (html !== _fileDeskLastHtml) {
       el.innerHTML = html;

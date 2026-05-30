@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 30 May 2026 (Session 28.75 Spool picker visibility)_
+_Last updated 30 May 2026 (Session 28.76 Print Vault split)_
 
 ## Current state
 
@@ -9,6 +9,26 @@ Service running at:
 - `http://flightdeck.local:8000`
 - `http://192.168.4.127:8000`
 - **`https://flightdeck.tail7de73e.ts.net`** (Tailscale Serve — HTTPS, used for PWA / notifications)
+
+---
+
+## What was built — Session 28.76 (Print Vault split — 30 May)
+
+Print Bay now separates active printer storage from the backup/archive library.
+
+### Frontend
+- The Pi print library now reads as `Print Vault`, suitable for Pi/USB/HDD-backed file storage.
+- Printer storage is presented first as `Printer Bays / Active storage`.
+- The vault is moved into its own collapsible panel so Print Bay has more room for live printer file lanes.
+- Overview wording changed from `Pi library` to `vault files`.
+- Static cache-bust bumped to `style.css?v=148` and `app.js?v=168`.
+
+### Note
+- The existing `FLIGHTDECK_PRINT_LIBRARY` path can be pointed at a mounted USB/HDD location when you want the vault on external storage.
+
+### Verification
+- `node --check app/static/app.js`
+- `git diff --check`
 
 ---
 
