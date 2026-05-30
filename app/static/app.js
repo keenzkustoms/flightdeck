@@ -1033,7 +1033,7 @@ function _printerNavLabel(p) {
 function _dashboardIssueText(p) {
   if (p.state === 'estop') return 'Emergency stop active';
   if (p.state === 'error') return p.error || 'Printer error';
-  if (p.state === 'paused') return 'Paused mid-print';
+  if (p.state === 'paused') return p.error || 'Paused mid-print';
   if (p.health?.reasons?.length) return p.health.reasons[0].message;
   if (p.state === 'offline') return `Offline ${fmtLastSeen(p.last_seen)}`;
   if (p.state === 'printing') {
@@ -1721,7 +1721,7 @@ function _detailLiveSignals(p) {
   const signals = [];
   if (p.state === 'estop') signals.push({ cls: 'danger', label: 'E-stop active' });
   else if (p.state === 'error') signals.push({ cls: 'danger', label: p.error || 'Printer fault' });
-  else if (p.state === 'paused') signals.push({ cls: 'warn', label: 'Print paused' });
+  else if (p.state === 'paused') signals.push({ cls: 'warn', label: p.error || 'Print paused' });
   else if (p.state === 'offline') signals.push({ cls: 'danger', label: `Offline ${fmtLastSeen(p.last_seen)}` });
 
   if (p.health?.reasons?.length) {

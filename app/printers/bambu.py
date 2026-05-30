@@ -93,6 +93,8 @@ class BambuPrinter:
             substage = substage_raw.value if substage_raw is not None else None
 
             dump = self._printer.mqtt_dump()
+            print_data = dump.get("print", {})
+            alarm_message = _bambu_alarm_message(print_data)
             temps: dict[str, TempReading] = {}
             mc = self._printer.mqtt_client
             dual = _read_dual_nozzle_temps(dump, self.model_name)
@@ -107,7 +109,7 @@ class BambuPrinter:
                     )
             bed = self._printer.get_bed_temperature()
             chamber = _read_chamber_temp(dump, self.model_name)
-            light_state = _read_light_state(dump.get("print", {}))
+            light_state = _read_light_state(print_data)
             if bed is not None:
                 temps["bed"] = TempReading(
                     actual=float(bed),
@@ -132,7 +134,7 @@ class BambuPrinter:
                     subtask_name=subtask,
                 )
 
-            state = self._resolve_state(raw_state, job, subtask)
+            state = self._resolve_state(raw_state, job, subtask, alarm_message)
 
             if (state == "printing"
                     and self._current_print_id is not None
@@ -142,11 +144,11 @@ class BambuPrinter:
                 # get_preview() caches on subtask_name so this is a one-shot FTP call.
                 if subtask and not self._preview_cache:
                     self.get_preview()
-                raw_snap = _snapshot_ams_slots(dump.get("print", {}))
+                raw_snap = _snapshot_ams_slots(print_data)
                 self._ams_slot_snapshot = raw_snap
                 self._ams_slot_snapshot_print_id = self._current_print_id
                 # Capture active tray for single-spool deduction attribution
-                ams_raw = dump.get("print", {}).get("ams", {})
+                ams_raw = print_data.get("ams", {})
                 tray_now = int(ams_raw.get("tray_now", 255))
                 self._ams_active_slot_at_start = None if tray_now == 255 else tray_now
                 # Enrich snapshot with current spool assignments and persist to DB
@@ -179,7 +181,7 @@ class BambuPrinter:
                     idle_info["Last print"] = _fmt_last_print(last)
 
             try:
-                ams = _parse_ams(dump.get("print", {}))
+                ams = _parse_ams(print_data)
             except Exception:
                 ams = []
 
@@ -190,6 +192,7 @@ class BambuPrinter:
                 icon=self.icon, kind="bambu", state=state,
                 temps=temps, job=job, substage=substage,
                 idle_info=idle_info, ams=ams, light_state=light_state,
+                error=alarm_message if state in ("paused", "error") else None,
                 last_seen=now, updated_at=now,
             )
         except Exception as exc:
@@ -198,7 +201,7 @@ class BambuPrinter:
                                  kind="bambu", state="error", error=str(exc))
 
     def _resolve_state(self, raw: bl.GcodeState, job: Optional[JobStatus],
-                       subtask: Optional[str]) -> str:
+                       subtask: Optional[str], alarm_message: Optional[str] = None) -> str:
         now = datetime.now(timezone.utc)
 
         if raw == bl.GcodeState.FINISH:
@@ -375,7 +378,7 @@ class BambuPrinter:
             if self._current_job_key:
                 # In-session failure: close the job and start showing the error.
                 job_key = self._current_job_key
-                err_msg = f"Bambu error: {err_code}" if err_code else "Print failed"
+                err_msg = alarm_message or (f"Bambu error: {err_code}" if err_code else "Print failed")
                 print_id = db.on_print_ended(
                     self.id, job_key,
                     final_state="ERROR",
@@ -417,7 +420,7 @@ class BambuPrinter:
 
             # Pre-existing failure not yet in DB — close it and show error once.
             if job_key:
-                err_msg = f"Bambu error: {err_code}" if err_code else "Print failed"
+                err_msg = alarm_message or (f"Bambu error: {err_code}" if err_code else "Print failed")
                 print_id = db.on_print_ended(
                     self.id, job_key,
                     final_state="ERROR",
@@ -725,6 +728,51 @@ def _read_light_state(print_data: dict) -> str:
     if any(m == "on" for m in known):
         return "on"
     return "off"
+
+
+_BAMBU_ALARM_MESSAGES = {
+    "1E07008012": 'Failed to get AMS mapping table; please select "Resume" to retry.',
+    "07008012": 'Failed to get AMS mapping table; please select "Resume" to retry.',
+    "117473298": 'Failed to get AMS mapping table; please select "Resume" to retry.',
+}
+
+
+def _normalise_bambu_alarm_code(value) -> str:
+    text = str(value or "").strip()
+    if not text or text == "0":
+        return ""
+    if text.endswith(".0"):
+        text = text[:-2]
+    return text.upper()
+
+
+def _format_bambu_display_code(code: str) -> str:
+    if len(code) >= 8 and all(ch in "0123456789ABCDEF" for ch in code[-8:]):
+        return f"{code[-8:-4]}-{code[-4:]}"
+    return code
+
+
+def _bambu_alarm_message(print_data: dict) -> Optional[str]:
+    """Return a user-facing Bambu alarm reason from MQTT fields."""
+    candidates: list[str] = []
+    for key in ("err", "print_error", "ap_err", "fail_reason", "mc_print_error_code", "mc_err"):
+        code = _normalise_bambu_alarm_code(print_data.get(key))
+        if code:
+            candidates.append(code)
+    err2 = print_data.get("err2")
+    if isinstance(err2, dict):
+        code = _normalise_bambu_alarm_code(err2.get("err_code"))
+        if code:
+            candidates.append(code)
+
+    for code in candidates:
+        message = _BAMBU_ALARM_MESSAGES.get(code) or _BAMBU_ALARM_MESSAGES.get(code[-8:])
+        if message:
+            return f"{message} [{_format_bambu_display_code(code)}]"
+
+    for code in candidates:
+        return f"Bambu alarm {_format_bambu_display_code(code)}"
+    return None
 
 
 def _split_ams_slot(slot: int) -> tuple[int, int]:

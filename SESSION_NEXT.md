@@ -1,5 +1,25 @@
 # Flightdeck — next session brief
-_Last updated 30 May 2026 (Session 28.79 Print Vault copy polish)_
+_Last updated 30 May 2026 (Session 28.80 Bambu pause alarm reasons)_
+
+## What was built - Session 28.80 (Bambu pause alarm reasons - 30 May)
+
+Flightdeck now surfaces the real Bambu AMS pause alarm instead of only saying a print paused.
+
+### Backend
+- Added Bambu MQTT alarm decoding from `err`, `err2.err_code`, `print_error`, `ap_err`, `fail_reason`, and related fields.
+- Added a friendly decoder for `1E07008012` / `0700-8012`: `Failed to get AMS mapping table; please select "Resume" to retry.`
+- Bambu paused/error printer status now carries the decoded alarm in `error`.
+- Print paused/error notifications now include the decoded printer reason.
+- If the paused print later becomes a failed print, the decoded reason is saved into print history as the failure message.
+
+### Frontend
+- Dashboard issue text and live-screen warning chips now show the decoded paused reason when present.
+- Static cache-bust bumped to `app.js?v=172`.
+
+### Verification
+- `python3 -m py_compile app/printers/bambu.py app/main.py`
+- `node --check app/static/app.js`
+- `git diff --check`
 
 ## What was built - Session 28.79 (Print Vault copy polish - 30 May)
 

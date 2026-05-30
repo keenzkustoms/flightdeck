@@ -220,11 +220,15 @@ def _check_transitions(data: list[dict]) -> None:
                 asyncio.create_task(_do_failure_snapshot(pid, error_pid))
             if curr == "error" and is_print_failure:
                 msg = f"{name}" + (f" · {label}" if label else "")
+                if p.get("error"):
+                    msg += f" · {p['error']}"
                 _notify("error", "Print error", msg, printer_id=pid, print_id=error_pid, link=f"#/printer/{pid}/live")
                 asyncio.create_task(_send_ntfy("Print error", msg, ["warning"], priority=4))
                 db.queue_cancel_active(pid, "failed")
         elif prev == "printing" and curr == "paused":
             msg = f"{name}" + (f" · {label}" if label else "")
+            if p.get("error"):
+                msg += f" · {p['error']}"
             _notify("info", "Print paused", msg, printer_id=pid, link=f"#/printer/{pid}/live")
             asyncio.create_task(_send_ntfy("Print paused", msg, ["double_vertical_bar"]))
         elif prev == "printing" and curr == "idle":
