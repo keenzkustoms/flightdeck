@@ -3396,6 +3396,7 @@ function _printBaySourceSummary(target, files) {
     count: files.length,
     size: totalBytes,
     compatible: compatible.size,
+    vaulted: files.filter(f => f.in_vault).length,
     ready: files.filter(f => _fileCompatiblePrinters(f).some(p => p.state === 'idle' || p.state === 'finished')).length,
   };
 }
@@ -3541,11 +3542,15 @@ function _fileDeskTargetHtml(target) {
     const ready = printers.filter(p => p.state === 'idle' || p.state === 'finished');
     const printerChips = printers.slice(0, 4).map(p => `<span class="filedesk-printer-chip${ready.some(r => r.id === p.id) ? ' filedesk-printer-ready' : ''}">${esc(p.model_name || p.custom_name || p.id)}</span>`).join('');
     const more = printers.length > 4 ? `<span class="filedesk-printer-chip">+${printers.length - 4}</span>` : '';
+    const vaultChip = f.in_vault && target.id !== 'library'
+      ? `<span class="filedesk-vault-chip" title="Archived in Print Vault${f.vault_path ? ': ' + esc(f.vault_path) : ''}">Vaulted</span>`
+      : '';
     return `<article class="filedesk-file-row">
       <input type="checkbox" class="filedesk-select" data-source-id="${esc(target.id)}" data-path="${path}" data-name="${esc(f.name || f.path || 'File')}" aria-label="Select ${esc(f.name || f.path || 'file')}">
       <div class="filedesk-file-main" title="${esc(f.path || f.name)}">
         <div class="filedesk-file-title">
           <span class="filedesk-kind filedesk-kind-${_fileKindClass(f.kind)}">${esc(f.kind || 'file')}</span>
+          ${vaultChip}
           <strong class="filedesk-name">${esc(f.name || f.path || 'File')}</strong>
         </div>
         <div class="filedesk-file-meta">
@@ -3569,7 +3574,7 @@ function _fileDeskTargetHtml(target) {
   const bulkBar = files.length ? `<div class="filedesk-bulk-row" data-bulk-source="${esc(target.id)}">
     <span class="filedesk-bulk-count">No files selected</span>
     <div class="filedesk-bulk-actions">
-      ${target.id === 'library' ? '' : `<button class="filedesk-action-btn filedesk-copy-btn" data-file-action="copy-selected" data-source-id="${esc(target.id)}" disabled>Copy selected</button>`}
+      ${target.id === 'library' ? '' : `<button class="filedesk-action-btn filedesk-copy-btn" data-file-action="copy-selected" data-source-id="${esc(target.id)}" disabled>Copy to Vault</button>`}
       <button class="filedesk-action-btn filedesk-delete-btn" data-file-action="delete-selected" data-source-id="${esc(target.id)}" disabled>Delete selected</button>
     </div>
   </div>` : '';
@@ -3587,6 +3592,7 @@ function _fileDeskTargetHtml(target) {
     <div class="filedesk-source-strip">
       <span><strong>${summary.ready}</strong> ready</span>
       <span><strong>${summary.compatible}</strong> compatible printers</span>
+      ${target.id === 'library' ? '' : `<span><strong>${summary.vaulted}</strong> vaulted</span>`}
       <span><strong>${_fmtBytes(summary.size)}</strong></span>
     </div>
     ${formatNote}
@@ -3790,7 +3796,7 @@ async function _copySelectedFiles(root, btn) {
   if (!files.length) return;
   const old = btn.textContent;
   btn.disabled = true;
-  btn.textContent = 'Copying';
+  btn.textContent = 'Archiving';
   let copied = 0;
   let skipped = 0;
   try {
@@ -3807,8 +3813,8 @@ async function _copySelectedFiles(root, btn) {
       copied += 1;
     }
     showToast(
-      'Copied to Pi Library',
-      `${copied} copied${skipped ? ` · ${skipped} skipped` : ''}`,
+      'Copied to Print Vault',
+      `${copied} archived${skipped ? ` · ${skipped} skipped` : ''}`,
       'success'
     );
     renderFileDeskView();
@@ -3849,9 +3855,9 @@ function _confirmLibraryReplace(name) {
       <div class="modal-box filedesk-queue-box" role="dialog" aria-modal="true" aria-label="Replace existing file">
         <div class="filedesk-queue-head">
           <div>
-            <div class="mission-eyebrow">Pi Library</div>
+            <div class="mission-eyebrow">Print Vault</div>
             <h3>File already exists</h3>
-            <span>${esc(name)} is already in the Pi Library.</span>
+            <span>${esc(name)} is already in the Print Vault.</span>
           </div>
           <button class="filedesk-dialog-close" data-replace-choice="skip" aria-label="Close">x</button>
         </div>

@@ -1,5 +1,5 @@
 # Flightdeck — next session brief
-_Last updated 30 May 2026 (Session 28.77 Configurable Print Vault)_
+_Last updated 30 May 2026 (Session 28.78 Print Vault archive indicators)_
 
 ## Current state
 
@@ -9,6 +9,28 @@ Service running at:
 - `http://flightdeck.local:8000`
 - `http://192.168.4.127:8000`
 - **`https://flightdeck.tail7de73e.ts.net`** (Tailscale Serve — HTTPS, used for PWA / notifications)
+
+---
+
+## What was built — Session 28.78 (Print Vault archive indicators — 30 May)
+
+Print Bay now recognises files that are already backed up into Print Vault.
+
+### Backend
+- Added archive-key matching between printer storage files and Print Vault files.
+- Printer bay file rows now include `in_vault` and `vault_path` when the file appears to already exist in the vault.
+
+### Frontend
+- Printer bay rows show a green `Vaulted` chip for files already backed up.
+- Printer bay source strips show how many visible files are vaulted.
+- Bulk copy action now reads `Copy to Vault`.
+- Copy success and replace prompts now use Print Vault wording.
+- Static cache-bust bumped to `style.css?v=150` and `app.js?v=170`.
+
+### Verification
+- `python3 -m py_compile app/main.py`
+- `node --check app/static/app.js`
+- `git diff --check`
 
 ---
 

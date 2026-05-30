@@ -393,6 +393,15 @@ def _file_kind(name: str) -> str:
     return "file"
 
 
+def _file_archive_key(name: str) -> str:
+    text = str(name or "").rsplit("/", 1)[-1].rsplit("\\", 1)[-1].lower()
+    for suffix in (".gcode.3mf", ".gcode.gz", ".3mf", ".gcode", ".ufp"):
+        if text.endswith(suffix):
+            text = text[: -len(suffix)]
+            break
+    return text.strip()
+
+
 def _print_library_path(raw: str | None = None) -> Path:
     if raw is None:
         raw = db.get_all_settings().get("print_vault_path") or ""
@@ -438,6 +447,19 @@ def _local_library_files() -> list[dict]:
         })
         if len(rows) >= 400:
             break
+    return rows
+
+
+def _mark_vaulted_files(files: list[dict], vault_lookup: dict[str, dict]) -> list[dict]:
+    rows = []
+    for item in files:
+        row = dict(item)
+        key = _file_archive_key(row.get("path") or row.get("name"))
+        vaulted = vault_lookup.get(key)
+        if vaulted:
+            row["in_vault"] = True
+            row["vault_path"] = vaulted.get("path") or vaulted.get("name")
+        rows.append(row)
     return rows
 
 
@@ -561,12 +583,18 @@ def _library_import_path(filename: str) -> Path:
 @app.get("/api/files")
 async def get_file_desk():
     library_root = _print_library_path()
+    library_files = _local_library_files()
+    vault_lookup = {
+        _file_archive_key(f.get("path") or f.get("name")): f
+        for f in library_files
+        if f.get("kind") != "dir" and _file_archive_key(f.get("path") or f.get("name"))
+    }
     targets = [{
         "id": "library",
         "label": "Print Vault",
         "kind": "library",
         "path": str(library_root),
-        "files": _local_library_files(),
+        "files": library_files,
         "actions": {"format_sd": False},
     }]
 
@@ -582,7 +610,7 @@ async def get_file_desk():
             "label": custom_name or model_name,
             "model": model_name,
             "kind": "moonraker",
-            "files": files,
+            "files": _mark_vaulted_files(files, vault_lookup),
             "error": error,
             "actions": {"format_sd": False},
         })
@@ -600,7 +628,7 @@ async def get_file_desk():
             "label": p.custom_name or p.model_name,
             "model": p.model_name,
             "kind": "bambu",
-            "files": files,
+            "files": _mark_vaulted_files(files, vault_lookup),
             "error": error,
             "actions": {"format_sd": True, "format_sd_ready": False},
         })
