@@ -39,6 +39,52 @@ class _SequencedMQTTClient(PrinterMQTTClient):
                 v['sequence_id'] = seq
         return super()._PrinterMQTTClient__publish_command(payload)
 
+    def start_print_3mf(self, filename: str,
+                        plate_number: int | str,
+                        use_ams: bool = True,
+                        ams_mapping: list[int] = [0],
+                        skip_objects: list[int] | None = None,
+                        flow_calibration: bool = True,
+                        ) -> bool:
+        """Start a 3MF with BambuStudio-style AMS mapping fields.
+
+        bambulabs_api 2.6.6 only sends the legacy flat ams_mapping. Newer Bambu
+        firmware, especially H2D with AMS 2 / AMS HT, expects ams_mapping2 as
+        well or it can pause with 0700-8012 "Failed to get AMS mapping table".
+        """
+        if skip_objects is not None and not skip_objects:
+            skip_objects = None
+
+        if isinstance(plate_number, int):
+            plate_location = f"Metadata/plate_{int(plate_number)}.gcode"
+        else:
+            plate_location = plate_number
+
+        flat_mapping, detailed_mapping = _build_bambu_ams_mappings(ams_mapping)
+        use_ams_flag = bool(use_ams)
+        if ams_mapping and use_ams_flag:
+            if all(t is None or int(t) < 0 or int(t) >= 254 for t in ams_mapping):
+                use_ams_flag = False
+
+        return self._PrinterMQTTClient__publish_command({
+            "print": {
+                "command": "project_file",
+                "param": plate_location,
+                "file": filename,
+                "bed_leveling": True,
+                "bed_type": "textured_plate",
+                "flow_cali": bool(flow_calibration),
+                "vibration_cali": True,
+                "url": f"ftp:///{filename}",
+                "layer_inspect": False,
+                "sequence_id": "10000000",
+                "use_ams": use_ams_flag,
+                "ams_mapping": flat_mapping,
+                "ams_mapping2": detailed_mapping,
+                "skip_objects": skip_objects,
+            }
+        })
+
 
 class BambuPrinter:
     """Wraps a bambulabs_api.Printer with persistent MQTT connection.
@@ -634,8 +680,15 @@ class BambuPrinter:
             for slot in unit.get("slots") or []:
                 if slot.get("empty"):
                     continue
-                idx = unit_id * 4 + int(slot.get("idx", 0))
-                slots.append({**slot, "unit": unit_id, "global_idx": idx})
+                slot_idx = int(slot.get("idx", 0))
+                flat_idx = unit_id * 4 + slot_idx
+                bambu_tray_id = unit_id + slot_idx if unit_id >= 128 else flat_idx
+                slots.append({
+                    **slot,
+                    "unit": unit_id,
+                    "global_idx": flat_idx,
+                    "bambu_tray_id": bambu_tray_id,
+                })
         return slots
 
     def send_file(self, file_path: str, filename: str) -> None:
@@ -691,6 +744,33 @@ def _read_dual_nozzle_temps(mqtt_dump: dict, model_name: str) -> dict[str, "Temp
             pass
 
     return result if len(result) == 2 else {}
+
+
+def _build_bambu_ams_mappings(ams_mapping: list[int] | None) -> tuple[list[int], list[dict]]:
+    """Return legacy flat ams_mapping plus detailed ams_mapping2.
+
+    For regular AMS, Bambu's flat tray ID is unit*4+slot. For AMS HT, the
+    flat tray ID is the unit ID itself (128, 129, ...), not unit*4. External
+    virtual trays are represented as -1 in the flat array and resolved through
+    ams_mapping2.
+    """
+    flat: list[int] = []
+    detailed: list[dict] = []
+    for raw_id in ams_mapping or []:
+        tray_id = int(raw_id) if raw_id is not None else -1
+        if tray_id < 0:
+            flat.append(-1)
+            detailed.append({"ams_id": 255, "slot_id": 255})
+        elif tray_id >= 254:
+            flat.append(-1)
+            detailed.append({"ams_id": 255, "slot_id": 0})
+        elif tray_id >= 128:
+            flat.append(tray_id)
+            detailed.append({"ams_id": tray_id, "slot_id": 0})
+        else:
+            flat.append(tray_id)
+            detailed.append({"ams_id": tray_id // 4, "slot_id": tray_id % 4})
+    return flat, detailed
 
 
 def _read_chamber_temp(mqtt_dump: dict, model_name: str) -> float | None:

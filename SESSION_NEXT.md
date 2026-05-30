@@ -1,5 +1,19 @@
 # Flightdeck — next session brief
-_Last updated 30 May 2026 (Session 28.82 AMS drying power warning)_
+_Last updated 30 May 2026 (Session 28.83 Bambu AMS mapping2 start command)_
+
+## What was built - Session 28.83 (Bambu AMS mapping2 start command - 30 May)
+
+Flightdeck now sends BambuStudio-style AMS mapping details when starting Bambu relay prints.
+
+### Backend
+- Overrode the Bambu 3MF start command in Flightdeck's sequenced MQTT client so it sends both legacy `ams_mapping` and detailed `ams_mapping2`.
+- Converted external/unknown slots to Bambu's expected detailed mapping format instead of leaving unsupported values in the flat map.
+- Corrected relay-start mapping for AMS HT: Flightdeck now sends Bambu-native AMS HT tray IDs like `128`, not internal UI slot IDs like `512`.
+- Relay mapping notes now log the Bambu tray ID that was sent.
+
+### Verification
+- `python3 -m py_compile app/relay.py app/printers/bambu.py`
+- `git diff --check`
 
 ## What was built - Session 28.82 (AMS drying power warning - 30 May)
 

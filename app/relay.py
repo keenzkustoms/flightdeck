@@ -98,17 +98,17 @@ def _bambu_ams_mapping(meta: dict, printer: "BambuPrinter") -> tuple[list[int], 
         ranked = sorted(
             material_matches,
             key=lambda slot: (
-                slot["global_idx"] in used,
+                slot["bambu_tray_id"] in used,
                 _hex_dist(req.get("color"), slot.get("color_norm")),
-                slot["global_idx"],
+                slot["bambu_tray_id"],
             ),
         )
         best = ranked[0]
-        mapping.append(int(best["global_idx"]))
-        used.add(int(best["global_idx"]))
+        mapping.append(int(best["bambu_tray_id"]))
+        used.add(int(best["bambu_tray_id"]))
         notes.append(
             f"{req.get('material') or 'unknown'} {req.get('color') or ''}"
-            f"→{best['global_idx']} {best.get('type') or ''} {best.get('color') or ''}"
+            f"→{best['bambu_tray_id']} {best.get('type') or ''} {best.get('color') or ''}"
         )
 
     return mapping or [0], "; ".join(notes)
