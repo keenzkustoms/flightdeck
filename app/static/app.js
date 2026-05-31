@@ -1853,10 +1853,10 @@ function _detailLiveAmsRows(p) {
         slotLabel,
         loadedSpool ? [loadedSpool.color_name, loadedSpool.material, loadedSpool.brand, `${Math.round(Number(loadedSpool.remaining_g || 0))}g`].filter(Boolean).join(' · ') : '',
         !slot.empty ? printerReport : '',
-        slot.active ? 'Fed now' : '',
+        _slotRouteActive(p, unit, slot) ? 'Fed now' : '',
         mismatch,
       ].filter(Boolean).join(' · ');
-      return `<button class="live-ams-slot${slot.empty ? ' live-ams-slot-empty' : ''}${loadedSpool ? ' live-ams-slot-loaded' : ''}${slot.active ? ' live-ams-slot-active' : ''}${mismatch ? ' live-ams-slot-warning' : ''}"
+      return `<button class="live-ams-slot${slot.empty ? ' live-ams-slot-empty' : ''}${loadedSpool ? ' live-ams-slot-loaded' : ''}${_slotRouteActive(p, unit, slot) ? ' live-ams-slot-active' : ''}${mismatch ? ' live-ams-slot-warning' : ''}"
         ${style} data-slot-edit data-printer-id="${p.id}" data-slot-index="${flatSlot}" data-slot-label="${esc(slotLabel)}"
         title="${esc(title)}">
         <span>${esc(slotText)}</span>
@@ -1873,6 +1873,47 @@ function _detailLiveAmsRows(p) {
   }).join('');
 }
 
+function _isH2dPrinter(p) {
+  return String(p?.model_name || p?.id || '').toLowerCase().includes('h2d');
+}
+
+function _isAmsHtUnit(unit) {
+  return Number(unit?.unit) >= 128 || String(unit?.label || '').toLowerCase().includes('ht');
+}
+
+function _hotendIsWorking(reading) {
+  const actual = Number(reading?.actual || 0);
+  const target = Number(reading?.target || 0);
+  return target >= 80 || actual >= 80;
+}
+
+function _h2dNozzleActivity(p) {
+  return {
+    left: _hotendIsWorking(p?.temps?.hotend_l),
+    right: _hotendIsWorking(p?.temps?.hotend_r),
+  };
+}
+
+function _slotRouteActive(p, unit, slot) {
+  if (!slot || slot.empty) return false;
+  if (_isH2dPrinter(p)) {
+    const nozzles = _h2dNozzleActivity(p);
+    const hasNozzleSignal = nozzles.left || nozzles.right;
+    const isHt = _isAmsHtUnit(unit);
+    if (hasNozzleSignal) {
+      if (isHt) return nozzles.right;
+      if (nozzles.right && !nozzles.left) return false;
+      return nozzles.left && !!slot.active;
+    }
+  }
+  return !!slot.active;
+}
+
+function _routeDestinationLabel(p, unit) {
+  if (_isH2dPrinter(p)) return _isAmsHtUnit(unit) ? 'Right nozzle' : 'Left nozzle';
+  return p?.temps?.hotend_l != null || p?.temps?.hotend_r != null ? 'Toolhead' : 'Nozzle';
+}
+
 function _detailFilamentRoute(p) {
   if (!p.ams?.length) return '';
   const loaded = _latestSpoolsByPrinter[p.id] || [];
@@ -1880,7 +1921,7 @@ function _detailFilamentRoute(p) {
 
   for (const unit of p.ams) {
     for (const slot of (unit.slots || [])) {
-      if (!slot.active || slot.empty) continue;
+      if (!_slotRouteActive(p, unit, slot)) continue;
       const flatSlot = unit.unit * 4 + slot.idx;
       const spool = loaded.find(s => Number(s.location_slot) === flatSlot);
       const colour = spool?.color_hex || slot.color || '#22c55e';
@@ -1889,7 +1930,7 @@ function _detailFilamentRoute(p) {
       const spoolLabel = spool
         ? `#${spool.id} ${[spool.color_name, spool.material].filter(Boolean).join(' · ')}`
         : _slotProfileLabel(slot) || slot.type || 'Loaded filament';
-      const dest = p.temps?.hotend_l != null || p.temps?.hotend_r != null ? 'Toolhead' : 'Nozzle';
+      const dest = _routeDestinationLabel(p, unit);
       const title = `${slotLabel} feeding ${dest}${spoolLabel ? ' · ' + spoolLabel : ''}`;
       routes.push(`<div class="live-filament-route" style="--route-colour:${colour};--route-text:${textColour}" title="${esc(title)}">
         <button class="live-route-node live-route-source" data-slot-edit data-printer-id="${p.id}" data-slot-index="${flatSlot}" data-slot-label="${esc(slotLabel)}">

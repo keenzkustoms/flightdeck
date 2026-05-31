@@ -1,5 +1,20 @@
 # Flightdeck — next session brief
-_Last updated 31 May 2026 (Session 28.87 Live filament route polish)_
+_Last updated 31 May 2026 (Session 28.88 H2D filament route nozzle inference)_
+
+## What was built - Session 28.88 (H2D filament route nozzle inference - 31 May)
+
+Flightdeck's Live filament route now handles the H2D's dual-nozzle/AMS HT reporting more accurately.
+
+### Frontend
+- Added H2D-specific route inference for the Live filament route.
+- When the right nozzle is hot/working and AMS HT is loaded, Flightdeck now routes AMS HT to `Right nozzle` even if Bambu's generic `active` flag still points at AMS 1.
+- Normal AMS routes label as `Left nozzle` on H2D.
+- Active/fed highlighting in the loaded AMS row uses the same inferred route signal as the route graphic.
+- Static cache-bust bumped to `app.js?v=186`.
+
+### Verification
+- `node --check app/static/app.js`
+- `git diff --check`
 
 ## What was built - Session 28.87 (Live filament route polish - 31 May)
 
