@@ -1921,6 +1921,13 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Multi-mismatch chips still summarise the count, include all slot details in the tooltip, and open the first mismatched slot for fast triage.
 - Static cache-bust bumped to `style.css?v=153` and `app.js?v=177`.
 
+### Flight Tower AMS mismatch awareness
+- Flight Tower printer lanes now include AMS mismatch signals from the same Profile Doctor truth layer.
+- A printer with a mismatch now falls into `Needs attention` instead of looking ready/idle.
+- Mission lane mismatch chips include the detailed mismatch reason in the tooltip.
+- `Idle and available` is suppressed when another warning/fault signal is present, avoiding mixed messages.
+- Static cache-bust bumped to `app.js?v=178`.
+
 ---
 
 ## Architecture decisions locked

@@ -4102,11 +4102,17 @@ function _missionPrinterSignals(p, jobs, spools, maint) {
   if (p.state === 'error' || p.state === 'estop') signals.push({ level: 'bad', text: p.error || 'Fault active' });
   if (p.state === 'paused') signals.push({ level: 'warn', text: 'Paused print' });
   const loaded = spools.filter(s => s.location_printer_id === p.id && !s.archived_at);
+  const mismatches = _amsMismatchSignals(p, loaded);
+  mismatches.forEach(m => signals.push({
+    level: 'warn',
+    text: m.label,
+    title: m.title,
+  }));
   const dueMaint = (maint[p.id] || []).filter(i => !i.archived_at && (i.status === 'due' || i.due));
   if (dueMaint.length) signals.push({ level: 'warn', text: `${dueMaint.length} maintenance item${dueMaint.length === 1 ? '' : 's'} due` });
   const failedQueue = jobs.filter(j => j.status === 'failed').length;
   if (failedQueue) signals.push({ level: 'warn', text: `${failedQueue} failed queue job${failedQueue === 1 ? '' : 's'}` });
-  if (!jobs.length && p.state === 'idle') signals.push({ level: 'ok', text: 'Idle and available' });
+  if (!signals.length && !jobs.length && p.state === 'idle') signals.push({ level: 'ok', text: 'Idle and available' });
   return signals.slice(0, 4);
 }
 
@@ -4719,7 +4725,7 @@ async function renderMissionControl() {
         <div class="mission-timeline">${queueHtml}${queueMore}</div>
         <div class="mission-loaded">${_missionLoadedLine(p, spools)}</div>
         <div class="mission-signals">
-          ${signals.map(s => `<span class="mission-signal mission-signal-${s.level}">${esc(s.text)}</span>`).join('')}
+          ${signals.map(s => `<span class="mission-signal mission-signal-${s.level}" title="${esc(s.title || s.text)}">${esc(s.text)}</span>`).join('')}
         </div>
       </section>`;
     }).join('') || `<div class="mission-empty-filter">No printers match this filter.</div>`;
