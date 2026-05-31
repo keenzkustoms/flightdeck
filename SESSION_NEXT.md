@@ -2084,6 +2084,8 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Moonraker status now passes through VVD fields including `filament`, `filament_pos`, `operation`, `action`, and `sensors`.
 - Voron route UI now labels the active path as `Pre-gate`, `Gear / buffer`, or `Toolhead` depending on reported VVD sensors instead of assuming the active gate is already at the nozzle.
 - Static cache-bust bumped to `app.js?v=190`.
+- Updated Voron/VVD operator labels from `G1/G2/G3/G4` to `T0/T1/T2/T3`, matching the Vivid/Happy Hare tool-position naming where the selector moves to the tool position.
+- Static cache-bust bumped to `app.js?v=191`.
 
 ---
 

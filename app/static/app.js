@@ -1881,7 +1881,7 @@ function _detailLiveMmuRows(p) {
     const gates = (unit.gates || []).map(gate => {
       const loadedSpool = loaded.find(s => Number(s.location_slot) === Number(gate.idx));
       const mismatch = _slotMismatch(loadedSpool, gate);
-      const gateLabel = `G${Number(gate.idx) + 1}`;
+      const gateLabel = `T${Number(gate.idx)}`;
       const style = (!gate.empty && gate.color) ? `style="background:${gate.color}"` : '';
       const slotText = loadedSpool
         ? `#${loadedSpool.id}`
@@ -1903,8 +1903,8 @@ function _detailLiveMmuRows(p) {
     }).join('');
     const meta = [
       unit.vendor || 'MMU',
-      unit.num_gates ? `${unit.num_gates} gates` : '',
-      unit.current_gate != null && unit.current_gate >= 0 ? `current G${Number(unit.current_gate) + 1}` : '',
+      unit.num_gates ? `${unit.num_gates} tools` : '',
+      unit.current_gate != null && unit.current_gate >= 0 ? `selector T${Number(unit.current_gate)}` : '',
       routeState.meta,
     ].filter(Boolean).join(' · ');
     return `<div class="live-mmu-row">
@@ -2047,7 +2047,7 @@ function _detailFilamentRoute(p) {
       const spool = loaded.find(s => Number(s.location_slot) === Number(gate.idx));
       const colour = spool?.color_hex || gate.color || '#ef4444';
       const textColour = _spoolTextColor(colour);
-      const gateLabel = `G${Number(gate.idx) + 1}`;
+      const gateLabel = `T${Number(gate.idx)}`;
       const spoolLabel = spool
         ? `#${spool.id} ${[spool.color_name, spool.material].filter(Boolean).join(' · ')}`
         : _slotProfileLabel(gate) || gate.material || 'Loaded filament';
@@ -2487,7 +2487,7 @@ function _detailMmuPanel(p) {
   const unit = p.mmu[0];
   if (!unit.gates?.length) return '';
 
-  const title = `<div class="detail-panel-title">${unit.vendor || 'MMU'} · ${unit.num_gates} gates</div>`;
+  const title = `<div class="detail-panel-title">${unit.vendor || 'MMU'} · ${unit.num_gates} tools</div>`;
 
   const slots = unit.gates.map(gate => {
     const loaded = (_latestSpoolsByPrinter[p.id] || []).find(s => Number(s.location_slot) === Number(gate.idx));
@@ -8646,7 +8646,7 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
       if (mmuUnit?.num_gates > 1) {
         slotSel.innerHTML = Array.from({length: mmuUnit.num_gates}, (_, i) => {
           const gate = mmuUnit.gates?.[i];
-          const label = gate?.material ? `Gate ${i} · ${gate.material}` : `Gate ${i}`;
+          const label = gate?.material ? `T${i} · ${gate.material}` : `T${i}`;
           return `<option value="${i}"${p0.location_slot === i ? ' selected' : ''}>${label}</option>`;
         }).join('');
       } else {
