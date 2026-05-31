@@ -1969,6 +1969,13 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - The action asks for confirmation and sends the printer unload/retract command without changing Flightdeck inventory; inventory still changes only after the printer reports empty or the operator clears/moves the spool.
 - Static cache-bust bumped to `app.js?v=181`.
 
+### AMS slot load action
+- Added the matching Bambu AMS load command path.
+- Backend now exposes `POST /api/printers/{printer_id}/ams/load`, calling Bambu's `load_filament_spool()` and logging an `ams_load_requested` decision.
+- AMS Profile Doctor now shows `Load AMS slot` when the printer reports filament in the clicked slot.
+- Like unload, this is a physical printer command only; it does not mutate Flightdeck spool inventory.
+- Static cache-bust bumped to `app.js?v=182`.
+
 ---
 
 ## Architecture decisions locked

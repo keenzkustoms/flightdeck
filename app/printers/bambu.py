@@ -638,6 +638,9 @@ class BambuPrinter:
     def unload_ams_filament(self) -> bool:
         return self._printer.unload_filament_spool()
 
+    def load_ams_filament(self) -> bool:
+        return self._printer.load_filament_spool()
+
     def set_ams_drying(
         self,
         ams_id: int,

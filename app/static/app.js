@@ -2264,6 +2264,18 @@ async function sendAmsUnload({ printerId, slotIndex }) {
   }
 }
 
+async function sendAmsLoad({ printerId, slotIndex }) {
+  const resp = await fetch(`/api/printers/${encodeURIComponent(printerId)}/ams/load`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ slot: Number(slotIndex) }),
+  });
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}));
+    throw new Error(err.detail || 'AMS load command failed');
+  }
+}
+
 // ── MMU panel ─────────────────────────────────────────────────────────────
 
 function _detailMmuPanel(p) {
@@ -7102,6 +7114,7 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
           </div>
           <div class="slot-actions">
             <a class="spool-action-btn spool-action-detail" href="#/spool/${current.id}">Details</a>
+            ${report && !report.empty ? `<button class="spool-action-btn spool-action-label" data-slot-load>Load AMS slot</button>` : ''}
             ${report && !report.empty ? `<button class="spool-action-btn spool-action-weigh" data-slot-unload>Unload AMS slot</button>` : ''}
             <button class="spool-action-btn spool-action-label" data-slot-trust-flightdeck="${current.id}">Trust Flightdeck</button>
             ${report ? `<button class="spool-action-btn spool-action-edit" data-slot-trust-printer="${current.id}">Trust Printer</button>` : ''}
@@ -7203,6 +7216,26 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
       });
       await _refreshSpoolsByPrinter();
       load();
+    });
+
+    body.querySelector('[data-slot-load]')?.addEventListener('click', async e => {
+      const btn = e.currentTarget;
+      const confirmed = await _confirmModal(`Load ${slotLabel} on ${printer.custom_name || printer.model_name || printerId}? Flightdeck will ask the printer to feed the AMS filament. Inventory is unchanged.`);
+      if (!confirmed) return;
+      const old = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = 'Loading';
+      try {
+        await sendAmsLoad({ printerId, slotIndex });
+        showToast('AMS load requested', `${slotLabel} load command sent.`, 'success');
+        await new Promise(resolve => setTimeout(resolve, 1200));
+        await refreshPrinters();
+        load();
+      } catch (err) {
+        showToast('AMS load failed', err.message || '', 'error');
+        btn.textContent = old;
+        btn.disabled = false;
+      }
     });
 
     body.querySelector('[data-slot-unload]')?.addEventListener('click', async e => {
