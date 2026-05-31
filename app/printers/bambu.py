@@ -325,11 +325,12 @@ class BambuPrinter:
             self._job_started_at = 0.0
             self._seen_finish_this_session = True
             if self._current_job_key:
-                filament_g = material = None
+                filament_g = material = filament_usage = None
                 if self._preview_cache:
                     _, pv = self._preview_cache
                     filament_g = pv.filament_weight_g
                     material = pv.filament_type
+                    filament_usage = _preview_filament_requirements(pv.filament_colors, pv.filament_type)
                 finished_print_id = db.on_print_finished(
                     self.id, self._current_job_key,
                     layers_completed=job.layer_current if job else None,
@@ -340,6 +341,7 @@ class BambuPrinter:
                     db.deduct_spool_usage(
                         self.id, finished_print_id, filament_g,
                         active_slot=self._ams_active_slot_at_start,
+                        filament_usage=filament_usage,
                     )
                 elif finished_print_id and self._ams_slot_snapshot_print_id == finished_print_id:
                     db.log_decision(self.id, "spool_no_deduction_cancelled",

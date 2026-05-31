@@ -2069,6 +2069,7 @@ def deduct_spool_usage(
     print_id: int,
     total_grams: float,
     active_slot: Optional[int] = None,
+    filament_usage: Optional[list[dict]] = None,
 ) -> None:
     """Read stored slot snapshot, deduct grams from mapped spools, write spool_usage JSON."""
     import json
@@ -2096,11 +2097,39 @@ def deduct_spool_usage(
     slots_with = [(int(s), d["spool_id"]) for s, d in snapshot.items() if d.get("spool_id")]
     slots_without = [int(s) for s, d in snapshot.items() if not d.get("spool_id")]
 
-    # Attribute grams: active_slot gets everything if known; else equal split
+    # Attribute grams: sliced colour/material usage first, then active slot, then equal split.
     slot_grams: dict[int, float] = {}
-    if active_slot is not None and any(s == active_slot for s, _ in slots_with):
+    if filament_usage:
+        reqs = _normalise_filament_usage(filament_usage)
+        req_total = sum(r["used_g"] for r in reqs)
+        used_slots: set[int] = set()
+        if req_total > 0:
+            available = [
+                (slot, sid, slot_snapshot.get(slot, {}))
+                for slot, sid in slots_with
+            ]
+            for req in reqs:
+                matches = [
+                    item for item in available
+                    if item[0] not in used_slots
+                    and _usage_material_matches(req["material"], item[2].get("type"))
+                ] or [item for item in available if item[0] not in used_slots] or available
+                if not matches:
+                    continue
+                best = min(
+                    matches,
+                    key=lambda item: (
+                        _hex_distance(req["color"], item[2].get("color")),
+                        item[0],
+                    ),
+                )
+                slot = best[0]
+                used_slots.add(slot)
+                slot_grams[slot] = slot_grams.get(slot, 0.0) + total_grams * (req["used_g"] / req_total)
+
+    if not slot_grams and active_slot is not None and any(s == active_slot for s, _ in slots_with):
         slot_grams[active_slot] = total_grams
-    elif slots_with:
+    elif not slot_grams and slots_with:
         per = total_grams / len(slots_with)
         for s, _ in slots_with:
             slot_grams[s] = per
@@ -2155,6 +2184,54 @@ def deduct_spool_usage(
 
     for event, detail in decision_logs:
         log_decision(printer_id, event, detail, print_id=print_id)
+
+
+def _normalise_filament_usage(rows: list[dict]) -> list[dict]:
+    out: list[dict] = []
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        try:
+            used_g = float(row.get("used_g") or row.get("grams") or 0)
+        except (TypeError, ValueError):
+            used_g = 0.0
+        if used_g <= 0:
+            continue
+        out.append({
+            "material": _normalise_material(row.get("type") or row.get("material")),
+            "color": _normalise_hex(row.get("color")),
+            "used_g": used_g,
+        })
+    return out
+
+
+def _normalise_material(value) -> str:
+    import re
+    return re.sub(r"[^a-z0-9]+", "", str(value or "").lower())
+
+
+def _normalise_hex(value) -> str:
+    import re
+    text = str(value or "").strip().lstrip("#")[:6].upper()
+    return f"#{text}" if re.fullmatch(r"[0-9A-F]{6}", text) else ""
+
+
+def _usage_material_matches(wanted: str, got) -> bool:
+    material = _normalise_material(got)
+    return bool(wanted and material and (wanted in material or material in wanted))
+
+
+def _hex_distance(a, b) -> int:
+    a = _normalise_hex(a)
+    b = _normalise_hex(b)
+    if not a or not b:
+        return 999
+    try:
+        av = tuple(int(a[i:i + 2], 16) for i in (1, 3, 5))
+        bv = tuple(int(b[i:i + 2], 16) for i in (1, 3, 5))
+    except ValueError:
+        return 999
+    return sum(abs(x - y) for x, y in zip(av, bv))
 
 
 def reconcile_spool_usage(

@@ -1888,6 +1888,18 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 
 ---
 
+### Multi-filament spool deduction fix
+- Fixed Bambu/H2D spool deduction so completed multi-filament jobs use the sliced 3MF per-colour `used_g` rows before falling back to the active AMS slot.
+- This prevents H2D dual-nozzle jobs from charging the entire print weight to the first active slot.
+- Repaired completed print `#118` (`can_openerV2`) from one usage row to two:
+  - Spool `#3` / AMS 1 S1 / white: `68.38g`
+  - Spool `#2` / AMS HT / red: `28.89g`
+- Updated spool balances from the print-start snapshot:
+  - Spool `#3`: `604.0g -> 535.62g`
+  - Spool `#2`: `324.0g -> 295.11g`
+
+---
+
 ## Architecture decisions locked
 
 - Python + FastAPI backend
