@@ -1928,6 +1928,11 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - `Idle and available` is suppressed when another warning/fault signal is present, avoiding mixed messages.
 - Static cache-bust bumped to `app.js?v=178`.
 
+### Queue preflight AMS mismatch guard
+- Queue preflight now compares Flightdeck spool assignments against printer-reported AMS slots.
+- If a mismatch affects the queued job's required material/colour, the job is blocked before dispatch with a specific AMS slot reason.
+- Unrelated AMS mismatches remain visible in Live/Flight Tower but do not block unrelated queue jobs.
+
 ---
 
 ## Architecture decisions locked

@@ -2172,12 +2172,12 @@ def _queue_colour_coverage(requirements: list[dict], spools: list[dict]) -> list
     return coverage
 
 
-def _flatten_reported_ams_slots(printer_status: Optional[dict]) -> list[dict]:
+def _flatten_reported_ams_slots(printer_status: Optional[dict], include_empty: bool = False) -> list[dict]:
     slots: list[dict] = []
     for unit in (printer_status or {}).get("ams") or []:
         unit_id = int(unit.get("unit") or 0)
         for slot in unit.get("slots") or []:
-            if slot.get("empty"):
+            if slot.get("empty") and not include_empty:
                 continue
             idx = int(slot.get("idx") or 0)
             slots.append({
@@ -2198,6 +2198,77 @@ def _reported_slot_matches_requirement(slot: dict, req: dict) -> bool:
         _spool_matches_material({"material": slot.get("type") or "", "subtype": "", "brand": ""}, req["material"])
         and _hex_dist(slot.get("color"), req["color"]) <= 95
     )
+
+
+def _reported_slot_mismatch(spool: Optional[dict], slot: Optional[dict]) -> str:
+    printer_loaded = bool(slot and not slot.get("empty"))
+    if spool and slot and slot.get("empty"):
+        return f"Flightdeck has spool #{spool.get('id')} assigned but printer reports empty"
+    if not spool and printer_loaded:
+        return "Printer reports filament but no Flightdeck spool is assigned"
+    if not spool or not printer_loaded or not slot:
+        return ""
+
+    reported_mat = _norm_material(slot.get("type") or slot.get("material") or "")
+    spool_mat = _norm_material(" ".join([
+        str(spool.get("material") or ""),
+        str(spool.get("subtype") or ""),
+    ]))
+    if reported_mat and spool_mat and reported_mat not in spool_mat and spool_mat not in reported_mat:
+        return f"Material mismatch: printer {slot.get('type') or 'unknown'}, Flightdeck {spool.get('material') or 'unknown'}"
+    if _hex_dist(slot.get("color"), spool.get("color_hex")) > 95:
+        return f"Colour mismatch: printer {_colour_label(slot.get('color'))}, Flightdeck {_colour_label(spool.get('color_hex'))}"
+    return ""
+
+
+def _printer_ams_mismatches(printer_status: Optional[dict], loaded_spools: list[dict]) -> list[dict]:
+    if not printer_status:
+        return []
+    reported_by_slot = {
+        int(slot["flat_slot"]): slot
+        for slot in _flatten_reported_ams_slots(printer_status, include_empty=True)
+    }
+    loaded_by_slot = {
+        int(s.get("location_slot")): s
+        for s in loaded_spools
+        if s.get("location_slot") is not None
+    }
+    mismatches: list[dict] = []
+    for flat_slot in sorted(set(reported_by_slot) | set(loaded_by_slot)):
+        slot = reported_by_slot.get(flat_slot)
+        spool = loaded_by_slot.get(flat_slot)
+        mismatch = _reported_slot_mismatch(spool, slot)
+        if not mismatch:
+            continue
+        label = (slot or {}).get("label") or f"AMS slot {flat_slot}"
+        mismatches.append({
+            "slot": flat_slot,
+            "label": label,
+            "message": mismatch,
+            "spool": spool,
+            "report": slot,
+        })
+    return mismatches
+
+
+def _ams_mismatch_impacts_job(mismatch: dict, material: Optional[str], color_reqs: list[dict]) -> bool:
+    spool = mismatch.get("spool") or {}
+    report = mismatch.get("report") or {}
+    if color_reqs:
+        return any(
+            (
+                spool and _spool_matches_material(spool, req["material"]) and _spool_matches_color(spool, req["color"])
+            ) or (
+                report and _reported_slot_matches_requirement(report, req)
+            )
+            for req in color_reqs
+        )
+    if material:
+        return (
+            bool(spool and _spool_matches_material(spool, material))
+            or bool(report and _spool_matches_material({"material": report.get("type") or "", "subtype": "", "brand": ""}, material))
+        )
+    return False
 
 
 def _queue_preflight(job: dict, printer_status: Optional[dict]) -> dict:
@@ -2231,6 +2302,15 @@ def _queue_preflight(job: dict, printer_status: Optional[dict]) -> dict:
         if any(_spool_matches_color(s, c["color"]) for c in color_reqs)
     ] if color_reqs else material_matches
     active_reported = _reported_active_slot(printer_status)
+    ams_mismatches = _printer_ams_mismatches(printer_status, loaded_spools)
+    impacted_mismatches = [m for m in ams_mismatches if _ams_mismatch_impacts_job(m, material, color_reqs)]
+    if impacted_mismatches:
+        detail = "; ".join(f"{m['label']}: {m['message']}" for m in impacted_mismatches[:2])
+        more = f"; +{len(impacted_mismatches) - 2} more" if len(impacted_mismatches) > 2 else ""
+        issues.append({
+            "level": "block",
+            "message": f"AMS profile mismatch affects this job: {detail}{more}",
+        })
 
     if material:
         if not loaded_spools:
