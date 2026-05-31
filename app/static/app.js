@@ -5652,19 +5652,24 @@ function _statsMonthRows(rows) {
   }).join('')}</div>`;
 }
 
-function _statsPrinterRows(printers, filamentSummary, failureSummary, allSpools = []) {
+function _statsPrinterRows(printers, filamentSummary, failureSummary, allSpools = [], usageSummary = []) {
   const byPrinter = Object.fromEntries((filamentSummary.by_printer || []).map(r => [r.printer_id, r.grams]));
   const failures = Object.fromEntries((failureSummary.by_printer || []).map(r => [r.key, r.count]));
+  const usage = Object.fromEntries((usageSummary || []).map(r => [r.printer_id, r]));
   if (!printers.length) return `<div class="stats-empty">No printers configured.</div>`;
   return `<div class="stats-printer-list">${printers.map(p => {
     const loaded = allSpools.filter(s => s.location_printer_id === p.id && !s.archived_at);
     const loadedG = loaded.reduce((sum, s) => sum + Number(s.remaining_g || 0), 0);
+    const u = usage[p.id] || {};
+    const hours = Number(u.total_seconds || 0) / 3600;
     return `<a class="stats-printer-row" href="#/printer/${p.id}">
       <div>
         <strong>${esc(_dashboardPrinterName(p))}</strong>
         <span>${esc(p.custom_name || '')}</span>
       </div>
       <div><b>${esc(p.state || 'unknown')}</b><span>state</span></div>
+      <div><b>${Number(u.total_prints || 0)}</b><span>prints</span></div>
+      <div><b>${hours ? hours.toFixed(1) : '0'}h</b><span>print time</span></div>
       <div><b>${_fmtGrams(byPrinter[p.id] || 0)}</b><span>used</span></div>
       <div><b>${_fmtGrams(loadedG)}</b><span>loaded</span></div>
       <div><b>${failures[p.id] || 0}</b><span>failures</span></div>
@@ -5841,13 +5846,14 @@ async function renderStatsView() {
   const focus = params.get('focus') || '';
 
   try {
-    const [filament, spools, allSpools, intel, failures, jobs] = await Promise.all([
+    const [filament, spools, allSpools, intel, failures, jobs, printerUsage] = await Promise.all([
       fetch('/api/filament/summary').then(r => r.ok ? r.json() : {}),
       fetch('/api/spools/summary').then(r => r.ok ? r.json() : {}),
       fetch('/api/spools').then(r => r.ok ? r.json() : []),
       fetch('/api/spools/intelligence?days=30').then(r => r.ok ? r.json() : {}),
       fetch('/api/failures?days=30').then(r => r.ok ? r.json() : {}),
       fetch('/api/queue').then(r => r.ok ? r.json() : []),
+      fetch('/api/printers/usage').then(r => r.ok ? r.json() : []),
     ]);
 
     const printers = _latestPrinters || [];
@@ -5924,7 +5930,7 @@ async function renderStatsView() {
           </div>
           <div class="stats-panel stats-panel-wide${focus === 'printers' ? ' stats-panel-focus' : ''}">
             <div class="stats-panel-head"><span>Printer Balance</span><a href="#/">Dashboard</a></div>
-            ${_statsPrinterRows(printers, filament, failures.summary || {}, allSpools)}
+            ${_statsPrinterRows(printers, filament, failures.summary || {}, allSpools, printerUsage)}
           </div>
         </section>
       </div>`;

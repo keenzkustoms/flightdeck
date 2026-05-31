@@ -1,6 +1,23 @@
 # Flightdeck — next session brief
 _Last updated 31 May 2026 (Session 28.91 Bambu MQTT maintenance automation)_
 
+## What was built - Session 28.92 (Printer usage telemetry - 31 May)
+
+Telemetry now includes per-printer historical print counters.
+
+### Backend
+- Added `/api/printers/usage` with all-time Flightdeck print counts, finished counts, failure counts, print hours, and filament grams by printer.
+- Corrected Bambu MQTT care label `ls` to "Lubricate lead screws"; `lr` remains "Lubricate linear rails".
+
+### Frontend
+- Telemetry Printer Balance rows now show per-printer print count and recorded print hours.
+- Static cache-bust bumped to `app.js?v=193`.
+
+### Verification
+- `python -m py_compile app/db.py app/main.py app/printers/bambu.py`
+- `node --check app/static/app.js`
+- `git diff --check`
+
 ## What was built - Session 28.91 (Bambu MQTT maintenance automation - 31 May)
 
 Flightdeck now reads Bambu MQTT care advisories into the printer Maintenance tab without copying Bambuddy.

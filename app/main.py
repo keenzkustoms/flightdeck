@@ -1178,6 +1178,11 @@ async def get_history_day(printer_id: str, date: str):
     return db.get_prints_for_day(printer_id, date)
 
 
+@app.get("/api/printers/usage")
+async def get_printer_usage():
+    return db.get_printer_usage_summary()
+
+
 @app.get("/api/failures")
 async def get_failures(days: int = 90):
     return db.get_failure_review(days)

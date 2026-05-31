@@ -536,6 +536,25 @@ def get_history_calendar(printer_id: str, year: int) -> dict:
     }
 
 
+def get_printer_usage_summary() -> list[dict]:
+    """All-time print counters per printer from Flightdeck history."""
+    with _conn() as conn:
+        rows = conn.execute(
+            """SELECT printer_id,
+                      COUNT(*) AS total_prints,
+                      SUM(CASE WHEN final_state = 'FINISHED' THEN 1 ELSE 0 END) AS finished_prints,
+                      SUM(CASE WHEN final_state IN ('ERROR', 'CANCELLED') THEN 1 ELSE 0 END) AS failed_prints,
+                      COALESCE(SUM(CASE WHEN duration_seconds IS NOT NULL THEN duration_seconds ELSE 0 END), 0) AS total_seconds,
+                      COALESCE(SUM(CASE WHEN final_state = 'FINISHED' THEN duration_seconds ELSE 0 END), 0) AS finished_seconds,
+                      COALESCE(SUM(filament_grams), 0) AS filament_grams
+               FROM prints
+               WHERE final_state IS NOT NULL
+               GROUP BY printer_id
+               ORDER BY printer_id""",
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
 def get_prints_for_day(printer_id: str, date_str: str) -> list[dict]:
     """All prints (any state) whose started_at is on the given UTC date (YYYY-MM-DD)."""
     with _conn() as conn:

@@ -20,7 +20,7 @@ FINISHED_TTL = timedelta(minutes=30)
 _BAMBU_PREVIEW_FAILED = object()  # sentinel: FTP failed, don't retry until job changes
 _BAMBU_CARE_LABELS = {
     "cr": "Clean carbon rods",
-    "ls": "Lubricate linear rails",
+    "ls": "Lubricate lead screws",
     "lr": "Lubricate linear rails",
     "ld": "Clean build plate",
     "hr": "Clean hotend/nozzle",
