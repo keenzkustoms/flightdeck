@@ -528,7 +528,19 @@ def _parse_mmu(mmu: dict, mmu_machine: dict, _gate_map: dict) -> list:
 
     unit0 = mmu_machine.get("unit_0", {})
     vendor = unit0.get("name") or unit0.get("vendor") or "MMU"
-    return [{"vendor": vendor, "num_gates": num_gates, "current_gate": current_gate, "gates": gates}]
+    return [{
+        "vendor": vendor,
+        "num_gates": num_gates,
+        "current_gate": current_gate,
+        "tool": mmu.get("tool"),
+        "filament": mmu.get("filament"),
+        "filament_position": mmu.get("filament_position"),
+        "filament_pos": mmu.get("filament_pos"),
+        "operation": mmu.get("operation"),
+        "action": mmu.get("action"),
+        "sensors": mmu.get("sensors") or {},
+        "gates": gates,
+    }]
 
 
 def _pick_thumbnail(thumbnails: list) -> Optional[dict]:

@@ -1877,6 +1877,7 @@ function _detailLiveMmuRows(p) {
   if (!p.mmu?.length) return '';
   const loaded = _latestSpoolsByPrinter[p.id] || [];
   return p.mmu.map(unit => {
+    const routeState = _mmuRouteState(unit);
     const gates = (unit.gates || []).map(gate => {
       const loadedSpool = loaded.find(s => Number(s.location_slot) === Number(gate.idx));
       const mismatch = _slotMismatch(loadedSpool, gate);
@@ -1885,7 +1886,7 @@ function _detailLiveMmuRows(p) {
       const slotText = loadedSpool
         ? `#${loadedSpool.id}`
         : (gate.empty ? 'Empty' : (gate.material || gateLabel));
-      const status = gate.active ? 'Loaded' : gate.status === 2 ? 'Buffered' : gate.empty ? 'Empty' : 'Ready';
+      const status = gate.active ? routeState.gateStatus : gate.status === 2 ? 'Buffered' : gate.empty ? 'Empty' : 'Ready';
       const title = [
         gateLabel,
         loadedSpool ? [loadedSpool.color_name, loadedSpool.material, loadedSpool.brand, `${Math.round(Number(loadedSpool.remaining_g || 0))}g`].filter(Boolean).join(' · ') : '',
@@ -1904,6 +1905,7 @@ function _detailLiveMmuRows(p) {
       unit.vendor || 'MMU',
       unit.num_gates ? `${unit.num_gates} gates` : '',
       unit.current_gate != null && unit.current_gate >= 0 ? `current G${Number(unit.current_gate) + 1}` : '',
+      routeState.meta,
     ].filter(Boolean).join(' · ');
     return `<div class="live-mmu-row">
       <div class="live-mmu-head">
@@ -1913,6 +1915,49 @@ function _detailLiveMmuRows(p) {
       <div class="live-mmu-gates">${gates}</div>
     </div>`;
   }).join('');
+}
+
+function _mmuRouteState(unit = {}) {
+  const sensors = unit.sensors || {};
+  const filament = String(unit.filament || '').trim();
+  const loadedToExtruder = sensors.extruder === true || (/loaded/i.test(filament) && !/unloaded/i.test(filament));
+  const atGear = sensors.mmu_gear === true;
+  const atPregate = sensors.mmu_pre_gate === true;
+  const operation = String(unit.operation || unit.action || '').trim();
+  if (loadedToExtruder) {
+    return {
+      destination: 'Toolhead',
+      detail: 'At nozzle',
+      badge: 'Loaded',
+      gateStatus: 'Nozzle',
+      meta: operation && !/^idle$/i.test(operation) ? operation : 'nozzle loaded',
+    };
+  }
+  if (atGear) {
+    return {
+      destination: 'Gear / buffer',
+      detail: 'Staged before Bowden',
+      badge: 'Staged',
+      gateStatus: 'Gear',
+      meta: 'at gear/buffer',
+    };
+  }
+  if (atPregate) {
+    return {
+      destination: 'Pre-gate',
+      detail: 'Waiting at sensor',
+      badge: 'Pre-gate',
+      gateStatus: 'Pre-gate',
+      meta: 'at pre-gate',
+    };
+  }
+  return {
+    destination: 'MMU selected',
+    detail: filament || 'Not fed',
+    badge: 'Selected',
+    gateStatus: 'Selected',
+    meta: filament && !/unloaded/i.test(filament) ? filament : '',
+  };
 }
 
 function _isH2dPrinter(p) {
@@ -1996,6 +2041,7 @@ function _detailFilamentRoute(p) {
   }
 
   for (const unit of (p.mmu || [])) {
+    const routeState = _mmuRouteState(unit);
     for (const gate of (unit.gates || [])) {
       if (!gate.active || gate.empty) continue;
       const spool = loaded.find(s => Number(s.location_slot) === Number(gate.idx));
@@ -2005,17 +2051,17 @@ function _detailFilamentRoute(p) {
       const spoolLabel = spool
         ? `#${spool.id} ${[spool.color_name, spool.material].filter(Boolean).join(' · ')}`
         : _slotProfileLabel(gate) || gate.material || 'Loaded filament';
-      const title = `${gateLabel} feeding toolhead${spoolLabel ? ' · ' + spoolLabel : ''}`;
+      const title = `${gateLabel} to ${routeState.destination}${spoolLabel ? ' · ' + spoolLabel : ''}`;
       routes.push(`<div class="live-filament-route live-filament-route-mmu" style="--route-colour:${colour};--route-text:${textColour}" title="${esc(title)}">
         <button class="live-route-node live-route-source" data-slot-edit data-printer-id="${p.id}" data-slot-index="${Number(gate.idx)}" data-slot-label="${esc(gateLabel)}">
           <span class="live-route-swatch"></span>
           <span><strong>${esc(gateLabel)}</strong><em>${esc(spoolLabel)}</em></span>
-          <b class="live-route-fed">Loaded</b>
+          <b class="live-route-fed">${esc(routeState.badge)}</b>
         </button>
         <span class="live-route-line" aria-hidden="true"></span>
         <span class="live-route-node live-route-destination">
           <span class="live-route-nozzle" aria-hidden="true"></span>
-          <span><strong>Toolhead</strong><em>Filament fed</em></span>
+          <span><strong>${esc(routeState.destination)}</strong><em>${esc(routeState.detail)}</em></span>
         </span>
       </div>`);
     }

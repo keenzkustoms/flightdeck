@@ -2079,6 +2079,12 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Removed the duplicate legacy MMU panel from the live page so the new Environment panel is the single source of truth.
 - Static cache-bust bumped to `app.js?v=189` and `style.css?v=156`.
 
+### Voron VVD filament path accuracy
+- Captured live Happy Hare/VVD MMU state showing the difference between selected/gear-buffered filament and filament loaded all the way to the extruder/nozzle.
+- Moonraker status now passes through VVD fields including `filament`, `filament_pos`, `operation`, `action`, and `sensors`.
+- Voron route UI now labels the active path as `Pre-gate`, `Gear / buffer`, or `Toolhead` depending on reported VVD sensors instead of assuming the active gate is already at the nozzle.
+- Static cache-bust bumped to `app.js?v=190`.
+
 ---
 
 ## Architecture decisions locked
