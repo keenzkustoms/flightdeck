@@ -7114,8 +7114,8 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
           </div>
           <div class="slot-actions">
             <a class="spool-action-btn spool-action-detail" href="#/spool/${current.id}">Details</a>
-            ${report && !report.empty ? `<button class="spool-action-btn spool-action-label" data-slot-load>Load AMS slot</button>` : ''}
-            ${report && !report.empty ? `<button class="spool-action-btn spool-action-weigh" data-slot-unload>Unload AMS slot</button>` : ''}
+            ${report && !report.empty && !report.active ? `<button class="spool-action-btn spool-action-label" data-slot-load>Load AMS slot</button>` : ''}
+            ${report && !report.empty && report.active ? `<button class="spool-action-btn spool-action-weigh" data-slot-unload>Unload AMS slot</button>` : ''}
             <button class="spool-action-btn spool-action-label" data-slot-trust-flightdeck="${current.id}">Trust Flightdeck</button>
             ${report ? `<button class="spool-action-btn spool-action-edit" data-slot-trust-printer="${current.id}">Trust Printer</button>` : ''}
             <button class="spool-action-btn spool-action-label" data-slot-label-print="${current.id}">Label</button>

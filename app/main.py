@@ -980,7 +980,7 @@ async def unload_ams_filament(printer_id: str, req: AmsFilamentActionRequest):
         if p.id != printer_id:
             continue
         try:
-            ok = await asyncio.to_thread(p.unload_ams_filament)
+            ok = await asyncio.to_thread(p.unload_ams_filament, req.slot)
         except Exception as exc:
             raise HTTPException(status_code=502, detail=str(exc))
         slot_note = f" slot={req.slot}" if req.slot is not None else ""
@@ -996,7 +996,7 @@ async def load_ams_filament(printer_id: str, req: AmsFilamentActionRequest):
         if p.id != printer_id:
             continue
         try:
-            ok = await asyncio.to_thread(p.load_ams_filament)
+            ok = await asyncio.to_thread(p.load_ams_filament, req.slot)
         except Exception as exc:
             raise HTTPException(status_code=502, detail=str(exc))
         slot_note = f" slot={req.slot}" if req.slot is not None else ""

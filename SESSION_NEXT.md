@@ -1976,6 +1976,13 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Like unload, this is a physical printer command only; it does not mutate Flightdeck spool inventory.
 - Static cache-bust bumped to `app.js?v=182`.
 
+### AMS load/unload active-slot refinement
+- Tightened the AMS Profile Doctor actions so parked loaded slots show `Load AMS slot`, while the currently active/fed slot shows `Unload AMS slot`.
+- Load now targets the clicked AMS tray instead of relying on Bambu's generic load helper.
+- Load/unload commands now choose a safer temperature from the clicked slot's material instead of always using the library default.
+- This should make AMS 2 slot 2 style cases clearer: load the parked slot first, then unload once it becomes active.
+- Static cache-bust bumped to `app.js?v=183`.
+
 ---
 
 ## Architecture decisions locked

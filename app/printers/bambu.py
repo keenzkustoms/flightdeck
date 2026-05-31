@@ -635,11 +635,43 @@ class BambuPrinter:
         payload = _ams_filament_setting_payload(spool, color.upper(), ams_id, tray_id)
         return self._printer.mqtt_client._PrinterMQTTClient__publish_command({"print": payload})
 
-    def unload_ams_filament(self) -> bool:
-        return self._printer.unload_filament_spool()
+    def unload_ams_filament(self, slot: Optional[int] = None) -> bool:
+        return self._printer.mqtt_client._PrinterMQTTClient__publish_command({
+            "print": {
+                "command": "ams_change_filament",
+                "target": 254,
+                "curr_temp": _filament_change_temp(self._ams_slot_material(slot)),
+                "tar_temp": _filament_change_temp(self._ams_slot_material(slot)),
+            }
+        })
 
-    def load_ams_filament(self) -> bool:
-        return self._printer.load_filament_spool()
+    def load_ams_filament(self, slot: Optional[int] = None) -> bool:
+        if slot is None:
+            return self._printer.load_filament_spool()
+        return self._printer.mqtt_client._PrinterMQTTClient__publish_command({
+            "print": {
+                "command": "ams_change_filament",
+                "target": _bambu_tray_target(slot),
+                "curr_temp": _filament_change_temp(self._ams_slot_material(slot)),
+                "tar_temp": _filament_change_temp(self._ams_slot_material(slot)),
+            }
+        })
+
+    def _ams_slot_material(self, slot: Optional[int]) -> str:
+        if slot is None:
+            return ""
+        unit_id, tray_id = _split_ams_slot(slot)
+        try:
+            dump = self._printer.mqtt_dump().get("print", {})
+            for unit_data in (dump.get("ams", {}) or {}).get("ams", []):
+                if int(unit_data.get("id", 0)) != int(unit_id):
+                    continue
+                for tray_data in unit_data.get("tray", []):
+                    if int(tray_data.get("id", 0)) == int(tray_id):
+                        return str(tray_data.get("tray_type") or "")
+        except Exception:
+            return ""
+        return ""
 
     def set_ams_drying(
         self,
@@ -1063,6 +1095,22 @@ def _bambu_alarm_message(print_data: dict) -> Optional[str]:
 def _split_ams_slot(slot: int) -> tuple[int, int]:
     slot = int(slot)
     return slot // 4, slot % 4
+
+
+def _bambu_tray_target(slot: int) -> int:
+    unit_id, tray_id = _split_ams_slot(slot)
+    return unit_id + tray_id if unit_id >= 128 else int(slot)
+
+
+def _filament_change_temp(material: Optional[str]) -> int:
+    material_norm = _norm_bambu_material(material)
+    if material_norm in ("asa", "abs", "pc", "pa", "nylon"):
+        return 255
+    if material_norm in ("petg", "pet", "pctg"):
+        return 245
+    if material_norm in ("tpu", "pla", "plasilk", "plamatte", "plaplus"):
+        return 220
+    return 220
 
 
 def _bambu_profile_for_idx(idx: Optional[str]) -> dict:
