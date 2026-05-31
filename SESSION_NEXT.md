@@ -1897,6 +1897,7 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Updated spool balances from the print-start snapshot:
   - Spool `#3`: `604.0g -> 535.62g`
   - Spool `#2`: `324.0g -> 295.11g`
+- Weigh-in hints no longer trigger just because a print has multiple usage rows when the deduction was repaired or matched from sliced per-filament usage.
 
 ---
 

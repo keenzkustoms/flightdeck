@@ -598,7 +598,8 @@ def _mark_reconcile_suggestions(usage: list[dict], spools: dict[int, dict], low_
         except (TypeError, ValueError, ZeroDivisionError):
             pct = None
 
-        if multiple_rows:
+        trusted_multi_row = bool(entry.get("repaired")) or entry.get("attribution") == "filament_usage"
+        if multiple_rows and not trusted_multi_row:
             reasons.append("multiple spools recorded")
         if pct is not None and pct < min(float(low_pct), 20.0):
             reasons.append(f"low spool ({pct:.0f}%)")
@@ -2155,6 +2156,8 @@ def deduct_spool_usage(
                 "remaining_before_g": round(float(old_r), 2),
                 "remaining_after_g": round(float(new_r), 2),
             }
+            if filament_usage:
+                usage["attribution"] = "filament_usage"
             start_g = slot_snapshot.get(slot, {}).get("remaining_g_at_start")
             if start_g is not None:
                 try:
