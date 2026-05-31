@@ -18,6 +18,15 @@ log = logging.getLogger(__name__)
 
 FINISHED_TTL = timedelta(minutes=30)
 _BAMBU_PREVIEW_FAILED = object()  # sentinel: FTP failed, don't retry until job changes
+_BAMBU_CARE_LABELS = {
+    "cr": "Clean carbon rods",
+    "ls": "Lubricate linear rails",
+    "lr": "Lubricate linear rails",
+    "ld": "Clean build plate",
+    "hr": "Clean hotend/nozzle",
+    "pt": "Check PTFE tube",
+    "bt": "Check belt tension",
+}
 _BAMBU_PROFILE_ALIASES = {
     "P461bccf": {
         "brand": "Siddament",
@@ -300,6 +309,7 @@ class BambuPrinter:
                 ams = _parse_ams(print_data)
             except Exception:
                 ams = []
+            maintenance = _parse_care(print_data)
 
             now = datetime.utcnow()
             self._last_seen = now
@@ -307,7 +317,7 @@ class BambuPrinter:
                 id=self.id, model_name=self.model_name, custom_name=self.custom_name,
                 icon=self.icon, kind="bambu", state=state,
                 temps=temps, job=job, substage=substage,
-                idle_info=idle_info, ams=ams, light_state=light_state,
+                idle_info=idle_info, ams=ams, maintenance=maintenance, light_state=light_state,
                 error=alarm_message if state in ("paused", "error") else None,
                 last_seen=now, updated_at=now,
             )
@@ -1319,6 +1329,38 @@ def _parse_ams(dump: dict) -> list[dict]:
             })
 
     return result
+
+
+def _parse_care(dump: dict) -> list[dict]:
+    """Return Bambu MQTT care advisories as Flightdeck maintenance signals.
+
+    The printer only publishes active care rows, so their presence is treated
+    as due/attention rather than as a full schedule replacement.
+    """
+    care = dump.get("care") or []
+    if not isinstance(care, list):
+        return []
+
+    items = []
+    for raw in care:
+        if not isinstance(raw, dict):
+            continue
+        code = str(raw.get("id") or "").strip().lower()
+        if not code:
+            continue
+        info = str(raw.get("info") or "").strip()
+        title = _BAMBU_CARE_LABELS.get(code, f"Printer care {code.upper()}")
+        items.append({
+            "id": f"bambu:{code}",
+            "code": code,
+            "title": title,
+            "source": "bambu_mqtt",
+            "state": "due",
+            "is_due": True,
+            "info": info,
+            "detail": f"Printer reported {code.upper()} care via Bambu MQTT",
+        })
+    return items
 
 
 def _safe_int(value) -> Optional[int]:

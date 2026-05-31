@@ -1,5 +1,22 @@
 # Flightdeck — next session brief
-_Last updated 31 May 2026 (Session 28.90 Camera sim route fix)_
+_Last updated 31 May 2026 (Session 28.91 Bambu MQTT maintenance automation)_
+
+## What was built - Session 28.91 (Bambu MQTT maintenance automation - 31 May)
+
+Flightdeck now reads Bambu MQTT care advisories into the printer Maintenance tab without copying Bambuddy.
+
+### Backend
+- Bambu status parses MQTT `print.care` into live maintenance advisories.
+- Printer status includes a `maintenance` telemetry list for due care codes.
+
+### Frontend
+- Maintenance tabs show an Auto maintenance panel above manual operator tasks.
+- Bumped static cache-bust to `app.js?v=192` and `style.css?v=157`.
+
+### Verification
+- `python -m py_compile app/models.py app/printers/bambu.py`
+- `node --check app/static/app.js`
+- `git diff --check`
 
 ## What was built - Session 28.90 (Camera sim route fix - 31 May)
 

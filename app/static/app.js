@@ -3069,6 +3069,43 @@ function _maintenanceCard(item) {
   </article>`;
 }
 
+function _maintenanceLiveCard(item) {
+  const title = item.title || 'Printer care';
+  const code = item.code ? ` · ${String(item.code).toUpperCase()}` : '';
+  const detail = item.detail || 'Reported by printer telemetry';
+  const info = item.info ? `<span class="maint-live-code">${esc(item.info)}</span>` : '';
+  return `<article class="maint-card maint-card-due maint-live-card">
+    <div class="maint-card-main">
+      <div class="maint-card-head">
+        <h3>${esc(title)}</h3>
+        <span class="maint-badge maint-badge-due">MQTT due</span>
+      </div>
+      <div class="maint-meta">${esc(detail)}${esc(code)}</div>
+      ${info}
+    </div>
+  </article>`;
+}
+
+function _maintenanceLivePanel(printerId) {
+  const printer = _latestPrinters.find(p => p.id === printerId);
+  if (!printer || printer.kind !== 'bambu') return '';
+  const liveItems = (printer?.maintenance || []).filter(i => i && (i.is_due || i.state === 'due'));
+  const status = liveItems.length
+    ? `${liveItems.length} printer-reported care item${liveItems.length === 1 ? '' : 's'}`
+    : 'Printer telemetry clear';
+  return `<section class="maint-live-panel ${liveItems.length ? 'maint-live-panel-due' : ''}">
+    <div class="maint-live-head">
+      <div>
+        <div class="maint-live-kicker">Auto maintenance</div>
+        <h3>Bambu MQTT watch</h3>
+      </div>
+      <span class="maint-badge ${liveItems.length ? 'maint-badge-due' : 'maint-badge-ok'}">${liveItems.length ? 'Action' : 'Clear'}</span>
+    </div>
+    <p>${esc(status)}. Flightdeck reads the printer care feed and keeps your manual schedule below for work you want to track yourself.</p>
+    ${liveItems.length ? `<div class="maint-live-grid">${liveItems.map(_maintenanceLiveCard).join('')}</div>` : ''}
+  </section>`;
+}
+
 function _maintenanceForm(printerId, item = null) {
   const isEdit = !!item;
   return `<form class="maint-form" data-maint-form data-printer-id="${printerId}" ${isEdit ? `data-id="${item.id}"` : ''}>
@@ -3123,6 +3160,7 @@ async function _renderMaintenanceBody(printerId) {
   el.innerHTML = `<div class="maint-header">
       <div class="maint-summary">${summary}</div>
     </div>
+    ${_maintenanceLivePanel(printerId)}
     ${_maintenanceForm(printerId)}
     <div class="maint-list">
       ${items.length ? items.map(_maintenanceCard).join('') : '<div class="maint-empty">No scheduled maintenance.</div>'}
