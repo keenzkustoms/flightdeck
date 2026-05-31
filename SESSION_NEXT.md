@@ -1,5 +1,9 @@
 # Flightdeck — next session brief
-_Last updated 1 June 2026 (Session 28.95 Printer failure scroll pane)_
+_Last updated 1 June 2026 (Session 28.96 Operations nav restore)_
+
+## What was built - Session 28.96 (Operations nav restore - 1 June)
+- Restored `Cameras` and `Queue` under the Operations section after the printer-scoped navigation pass.
+- Static cache-bust bumped to `app.js?v=196`.
 
 ## What was built - Session 28.95 (Printer failure scroll pane - 1 June)
 - Gave each printer `Failures` tab the same fixed-context/scrolling-results behaviour as the spool swatch view.
