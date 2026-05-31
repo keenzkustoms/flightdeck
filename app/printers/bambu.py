@@ -636,24 +636,41 @@ class BambuPrinter:
         return self._printer.mqtt_client._PrinterMQTTClient__publish_command({"print": payload})
 
     def unload_ams_filament(self, slot: Optional[int] = None) -> bool:
+        ams_id, _tray_id = _split_ams_slot(slot) if slot is not None else (255, 255)
+        if slot is None:
+            try:
+                tray_now = int((self._printer.mqtt_dump().get("print", {}).get("ams", {}) or {}).get("tray_now", 255))
+                if 0 <= tray_now < 128:
+                    ams_id = tray_now // 4
+                elif tray_now >= 128:
+                    ams_id = tray_now
+            except Exception:
+                ams_id = 255
+        temp = _filament_change_temp(self._ams_slot_material(slot))
         return self._printer.mqtt_client._PrinterMQTTClient__publish_command({
             "print": {
                 "command": "ams_change_filament",
-                "target": 254,
-                "curr_temp": _filament_change_temp(self._ams_slot_material(slot)),
-                "tar_temp": _filament_change_temp(self._ams_slot_material(slot)),
+                "ams_id": ams_id,
+                "slot_id": 255,
+                "target": 255,
+                "curr_temp": temp,
+                "tar_temp": temp,
             }
         })
 
     def load_ams_filament(self, slot: Optional[int] = None) -> bool:
         if slot is None:
             return self._printer.load_filament_spool()
+        ams_id, tray_id = _split_ams_slot(slot)
+        target = _bambu_tray_target(slot)
         return self._printer.mqtt_client._PrinterMQTTClient__publish_command({
             "print": {
                 "command": "ams_change_filament",
-                "target": _bambu_tray_target(slot),
-                "curr_temp": _filament_change_temp(self._ams_slot_material(slot)),
-                "tar_temp": _filament_change_temp(self._ams_slot_material(slot)),
+                "ams_id": ams_id,
+                "slot_id": tray_id,
+                "target": target,
+                "curr_temp": -1,
+                "tar_temp": -1,
             }
         })
 

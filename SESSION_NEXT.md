@@ -1983,6 +1983,12 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - This should make AMS 2 slot 2 style cases clearer: load the parked slot first, then unload once it becomes active.
 - Static cache-bust bumped to `app.js?v=183`.
 
+### BambuStudio-shaped AMS load/unload commands
+- Updated Flightdeck's Bambu AMS load/unload MQTT payloads to match captured BambuStudio/Bambuddy command shape more closely.
+- Load now sends `ams_id`, `slot_id`, `target`, and `curr_temp/tar_temp=-1`.
+- Unload now sends `slot_id=255` and `target=255`, with source `ams_id` derived from the clicked/active slot.
+- This replaces the older bambulabs_api helper shape that was accepted by MQTT but ignored by the H2D AMS state machine.
+
 ---
 
 ## Architecture decisions locked
