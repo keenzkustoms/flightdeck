@@ -1,5 +1,19 @@
 # Flightdeck — next session brief
-_Last updated 31 May 2026 (Session 28.91 Bambu MQTT maintenance automation)_
+_Last updated 31 May 2026 (Session 28.93 Maintenance service cockpit)_
+
+## What was built - Session 28.93 (Maintenance service cockpit - 31 May)
+
+The printer Maintenance tab now reads more like a service cockpit than a plain task list.
+
+### Frontend
+- Added a top cockpit panel with printer-reported care count, scheduled due count, manual task count, next service, and last completed service.
+- Collapsed the add-task form behind an "Add service task" drawer so the service status is the first thing you see.
+- Kept Bambu MQTT care and manual schedules visually separate.
+- Static cache-bust bumped to `app.js?v=194` and `style.css?v=158`.
+
+### Verification
+- `node --check app/static/app.js`
+- `git diff --check`
 
 ## What was built - Session 28.92 (Printer usage telemetry - 31 May)
 

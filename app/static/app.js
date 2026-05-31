@@ -3106,6 +3106,79 @@ function _maintenanceLivePanel(printerId) {
   </section>`;
 }
 
+function _maintenanceTaskDueText(item) {
+  if (!item) return 'No task scheduled';
+  if (item.is_due) return 'Due now';
+  if (item.days_until_due != null) {
+    if (item.days_until_due < 0) return `${Math.abs(item.days_until_due)}d overdue`;
+    if (item.days_until_due === 0) return 'due today';
+    return `${item.days_until_due}d left`;
+  }
+  if (item.interval_hours) return `${item.hours_since}/${item.interval_hours}h`;
+  if (item.interval_prints) return `${item.prints_since}/${item.interval_prints} prints`;
+  if (item.interval_days) return `${item.days_since ?? 0}/${item.interval_days}d`;
+  return 'Manual trigger';
+}
+
+function _maintenanceCockpit(printerId, items) {
+  const printer = _latestPrinters.find(p => p.id === printerId);
+  const liveItems = (printer?.maintenance || []).filter(i => i && (i.is_due || i.state === 'due'));
+  const dueItems = items.filter(i => i.is_due);
+  const activeItems = items.filter(i => !i.archived_at);
+  const nextItem = activeItems
+    .filter(i => !i.is_due)
+    .sort((a, b) => {
+      const ad = a.days_until_due == null ? 999999 : a.days_until_due;
+      const bd = b.days_until_due == null ? 999999 : b.days_until_due;
+      return ad - bd || String(a.title || '').localeCompare(String(b.title || ''));
+    })[0];
+  const lastDone = activeItems
+    .filter(i => i.last_completed_at)
+    .sort((a, b) => String(b.last_completed_at).localeCompare(String(a.last_completed_at)))[0];
+  const lastDoneText = lastDone
+    ? `${lastDone.title} · ${new Date((lastDone.last_completed_at.endsWith('Z') ? lastDone.last_completed_at : lastDone.last_completed_at + 'Z')).toLocaleDateString()}`
+    : 'No completed service yet';
+  const statusClass = liveItems.length || dueItems.length ? 'warn' : 'ok';
+  const statusText = liveItems.length
+    ? `${liveItems.length} printer care`
+    : dueItems.length
+      ? `${dueItems.length} scheduled due`
+      : 'Service clear';
+  return `<section class="maint-cockpit maint-cockpit-${statusClass}">
+    <div class="maint-cockpit-title">
+      <div>
+        <div class="maint-live-kicker">Service cockpit</div>
+        <h2>${esc(printer?.custom_name || printer?.model_name || 'Printer')}</h2>
+      </div>
+      <span class="maint-badge ${statusClass === 'warn' ? 'maint-badge-due' : 'maint-badge-ok'}">${esc(statusText)}</span>
+    </div>
+    <div class="maint-cockpit-grid">
+      <div class="maint-cockpit-stat">
+        <strong>${liveItems.length}</strong>
+        <span>printer reported</span>
+      </div>
+      <div class="maint-cockpit-stat">
+        <strong>${dueItems.length}</strong>
+        <span>scheduled due</span>
+      </div>
+      <div class="maint-cockpit-stat">
+        <strong>${activeItems.length}</strong>
+        <span>manual tasks</span>
+      </div>
+      <div class="maint-cockpit-next">
+        <span>Next service</span>
+        <strong>${esc(nextItem?.title || (dueItems[0]?.title ?? 'Nothing queued'))}</strong>
+        <small>${esc(_maintenanceTaskDueText(nextItem || dueItems[0]))}</small>
+      </div>
+      <div class="maint-cockpit-next">
+        <span>Last completed</span>
+        <strong>${esc(lastDoneText)}</strong>
+        <small>Operator service log</small>
+      </div>
+    </div>
+  </section>`;
+}
+
 function _maintenanceForm(printerId, item = null) {
   const isEdit = !!item;
   return `<form class="maint-form" data-maint-form data-printer-id="${printerId}" ${isEdit ? `data-id="${item.id}"` : ''}>
@@ -3158,10 +3231,17 @@ async function _renderMaintenanceBody(printerId) {
     : 'No maintenance tasks yet';
 
   el.innerHTML = `<div class="maint-header">
-      <div class="maint-summary">${summary}</div>
+      <div>
+        <div class="maint-live-kicker">Maintenance</div>
+        <div class="maint-summary">${summary}</div>
+      </div>
     </div>
+    ${_maintenanceCockpit(printerId, items)}
     ${_maintenanceLivePanel(printerId)}
-    ${_maintenanceForm(printerId)}
+    <details class="maint-form-shell">
+      <summary>${items.length ? 'Add service task' : 'Create first service task'}</summary>
+      ${_maintenanceForm(printerId)}
+    </details>
     <div class="maint-list">
       ${items.length ? items.map(_maintenanceCard).join('') : '<div class="maint-empty">No scheduled maintenance.</div>'}
     </div>`;
