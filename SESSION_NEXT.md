@@ -1,5 +1,9 @@
 # Flightdeck — next session brief
-_Last updated 1 June 2026 (Session 28.99 Offline state consistency polish)_
+_Last updated 1 June 2026 (Session 28.100 Bambu offline init fix)_
+
+## What was built - Session 28.100 (Bambu offline init fix - 1 June)
+- Initialised the Bambu connector's cached last-seen timestamp before first contact.
+- Fixed powered-off Bambu printers briefly rendering as `ERROR` after restart instead of the intended `OFFLINE` state.
 
 ## What was built - Session 28.99 (Offline state consistency polish - 1 June)
 - Added Bambu MQTT staleness detection so retained printer payloads do not keep powered-off printers showing as `idle`.

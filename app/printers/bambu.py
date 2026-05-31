@@ -195,6 +195,7 @@ class BambuPrinter:
         self._printer.mqtt_client = _SequencedMQTTClient(ip, access_code, serial)
         self._lock = threading.Lock()
         self._connected = False
+        self._last_seen: datetime | None = None
         self._preview_cache: tuple[str, object] | None = None
         self._seen_finish_this_session = False
         self._current_job_key: Optional[str] = None
