@@ -624,19 +624,16 @@ class BambuPrinter:
                     "nozzle_temp_min": 0,
                     "nozzle_temp_max": 0,
                     "tray_type": "",
+                    "tray_sub_brands": "",
+                    "tray_id_name": "",
                 }
             })
 
-        filament = _filament_for_spool(spool)
         color = str(spool.get("color_hex") or "#808080").lstrip("#")[:6]
         if len(color) != 6:
             color = "808080"
-        return self._printer.set_filament_printer(
-            color.upper(),
-            filament,
-            ams_id=ams_id,
-            tray_id=tray_id,
-        )
+        payload = _ams_filament_setting_payload(spool, color.upper(), ams_id, tray_id)
+        return self._printer.mqtt_client._PrinterMQTTClient__publish_command({"print": payload})
 
     def set_ams_drying(
         self,
@@ -1078,6 +1075,51 @@ def _custom_filament_for_spool(spool: dict) -> Optional[AMSFilamentSettings]:
             profile["tray_type"],
         )
     return None
+
+
+def _profile_alias_for_spool(spool: dict) -> dict:
+    material = str(spool.get("material") or "").strip().upper()
+    brand = str(spool.get("brand") or "").strip().lower()
+    if material == "ASA" and "siddament" in brand:
+        return _BAMBU_PROFILE_ALIASES["P461bccf"]
+    filament = _filament_for_spool(spool)
+    if isinstance(filament, AMSFilamentSettings):
+        for alias in _BAMBU_PROFILE_ALIASES.values():
+            if alias.get("tray_info_idx") == filament.tray_info_idx:
+                return alias
+        return {
+            "tray_info_idx": filament.tray_info_idx,
+            "tray_type": filament.tray_type,
+            "nozzle_temp_min": filament.nozzle_temp_min,
+            "nozzle_temp_max": filament.nozzle_temp_max,
+            "brand": str(spool.get("brand") or "").strip(),
+            "profile": " ".join(str(spool.get(k) or "").strip() for k in ("brand", "material", "subtype")).strip(),
+        }
+    return {}
+
+
+def _ams_filament_setting_payload(spool: dict, color: str, ams_id: int, tray_id: int) -> dict:
+    alias = _profile_alias_for_spool(spool)
+    filament = _filament_for_spool(spool)
+    if not isinstance(filament, AMSFilamentSettings):
+        filament = AMSFilamentSettings(str(filament), 0, 0, str(spool.get("material") or "").upper())
+
+    brand = str(alias.get("brand") or spool.get("brand") or "").strip()
+    profile = str(alias.get("profile") or " ".join(
+        str(spool.get(k) or "").strip() for k in ("brand", "material", "subtype")
+    ).strip()).strip()
+    return {
+        "command": "ams_filament_setting",
+        "ams_id": ams_id,
+        "tray_id": tray_id,
+        "tray_info_idx": alias.get("tray_info_idx") or filament.tray_info_idx,
+        "tray_color": f"{color}FF",
+        "nozzle_temp_min": alias.get("nozzle_temp_min", filament.nozzle_temp_min),
+        "nozzle_temp_max": alias.get("nozzle_temp_max", filament.nozzle_temp_max),
+        "tray_type": alias.get("tray_type") or filament.tray_type,
+        "tray_sub_brands": brand,
+        "tray_id_name": profile,
+    }
 
 
 def _filament_for_spool(spool: dict):

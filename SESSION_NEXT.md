@@ -1946,6 +1946,12 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Backend queue/Flight Tower mismatch checks use the same profile/vendor rules.
 - Static cache-bust bumped to `app.js?v=180`.
 
+### Richer Bambu AMS slot sync payload
+- `Trust Flightdeck` now sends Flightdeck's own AMS filament payload instead of the bambulabs_api minimal helper.
+- Payload still sends the required Bambu fields (`tray_info_idx`, colour, nozzle temperatures, and material type), but now also includes `tray_sub_brands` and `tray_id_name` when Flightdeck knows them.
+- This is intended to help the printer touchscreen/UI show the same profile/vendor that Flightdeck and MQTT are already using.
+- Empty-slot clears also send blank profile/vendor display fields.
+
 ---
 
 ## Architecture decisions locked
