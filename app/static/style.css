@@ -2680,6 +2680,16 @@ header {
   line-height: 1.1;
 }
 
+.live-signal-button {
+  appearance: none;
+  cursor: pointer;
+}
+
+.live-signal-button:hover {
+  filter: brightness(1.14);
+  transform: translateY(-1px);
+}
+
 .live-signal-ok {
   border-color: rgba(34,197,94,0.32);
   background: rgba(34,197,94,0.1);

@@ -1744,30 +1744,54 @@ function _detailLiveSignals(p) {
     label: `Low spool #${s.id}: ${Math.round(Number(s.remaining_g || 0))}g`,
   }));
 
-  const mismatches = [];
-  (p.ams || []).forEach(unit => (unit.slots || []).forEach(slot => {
-    const flatSlot = unit.unit * 4 + slot.idx;
-    const loadedSpool = loaded.find(s => Number(s.location_slot) === flatSlot);
-    const mismatch = _slotMismatch(loadedSpool, slot);
-    if (mismatch) mismatches.push(`${_amsSlotLabel(p, flatSlot)} ${mismatch}`);
-  }));
-  if (mismatches.length) {
-    signals.push({ cls: 'warn', label: `${mismatches.length} AMS mismatch${mismatches.length > 1 ? 'es' : ''}` });
-  }
+  signals.push(..._amsMismatchSignals(p, loaded));
 
   const unique = [];
   const seen = new Set();
   signals.forEach(signal => {
-    const key = `${signal.cls}:${signal.label}`;
+    const key = `${signal.cls}:${signal.label}:${signal.slotIndex ?? ''}`;
     if (seen.has(key)) return;
     seen.add(key);
     unique.push(signal);
   });
 
   if (!unique.length) return `<span class="live-signal live-signal-ok">Clear skies</span>`;
-  return unique.slice(0, 5).map(signal => `
-    <span class="live-signal live-signal-${signal.cls}">${esc(signal.label)}</span>
-  `).join('');
+  return unique.slice(0, 5).map(signal => {
+    const title = signal.title || signal.label;
+    if (signal.slotIndex != null) {
+      return `<button class="live-signal live-signal-button live-signal-${signal.cls}"
+        data-slot-edit data-printer-id="${esc(p.id)}" data-slot-index="${Number(signal.slotIndex)}"
+        data-slot-label="${esc(signal.slotLabel || `S${Number(signal.slotIndex) + 1}`)}"
+        title="${esc(title)}">${esc(signal.label)}</button>`;
+    }
+    return `<span class="live-signal live-signal-${signal.cls}" title="${esc(title)}">${esc(signal.label)}</span>`;
+  }).join('');
+}
+
+function _amsMismatchSignals(p, loaded = []) {
+  const mismatches = [];
+  (p.ams || []).forEach(unit => (unit.slots || []).forEach(slot => {
+    const flatSlot = unit.unit * 4 + slot.idx;
+    const loadedSpool = loaded.find(s => Number(s.location_slot) === flatSlot);
+    const mismatch = _slotMismatch(loadedSpool, slot);
+    if (!mismatch) return;
+    const slotLabel = _amsSlotLabel(p, flatSlot);
+    mismatches.push({
+      cls: 'warn',
+      label: `${slotLabel} mismatch`,
+      title: mismatch,
+      slotIndex: flatSlot,
+      slotLabel,
+    });
+  }));
+  if (mismatches.length <= 1) return mismatches;
+  return [{
+    cls: 'warn',
+    label: `${mismatches.length} AMS mismatches`,
+    title: mismatches.map(m => `${m.slotLabel}: ${m.title}`).join(' · '),
+    slotIndex: mismatches[0].slotIndex,
+    slotLabel: mismatches[0].slotLabel,
+  }];
 }
 
 function _detailLiveTempChips(p, limit = 4) {

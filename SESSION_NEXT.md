@@ -1915,6 +1915,12 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Stored spool picker now ranks likely matches first and marks close material/colour matches as `Suggested`.
 - Static cache-bust bumped to `style.css?v=152` and `app.js?v=176`.
 
+### Actionable AMS mismatch badges
+- Live printer warning chips now name the exact mismatched AMS slot instead of only showing a generic mismatch count when there is one mismatch.
+- Clicking the mismatch chip opens that slot directly in the AMS Profile Doctor.
+- Multi-mismatch chips still summarise the count, include all slot details in the tooltip, and open the first mismatched slot for fast triage.
+- Static cache-bust bumped to `style.css?v=153` and `app.js?v=177`.
+
 ---
 
 ## Architecture decisions locked
