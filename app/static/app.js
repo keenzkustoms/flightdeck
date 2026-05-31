@@ -1828,10 +1828,19 @@ function _detailLiveSpoolChips(p) {
   if (!spools.length) return '';
   return spools.map(s => {
     const pct = s.label_weight_g > 0 ? Math.round(Number(s.remaining_g || 0) * 100 / Number(s.label_weight_g || 1)) : 0;
-    const cls = pct < 20 ? ' live-chip-low' : pct < 50 ? ' live-chip-warn' : '';
-    return `<a class="live-chip live-spool-chip${cls}" href="#/spool/${s.id}">
-      <em>${esc([s.material, s.brand].filter(Boolean).join(' · ') || `Spool #${s.id}`)}</em>
-      <strong>#${s.id} · ${Math.round(Number(s.remaining_g || 0))}g</strong>
+    const cls = pct < 20 ? ' live-spool-row-low' : pct < 50 ? ' live-spool-row-warn' : '';
+    const title = [s.color_name, s.material, s.brand].filter(Boolean).join(' · ') || `Spool #${s.id}`;
+    const grams = Math.round(Number(s.remaining_g || 0));
+    const total = Math.round(Number(s.label_weight_g || 0));
+    const slot = s.location_slot != null ? _amsSlotLabel(p, Number(s.location_slot)) : (s.storage_location_name || 'Loaded');
+    return `<a class="live-spool-row${cls}" href="#/spool/${s.id}">
+      <span class="live-spool-swatch" style="background:${s.color_hex || '#808080'}"></span>
+      <span class="live-spool-main">
+        <strong>${esc(title)}</strong>
+        <em>#${s.id} · ${esc(slot)} · ${grams}g${total ? ` of ${total}g` : ''}</em>
+      </span>
+      <span class="live-spool-meter"><b style="width:${Math.max(2, Math.min(100, pct))}%"></b></span>
+      <span class="live-spool-pct">${pct}%</span>
     </a>`;
   }).join('');
 }

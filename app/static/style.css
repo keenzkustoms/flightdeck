@@ -3037,6 +3037,87 @@ header {
 .live-spool-chip.live-chip-warn strong { color: #f59e0b; }
 .live-spool-chip.live-chip-low strong { color: #ff5c6c; }
 
+.live-spool-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) minmax(4rem, 8rem) auto;
+  align-items: center;
+  gap: 0.55rem;
+  min-width: 0;
+  border: 1px solid rgba(96,165,250,0.18);
+  border-radius: 0.55rem;
+  background: rgba(15,23,42,0.44);
+  color: var(--text);
+  padding: 0.46rem 0.55rem;
+  text-decoration: none;
+}
+
+.live-spool-row:hover {
+  border-color: rgba(96,165,250,0.42);
+  background: rgba(96,165,250,0.08);
+}
+
+.live-spool-swatch {
+  width: 0.78rem;
+  height: 0.78rem;
+  border: 1px solid rgba(255,255,255,0.28);
+  border-radius: 999px;
+  box-shadow: 0 0 0 2px rgba(0,0,0,0.22);
+}
+
+.live-spool-main {
+  display: grid;
+  gap: 0.12rem;
+  min-width: 0;
+}
+
+.live-spool-main strong,
+.live-spool-main em {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.live-spool-main strong {
+  color: var(--text);
+  font-size: 0.78rem;
+}
+
+.live-spool-main em {
+  color: var(--muted);
+  font-size: 0.66rem;
+  font-style: normal;
+}
+
+.live-spool-meter {
+  height: 0.28rem;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.08);
+  overflow: hidden;
+}
+
+.live-spool-meter b {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #22c55e;
+}
+
+.live-spool-pct {
+  color: #86efac;
+  font-size: 0.68rem;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+}
+
+.live-spool-row-warn .live-spool-meter b { background: #f59e0b; }
+.live-spool-row-warn .live-spool-pct { color: #f59e0b; }
+.live-spool-row-low {
+  border-color: rgba(239,68,68,0.38);
+  background: rgba(239,68,68,0.08);
+}
+.live-spool-row-low .live-spool-meter b { background: #ff5c6c; }
+.live-spool-row-low .live-spool-pct { color: #ff5c6c; }
+
 .live-strip-empty {
   font-size: 0.75rem;
 }
@@ -3452,6 +3533,12 @@ button.live-route-node:hover {
   }
   .live-mmu-row {
     grid-template-columns: 1fr;
+  }
+  .live-spool-row {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+  .live-spool-meter {
+    grid-column: 2 / -1;
   }
   .live-filament-route {
     grid-template-columns: 1fr;

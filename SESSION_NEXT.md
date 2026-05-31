@@ -1,5 +1,15 @@
 # Flightdeck — next session brief
-_Last updated 1 June 2026 (Session 28.97 Live offline hero restore)_
+_Last updated 1 June 2026 (Session 28.99 Offline state consistency polish)_
+
+## What was built - Session 28.99 (Offline state consistency polish - 1 June)
+- Added Bambu MQTT staleness detection so retained printer payloads do not keep powered-off printers showing as `idle`.
+- Dashboard and All Cameras now inherit the backend `offline` state once Bambu printers stop sending fresh reports.
+- Kept the Session 28.98 Environment fallback polish in place for offline/non-reporting printers.
+
+## What was built - Session 28.98 (Live loaded spool fallback polish - 1 June)
+- Replaced the old skinny loaded-spool fallback chips with proper loaded rows for printers without live AMS/MMU data.
+- Offline Voron now keeps the newer Environment panel language with swatch, material/brand, spool number, slot, grams, and percent meter.
+- Static cache-bust bumped to `app.js?v=198` and `style.css?v=163`.
 
 ## What was built - Session 28.97 (Live offline hero restore - 1 June)
 - Replaced the plain black live-feed offline placeholder with a polished signal-lost card.

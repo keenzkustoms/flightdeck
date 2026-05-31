@@ -18,6 +18,7 @@ log = logging.getLogger(__name__)
 
 FINISHED_TTL = timedelta(minutes=30)
 _BAMBU_PREVIEW_FAILED = object()  # sentinel: FTP failed, don't retry until job changes
+_BAMBU_STALE_REPORT_SECONDS = 150
 _BAMBU_CARE_LABELS = {
     "cr": "Clean carbon rods",
     "ls": "Lubricate lead screws",
@@ -106,6 +107,21 @@ class _SequencedMQTTClient(PrinterMQTTClient):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._seq = 0
+        self._last_report_monotonic = 0.0
+        self._last_report_wall: datetime | None = None
+
+    def manual_update(self, doc: dict) -> None:
+        self._last_report_monotonic = time.monotonic()
+        self._last_report_wall = datetime.utcnow()
+        return super().manual_update(doc)
+
+    def report_age_seconds(self) -> float | None:
+        if not self._last_report_monotonic:
+            return None
+        return time.monotonic() - self._last_report_monotonic
+
+    def last_report_wall(self) -> datetime | None:
+        return self._last_report_wall
 
     # Intercepts every self.__publish_command(...) call made by the base class.
     def _PrinterMQTTClient__publish_command(self, payload: dict) -> bool:
@@ -211,6 +227,27 @@ class BambuPrinter:
                                  custom_name=self.custom_name, icon=self.icon,
                                  kind="bambu", state="offline", error="not connected")
         try:
+            mc = self._printer.mqtt_client
+            if not mc.is_connected():
+                return PrinterStatus(
+                    id=self.id, model_name=self.model_name, custom_name=self.custom_name,
+                    icon=self.icon, kind="bambu", state="offline",
+                    error="MQTT disconnected", last_seen=mc.last_report_wall() or self._last_seen,
+                )
+            age = mc.report_age_seconds()
+            if age is None:
+                return PrinterStatus(
+                    id=self.id, model_name=self.model_name, custom_name=self.custom_name,
+                    icon=self.icon, kind="bambu", state="offline",
+                    error="Waiting for MQTT report", last_seen=self._last_seen,
+                )
+            if age > _BAMBU_STALE_REPORT_SECONDS:
+                last_seen = mc.last_report_wall() or self._last_seen
+                return PrinterStatus(
+                    id=self.id, model_name=self.model_name, custom_name=self.custom_name,
+                    icon=self.icon, kind="bambu", state="offline",
+                    error=f"No MQTT report for {int(age)}s", last_seen=last_seen,
+                )
             raw_state = self._printer.get_state()
             substage_raw = self._printer.get_current_state()
             substage = substage_raw.value if substage_raw is not None else None
@@ -219,7 +256,6 @@ class BambuPrinter:
             print_data = dump.get("print", {})
             alarm_message = _bambu_alarm_message(print_data)
             temps: dict[str, TempReading] = {}
-            mc = self._printer.mqtt_client
             dual = _read_dual_nozzle_temps(dump, self.model_name)
             if dual:
                 temps.update(dual)
