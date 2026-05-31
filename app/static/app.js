@@ -1872,6 +1872,45 @@ function _detailLiveAmsRows(p) {
   }).join('');
 }
 
+function _detailFilamentRoute(p) {
+  if (!p.ams?.length) return '';
+  const loaded = _latestSpoolsByPrinter[p.id] || [];
+  const routes = [];
+
+  for (const unit of p.ams) {
+    for (const slot of (unit.slots || [])) {
+      if (!slot.active || slot.empty) continue;
+      const flatSlot = unit.unit * 4 + slot.idx;
+      const spool = loaded.find(s => Number(s.location_slot) === flatSlot);
+      const colour = spool?.color_hex || slot.color || '#22c55e';
+      const textColour = _spoolTextColor(colour);
+      const slotLabel = _amsSlotLabel(p, flatSlot);
+      const spoolLabel = spool
+        ? `#${spool.id} ${[spool.color_name, spool.material].filter(Boolean).join(' · ')}`
+        : _slotProfileLabel(slot) || slot.type || 'Loaded filament';
+      const dest = p.temps?.hotend_l != null || p.temps?.hotend_r != null ? 'Toolhead' : 'Nozzle';
+      const title = `${slotLabel} feeding ${dest}${spoolLabel ? ' · ' + spoolLabel : ''}`;
+      routes.push(`<div class="live-filament-route" style="--route-colour:${colour};--route-text:${textColour}" title="${esc(title)}">
+        <button class="live-route-node live-route-source" data-slot-edit data-printer-id="${p.id}" data-slot-index="${flatSlot}" data-slot-label="${esc(slotLabel)}">
+          <span class="live-route-swatch"></span>
+          <span><strong>${esc(slotLabel)}</strong><em>${esc(spoolLabel)}</em></span>
+        </button>
+        <span class="live-route-line" aria-hidden="true"></span>
+        <span class="live-route-node live-route-destination">
+          <span class="live-route-nozzle" aria-hidden="true"></span>
+          <span><strong>${esc(dest)}</strong><em>Filament fed</em></span>
+        </span>
+      </div>`);
+    }
+  }
+
+  if (!routes.length) return '';
+  return `<div class="live-environment-section live-route-section">
+    <span class="live-strip-label">Filament route</span>
+    <div class="live-route-list">${routes.join('')}</div>
+  </div>`;
+}
+
 function _detailCameraHud(p) {
   const job = p.job;
   if (!job) return '';
@@ -1884,11 +1923,13 @@ function _detailCameraHud(p) {
 
 function _detailLiveStrip(p) {
   const loadedHtml = _detailLiveAmsRows(p) || _detailLiveSpoolChips(p);
+  const routeHtml = _detailFilamentRoute(p);
   return `<div class="live-environment-panel">
     <div class="live-environment-head">
       <span class="live-strip-label live-environment-title">Environment</span>
       <div class="live-chip-row">${_detailLiveTempChips(p)}</div>
     </div>
+    ${routeHtml}
     <div class="live-environment-section live-environment-loaded">
       <span class="live-strip-label">Loaded</span>
       <div class="live-loaded-stack">${loadedHtml || '<span class="live-strip-empty">No Flightdeck spools assigned</span>'}</div>

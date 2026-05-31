@@ -1,5 +1,20 @@
 # Flightdeck — next session brief
-_Last updated 30 May 2026 (Session 28.85 Bambu queued plate display fallback)_
+_Last updated 31 May 2026 (Session 28.86 Live AMS-to-toolhead route graphic)_
+
+## What was built - Session 28.86 (Live AMS-to-toolhead route graphic - 31 May)
+
+Flightdeck now shows the currently fed AMS filament path on the printer Live tab.
+
+### Frontend
+- Added a compact `Filament route` strip inside the Live `Environment` panel.
+- The route uses the printer's live `active` AMS slot signal and draws the slot colour toward the toolhead/nozzle area.
+- Clicking the source node opens the same AMS Profile Doctor for that slot.
+- Parked/non-active AMS rolls remain in the normal `Loaded` rows so Flightdeck does not overclaim which spool is actually feeding.
+- Static cache-bust bumped to `style.css?v=154` and `app.js?v=184`.
+
+### Verification
+- `node --check app/static/app.js`
+- `git diff --check`
 
 ## What was built - Session 28.85 (Bambu queued plate display fallback - 30 May)
 
