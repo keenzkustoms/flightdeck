@@ -1,5 +1,10 @@
 # Flightdeck — next session brief
-_Last updated 1 June 2026 (Session 28.100 Bambu offline init fix)_
+_Last updated 1 June 2026 (Session 28.101 Camera offline tile polish)_
+
+## What was built - Session 28.101 (Camera offline tile polish - 1 June)
+- Reused the Live page signal-lost treatment in the All Cameras view.
+- Offline and unconfigured camera tiles now show the radar card, status badge, and last-contact/context text instead of plain black placeholders.
+- Static cache-bust bumped to `app.js?v=199` and `style.css?v=164`.
 
 ## What was built - Session 28.100 (Bambu offline init fix - 1 June)
 - Initialised the Bambu connector's cached last-seen timestamp before first contact.

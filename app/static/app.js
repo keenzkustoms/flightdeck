@@ -2102,6 +2102,10 @@ function _detailCameraContent(id, p, camSrc) {
   if (camSrc && p.state !== 'offline') {
     return `<img id="detail-cam-img" src="${camSrc}" alt="Live camera" data-camera-id="${id}">`;
   }
+  return _cameraOfflineContent(p, '');
+}
+
+function _cameraOfflineContent(p, extraClass = '') {
   const isOffline = p.state === 'offline';
   const label = isOffline ? 'Signal lost' : 'Camera not configured';
   const title = isOffline ? `${_dashboardPrinterName(p)} is offline` : 'No camera feed configured';
@@ -2109,7 +2113,7 @@ function _detailCameraContent(id, p, camSrc) {
     ? `Last contact ${fmtLastSeen(p.last_seen)}`
     : 'Add a camera URL in printer settings to bring this bay online.';
   const status = isOffline ? 'Offline' : 'No feed';
-  return `<div class="camera-hero-offline ${isOffline ? 'camera-hero-offline-state' : 'camera-hero-no-feed'}">
+  return `<div class="camera-hero-offline ${extraClass} ${isOffline ? 'camera-hero-offline-state' : 'camera-hero-no-feed'}">
     <div class="camera-offline-card">
       <div class="camera-offline-radar" aria-hidden="true">
         <span></span><span></span><span></span>
@@ -5591,7 +5595,7 @@ function _camTileHtml(p) {
   const camSrc = _cameraStreamSrc(cameraId);
   const feed = (camSrc && p.state !== 'offline')
     ? `<img src="${camSrc}" alt="${p.custom_name}" data-camera-id="${cameraId}">`
-    : `<div class="cam-tile-offline">${p.state === 'offline' ? 'Offline' : 'No camera'}</div>`;
+    : _cameraOfflineContent(p, 'cam-tile-offline');
   return `<div class="cam-tile ${p._simulated ? 'cam-tile-sim' : ''}" data-printer-id="${p.id}" data-target-id="${p._source_id || p.id}" tabindex="0">
     <div class="cam-tile-header">${_camHeaderInner(p)}</div>
     ${p._simulated ? '<div class="cam-sim-ribbon">Simulated camera</div>' : ''}
