@@ -1,5 +1,12 @@
 # Flightdeck — next session brief
-_Last updated 31 May 2026 (Session 28.93 Maintenance service cockpit)_
+_Last updated 1 June 2026 (Session 28.94 Printer scoped Print Bay and failures)_
+
+## What was built - Session 28.94 (Printer scoped Print Bay and failures - 1 June)
+- Reworked the left navigation into printer groups so each machine owns its own `Live`, `Print Bay`, `History`, `Failures`, and `Maintenance` pages.
+- Added printer-specific Print Bay tabs for machine-local files, recent work, and vault-compatible candidates while keeping the Print Vault inside the global Print Bay.
+- Moved failure review into each printer page so timing buckets, material, spool attribution, snapshots, and failure rows are scoped per machine.
+- Removed the combined `Failures` item from the primary nav and renamed the fleet file area to `Global Print Bay`.
+- Static cache-bust bumped to `app.js?v=195` and `style.css?v=159`.
 
 ## What was built - Session 28.93 (Maintenance service cockpit - 31 May)
 

@@ -512,8 +512,7 @@ function _commandStaticItems() {
     ['Telemetry', '#/stats', 'Stats, RH, utilisation'],
     ['Cameras', '#/cameras', 'All live feeds'],
     ['Queue', '#/queue', 'Pending print jobs'],
-    ['Print Bay', '#/files', 'Files, printer storage, and reprint staging'],
-    ['Failures', '#/failures', 'Failure review'],
+    ['Global Print Bay', '#/files', 'Files, printer storage, and reprint staging'],
     ['Spools', '#/spools', 'Spool inventory'],
     ['Settings', '#/settings', 'Configuration'],
   ].map(([label, hash, meta]) => _commandItem({
@@ -993,14 +992,14 @@ function _healthBadgeLabel(health) {
 function _healthBadge(health, printerId = '') {
   if (!health) return '';
   if (!_healthIsActionable(health)) return '';
-  const href = `#/failures?printer=${encodeURIComponent(printerId)}`;
+  const href = `#/printer/${encodeURIComponent(printerId)}/failures`;
   return `<a class="health-badge ${_healthBadgeClass(health)}" href="${href}" title="${esc((health.reasons || []).map(r => r.message).join(' · ') || health.label)}">${_healthBadgeLabel(health)}</a>`;
 }
 
 function _healthLine(health, printerId = '') {
   if (!health?.reasons?.length) return '';
   const label = _healthIsActionable(health) ? 'Action' : 'Reliability';
-  const href = `#/failures?printer=${encodeURIComponent(printerId)}`;
+  const href = `#/printer/${encodeURIComponent(printerId)}/failures`;
   return `<a class="health-line${_healthIsActionable(health) ? ' health-line-action' : ''}" href="${href}">
     <span>${label}</span>
     <strong>${esc(health.reasons[0].message)}</strong>
@@ -1066,7 +1065,7 @@ function _renderDashboardOverview(printers) {
       : p.state === 'paused' || (_healthIsActionable(p.health) && p.health?.status === 'watch')
         ? 'warn'
         : 'muted';
-    const href = _healthIsActionable(p.health) ? `#/failures?printer=${encodeURIComponent(p.id)}` : `#/printer/${encodeURIComponent(p.id)}`;
+    const href = _healthIsActionable(p.health) ? `#/printer/${encodeURIComponent(p.id)}/failures` : `#/printer/${encodeURIComponent(p.id)}`;
     return `<a class="dash-attention-item dash-attention-${severity}" href="${href}">
       <span class="dash-attention-name">${esc(_dashboardPrinterName(p))}</span>
       <span class="dash-attention-text">${esc(_dashboardIssueText(p))}</span>
@@ -1535,7 +1534,7 @@ document.getElementById('view-printer').addEventListener('click', e => {
 
 function parseRoute() {
   const hash = location.hash || '#/';
-  const printerMatch = hash.match(/^#\/printer\/([^/]+)(?:\/(history|maintenance))?/);
+  const printerMatch = hash.match(/^#\/printer\/([^/]+)(?:\/(bay|history|failures|maintenance))?/);
   if (printerMatch) return { view: 'printer', id: printerMatch[1], subtab: printerMatch[2] || 'live' };
   const spoolMatch = hash.match(/^#\/spool\/(\d+)/);
   if (spoolMatch) return { view: 'spool', id: parseInt(spoolMatch[1], 10) };
@@ -1608,11 +1607,15 @@ function router() {
 
   document.querySelectorAll('#tab-strip .tab').forEach(tab => {
     const href = tab.getAttribute('href');
+    const printerTabActive = route.view === 'printer' && (
+      (route.subtab === 'live' && href === `#/printer/${route.id}`) ||
+      (route.subtab !== 'live' && href === `#/printer/${route.id}/${route.subtab}`)
+    );
     tab.classList.toggle('active',
       (route.view === 'dashboard' && href === '#/') ||
       (route.view === 'mission'   && href === '#/mission') ||
       (route.view === 'stats'     && href === '#/stats') ||
-      (route.view === 'printer'  && href === `#/printer/${route.id}`) ||
+      printerTabActive ||
       (route.view === 'cameras'  && href === '#/cameras') ||
       (route.view === 'queue'    && href === '#/queue') ||
       (route.view === 'files'    && href === '#/files') ||
@@ -1643,20 +1646,28 @@ function router() {
 
 function buildTabs(printers) {
   const nav = document.getElementById('tab-strip');
+  const printerGroups = printers.map((p, i) => {
+    const color = _PRINTER_ACCENT_PALETTE[i % _PRINTER_ACCENT_PALETTE.length];
+    const label = _printerNavLabel(p);
+    return `<div class="tab-printer-group" style="--tab-accent:${color}">
+      <div class="tab-printer-parent">${label}</div>
+      <div class="tab-printer-subnav">
+        <a class="tab tab-printer-child" href="#/printer/${p.id}">Live</a>
+        <a class="tab tab-printer-child" href="#/printer/${p.id}/bay">Print Bay</a>
+        <a class="tab tab-printer-child" href="#/printer/${p.id}/history">History</a>
+        <a class="tab tab-printer-child" href="#/printer/${p.id}/failures">Failures</a>
+        <a class="tab tab-printer-child" href="#/printer/${p.id}/maintenance">Maintenance</a>
+      </div>
+    </div>`;
+  }).join('');
   nav.innerHTML = [
     `<a class="tab" href="#/">Dashboard</a>`,
     `<a class="tab" href="#/mission">Flight Tower</a>`,
     `<a class="tab" href="#/stats">Telemetry</a>`,
     `<div class="tab-section">Printers</div>`,
-    ...printers.map((p, i) => {
-      const color = _PRINTER_ACCENT_PALETTE[i % _PRINTER_ACCENT_PALETTE.length];
-      return `<a class="tab tab-printer" href="#/printer/${p.id}" style="--tab-accent:${color}">${_printerNavLabel(p)}</a>`;
-    }),
+    printerGroups,
     `<div class="tab-section">Operations</div>`,
-    `<a class="tab" href="#/cameras">Cameras</a>`,
-    `<a class="tab" href="#/queue">Queue</a>`,
-    `<a class="tab" href="#/files">Print Bay</a>`,
-    `<a class="tab" href="#/failures">Failures</a>`,
+    `<a class="tab" href="#/files">Global Print Bay</a>`,
     `<a class="tab" href="#/spools">Spools</a>`,
     `<div class="tab-section">System</div>`,
     `<a class="tab" href="#/settings">Settings</a>`,
@@ -1670,7 +1681,9 @@ function buildTabs(printers) {
 function _detailSubTabs(id, active) {
   return `<div class="detail-sub-tabs">
     <a class="sub-tab ${active === 'live' ? 'active' : ''}" href="#/printer/${id}">Live</a>
+    <a class="sub-tab ${active === 'bay' ? 'active' : ''}" href="#/printer/${id}/bay">Print Bay</a>
     <a class="sub-tab ${active === 'history' ? 'active' : ''}" href="#/printer/${id}/history">History</a>
+    <a class="sub-tab ${active === 'failures' ? 'active' : ''}" href="#/printer/${id}/failures">Failures</a>
     <a class="sub-tab ${active === 'maintenance' ? 'active' : ''}" href="#/printer/${id}/maintenance">Maintenance</a>
   </div>`;
 }
@@ -3504,13 +3517,20 @@ function _failureOptions(items, key, label, selected = '') {
   ).join('');
 }
 
-async function renderFailuresView() {
-  const el = document.getElementById('failures-page');
+async function renderFailuresView(options = {}) {
+  const {
+    printerId = '',
+    targetId = 'failures-page',
+    routePrefix = '#/failures',
+    embedded = false,
+  } = options;
+  const el = document.getElementById(targetId);
   if (!el) return;
   el.innerHTML = `<div class="detail-placeholder" style="min-height:40vh">Loading...</div>`;
 
-  const params = _routeParams('#/failures');
-  if (params.has('printer')) _failureFilter.printer = params.get('printer') || '';
+  const params = _routeParams(routePrefix);
+  if (printerId) _failureFilter.printer = printerId;
+  else if (params.has('printer')) _failureFilter.printer = params.get('printer') || '';
   if (params.has('state')) _failureFilter.state = params.get('state') || '';
   if (params.has('material')) _failureFilter.material = params.get('material') || '';
   if (params.has('days')) {
@@ -3532,28 +3552,43 @@ async function renderFailuresView() {
   );
 
   const spoolStats = data.summary.by_spool || [];
-  const spoolStatHtml = spoolStats.length
-    ? _failureStatBlock('By Spool', spoolStats, r => r.spool_id ? `Spool #${r.spool_id}` : 'Unknown')
+  const scopedPrinter = _failureFilter.printer ? _latestPrinters.find(p => p.id === _failureFilter.printer) : null;
+  const summaryItems = _failureFilter.printer ? filtered : all;
+  const summaryBy = (key) => Object.entries(summaryItems.reduce((acc, item) => {
+    const val = item[key] || 'Unknown';
+    acc[val] = (acc[val] || 0) + 1;
+    return acc;
+  }, {})).map(([key, count]) => ({ key, count })).sort((a, b) => b.count - a.count || String(a.key).localeCompare(String(b.key)));
+  const scopedSpoolStats = Object.entries(summaryItems.reduce((acc, item) => {
+    (item.spool_usage || []).forEach(u => {
+      const key = u.spool_id || 'Unknown';
+      acc[key] = (acc[key] || 0) + 1;
+    });
+    return acc;
+  }, {})).map(([spool_id, count]) => ({ spool_id, count })).sort((a, b) => b.count - a.count);
+  const spoolRows = _failureFilter.printer ? scopedSpoolStats : spoolStats;
+  const spoolStatHtml = spoolRows.length
+    ? _failureStatBlock('By Spool', spoolRows, r => r.spool_id && r.spool_id !== 'Unknown' ? `Spool #${r.spool_id}` : 'Unknown')
     : '';
 
   el.innerHTML = `<div class="failures-header">
     <div>
-      <h1>Failure Review</h1>
-      <p>${data.total || 0} observed failure/cancel events in the last ${data.days || _failureDays} days</p>
+      <h1>${scopedPrinter ? `${esc(_dashboardPrinterName(scopedPrinter))} Failures` : 'Failure Review'}</h1>
+      <p>${filtered.length} observed failure/cancel events in the last ${data.days || _failureDays} days${scopedPrinter ? '' : ` · ${data.total || 0} fleet total`}</p>
     </div>
     <div class="failures-controls">
       <select id="failure-days">
         ${[30, 90, 180, 365].map(d => `<option value="${d}"${_failureDays === d ? ' selected' : ''}>${d} days</option>`).join('')}
       </select>
-      <select data-failure-filter="printer">${_failureOptions(all, 'printer_id', 'All printers', _failureFilter.printer)}</select>
+      ${printerId ? '' : `<select data-failure-filter="printer">${_failureOptions(all, 'printer_id', 'All printers', _failureFilter.printer)}</select>`}
       <select data-failure-filter="final_state">${_failureOptions(all, 'final_state', 'All states', _failureFilter.state)}</select>
       <select data-failure-filter="material">${_failureOptions(all, 'material', 'All materials', _failureFilter.material)}</select>
     </div>
   </div>
-  <div class="failure-stats">
-    ${_failureStatBlock('By Printer', data.summary.by_printer || [], r => (_latestPrinters.find(p => p.id === r.key)?.custom_name ?? r.key))}
-    ${_failureStatBlock('By Material', data.summary.by_material || [])}
-    ${_failureStatBlock('Failure Timing', data.summary.by_timing || [], r => _FAIL_TIMING_LABELS[r.key] || r.key)}
+  <div class="failure-stats ${embedded ? 'failure-stats-embedded' : ''}">
+    ${printerId ? _failureStatBlock('By Job State', summaryBy('final_state')) : _failureStatBlock('By Printer', data.summary.by_printer || [], r => (_latestPrinters.find(p => p.id === r.key)?.custom_name ?? r.key))}
+    ${_failureStatBlock('By Material', printerId ? summaryBy('material') : data.summary.by_material || [])}
+    ${_failureStatBlock('By Timing', printerId ? summaryBy('timing_bucket') : data.summary.by_timing || [], r => _FAIL_TIMING_LABELS[r.key] || r.key)}
     ${spoolStatHtml}
   </div>
   <div class="failure-list">
@@ -3562,7 +3597,7 @@ async function renderFailuresView() {
 
   el.querySelector('#failure-days')?.addEventListener('change', e => {
     _failureDays = parseInt(e.target.value, 10);
-    renderFailuresView();
+    renderFailuresView(options);
   });
   el.querySelectorAll('[data-failure-filter]').forEach(sel => {
     sel.addEventListener('change', () => {
@@ -3570,7 +3605,7 @@ async function renderFailuresView() {
       if (key === 'printer') _failureFilter.printer = sel.value;
       if (key === 'final_state') _failureFilter.state = sel.value;
       if (key === 'material') _failureFilter.material = sel.value;
-      renderFailuresView();
+      renderFailuresView(options);
     });
   });
 }
@@ -3606,6 +3641,23 @@ async function renderPrinterDetail(id, subtab = 'live') {
     return;
   }
 
+  if (subtab === 'failures') {
+    if (needsFullRender) {
+      _failureFilter.printer = id;
+      el.innerHTML = _detailSubTabs(id, 'failures') +
+        `<div class="failures-page printer-failures-page" id="printer-failures-page" data-printer-id="${id}">
+          <div class="detail-placeholder" style="min-height:40vh">Loading...</div>
+        </div>`;
+      renderFailuresView({
+        printerId: id,
+        targetId: 'printer-failures-page',
+        routePrefix: `#/printer/${id}/failures`,
+        embedded: true,
+      });
+    }
+    return;
+  }
+
   if (subtab === 'maintenance') {
     if (needsFullRender) {
       el.innerHTML = _detailSubTabs(id, 'maintenance') +
@@ -3613,6 +3665,17 @@ async function renderPrinterDetail(id, subtab = 'live') {
           <div class="detail-placeholder" style="min-height:40vh">Loading...</div>
         </div>`;
       _renderMaintenanceBody(id);
+    }
+    return;
+  }
+
+  if (subtab === 'bay') {
+    if (needsFullRender) {
+      el.innerHTML = _detailSubTabs(id, 'bay') +
+        `<div class="printer-bay-body" id="printer-bay-body" data-printer-id="${id}">
+          <div class="detail-placeholder" style="min-height:40vh">Loading Print Bay...</div>
+        </div>`;
+      _renderPrinterBayBody(id);
     }
     return;
   }
@@ -3911,8 +3974,14 @@ function _printBayReprintHtml(items, targets) {
   </section>`;
 }
 
-function _fileDeskTargetHtml(target) {
-  const files = (target.files || []).filter(f => f.kind !== 'dir' && _fileCompatiblePrinters(f).length);
+function _fileDeskTargetHtml(target, options = {}) {
+  const targetPrinterId = options.printerId || '';
+  const directQueue = !!options.directQueue && !!targetPrinterId;
+  const files = (target.files || []).filter(f => {
+    if (f.kind === 'dir') return false;
+    const printers = _fileCompatiblePrinters(f);
+    return targetPrinterId ? printers.some(p => p.id === targetPrinterId) : printers.length;
+  });
   const summary = _printBaySourceSummary(target, files);
   const rows = files.length ? files.map(f => {
     const path = esc(f.path || f.name);
@@ -3940,7 +4009,7 @@ function _fileDeskTargetHtml(target) {
       <div class="filedesk-compat">
         ${printerChips}${more}
       </div>
-      <button class="filedesk-action-btn filedesk-queue-primary" data-file-action="queue" data-source-id="${esc(target.id)}" data-path="${path}">Queue</button>
+      <button class="filedesk-action-btn filedesk-queue-primary" data-file-action="queue" data-source-id="${esc(target.id)}" data-path="${path}" ${directQueue ? `data-target-printer="${esc(targetPrinterId)}"` : ''}>Queue</button>
     </article>`;
   }).join('') : `<div class="filedesk-empty">${target.error ? esc(target.error) : 'No printable files found.'}</div>`;
   const formatNote = target.actions?.format_sd
@@ -4048,11 +4117,78 @@ async function renderFileDeskView() {
   }
 }
 
+async function _renderPrinterBayBody(printerId) {
+  const el = document.getElementById('printer-bay-body');
+  if (!el) return;
+  el.innerHTML = `<div class="detail-placeholder">Loading Print Bay...</div>`;
+  try {
+    const [filesResp, reprints] = await Promise.all([
+      fetch('/api/files'),
+      fetch('/api/files/reprints?limit=24')
+        .then(r => r.ok ? r.json() : { items: [] })
+        .catch(() => ({ items: [] })),
+    ]);
+    if (!filesResp.ok) throw new Error('Unable to load files');
+    const data = await filesResp.json();
+    _fileDeskTargets = data.targets || [];
+    const printer = _latestPrinters.find(p => p.id === printerId);
+    const printerTarget = _fileDeskTargets.find(t => t.id === printerId);
+    const vaultTargets = _fileDeskTargets.filter(t => t.id === 'library');
+    const recent = (reprints.items || []).filter(p => p.printer_id === printerId);
+    const vaultFiles = vaultTargets.reduce((sum, t) => sum + (t.files || []).filter(f =>
+      f.kind !== 'dir' && _fileCompatiblePrinters(f).some(p => p.id === printerId)
+    ).length, 0);
+    const printerFileCount = printerTarget
+      ? (printerTarget.files || []).filter(f => f.kind !== 'dir' && _fileCompatiblePrinters(f).some(p => p.id === printerId)).length
+      : 0;
+    el.innerHTML = `<div class="printer-bay-shell">
+      <section class="printer-bay-hero">
+        <div>
+          <div class="mission-eyebrow">Print Bay</div>
+          <h2>${esc(_dashboardPrinterName(printer || { id: printerId }))}</h2>
+          <p>Machine-local files, recent work, and vault candidates for this printer.</p>
+        </div>
+        <div class="printer-bay-stats">
+          <span><strong>${printerFileCount}</strong> printer files</span>
+          <span><strong>${vaultFiles}</strong> vault matches</span>
+          <span><strong>${recent.length}</strong> recent prints</span>
+        </div>
+      </section>
+      ${_printBayReprintHtml(recent, _fileDeskTargets)}
+      <section class="printbay-active-bays">
+        <div class="printbay-section-head printbay-section-head-compact">
+          <div>
+            <div class="mission-eyebrow">Printer Bay</div>
+            <h2>On-machine storage</h2>
+          </div>
+          <a class="filedesk-action-btn" href="#/files">Fleet bay</a>
+        </div>
+        <div class="filedesk-grid printer-bay-grid">${printerTarget ? _fileDeskTargetHtml(printerTarget, { printerId, directQueue: true }) : '<div class="filedesk-empty">No storage target for this printer.</div>'}</div>
+      </section>
+      <details class="printbay-vault printer-bay-vault"${_printBayVaultOpen ? ' open' : ''}>
+        <summary>
+          <span><b>Print Vault</b><small>Compatible files ready for this printer</small></span>
+          <em>${vaultFiles} file${vaultFiles === 1 ? '' : 's'}</em>
+        </summary>
+        <div class="filedesk-grid printbay-vault-grid">${vaultTargets.map(t => _fileDeskTargetHtml(t, { printerId, directQueue: true })).join('')}</div>
+      </details>
+    </div>`;
+    _attachFileDeskEvents(el);
+  } catch (err) {
+    el.innerHTML = `<div class="detail-placeholder">Print Bay unavailable.</div>`;
+  }
+}
+
 function _attachFileDeskEvents(el) {
   el.querySelectorAll('[data-file-action="queue"]').forEach(btn => {
     btn.addEventListener('click', () => {
       const sourceId = btn.dataset.sourceId;
       const path = btn.dataset.path;
+      const targetPrinter = btn.dataset.targetPrinter;
+      if (targetPrinter) {
+        _queueFileToPrinter({ sourceId, path, printerId: targetPrinter, button: btn });
+        return;
+      }
       const file = (_fileDeskTargets.find(t => t.id === sourceId)?.files || [])
         .find(f => (f.path || f.name) === path);
       const printers = _fileCompatiblePrinters(file);
@@ -4090,6 +4226,31 @@ function _attachFileDeskEvents(el) {
   el.querySelector('.printbay-vault')?.addEventListener('toggle', e => {
     _printBayVaultOpen = e.currentTarget.open;
   });
+}
+
+async function _queueFileToPrinter({ sourceId, path, printerId, button }) {
+  const old = button?.textContent;
+  if (button) {
+    button.disabled = true;
+    button.textContent = 'Queued...';
+  }
+  try {
+    const r = await fetch('/api/files/queue', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source_id: sourceId, path, printer_id: printerId }),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.detail || 'Unable to queue file');
+    showToast('Added to queue', _latestPrinters.find(p => p.id === printerId)?.custom_name || printerId, 'success');
+    _updateQueueBadge();
+  } catch (err) {
+    showToast('Queue failed', err.message || '', 'error');
+    if (button) {
+      button.disabled = false;
+      button.textContent = old || 'Queue';
+    }
+  }
 }
 
 function _openFileQueueDialog({ sourceId, path, file, printers }) {
@@ -4201,7 +4362,8 @@ async function _copySelectedFiles(root, btn) {
       'success'
     );
     _fileDeskLastHtml = '';
-    renderFileDeskView();
+    if (parseRoute().view === 'printer' && parseRoute().subtab === 'bay') _renderPrinterBayBody(parseRoute().id);
+    else renderFileDeskView();
   } catch (err) {
     showToast('Copy failed', err.message || '', 'error');
     btn.disabled = false;
@@ -4320,7 +4482,8 @@ function _openFileDeleteDialog({ target, files }) {
       }
       showToast('Files deleted', `${deleted} file${deleted === 1 ? '' : 's'} removed`, 'success');
       close();
-      renderFileDeskView();
+      if (parseRoute().view === 'printer' && parseRoute().subtab === 'bay') _renderPrinterBayBody(parseRoute().id);
+      else renderFileDeskView();
     } catch (err) {
       errEl.textContent = err.message || 'Unable to delete file';
       errEl.hidden = false;
@@ -4386,7 +4549,8 @@ function _openBambuSdClearDialog(target) {
       if (!r.ok) throw new Error(data.detail || 'Unable to clear SD files');
       showToast('Bambu SD cleaned', `${data.deleted?.length || 0} print files removed`, 'success');
       close();
-      renderFileDeskView();
+      if (parseRoute().view === 'printer' && parseRoute().subtab === 'bay') _renderPrinterBayBody(parseRoute().id);
+      else renderFileDeskView();
     } catch (err) {
       errEl.textContent = err.message || 'Unable to clear SD files';
       errEl.hidden = false;

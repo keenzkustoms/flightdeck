@@ -1176,6 +1176,36 @@ header {
   font-size: 0.78rem;
 }
 
+.tab-printer-group {
+  display: grid;
+  gap: 0.18rem;
+  border-radius: 0.45rem;
+}
+.tab-printer-parent {
+  padding: 0.35rem 0.65rem 0.1rem;
+  color: var(--text);
+  font-size: 0.82rem;
+  font-weight: 800;
+  line-height: 1.2;
+}
+.tab-printer-subnav {
+  display: grid;
+  gap: 0.12rem;
+  padding: 0 0 0.18rem 0.55rem;
+}
+.tab-printer-child {
+  min-height: 1.55rem;
+  padding: 0.18rem 0.52rem;
+  color: #8fb0df;
+  font-size: 0.72rem;
+}
+.tab-printer-group:has(.tab.active) {
+  background: rgba(255,255,255,0.025);
+}
+.tab-printer-group:has(.tab.active) .tab-printer-parent {
+  color: var(--text);
+}
+
 @media (max-width: 760px) {
   body { height: auto; overflow: auto; }
   header {
@@ -1227,6 +1257,23 @@ header {
   }
   .tab-section { display: none; }
   .tab-printer { padding-left: 0.65rem; }
+  .tab-printer-group {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+  }
+  .tab-printer-parent {
+    padding: 0.35rem 0.2rem 0.35rem 0.55rem;
+  }
+  .tab-printer-subnav {
+    display: flex;
+    align-items: center;
+    padding: 0;
+  }
+  .tab-printer-child {
+    min-height: 2rem;
+    padding: 0.35rem 0.55rem;
+  }
   .app-views { overflow: visible; }
   .view { overflow: visible; }
   #dashboard-overview { padding: 1rem 1rem 0; }
@@ -8086,6 +8133,11 @@ select.settings-input { cursor: pointer; }
   gap: 1rem;
 }
 
+.printer-failures-page {
+  max-width: none;
+  padding: 1.25rem;
+}
+
 .failures-header {
   display: flex;
   align-items: flex-start;
@@ -8126,6 +8178,10 @@ select.settings-input { cursor: pointer; }
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: 0.75rem;
+}
+
+.failure-stats-embedded {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .failure-stat {
@@ -8257,6 +8313,7 @@ select.settings-input { cursor: pointer; }
   .failures-header { flex-direction: column; }
   .failures-controls { justify-content: flex-start; }
   .failure-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .failure-stats-embedded { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 560px) {
@@ -8532,6 +8589,58 @@ select.settings-input { cursor: pointer; }
 /* -- File Desk ------------------------------------------------------------- */
 .filedesk-page { min-height: 100%; }
 .filedesk-shell { max-width: 1720px; margin: 0 auto; padding: 1.55rem; }
+.printer-bay-body { padding: 1.25rem; }
+.printer-bay-shell {
+  display: grid;
+  gap: 0.75rem;
+  max-width: 1720px;
+  margin: 0 auto;
+}
+.printer-bay-hero {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 0.7rem;
+  background: linear-gradient(135deg, rgba(59,130,246,0.08), rgba(255,255,255,0.02));
+  padding: 0.9rem 1rem;
+}
+.printer-bay-hero h2 {
+  margin: 0.2rem 0 0;
+  color: var(--text);
+  font-size: 1.35rem;
+}
+.printer-bay-hero p {
+  margin: 0.32rem 0 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+.printer-bay-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  justify-content: flex-end;
+}
+.printer-bay-stats span {
+  border: 1px solid rgba(122,162,216,0.24);
+  border-radius: 999px;
+  background: rgba(122,162,216,0.07);
+  color: #9fb5d4;
+  padding: 0.24rem 0.52rem;
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+.printer-bay-stats strong {
+  color: var(--text);
+}
+.printer-bay-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+.printer-bay-grid .filedesk-list-wrap,
+.printer-bay-vault .filedesk-list-wrap {
+  max-height: clamp(20rem, 52vh, 42rem);
+}
 .filedesk-hero { display: flex; justify-content: space-between; align-items: flex-end; gap: 1rem; margin-bottom: 0.65rem; }
 .filedesk-hero h1 { margin-top: 0.2rem; font-size: 1.72rem; line-height: 1; }
 .filedesk-hero p, .filedesk-library-path { color: var(--muted); font-size: 0.82rem; }
@@ -9109,6 +9218,8 @@ select.settings-input { cursor: pointer; }
 @media (max-width: 1100px) {
   .filedesk-overview { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .filedesk-grid { grid-template-columns: 1fr; }
+  .printer-bay-hero { align-items: flex-start; flex-direction: column; }
+  .printer-bay-stats { justify-content: flex-start; }
   .filedesk-hero { align-items: flex-start; flex-direction: column; }
   .filedesk-format-row { align-items: stretch; flex-direction: column; }
   .filedesk-danger-btn { align-self: flex-start; }
