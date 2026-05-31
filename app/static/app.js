@@ -1540,7 +1540,7 @@ function parseRoute() {
   const spoolMatch = hash.match(/^#\/spool\/(\d+)/);
   if (spoolMatch) return { view: 'spool', id: parseInt(spoolMatch[1], 10) };
   if (hash === '#/mission' || hash.startsWith('#/mission?')) return { view: 'mission' };
-  if (hash === '#/cameras') return { view: 'cameras' };
+  if (hash === '#/cameras' || hash.startsWith('#/cameras?')) return { view: 'cameras' };
   if (hash === '#/stats' || hash.startsWith('#/stats?')) return { view: 'stats' };
   if (hash === '#/queue') return { view: 'queue' };
   if (hash === '#/files') return { view: 'files' };

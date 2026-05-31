@@ -1,5 +1,18 @@
 # Flightdeck — next session brief
-_Last updated 31 May 2026 (Session 28.89 H2D route cooling guard)_
+_Last updated 31 May 2026 (Session 28.90 Camera sim route fix)_
+
+## What was built - Session 28.90 (Camera sim route fix - 31 May)
+
+Flightdeck's 30-camera simulator link now opens the camera wall correctly.
+
+### Frontend
+- Router now recognises `#/cameras?sim=30`, not only plain `#/cameras`.
+- The Flight Tower `View 30 cameras` link can now switch to the simulated camera wall instead of only changing the hash.
+- Static cache-bust bumped to `app.js?v=188`.
+
+### Verification
+- `node --check app/static/app.js`
+- `git diff --check`
 
 ## What was built - Session 28.89 (H2D route cooling guard - 31 May)
 
