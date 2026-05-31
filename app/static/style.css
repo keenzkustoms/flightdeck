@@ -8134,8 +8134,19 @@ select.settings-input { cursor: pointer; }
 }
 
 .printer-failures-page {
+  flex: 1 1 auto;
+  height: 100%;
   max-width: none;
+  max-height: calc(100dvh - 13rem);
+  min-height: 0;
   padding: 1.25rem;
+  overflow: hidden;
+}
+
+.printer-failures-page .failure-list {
+  flex: 1 1 auto;
+  min-height: 12rem;
+  overflow: auto;
 }
 
 .failures-header {

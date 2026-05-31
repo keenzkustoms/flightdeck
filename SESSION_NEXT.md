@@ -1,5 +1,10 @@
 # Flightdeck — next session brief
-_Last updated 1 June 2026 (Session 28.94 Printer scoped Print Bay and failures)_
+_Last updated 1 June 2026 (Session 28.95 Printer failure scroll pane)_
+
+## What was built - Session 28.95 (Printer failure scroll pane - 1 June)
+- Gave each printer `Failures` tab the same fixed-context/scrolling-results behaviour as the spool swatch view.
+- The failure header, filters, and stat cards stay visible while the failure row list scrolls underneath.
+- Static cache-bust bumped to `style.css?v=161`.
 
 ## What was built - Session 28.94 (Printer scoped Print Bay and failures - 1 June)
 - Reworked the left navigation into printer groups so each machine owns its own `Live`, `Print Bay`, `History`, `Failures`, and `Maintenance` pages.
