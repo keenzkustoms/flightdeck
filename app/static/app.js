@@ -2089,6 +2089,32 @@ function _detailFilamentRoute(p) {
   </div>`;
 }
 
+function _detailCameraContent(id, p, camSrc) {
+  if (camSrc && p.state !== 'offline') {
+    return `<img id="detail-cam-img" src="${camSrc}" alt="Live camera" data-camera-id="${id}">`;
+  }
+  const isOffline = p.state === 'offline';
+  const label = isOffline ? 'Signal lost' : 'Camera not configured';
+  const title = isOffline ? `${_dashboardPrinterName(p)} is offline` : 'No camera feed configured';
+  const detail = isOffline
+    ? `Last contact ${fmtLastSeen(p.last_seen)}`
+    : 'Add a camera URL in printer settings to bring this bay online.';
+  const status = isOffline ? 'Offline' : 'No feed';
+  return `<div class="camera-hero-offline ${isOffline ? 'camera-hero-offline-state' : 'camera-hero-no-feed'}">
+    <div class="camera-offline-card">
+      <div class="camera-offline-radar" aria-hidden="true">
+        <span></span><span></span><span></span>
+      </div>
+      <div class="camera-offline-copy">
+        <span class="mission-eyebrow">${esc(label)}</span>
+        <strong>${esc(title)}</strong>
+        <small>${esc(detail)}</small>
+      </div>
+      <span class="camera-offline-badge">${esc(status)}</span>
+    </div>
+  </div>`;
+}
+
 function _detailCameraHud(p) {
   const job = p.job;
   if (!job) return '';
@@ -3695,9 +3721,7 @@ async function renderPrinterDetail(id, subtab = 'live') {
     if (existingImg) existingImg.src = '';
 
     const camSrc = _cameraStreamSrc(id);
-    const camHtml = (camSrc && p.state !== 'offline')
-      ? `<img id="detail-cam-img" src="${camSrc}" alt="Live camera" data-camera-id="${id}">`
-      : `<div class="camera-hero-offline">${p.state === 'offline' ? 'Printer offline' : 'No camera configured'}</div>`;
+    const camHtml = _detailCameraContent(id, p, camSrc);
 
     const printerColor = _printerColor(id);
     const bannerTextColor = p.icon === 'bambu' ? '#22c55e' : p.icon === 'voron' ? '#ef4444' : 'var(--text)';
@@ -3756,9 +3780,15 @@ async function renderPrinterDetail(id, subtab = 'live') {
     if (p.state === 'printing' || p.state === 'paused') refreshObjectsPanel(id);
   } else {
     // Restore camera stream if it was stopped when navigating away and back.
+    const heroEl = el.querySelector('.camera-hero');
     const camImg = el.querySelector('#detail-cam-img');
     const camSrc = _cameraStreamSrc(id);
-    if (camImg?.dataset.stopped && camSrc && p.state !== 'offline') {
+    const shouldShowImg = !!camSrc && p.state !== 'offline';
+    const hasImg = !!camImg;
+    if (heroEl && shouldShowImg !== hasImg) {
+      heroEl.innerHTML = `${_detailCameraContent(id, p, camSrc)}<div class="camera-hud" id="detail-camera-hud">${_detailCameraHud(p)}</div>`;
+      _attachCameraRetries(el);
+    } else if (camImg?.dataset.stopped && camSrc && p.state !== 'offline') {
       delete camImg.dataset.stopped;
       camImg.src = camSrc;
     }

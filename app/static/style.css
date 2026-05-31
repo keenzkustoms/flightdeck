@@ -2793,9 +2793,100 @@ header {
   justify-content: center;
   width: 100%;
   height: 100%;
+  padding: 1.25rem;
+  color: var(--text);
+  background:
+    radial-gradient(circle at 50% 44%, rgba(96,165,250,0.12), transparent 26rem),
+    linear-gradient(135deg, rgba(15,23,42,0.78), rgba(2,6,23,0.92));
+}
+
+.camera-offline-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.95rem;
+  width: min(34rem, 100%);
+  border: 1px solid rgba(122,162,216,0.28);
+  border-radius: 0.85rem;
+  background: rgba(11,16,29,0.82);
+  box-shadow: 0 24px 70px rgba(0,0,0,0.34);
+  padding: 0.92rem 1rem;
+}
+
+.camera-offline-radar {
+  position: relative;
+  width: 3.25rem;
+  height: 3.25rem;
+  border: 1px solid rgba(96,165,250,0.38);
+  border-radius: 999px;
+  background: rgba(96,165,250,0.06);
+  box-shadow: inset 0 0 24px rgba(96,165,250,0.12), 0 0 24px rgba(96,165,250,0.08);
+}
+
+.camera-offline-radar::before,
+.camera-offline-radar::after {
+  content: "";
+  position: absolute;
+  inset: 50% auto auto 50%;
+  width: 42%;
+  height: 1px;
+  background: rgba(147,197,253,0.72);
+  transform-origin: left center;
+}
+
+.camera-offline-radar::before { transform: rotate(0deg); }
+.camera-offline-radar::after { transform: rotate(90deg); }
+
+.camera-offline-radar span {
+  position: absolute;
+  border: 1px solid rgba(96,165,250,0.24);
+  border-radius: 999px;
+}
+
+.camera-offline-radar span:nth-child(1) { inset: 0.42rem; }
+.camera-offline-radar span:nth-child(2) { inset: 1rem; }
+.camera-offline-radar span:nth-child(3) {
+  top: 48%;
+  left: 48%;
+  width: 0.42rem;
+  height: 0.42rem;
+  border-color: #f87171;
+  background: #f87171;
+  box-shadow: 0 0 16px rgba(248,113,113,0.8);
+}
+
+.camera-offline-copy {
+  display: grid;
+  gap: 0.18rem;
+  min-width: 0;
+}
+
+.camera-offline-copy strong {
+  color: var(--text);
+  font-size: 1rem;
+}
+
+.camera-offline-copy small {
   color: var(--muted);
-  font-size: 0.875rem;
-  letter-spacing: 0.04em;
+  font-size: 0.78rem;
+}
+
+.camera-offline-badge {
+  border: 1px solid rgba(248,113,113,0.38);
+  border-radius: 999px;
+  background: rgba(239,68,68,0.1);
+  color: #fca5a5;
+  padding: 0.25rem 0.58rem;
+  font-size: 0.68rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.camera-hero-no-feed .camera-offline-badge {
+  border-color: rgba(148,163,184,0.32);
+  background: rgba(148,163,184,0.08);
+  color: #cbd5e1;
 }
 
 .camera-hud {

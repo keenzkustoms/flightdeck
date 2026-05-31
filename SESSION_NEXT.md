@@ -1,5 +1,10 @@
 # Flightdeck — next session brief
-_Last updated 1 June 2026 (Session 28.96 Operations nav restore)_
+_Last updated 1 June 2026 (Session 28.97 Live offline hero restore)_
+
+## What was built - Session 28.97 (Live offline hero restore - 1 June)
+- Replaced the plain black live-feed offline placeholder with a polished signal-lost card.
+- Live camera hero now swaps between stream and offline/no-feed states cleanly when printer state changes.
+- Static cache-bust bumped to `app.js?v=197` and `style.css?v=162`.
 
 ## What was built - Session 28.96 (Operations nav restore - 1 June)
 - Restored `Cameras` and `Queue` under the Operations section after the printer-scoped navigation pass.
