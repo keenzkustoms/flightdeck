@@ -1,5 +1,10 @@
 # Flightdeck — next session brief
-_Last updated 1 June 2026 (Session 28.101 Camera offline tile polish)_
+_Last updated 1 June 2026 (Session 28.102 Camera tile live refresh fix)_
+
+## What was built - Session 28.102 (Camera tile live refresh fix - 1 June)
+- Fixed the All Cameras refresh path so tile bodies update when printers move between offline and online, not just the header badge.
+- Split camera tile feed rendering into a reusable helper and reattached retry handlers after feed swaps.
+- Fixed a duplicate camera endpoint JSON read and bumped `app.js?v=200`.
 
 ## What was built - Session 28.101 (Camera offline tile polish - 1 June)
 - Reused the Live page signal-lost treatment in the All Cameras view.

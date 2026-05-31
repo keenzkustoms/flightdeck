@@ -5591,16 +5591,19 @@ function _attachCameraRetries(root) {
 }
 
 function _camTileHtml(p) {
-  const cameraId = p._camera_id || p.id;
-  const camSrc = _cameraStreamSrc(cameraId);
-  const feed = (camSrc && p.state !== 'offline')
-    ? `<img src="${camSrc}" alt="${p.custom_name}" data-camera-id="${cameraId}">`
-    : _cameraOfflineContent(p, 'cam-tile-offline');
   return `<div class="cam-tile ${p._simulated ? 'cam-tile-sim' : ''}" data-printer-id="${p.id}" data-target-id="${p._source_id || p.id}" tabindex="0">
     <div class="cam-tile-header">${_camHeaderInner(p)}</div>
     ${p._simulated ? '<div class="cam-sim-ribbon">Simulated camera</div>' : ''}
-    <div class="cam-tile-feed">${feed}</div>
+    <div class="cam-tile-feed">${_camTileFeedHtml(p)}</div>
   </div>`;
+}
+
+function _camTileFeedHtml(p) {
+  const cameraId = p._camera_id || p.id;
+  const camSrc = _cameraStreamSrc(cameraId);
+  return (camSrc && p.state !== 'offline')
+    ? `<img src="${camSrc}" alt="${p.custom_name}" data-camera-id="${cameraId}">`
+    : _cameraOfflineContent(p, 'cam-tile-offline');
 }
 
 async function renderCamerasView() {
@@ -5617,9 +5620,20 @@ async function renderCamerasView() {
 
   if (_camerasFull && _camerasMode === mode) {
     cameraPrinters.forEach(p => {
-      const header = el.querySelector(`.cam-tile[data-printer-id="${p.id}"] .cam-tile-header`);
+      const tile = el.querySelector(`.cam-tile[data-printer-id="${p.id}"]`);
+      const header = tile?.querySelector('.cam-tile-header');
       if (header) header.innerHTML = _camHeaderInner(p);
+      const feed = tile?.querySelector('.cam-tile-feed');
+      if (feed) {
+        const next = _camTileFeedHtml(p);
+        const currentIsImg = !!feed.querySelector('img[data-camera-id]');
+        const nextIsImg = next.includes('<img ');
+        if (currentIsImg !== nextIsImg || !nextIsImg) {
+          feed.innerHTML = next;
+        }
+      }
     });
+    _attachCameraRetries(el);
     return;
   }
 
@@ -5632,7 +5646,8 @@ async function renderCamerasView() {
     if (_cameraUrlCache[p.id] === undefined) {
       try {
         const r = await fetch(`/api/printers/${p.id}/camera`);
-        _cameraUrlCache[p.id] = r.ok ? (await r.json()).url : null;
+        const body = r.ok ? await r.json() : null;
+        _cameraUrlCache[p.id] = body?.url || null;
       } catch { _cameraUrlCache[p.id] = null; }
     }
   }));
