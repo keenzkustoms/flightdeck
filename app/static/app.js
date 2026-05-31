@@ -1881,16 +1881,22 @@ function _isAmsHtUnit(unit) {
   return Number(unit?.unit) >= 128 || String(unit?.label || '').toLowerCase().includes('ht');
 }
 
-function _hotendIsWorking(reading) {
+function _printerHasActiveThermalContext(p) {
+  const state = String(p?.state || '').toLowerCase();
+  return !!p?.job || ['printing', 'paused', 'loading', 'preparing', 'busy'].includes(state);
+}
+
+function _hotendIsWorking(p, reading) {
   const actual = Number(reading?.actual || 0);
   const target = Number(reading?.target || 0);
-  return target >= 80 || actual >= 80;
+  if (target >= 80) return true;
+  return _printerHasActiveThermalContext(p) && actual >= 80;
 }
 
 function _h2dNozzleActivity(p) {
   return {
-    left: _hotendIsWorking(p?.temps?.hotend_l),
-    right: _hotendIsWorking(p?.temps?.hotend_r),
+    left: _hotendIsWorking(p, p?.temps?.hotend_l),
+    right: _hotendIsWorking(p, p?.temps?.hotend_r),
   };
 }
 

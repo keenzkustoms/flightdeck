@@ -1,5 +1,19 @@
 # Flightdeck — next session brief
-_Last updated 31 May 2026 (Session 28.88 H2D filament route nozzle inference)_
+_Last updated 31 May 2026 (Session 28.89 H2D route cooling guard)_
+
+## What was built - Session 28.89 (H2D route cooling guard - 31 May)
+
+Flightdeck now avoids showing a false H2D AMS HT route while a nozzle is only cooling down after unload.
+
+### Frontend
+- H2D route inference now treats a nozzle as route-active from target temperature immediately.
+- Actual nozzle heat only counts as route-active while the printer has an active thermal context, such as a print/job, pause, loading, preparing, or busy state.
+- When H2D is idle and both AMS slots report inactive, the Live filament route stays hidden even if a nozzle is still hot from the previous unload/print.
+- Static cache-bust bumped to `app.js?v=187`.
+
+### Verification
+- `node --check app/static/app.js`
+- `git diff --check`
 
 ## What was built - Session 28.88 (H2D filament route nozzle inference - 31 May)
 
