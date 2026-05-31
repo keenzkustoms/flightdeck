@@ -55,7 +55,7 @@ Edit printer config:
 
 Run locally:
   cd ${APP_DIR}
-  FLIGHTDECK_DATA_DIR=${DATA_DIR} .venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
+  FLIGHTDECK_DATA_DIR=${DATA_DIR} .venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
 
 To install systemd service:
   ${APP_DIR}/scripts/install-systemd.sh

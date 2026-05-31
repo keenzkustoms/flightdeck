@@ -16,7 +16,7 @@ After=network.target
 User=${SERVICE_USER}
 WorkingDirectory=${APP_DIR}
 EnvironmentFile=-${APP_DIR}/.env
-ExecStart=${APP_DIR}/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
+ExecStart=${APP_DIR}/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
 Restart=on-failure
 RestartSec=5
 

@@ -6,7 +6,7 @@ After=network.target
 User=flightdeck
 WorkingDirectory=/home/flightdeck/flightdeck
 EnvironmentFile=-/home/flightdeck/flightdeck/.env
-ExecStart=/home/flightdeck/flightdeck/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
+ExecStart=/home/flightdeck/flightdeck/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
 Restart=on-failure
 RestartSec=5
 

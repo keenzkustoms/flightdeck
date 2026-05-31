@@ -1060,14 +1060,46 @@ async def get_printer_camera(printer_id: str):
     if camera is None:
         raise HTTPException(status_code=404, detail="no camera configured")
     if isinstance(camera, MjpegDirectCamera):
-        return {"url": camera.stream_url, "type": "mjpeg"}
+        return {"url": f"/api/camera/{printer_id}/stream", "type": "mjpeg"}
     if isinstance(camera, BambuRtspCamera):
         return {"url": f"/api/camera/{printer_id}/stream", "type": "mjpeg"}
     raise HTTPException(status_code=404, detail="unknown camera type")
 
 
+async def _mjpeg_direct_response(url: str) -> StreamingResponse:
+    timeout = httpx.Timeout(connect=5.0, read=None, write=5.0, pool=None)
+    client = httpx.AsyncClient(timeout=timeout, follow_redirects=True)
+    try:
+        request = client.build_request("GET", url)
+        upstream = await client.send(request, stream=True)
+        upstream.raise_for_status()
+    except Exception:
+        await client.aclose()
+        raise
+
+    async def chunks():
+        try:
+            async for chunk in upstream.aiter_bytes():
+                if chunk:
+                    yield chunk
+        finally:
+            await upstream.aclose()
+            await client.aclose()
+
+    content_type = upstream.headers.get("content-type", "multipart/x-mixed-replace")
+    return StreamingResponse(
+        chunks(),
+        media_type=content_type,
+        headers={"Cache-Control": "no-cache, no-store"},
+    )
+
+
 @app.get("/api/camera/{printer_id}/stream")
 async def camera_stream(printer_id: str):
+    camera = _cameras.get(printer_id)
+    if isinstance(camera, MjpegDirectCamera):
+        return await _mjpeg_direct_response(camera.stream_url)
+
     proxy = _cam_proxies.get(printer_id)
     if proxy is None:
         raise HTTPException(status_code=404, detail="no camera configured")

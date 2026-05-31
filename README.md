@@ -154,7 +154,7 @@ That keeps your printer config, queue/history database, uploaded files, and SD/l
 Run manually:
 
 ```bash
-FLIGHTDECK_DATA_DIR=~/flightdeck-data .venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
+FLIGHTDECK_DATA_DIR=~/flightdeck-data .venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
 Install or update the systemd service for this checkout:
@@ -163,7 +163,15 @@ Install or update the systemd service for this checkout:
 ./scripts/install-systemd.sh
 ```
 
-The dashboard will be available at `http://<host>:8000`.
+The dashboard will be available locally at `http://127.0.0.1:8000`.
+
+For remote access, prefer Tailscale Serve:
+
+```bash
+tailscale serve --bg http://127.0.0.1:8000
+```
+
+This keeps Flightdeck off the raw LAN interface while exposing it over your tailnet HTTPS URL.
 
 ### Configuration
 

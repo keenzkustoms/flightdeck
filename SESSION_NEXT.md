@@ -2060,6 +2060,18 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Unload now sends `slot_id=255` and `target=255`, with source `ams_id` derived from the clicked/active slot.
 - This replaces the older bambulabs_api helper shape that was accepted by MQTT but ignored by the H2D AMS state machine.
 
+### Voron live camera proxy
+- Fixed the Voron/Greyhound Elite V2 live feed path for HTTPS/Tailscale use.
+- `mjpeg_direct` cameras now advertise a same-origin Flightdeck proxy URL (`/api/camera/{printer_id}/stream`) instead of returning the printer's raw HTTP MJPEG URL to the browser.
+- Added direct MJPEG proxy streaming for Moonraker/Crowsnest cameras while preserving the upstream content type and no-cache headers.
+- Updated the live printer config model name from `Voron` to `Voron 2.4 350`; the shop name remains `Greyhound Elite V2`.
+
+### Localhost-only service hardening
+- Reviewed the Bambuddy 0.2.4.4 fail-open auth advisory against Flightdeck.
+- Flightdeck does not currently have a comparable auth gate that can fail open, but it was still listening on `0.0.0.0:8000`, which exposed the raw HTTP app to the LAN.
+- Changed the shipped systemd service and install docs to bind Uvicorn to `127.0.0.1:8000` by default.
+- Tailscale Serve remains the intended remote doorway: `tailscale serve --bg http://127.0.0.1:8000`.
+
 ---
 
 ## Architecture decisions locked
