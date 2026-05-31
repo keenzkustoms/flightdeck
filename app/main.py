@@ -1756,6 +1756,11 @@ class SpoolMove(BaseModel):
     slot: Optional[int] = None
     storage_location_id: Optional[int] = None
 
+class SpoolTrustPrinter(BaseModel):
+    printer_id: str
+    slot: int
+    storage_location_id: Optional[int] = None
+
 class SpoolLocationBody(BaseModel):
     name: str
     notes: Optional[str] = None
@@ -2004,6 +2009,52 @@ async def move_spool(spool_id: int, body: SpoolMove):
         spool = db.get_spool(spool_id)
         ams_sync = await _sync_bambu_ams_slot(body.printer_id, body.slot, spool)
     return {"ok": True, "ams_sync": ams_sync}
+
+
+@app.post("/api/spools/{spool_id}/trust_printer")
+async def trust_printer_spool(spool_id: int, body: SpoolTrustPrinter):
+    spool = db.get_spool(spool_id)
+    if not spool:
+        raise HTTPException(status_code=404, detail="Spool not found")
+    if spool.get("location_printer_id") != body.printer_id or int(spool.get("location_slot") or -1) != int(body.slot):
+        raise HTTPException(status_code=409, detail="Spool is no longer assigned to that printer slot")
+
+    statuses = await _printer_status_map()
+    slot = next(
+        (s for s in _flatten_reported_ams_slots(statuses.get(body.printer_id), include_empty=True)
+         if int(s.get("flat_slot") or -1) == int(body.slot)),
+        None,
+    )
+    if not slot:
+        raise HTTPException(status_code=404, detail="Printer slot report not available")
+
+    if slot.get("empty"):
+        result = db.move_spool(spool_id, None, None, body.storage_location_id)
+        if not result["ok"]:
+            raise HTTPException(status_code=409, detail="Unable to clear spool from slot")
+        db.log_decision(body.printer_id, "spool_trusted_printer", f"Spool #{spool_id} cleared from AMS slot {body.slot}; printer reports empty")
+        return {"ok": True, "cleared": True}
+
+    fields: dict[str, object] = {}
+    material = str(slot.get("type") or "").strip()
+    if material:
+        fields["material"] = material
+    color = _norm_hex(slot.get("color"))
+    if color:
+        fields["color_hex"] = color
+        fields["color_name"] = _colour_label(color)
+    brand = str(slot.get("brand") or "").strip()
+    if brand:
+        fields["brand"] = brand
+
+    if not fields:
+        raise HTTPException(status_code=422, detail="Printer slot does not report enough filament data")
+    if not db.update_spool(spool_id, **fields):
+        raise HTTPException(status_code=404, detail="Spool not found")
+
+    summary = ", ".join(f"{k}={v}" for k, v in fields.items())
+    db.log_decision(body.printer_id, "spool_trusted_printer", f"Spool #{spool_id} updated from AMS slot {body.slot}: {summary}")
+    return {"ok": True, "updated": fields}
 
 
 async def _sync_bambu_ams_slot(printer_id: str, slot: int, spool: Optional[dict]) -> Optional[bool]:

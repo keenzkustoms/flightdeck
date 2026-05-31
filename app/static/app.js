@@ -7078,6 +7078,7 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
           <div class="slot-actions">
             <a class="spool-action-btn spool-action-detail" href="#/spool/${current.id}">Details</a>
             <button class="spool-action-btn spool-action-label" data-slot-trust-flightdeck="${current.id}">Trust Flightdeck</button>
+            ${report ? `<button class="spool-action-btn spool-action-edit" data-slot-trust-printer="${current.id}">Trust Printer</button>` : ''}
             <button class="spool-action-btn spool-action-label" data-slot-label-print="${current.id}">Label</button>
             <button class="spool-action-btn spool-action-weigh" data-slot-weigh="${current.id}">Weigh</button>
             <select class="slot-clear-location" data-slot-clear-location>${locationOptions}</select>
@@ -7123,6 +7124,34 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
         body: JSON.stringify({ printer_id: printerId, slot: Number(slotIndex) }),
       });
       if (!r.ok) showToast('AMS sync failed', 'Flightdeck could not push this spool to the printer slot.', 'error');
+      await refreshPrinters();
+      await _refreshSpoolsByPrinter();
+      btn.textContent = old;
+      btn.disabled = false;
+      load();
+    });
+
+    body.querySelector('[data-slot-trust-printer]')?.addEventListener('click', async e => {
+      const btn = e.currentTarget;
+      const id = btn.dataset.slotTrustPrinter;
+      const old = btn.textContent;
+      const rawStorageId = body.querySelector('[data-slot-clear-location]')?.value || '';
+      const storageId = rawStorageId ? Number(rawStorageId) : null;
+      btn.disabled = true;
+      btn.textContent = 'Updating';
+      const r = await fetch(`/api/spools/${id}/trust_printer`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          printer_id: printerId,
+          slot: Number(slotIndex),
+          storage_location_id: storageId,
+        }),
+      });
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        showToast('Trust Printer failed', err.detail?.message || err.detail || 'Flightdeck could not update this spool from the printer report.', 'error');
+      }
       await refreshPrinters();
       await _refreshSpoolsByPrinter();
       btn.textContent = old;

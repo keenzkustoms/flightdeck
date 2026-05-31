@@ -1933,6 +1933,12 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - If a mismatch affects the queued job's required material/colour, the job is blocked before dispatch with a specific AMS slot reason.
 - Unrelated AMS mismatches remain visible in Live/Flight Tower but do not block unrelated queue jobs.
 
+### AMS Profile Doctor Trust Printer action
+- Added the opposite repair path to `Trust Flightdeck`.
+- `Trust Printer` updates the already-assigned Flightdeck spool from the live AMS report (material, colour, colour name, and brand when reported).
+- If the printer reports the slot empty, `Trust Printer` clears that Flightdeck spool back to the selected storage location.
+- Static cache-bust bumped to `app.js?v=179`.
+
 ---
 
 ## Architecture decisions locked
