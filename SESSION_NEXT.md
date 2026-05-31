@@ -1,5 +1,19 @@
 # Flightdeck — next session brief
-_Last updated 31 May 2026 (Session 28.86 Live AMS-to-toolhead route graphic)_
+_Last updated 31 May 2026 (Session 28.87 Live filament route polish)_
+
+## What was built - Session 28.87 (Live filament route polish - 31 May)
+
+The Live AMS route graphic now reads more like an active feed indicator.
+
+### Frontend
+- Active/fed AMS slot swatches now get a subtle green active ring and dot.
+- Filament route source node now includes a compact `Fed now` state badge.
+- The route line now has a quiet animated flow treatment so live filament movement is easier to spot without crowding the camera.
+- Static cache-bust bumped to `style.css?v=155` and `app.js?v=185`.
+
+### Verification
+- `node --check app/static/app.js`
+- `git diff --check`
 
 ## What was built - Session 28.86 (Live AMS-to-toolhead route graphic - 31 May)
 

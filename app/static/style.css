@@ -2953,6 +2953,7 @@ button.live-route-node:hover {
 
 .live-route-source {
   padding: 0.28rem 0.45rem;
+  position: relative;
 }
 
 .live-route-destination {
@@ -2960,7 +2961,8 @@ button.live-route-node:hover {
 }
 
 .live-route-node strong,
-.live-route-node em {
+.live-route-node em,
+.live-route-fed {
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2981,6 +2983,18 @@ button.live-route-node:hover {
   line-height: 1.15;
 }
 
+.live-route-fed {
+  align-self: center;
+  padding: 0.11rem 0.34rem;
+  border: 1px solid rgba(34,197,94,0.4);
+  border-radius: 999px;
+  background: rgba(34,197,94,0.11);
+  color: #86efac;
+  font-size: 0.54rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
 .live-route-swatch {
   width: 1.12rem;
   height: 1.12rem;
@@ -2997,8 +3011,12 @@ button.live-route-node:hover {
   min-width: 2rem;
   height: 0.18rem;
   border-radius: 999px;
-  background: linear-gradient(90deg, var(--route-colour), rgba(96,165,250,0.74));
+  background:
+    repeating-linear-gradient(90deg, rgba(255,255,255,0.18) 0 0.32rem, transparent 0.32rem 0.74rem),
+    linear-gradient(90deg, var(--route-colour), rgba(96,165,250,0.74));
+  background-size: 1.48rem 100%, 100% 100%;
   box-shadow: 0 0 12px color-mix(in srgb, var(--route-colour) 38%, transparent);
+  animation: live-route-flow 1.15s linear infinite;
 }
 
 .live-route-line::after {
@@ -3021,6 +3039,11 @@ button.live-route-node:hover {
   border-radius: 0.28rem 0.28rem 0.5rem 0.5rem;
   background: linear-gradient(180deg, rgba(96,165,250,0.26), rgba(96,165,250,0.08));
   box-shadow: inset 0 -0.18rem 0 var(--route-colour);
+}
+
+@keyframes live-route-flow {
+  from { background-position: 0 0, 0 0; }
+  to { background-position: 1.48rem 0, 0 0; }
 }
 
 .live-ams-row {
@@ -3121,6 +3144,26 @@ button.live-route-node:hover {
 
 .live-ams-slot-loaded {
   box-shadow: inset 0 -2px 0 rgba(34,197,94,0.72);
+}
+
+.live-ams-slot-active {
+  border-color: rgba(34,197,94,0.72);
+  box-shadow:
+    inset 0 -2px 0 rgba(34,197,94,0.95),
+    0 0 0 1px rgba(34,197,94,0.2),
+    0 0 16px rgba(34,197,94,0.18);
+}
+
+.live-ams-slot-active::after {
+  content: '';
+  position: absolute;
+  top: 0.14rem;
+  right: 0.14rem;
+  width: 0.32rem;
+  height: 0.32rem;
+  border-radius: 999px;
+  background: #86efac;
+  box-shadow: 0 0 8px rgba(34,197,94,0.82);
 }
 
 .live-ams-slot-warning {

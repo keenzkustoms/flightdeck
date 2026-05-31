@@ -1853,9 +1853,10 @@ function _detailLiveAmsRows(p) {
         slotLabel,
         loadedSpool ? [loadedSpool.color_name, loadedSpool.material, loadedSpool.brand, `${Math.round(Number(loadedSpool.remaining_g || 0))}g`].filter(Boolean).join(' · ') : '',
         !slot.empty ? printerReport : '',
+        slot.active ? 'Fed now' : '',
         mismatch,
       ].filter(Boolean).join(' · ');
-      return `<button class="live-ams-slot${slot.empty ? ' live-ams-slot-empty' : ''}${loadedSpool ? ' live-ams-slot-loaded' : ''}${mismatch ? ' live-ams-slot-warning' : ''}"
+      return `<button class="live-ams-slot${slot.empty ? ' live-ams-slot-empty' : ''}${loadedSpool ? ' live-ams-slot-loaded' : ''}${slot.active ? ' live-ams-slot-active' : ''}${mismatch ? ' live-ams-slot-warning' : ''}"
         ${style} data-slot-edit data-printer-id="${p.id}" data-slot-index="${flatSlot}" data-slot-label="${esc(slotLabel)}"
         title="${esc(title)}">
         <span>${esc(slotText)}</span>
@@ -1894,6 +1895,7 @@ function _detailFilamentRoute(p) {
         <button class="live-route-node live-route-source" data-slot-edit data-printer-id="${p.id}" data-slot-index="${flatSlot}" data-slot-label="${esc(slotLabel)}">
           <span class="live-route-swatch"></span>
           <span><strong>${esc(slotLabel)}</strong><em>${esc(spoolLabel)}</em></span>
+          <b class="live-route-fed">Fed now</b>
         </button>
         <span class="live-route-line" aria-hidden="true"></span>
         <span class="live-route-node live-route-destination">
