@@ -6925,6 +6925,23 @@ function _slotMismatch(spool, report) {
   return '';
 }
 
+function _slotDoctorState(spool, report) {
+  const mismatch = _slotMismatch(spool, report);
+  if (mismatch) return { cls: 'warn', label: 'Review', detail: mismatch };
+  if (spool && report && !report.empty) return { cls: 'ok', label: 'Matched', detail: 'Flightdeck and printer agree.' };
+  if (spool && !report) return { cls: 'info', label: 'Flightdeck only', detail: 'No live printer report available for this slot.' };
+  if (!spool && report?.empty) return { cls: 'ok', label: 'Empty', detail: 'Flightdeck and printer both show this slot empty.' };
+  return { cls: 'info', label: 'Unassigned', detail: 'No Flightdeck spool assigned.' };
+}
+
+function _slotCandidateScore(spool, report) {
+  if (!report || report.empty) return 9999;
+  const mat = _normMat(`${spool.material || ''}${spool.subtype ? ' ' + spool.subtype : ''}`);
+  const reported = _normMat(_slotReportedMaterial(report));
+  const matPenalty = reported && mat && (mat.includes(reported) || reported.includes(mat)) ? 0 : 250;
+  return matPenalty + _hexDistance(report.color, spool.color_hex);
+}
+
 function _slotReport(printer, slotIndex) {
   if (!printer) return null;
   for (const unit of printer.ams || []) {
@@ -6978,12 +6995,14 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
     );
     const report = _slotReport(printer, slotIndex);
     const mismatch = _slotMismatch(current, report);
+    const doctor = _slotDoctorState(current, report);
     const reportLine = report
-      ? (report.empty ? 'Printer reports empty' : `Printer reports ${[_slotReportedMaterial(report), report.color].filter(Boolean).join(' · ') || 'filament loaded'}`)
+      ? (report.empty ? 'Printer reports empty' : `Printer reports ${[_slotProfileLabel(report), report.color].filter(Boolean).join(' · ') || 'filament loaded'}`)
       : 'No printer slot report available';
     const candidates = spools
       .filter(s => !s.archived_at && !s.location_printer_id)
       .sort((a, b) =>
+        _slotCandidateScore(a, report) - _slotCandidateScore(b, report) ||
         _spoolStorageLocationName(a.storage_location_id).localeCompare(_spoolStorageLocationName(b.storage_location_id)) ||
         (a.material || '').localeCompare(b.material || '') ||
         (a.color_name || '').localeCompare(b.color_name || '')
@@ -6991,11 +7010,13 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
     const pickerRows = candidates.length ? candidates.map(s => {
       const pct = s.label_weight_g > 0 ? Math.round(s.remaining_g * 100 / s.label_weight_g) : 0;
       const loc = _spoolStorageLocationName(s.storage_location_id);
+      const score = _slotCandidateScore(s, report);
+      const suggested = score < 96;
       const searchable = `${loc} ${s.material || ''} ${s.subtype || ''} ${s.brand || ''} ${s.color_name || ''} ${s.color_hex || ''} #${s.id}`.toLowerCase();
       return `<button type="button" class="slot-spool-option" data-slot-spool-id="${s.id}" data-search="${esc(searchable)}">
         <span class="location-spool-swatch" style="background:${s.color_hex || '#808080'}"></span>
         <span class="slot-spool-option-main">
-          <strong>${esc(s.color_name || s.color_hex || 'Colour')} · ${esc(s.material)}${s.subtype ? ` ${esc(s.subtype)}` : ''}</strong>
+          <strong>${esc(s.color_name || s.color_hex || 'Colour')} · ${esc(s.material)}${s.subtype ? ` ${esc(s.subtype)}` : ''}${suggested ? ' <em>Suggested</em>' : ''}</strong>
           <small>${esc(s.brand || 'Unknown brand')} · #${s.id} · ${Math.round(s.remaining_g || 0)}g (${pct}%)</small>
         </span>
         <span class="slot-spool-location">${esc(loc)}</span>
@@ -7005,6 +7026,13 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
       ? _spoolLocations.map(loc => `<option value="${loc.id}">${esc(loc.name)}</option>`).join('')
       : '<option value="">Unassigned</option>';
     body.innerHTML = `
+      <div class="slot-doctor slot-doctor-${doctor.cls}">
+        <div>
+          <span>AMS Profile Doctor</span>
+          <strong>${esc(doctor.label)}</strong>
+        </div>
+        <p>${esc(doctor.detail)}</p>
+      </div>
       <div class="slot-current">
         <div class="slot-current-label">Current assignment</div>
         <div class="slot-printer-report">${esc(reportLine)}</div>
@@ -7019,6 +7047,7 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
           </div>
           <div class="slot-actions">
             <a class="spool-action-btn spool-action-detail" href="#/spool/${current.id}">Details</a>
+            <button class="spool-action-btn spool-action-label" data-slot-trust-flightdeck="${current.id}">Trust Flightdeck</button>
             <button class="spool-action-btn spool-action-label" data-slot-label-print="${current.id}">Label</button>
             <button class="spool-action-btn spool-action-weigh" data-slot-weigh="${current.id}">Weigh</button>
             <select class="slot-clear-location" data-slot-clear-location>${locationOptions}</select>
@@ -7050,6 +7079,25 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
       await _refreshSpoolsByPrinter();
       load();
       });
+    });
+
+    body.querySelector('[data-slot-trust-flightdeck]')?.addEventListener('click', async e => {
+      const btn = e.currentTarget;
+      const id = btn.dataset.slotTrustFlightdeck;
+      const old = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = 'Syncing';
+      const r = await fetch(`/api/spools/${id}/move`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ printer_id: printerId, slot: Number(slotIndex) }),
+      });
+      if (!r.ok) showToast('AMS sync failed', 'Flightdeck could not push this spool to the printer slot.', 'error');
+      await refreshPrinters();
+      await _refreshSpoolsByPrinter();
+      btn.textContent = old;
+      btn.disabled = false;
+      load();
     });
 
     body.querySelector('#slot-spool-filter')?.addEventListener('input', e => {

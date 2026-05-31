@@ -1908,6 +1908,15 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 
 ---
 
+### AMS Profile Doctor first pass
+- Extended the AMS slot modal into a lightweight Profile Doctor.
+- Slot modal now shows a `Matched`, `Review`, `Empty`, or `Unassigned` status comparing Flightdeck assignment against the printer-reported AMS material/profile/colour.
+- Added `Trust Flightdeck` action to re-push the assigned spool profile/colour to the printer AMS slot.
+- Stored spool picker now ranks likely matches first and marks close material/colour matches as `Suggested`.
+- Static cache-bust bumped to `style.css?v=152` and `app.js?v=176`.
+
+---
+
 ## Architecture decisions locked
 
 - Python + FastAPI backend

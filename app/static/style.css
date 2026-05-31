@@ -4042,6 +4042,59 @@ header {
   gap: 0.65rem;
 }
 
+.slot-doctor {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: center;
+  border: 1px solid rgba(122,162,216,0.22);
+  border-radius: 0.55rem;
+  background: rgba(96,165,250,0.05);
+  padding: 0.7rem 0.8rem;
+}
+
+.slot-doctor span,
+.slot-doctor strong,
+.slot-doctor p {
+  display: block;
+}
+
+.slot-doctor span {
+  color: #7aa2d8;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.slot-doctor strong {
+  margin-top: 0.15rem;
+  color: var(--text);
+  font-size: 0.92rem;
+}
+
+.slot-doctor p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.76rem;
+  line-height: 1.35;
+  text-align: right;
+}
+
+.slot-doctor-ok {
+  border-color: rgba(34,197,94,0.32);
+  background: rgba(34,197,94,0.07);
+}
+
+.slot-doctor-ok strong { color: #86efac; }
+
+.slot-doctor-warn {
+  border-color: rgba(245,158,11,0.5);
+  background: rgba(245,158,11,0.1);
+}
+
+.slot-doctor-warn strong { color: #fbbf24; }
+
 .slot-current-label {
   color: #7aa2d8;
   font-size: 0.68rem;
@@ -4148,6 +4201,19 @@ header {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 0.82rem;
+}
+
+.slot-spool-option-main em {
+  display: inline-block;
+  margin-left: 0.35rem;
+  border: 1px solid rgba(34,197,94,0.45);
+  border-radius: 999px;
+  color: #86efac;
+  font-size: 0.58rem;
+  font-style: normal;
+  font-weight: 900;
+  padding: 0.08rem 0.32rem;
+  vertical-align: middle;
 }
 
 .slot-spool-option-main small,
