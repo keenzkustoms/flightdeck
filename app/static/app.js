@@ -1873,6 +1873,48 @@ function _detailLiveAmsRows(p) {
   }).join('');
 }
 
+function _detailLiveMmuRows(p) {
+  if (!p.mmu?.length) return '';
+  const loaded = _latestSpoolsByPrinter[p.id] || [];
+  return p.mmu.map(unit => {
+    const gates = (unit.gates || []).map(gate => {
+      const loadedSpool = loaded.find(s => Number(s.location_slot) === Number(gate.idx));
+      const mismatch = _slotMismatch(loadedSpool, gate);
+      const gateLabel = `G${Number(gate.idx) + 1}`;
+      const style = (!gate.empty && gate.color) ? `style="background:${gate.color}"` : '';
+      const slotText = loadedSpool
+        ? `#${loadedSpool.id}`
+        : (gate.empty ? 'Empty' : (gate.material || gateLabel));
+      const status = gate.active ? 'Loaded' : gate.status === 2 ? 'Buffered' : gate.empty ? 'Empty' : 'Ready';
+      const title = [
+        gateLabel,
+        loadedSpool ? [loadedSpool.color_name, loadedSpool.material, loadedSpool.brand, `${Math.round(Number(loadedSpool.remaining_g || 0))}g`].filter(Boolean).join(' · ') : '',
+        !gate.empty ? _slotProfileLabel(gate) : '',
+        status,
+        mismatch,
+      ].filter(Boolean).join(' · ');
+      return `<button class="live-mmu-gate${gate.empty ? ' live-mmu-gate-empty' : ''}${gate.active ? ' live-mmu-gate-active' : ''}${gate.status === 2 ? ' live-mmu-gate-buffered' : ''}${mismatch ? ' live-mmu-gate-warning' : ''}"
+        ${style} data-slot-edit data-printer-id="${p.id}" data-slot-index="${Number(gate.idx)}" data-slot-label="${esc(gateLabel)}"
+        title="${esc(title)}">
+        <span>${esc(slotText)}</span>
+        <em>${esc(status)}</em>
+      </button>`;
+    }).join('');
+    const meta = [
+      unit.vendor || 'MMU',
+      unit.num_gates ? `${unit.num_gates} gates` : '',
+      unit.current_gate != null && unit.current_gate >= 0 ? `current G${Number(unit.current_gate) + 1}` : '',
+    ].filter(Boolean).join(' · ');
+    return `<div class="live-mmu-row">
+      <div class="live-mmu-head">
+        <strong>${esc(unit.vendor || 'MMU')}</strong>
+        ${meta ? `<span>${esc(meta)}</span>` : ''}
+      </div>
+      <div class="live-mmu-gates">${gates}</div>
+    </div>`;
+  }).join('');
+}
+
 function _isH2dPrinter(p) {
   return String(p?.model_name || p?.id || '').toLowerCase().includes('h2d');
 }
@@ -1921,7 +1963,7 @@ function _routeDestinationLabel(p, unit) {
 }
 
 function _detailFilamentRoute(p) {
-  if (!p.ams?.length) return '';
+  if (!p.ams?.length && !p.mmu?.length) return '';
   const loaded = _latestSpoolsByPrinter[p.id] || [];
   const routes = [];
 
@@ -1953,6 +1995,32 @@ function _detailFilamentRoute(p) {
     }
   }
 
+  for (const unit of (p.mmu || [])) {
+    for (const gate of (unit.gates || [])) {
+      if (!gate.active || gate.empty) continue;
+      const spool = loaded.find(s => Number(s.location_slot) === Number(gate.idx));
+      const colour = spool?.color_hex || gate.color || '#ef4444';
+      const textColour = _spoolTextColor(colour);
+      const gateLabel = `G${Number(gate.idx) + 1}`;
+      const spoolLabel = spool
+        ? `#${spool.id} ${[spool.color_name, spool.material].filter(Boolean).join(' · ')}`
+        : _slotProfileLabel(gate) || gate.material || 'Loaded filament';
+      const title = `${gateLabel} feeding toolhead${spoolLabel ? ' · ' + spoolLabel : ''}`;
+      routes.push(`<div class="live-filament-route live-filament-route-mmu" style="--route-colour:${colour};--route-text:${textColour}" title="${esc(title)}">
+        <button class="live-route-node live-route-source" data-slot-edit data-printer-id="${p.id}" data-slot-index="${Number(gate.idx)}" data-slot-label="${esc(gateLabel)}">
+          <span class="live-route-swatch"></span>
+          <span><strong>${esc(gateLabel)}</strong><em>${esc(spoolLabel)}</em></span>
+          <b class="live-route-fed">Loaded</b>
+        </button>
+        <span class="live-route-line" aria-hidden="true"></span>
+        <span class="live-route-node live-route-destination">
+          <span class="live-route-nozzle" aria-hidden="true"></span>
+          <span><strong>Toolhead</strong><em>Filament fed</em></span>
+        </span>
+      </div>`);
+    }
+  }
+
   if (!routes.length) return '';
   return `<div class="live-environment-section live-route-section">
     <span class="live-strip-label">Filament route</span>
@@ -1971,7 +2039,7 @@ function _detailCameraHud(p) {
 }
 
 function _detailLiveStrip(p) {
-  const loadedHtml = _detailLiveAmsRows(p) || _detailLiveSpoolChips(p);
+  const loadedHtml = _detailLiveAmsRows(p) || _detailLiveMmuRows(p) || _detailLiveSpoolChips(p);
   const routeHtml = _detailFilamentRoute(p);
   return `<div class="live-environment-panel">
     <div class="live-environment-head">
@@ -3416,7 +3484,6 @@ async function renderPrinterDetail(id, subtab = 'live') {
           <div class="detail-panels">
             <div class="detail-panel" id="detail-print">${_detailPrintPanel(p)}</div>
           </div>
-          <div id="detail-mmu">${_detailMmuPanel(p)}</div>
           <div id="detail-objects"></div>
         </div>
       </div>`;
@@ -3483,8 +3550,6 @@ async function renderPrinterDetail(id, subtab = 'live') {
     }
     const tempsEl = el.querySelector('#detail-temps');
     if (tempsEl) tempsEl.innerHTML = _detailTempsPanel(p);
-    const mmuEl = el.querySelector('#detail-mmu');
-    if (mmuEl) mmuEl.innerHTML = _detailMmuPanel(p);
   }
 }
 

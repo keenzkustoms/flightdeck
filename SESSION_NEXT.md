@@ -2072,6 +2072,13 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Changed the shipped systemd service and install docs to bind Uvicorn to `127.0.0.1:8000` by default.
 - Tailscale Serve remains the intended remote doorway: `tailscale serve --bg http://127.0.0.1:8000`.
 
+### Voron live page first polish
+- Started giving the Voron/Greyhound Elite V2 live page its own treatment instead of letting it feel like a Bambu page without AMS.
+- Added a Moonraker/MMU environment row with gate cards, active/buffered/empty states, slot editing hooks, and mismatch highlighting.
+- Added a Voron filament-route strip from the active MMU gate to the toolhead, matching the visual language of the Bambu AMS-to-nozzle route.
+- Removed the duplicate legacy MMU panel from the live page so the new Environment panel is the single source of truth.
+- Static cache-bust bumped to `app.js?v=189` and `style.css?v=156`.
+
 ---
 
 ## Architecture decisions locked
