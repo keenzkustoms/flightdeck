@@ -1962,6 +1962,13 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
   - Confirm left/right nozzle grouping before sending.
 - Captured the key gotcha: if the model has no geometry assigned to a colour, the slicer may leave that nozzle blank even when Flightdeck and the AMS are correct.
 
+### AMS slot unload action
+- Added a Bambu AMS unload command path from Flightdeck.
+- Backend now exposes `POST /api/printers/{printer_id}/ams/unload`, calling Bambu's `unload_filament_spool()` and logging an `ams_unload_requested` decision.
+- AMS Profile Doctor now shows `Unload AMS slot` when the printer reports filament loaded in the clicked slot.
+- The action asks for confirmation and sends the printer unload/retract command without changing Flightdeck inventory; inventory still changes only after the printer reports empty or the operator clears/moves the spool.
+- Static cache-bust bumped to `app.js?v=181`.
+
 ---
 
 ## Architecture decisions locked

@@ -923,6 +923,10 @@ class AmsDryRequest(BaseModel):
     rotate_tray: bool = False
 
 
+class AmsUnloadRequest(BaseModel):
+    slot: int | None = None
+
+
 @app.post("/api/printers/{printer_id}/set-temp")
 async def set_printer_temp(printer_id: str, req: SetTempRequest):
     if req.heater not in ("hotend", "bed", "chamber"):
@@ -968,6 +972,22 @@ async def control_printer(printer_id: str, req: ControlRequest):
             return {"ok": True}
 
     raise HTTPException(status_code=404, detail="printer not found")
+
+
+@app.post("/api/printers/{printer_id}/ams/unload")
+async def unload_ams_filament(printer_id: str, req: AmsUnloadRequest):
+    for p in _bambu:
+        if p.id != printer_id:
+            continue
+        try:
+            ok = await asyncio.to_thread(p.unload_ams_filament)
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+        slot_note = f" slot={req.slot}" if req.slot is not None else ""
+        db.log_decision(printer_id, "ams_unload_requested", f"AMS unload requested{slot_note}")
+        return {"ok": bool(ok)}
+
+    raise HTTPException(status_code=404, detail="Bambu printer not found")
 
 
 @app.post("/api/printers/{printer_id}/ams/{ams_id}/dry")

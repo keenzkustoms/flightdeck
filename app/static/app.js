@@ -2252,6 +2252,18 @@ async function sendAmsDry({ printerId, amsId, enabled, filament = 'PLA', temp = 
   }
 }
 
+async function sendAmsUnload({ printerId, slotIndex }) {
+  const resp = await fetch(`/api/printers/${encodeURIComponent(printerId)}/ams/unload`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ slot: Number(slotIndex) }),
+  });
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}));
+    throw new Error(err.detail || 'AMS unload command failed');
+  }
+}
+
 // ── MMU panel ─────────────────────────────────────────────────────────────
 
 function _detailMmuPanel(p) {
@@ -7090,6 +7102,7 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
           </div>
           <div class="slot-actions">
             <a class="spool-action-btn spool-action-detail" href="#/spool/${current.id}">Details</a>
+            ${report && !report.empty ? `<button class="spool-action-btn spool-action-weigh" data-slot-unload>Unload AMS slot</button>` : ''}
             <button class="spool-action-btn spool-action-label" data-slot-trust-flightdeck="${current.id}">Trust Flightdeck</button>
             ${report ? `<button class="spool-action-btn spool-action-edit" data-slot-trust-printer="${current.id}">Trust Printer</button>` : ''}
             <button class="spool-action-btn spool-action-label" data-slot-label-print="${current.id}">Label</button>
@@ -7190,6 +7203,26 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
       });
       await _refreshSpoolsByPrinter();
       load();
+    });
+
+    body.querySelector('[data-slot-unload]')?.addEventListener('click', async e => {
+      const btn = e.currentTarget;
+      const confirmed = await _confirmModal(`Unload ${slotLabel} from ${printer.custom_name || printer.model_name || printerId}? Flightdeck will ask the printer to retract the active AMS filament. Inventory is unchanged until the printer reports empty or you clear the slot.`);
+      if (!confirmed) return;
+      const old = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = 'Unloading';
+      try {
+        await sendAmsUnload({ printerId, slotIndex });
+        showToast('AMS unload requested', `${slotLabel} unload command sent.`, 'success');
+        await new Promise(resolve => setTimeout(resolve, 1200));
+        await refreshPrinters();
+        load();
+      } catch (err) {
+        showToast('AMS unload failed', err.message || '', 'error');
+        btn.textContent = old;
+        btn.disabled = false;
+      }
     });
 
     body.querySelector('[data-slot-label-print]')?.addEventListener('click', async e => {

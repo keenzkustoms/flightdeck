@@ -635,6 +635,9 @@ class BambuPrinter:
         payload = _ams_filament_setting_payload(spool, color.upper(), ams_id, tray_id)
         return self._printer.mqtt_client._PrinterMQTTClient__publish_command({"print": payload})
 
+    def unload_ams_filament(self) -> bool:
+        return self._printer.unload_filament_spool()
+
     def set_ams_drying(
         self,
         ams_id: int,
