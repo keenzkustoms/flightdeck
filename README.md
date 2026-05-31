@@ -205,6 +205,23 @@ There's no user account system — Flightdeck assumes you trust everyone on your
 
 ---
 
+## Flight Manual
+
+### H2D Dual-Nozzle Colour Prints
+
+For Bambu H2D jobs that use both nozzles, confirm the slicer has built the nozzle mapping before sending the job.
+
+1. In Flightdeck, open the AMS slot and use **Trust Flightdeck** if the AMS profile/vendor/colour does not match the physical spool.
+2. In OrcaSlicer or Bambu Studio, sync filament from the AMS.
+3. Assign the model parts to the intended filament colours.
+4. Use **Regroup and slice** if the send dialog shows the wrong nozzle grouping.
+5. Confirm the send dialog shows the intended split, for example left nozzle using filament `1` and right nozzle using filament `5`.
+6. Send the job once the filament/nozzle grouping matches the physical AMS setup.
+
+If the slicer model has no geometry assigned to a colour, the send dialog may leave that nozzle blank even when Flightdeck and the AMS are correct.
+
+---
+
 ## Roadmap
 
 - [x] Pi 5 host commissioned, SSH-hardened, NVMe-backed

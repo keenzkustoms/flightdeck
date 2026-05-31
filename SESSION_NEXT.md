@@ -1952,6 +1952,16 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - This is intended to help the printer touchscreen/UI show the same profile/vendor that Flightdeck and MQTT are already using.
 - Empty-slot clears also send blank profile/vendor display fields.
 
+### Flight Manual H2D dual-nozzle note
+- Added a `Flight Manual` section to README.
+- Documented the H2D dual-nozzle colour-print workflow learned during testing:
+  - Trust Flightdeck when the physical spool/profile is correct.
+  - Sync filament from AMS in the slicer.
+  - Assign model colours.
+  - Use Regroup and slice if the send dialog maps everything to one nozzle.
+  - Confirm left/right nozzle grouping before sending.
+- Captured the key gotcha: if the model has no geometry assigned to a colour, the slicer may leave that nozzle blank even when Flightdeck and the AMS are correct.
+
 ---
 
 ## Architecture decisions locked
