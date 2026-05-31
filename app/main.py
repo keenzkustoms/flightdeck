@@ -2269,6 +2269,22 @@ def _reported_slot_mismatch(spool: Optional[dict], slot: Optional[dict]) -> str:
         return f"Material mismatch: printer {slot.get('type') or 'unknown'}, Flightdeck {spool.get('material') or 'unknown'}"
     if _hex_dist(slot.get("color"), spool.get("color_hex")) > 95:
         return f"Colour mismatch: printer {_colour_label(slot.get('color'))}, Flightdeck {_colour_label(spool.get('color_hex'))}"
+
+    reported_brand = _norm_material(slot.get("brand") or "")
+    spool_brand = _norm_material(spool.get("brand") or "")
+    if reported_brand and spool_brand and reported_brand != spool_brand and reported_brand != "generic":
+        return f"Brand mismatch: printer {slot.get('brand')}, Flightdeck {spool.get('brand')}"
+    reported_profile = _norm_material(slot.get("profile_name") or "")
+    spool_profile = _norm_material(" ".join([
+        str(spool.get("brand") or ""),
+        str(spool.get("material") or ""),
+        str(spool.get("subtype") or ""),
+    ]))
+    if reported_profile and spool_profile and reported_profile != "generic" and reported_profile not in spool_profile and spool_profile not in reported_profile:
+        expected = " ".join(str(spool.get(k) or "") for k in ("brand", "material", "subtype")).strip()
+        return f"Profile mismatch: printer {slot.get('profile_name')}, Flightdeck {expected}"
+    if reported_brand == "generic" and spool_brand and spool_brand != "generic":
+        return f"Profile review: printer reports Generic, Flightdeck has {spool.get('brand')}"
     return ""
 
 

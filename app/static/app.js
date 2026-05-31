@@ -6952,6 +6952,19 @@ function _slotMismatch(spool, report) {
   if (_hexDistance(report.color, spool.color_hex) > 95) {
     return `Colour mismatch: printer ${report.color}, Flightdeck ${spool.color_hex}`;
   }
+  const reportedBrand = _normMat(report.brand || '');
+  const spoolBrand = _normMat(spool.brand || '');
+  if (reportedBrand && spoolBrand && reportedBrand !== spoolBrand && reportedBrand !== 'generic') {
+    return `Brand mismatch: printer ${report.brand}, Flightdeck ${spool.brand}`;
+  }
+  const reportedProfile = _normMat(report.profile_name || '');
+  const spoolProfile = _normMat([spool.brand, spool.material, spool.subtype].filter(Boolean).join(' '));
+  if (reportedProfile && spoolProfile && reportedProfile !== 'generic' && !spoolProfile.includes(reportedProfile) && !reportedProfile.includes(spoolProfile)) {
+    return `Profile mismatch: printer ${report.profile_name}, Flightdeck ${[spool.brand, spool.material, spool.subtype].filter(Boolean).join(' ')}`;
+  }
+  if (reportedBrand === 'generic' && spoolBrand && spoolBrand !== 'generic') {
+    return `Profile review: printer reports Generic, Flightdeck has ${spool.brand}`;
+  }
   return '';
 }
 

@@ -1939,6 +1939,13 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - If the printer reports the slot empty, `Trust Printer` clears that Flightdeck spool back to the selected storage location.
 - Static cache-bust bumped to `app.js?v=179`.
 
+### AMS profile/vendor mismatch tightening
+- Profile Doctor no longer treats matching material/colour as fully matched when the Bambu-reported profile/vendor differs from Flightdeck.
+- Non-generic brand/profile differences now show `Brand mismatch` or `Profile mismatch`.
+- Generic printer profiles against a specific Flightdeck brand now show `Profile review`, which is useful for cases where Flightdeck knows the spool better than the AMS.
+- Backend queue/Flight Tower mismatch checks use the same profile/vendor rules.
+- Static cache-bust bumped to `app.js?v=180`.
+
 ---
 
 ## Architecture decisions locked
