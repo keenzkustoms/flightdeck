@@ -146,6 +146,7 @@ let _camZoom = 0;               // 0=normal, 1=wide, 2=fullscreen
 let _onSettings = false;        // true while settings view is active
 let _onFailures = false;        // true while failure review is active
 let _onSpools = false;          // true while spool inventory is active
+let _renderedSpoolDetailId = null;
 
 // ── Toast notifications ────────────────────────────────────────────────────
 
@@ -1587,9 +1588,11 @@ function router() {
   const wasOnSettings = _onSettings;
   const wasOnFailures = _onFailures;
   const wasOnSpools = _onSpools;
+  const wasSpoolDetailId = _renderedSpoolDetailId;
   _onSettings = route.view === 'settings';
   _onFailures = route.view === 'failures';
   _onSpools = route.view === 'spools';
+  if (route.view !== 'spool') _renderedSpoolDetailId = null;
 
   document.getElementById('view-dashboard').hidden = route.view !== 'dashboard';
   document.getElementById('view-mission').hidden   = route.view !== 'mission';
@@ -1626,7 +1629,10 @@ function router() {
   if (route.view === 'printer') renderPrinterDetail(route.id, route.subtab);
   if (route.view === 'mission') renderMissionControl();
   if (route.view === 'stats') renderStatsView();
-  if (route.view === 'spool') renderSpoolDetail(route.id);
+  if (route.view === 'spool' && wasSpoolDetailId !== route.id) {
+    _renderedSpoolDetailId = route.id;
+    renderSpoolDetail(route.id);
+  }
   if (route.view === 'cameras') renderCamerasView();
   if (route.view === 'queue') renderQueueView();
   if (route.view === 'files' && !_fileDeskRenderInFlight) renderFileDeskView();

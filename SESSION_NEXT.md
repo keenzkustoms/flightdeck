@@ -1901,6 +1901,13 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 
 ---
 
+### Spool detail flashing fix
+- Fixed spool detail page flashing by preventing printer polling from re-running `renderSpoolDetail()` for the same spool every tick.
+- Spool detail now renders on navigation or when switching to a different spool, but background printer polling no longer replaces the page with `Loading...`.
+- Static cache-bust bumped to `app.js?v=175`.
+
+---
+
 ## Architecture decisions locked
 
 - Python + FastAPI backend
