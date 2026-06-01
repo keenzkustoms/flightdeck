@@ -6155,6 +6155,56 @@ function _statsActionSummary(jobs, printers) {
   </div>`;
 }
 
+function _statsHealthTone(pct, warn = 70, bad = 85) {
+  const n = Number(pct);
+  if (!Number.isFinite(n)) return 'ok';
+  if (n >= bad) return 'bad';
+  if (n >= warn) return 'warn';
+  return 'ok';
+}
+
+function _statsHealthCard(label, value, detail, tone = 'ok') {
+  return `<div class="stats-system-card stats-system-${tone}">
+    <span>${esc(label)}</span>
+    <strong>${esc(value)}</strong>
+    <small>${esc(detail || '')}</small>
+  </div>`;
+}
+
+function _statsSystemHealthPanel(instance) {
+  const info = instance || _instanceInfo || {};
+  const host = info.host || {};
+  const load = host.load || {};
+  const memory = host.memory || {};
+  const disk = host.disk || {};
+  const cameraWorkers = info.camera_workers || {};
+  const loadPct = Number(load.pct);
+  const memoryPct = Number(memory.pct);
+  const diskPct = Number(disk.pct);
+  const cameraTone = cameraWorkers.ok === false ? 'bad' : 'ok';
+  const loadText = Number.isFinite(Number(load.one))
+    ? `${Number(load.one).toFixed(2)}`
+    : '--';
+  const memoryText = Number.isFinite(memoryPct)
+    ? `${Math.round(memoryPct)}%`
+    : '--';
+  const diskText = Number.isFinite(diskPct)
+    ? `${Math.round(diskPct)}%`
+    : '--';
+  const hardware = info.hardware || info.address || 'Flightdeck host';
+  const runtime = [info.runtime, info.address].filter(Boolean).join(' · ') || 'local runtime';
+  return `<div class="stats-panel stats-panel-wide stats-system-panel">
+    <div class="stats-panel-head"><span>System Health</span><a href="#/settings?category=setup">Setup</a></div>
+    <div class="stats-system-grid">
+      ${_statsHealthCard('Host', hardware, runtime, 'ok')}
+      ${_statsHealthCard('CPU Load', loadText, Number.isFinite(loadPct) ? `${Math.round(loadPct)}% of ${load.cores || 1} cores` : 'unavailable', _statsHealthTone(loadPct, 65, 90))}
+      ${_statsHealthCard('Memory', memoryText, `${_fmtBytes(memory.used)} used · ${_fmtBytes(memory.available)} free`, _statsHealthTone(memoryPct, 72, 88))}
+      ${_statsHealthCard('Data Disk', diskText, `${_fmtBytes(disk.free)} free`, _statsHealthTone(diskPct, 75, 90))}
+      ${_statsHealthCard('Camera Workers', cameraWorkers.count == null ? '--' : String(cameraWorkers.count), cameraWorkers.detail || 'not checked', cameraTone)}
+    </div>
+  </div>`;
+}
+
 async function renderStatsView() {
   const el = document.getElementById('stats-page');
   if (!el) return;
@@ -6165,7 +6215,7 @@ async function renderStatsView() {
   const focus = params.get('focus') || '';
 
   try {
-    const [filament, spools, allSpools, intel, failures, jobs, printerUsage] = await Promise.all([
+    const [filament, spools, allSpools, intel, failures, jobs, printerUsage, instance] = await Promise.all([
       fetch('/api/filament/summary').then(r => r.ok ? r.json() : {}),
       fetch('/api/spools/summary').then(r => r.ok ? r.json() : {}),
       fetch('/api/spools').then(r => r.ok ? r.json() : []),
@@ -6173,7 +6223,9 @@ async function renderStatsView() {
       fetch('/api/failures?days=30').then(r => r.ok ? r.json() : {}),
       fetch('/api/queue').then(r => r.ok ? r.json() : []),
       fetch('/api/printers/usage').then(r => r.ok ? r.json() : []),
+      fetch('/api/instance').then(r => r.ok ? r.json() : (_instanceInfo || {})),
     ]);
+    if (instance?.app) _instanceInfo = instance;
 
     const printers = _latestPrinters || [];
     const states = _statsStateCounts(printers);
@@ -6209,6 +6261,7 @@ async function renderStatsView() {
         ${focus === 'rh' ? _statsRhDetail(rhReadings) : ''}
 
         <section class="stats-layout">
+          ${_statsSystemHealthPanel(instance)}
           <div class="stats-panel stats-panel-wide">
             <div class="stats-panel-head"><span>Filament Trend</span><a href="#/spools?view=catalogue">Catalogue</a></div>
             ${_statsMonthRows(filament.by_month || [])}

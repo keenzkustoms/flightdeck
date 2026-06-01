@@ -1,5 +1,10 @@
 # Flightdeck — next session brief
-_Last updated 1 June 2026 (Session 28.115 Camera worker guardrails)_
+_Last updated 1 June 2026 (Session 28.116 System health telemetry)_
+
+## What was built - Session 28.116 (System health telemetry - 1 June)
+- Expanded `/api/instance` with host load, memory, and data-disk usage so Flightdeck can surface Pi/NAS pressure without another diagnostic tool.
+- Added a Telemetry “System Health” panel for runtime host, CPU load, RAM, data disk, and Bambu camera worker count.
+- Kept camera-worker state visible in Telemetry as an early warning if live feeds ever start overworking the Pi again.
 
 ## What was built - Session 28.115 (Camera worker guardrails - 1 June)
 - Added camera worker diagnostics to `/api/instance` and Settings > Setup health so runaway Bambu `ffmpeg` workers are visible before they overload the Pi.

@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import socket
 import sqlite3
 import subprocess
@@ -1595,6 +1596,73 @@ def _camera_worker_status() -> dict:
     }
 
 
+def _memory_status() -> dict:
+    try:
+        meminfo = Path("/proc/meminfo").read_text(encoding="utf-8", errors="ignore")
+        values: dict[str, int] = {}
+        for line in meminfo.splitlines():
+            if ":" not in line:
+                continue
+            key, raw = line.split(":", 1)
+            parts = raw.strip().split()
+            if not parts:
+                continue
+            try:
+                values[key] = int(parts[0]) * 1024
+            except ValueError:
+                continue
+        total = values.get("MemTotal", 0)
+        available = values.get("MemAvailable", 0)
+        used = max(0, total - available) if total else 0
+        return {
+            "total": total,
+            "available": available,
+            "used": used,
+            "pct": round((used / total) * 100, 1) if total else None,
+        }
+    except Exception as exc:
+        return {"error": str(exc)}
+
+
+def _load_status() -> dict:
+    try:
+        one, five, fifteen = os.getloadavg()
+        cores = os.cpu_count() or 1
+        return {
+            "one": round(one, 2),
+            "five": round(five, 2),
+            "fifteen": round(fifteen, 2),
+            "cores": cores,
+            "pct": round((one / cores) * 100, 1) if cores else None,
+        }
+    except Exception as exc:
+        return {"error": str(exc)}
+
+
+def _disk_status() -> dict:
+    path = DATA_DIR if DATA_DIR.exists() else APP_DIR
+    try:
+        usage = shutil.disk_usage(path)
+        used = usage.total - usage.free
+        return {
+            "path": str(path),
+            "total": usage.total,
+            "free": usage.free,
+            "used": used,
+            "pct": round((used / usage.total) * 100, 1) if usage.total else None,
+        }
+    except Exception as exc:
+        return {"path": str(path), "error": str(exc)}
+
+
+def _host_health() -> dict:
+    return {
+        "load": _load_status(),
+        "memory": _memory_status(),
+        "disk": _disk_status(),
+    }
+
+
 @app.get("/api/instance")
 async def instance_info():
     return {
@@ -1602,6 +1670,7 @@ async def instance_info():
         "address": _local_ipv4(),
         "hardware": _hardware_label(),
         "runtime": os.environ.get("FLIGHTDECK_RUNTIME", "").strip() or ("docker" if Path("/.dockerenv").exists() else "systemd"),
+        "host": _host_health(),
         "camera_workers": _camera_worker_status(),
     }
 
