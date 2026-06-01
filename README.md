@@ -24,6 +24,54 @@ The helper stops the service, cleans only Flightdeck-owned leftover `uvicorn` an
 
 ---
 
+## Backup and Restore
+
+Flightdeck code is backed up in the main GitHub repository. Live data is backed up separately so a clean install never overwrites your real printer history, spool inventory, uploads, or print vault.
+
+Create a private backup archive and push it to:
+
+```text
+https://github.com/Kidabah/flightdeck-backup-private.git
+```
+
+```bash
+./scripts/backup-flightdeck-data.sh
+```
+
+By default the backup includes:
+
+- `flightdeck.db`
+- `printers.yaml`
+- `uploads/`
+- `settings/`
+- metadata files such as `backup_metadata.json` and `spools.db` when present
+
+It deliberately excludes `.env`, SSH keys, virtual environments, caches, and the print vault. To include the print vault:
+
+```bash
+INCLUDE_PRINT_LIBRARY=1 ./scripts/backup-flightdeck-data.sh
+```
+
+To also copy the archive to the NAS staging folder:
+
+```bash
+BACKUP_STAGING_DIR=/mnt/flightdeck-backups/pi-imports ./scripts/backup-flightdeck-data.sh
+```
+
+If the NAS share is mounted elsewhere, replace `/mnt/flightdeck-backups/pi-imports` with the mounted path.
+
+Restore from a backup archive:
+
+```bash
+sudo systemctl stop flightdeck.service
+./scripts/restore-flightdeck-data.sh ~/flightdeck-backup-private/backups/flightdeck-backup-YYYYmmdd-HHMMSS.tar.gz
+sudo ./scripts/safe-restart-flightdeck.sh
+```
+
+The restore helper asks you to type `RESTORE` and creates a safety copy of the current live data before it replaces anything.
+
+---
+
 ## Why
 
 Running multiple printers across ecosystems means juggling:

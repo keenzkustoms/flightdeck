@@ -1,5 +1,11 @@
 # Flightdeck — next session brief
-_Last updated 1 June 2026 (Session 28.108 Security cameras removed)_
+_Last updated 1 June 2026 (Session 28.109 Backup and restore foundation)_
+
+## What was built - Session 28.109 (Backup and restore foundation - 1 June)
+- Added `scripts/backup-flightdeck-data.sh` for private recovery archives of Flightdeck live data.
+- Added `scripts/restore-flightdeck-data.sh` with a typed confirmation and automatic safety copy before overwriting live data.
+- Documented the private GitHub backup repo workflow and optional NAS staging copy for `/volume3/flightdeck-backups/pi-imports`.
+- The default backup excludes `.env`, SSH keys, caches, and the large print vault unless `INCLUDE_PRINT_LIBRARY=1` is set.
 
 ## What was built - Session 28.108 (Security cameras removed - 1 June)
 - Removed the experimental Security Cameras watchtower screen to reduce Pi memory and camera-stream load.
