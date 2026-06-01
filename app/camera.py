@@ -13,6 +13,9 @@ _INITIAL_TIMEOUT    = 10    # max seconds to wait for the very first frame after
 _MAX_SESSION_LIFE   = 900   # 15 min — H2D firmware silently freezes long-lived RTSP sessions
 _FRAME_START = b"\xff\xd8"
 _FRAME_END   = b"\xff\xd9"
+_STREAM_WIDTH = "960"
+_STREAM_FPS = "5"
+_STREAM_QUALITY = "7"
 
 
 class BambuCameraProxy:
@@ -37,35 +40,40 @@ class BambuCameraProxy:
         self._started_at: float = 0.0
         self._clients: int = 0
         self._idle_task: Optional[asyncio.Task] = None
+        self._start_lock = asyncio.Lock()
 
     # ── lifecycle ──────────────────────────────────────────────────────────
 
     async def _start(self) -> None:
-        if self._proc and self._proc.returncode is None:
-            return
-        self._latest = None
-        self._last_frame_at = 0.0
-        self._last_changed_at = 0.0
-        self._last_frame_sig = None
-        self._started_at = time.monotonic()
-        self._proc = await asyncio.create_subprocess_exec(
-            "ffmpeg",
-            "-loglevel", "error",
-            "-fflags", "nobuffer",
-            "-flags", "low_delay",
-            "-rtsp_transport", "tcp",
-            "-i", self._url,
-            "-vf", "scale=1280:-2",
-            "-f", "image2pipe", "-vcodec", "mjpeg",
-            "-r", "8", "-q:v", "5",
-            "pipe:1",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        self._reader = asyncio.create_task(self._read_frames())
-        if not self._watchdog_task or self._watchdog_task.done():
-            self._watchdog_task = asyncio.create_task(self._watchdog())
-        log.info("camera ffmpeg started: %s", self._id)
+        async with self._start_lock:
+            if self._proc and self._proc.returncode is None:
+                return
+            if self._reader and not self._reader.done():
+                self._reader.cancel()
+                self._reader = None
+            self._latest = None
+            self._last_frame_at = 0.0
+            self._last_changed_at = 0.0
+            self._last_frame_sig = None
+            self._started_at = time.monotonic()
+            self._proc = await asyncio.create_subprocess_exec(
+                "ffmpeg",
+                "-loglevel", "error",
+                "-fflags", "nobuffer",
+                "-flags", "low_delay",
+                "-rtsp_transport", "tcp",
+                "-i", self._url,
+                "-vf", f"scale={_STREAM_WIDTH}:-2",
+                "-f", "image2pipe", "-vcodec", "mjpeg",
+                "-r", _STREAM_FPS, "-q:v", _STREAM_QUALITY,
+                "pipe:1",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            self._reader = asyncio.create_task(self._read_frames(self._proc))
+            if not self._watchdog_task or self._watchdog_task.done():
+                self._watchdog_task = asyncio.create_task(self._watchdog())
+            log.info("camera ffmpeg started: %s", self._id)
 
     async def stop(self) -> None:
         if self._watchdog_task:
@@ -122,12 +130,12 @@ class BambuCameraProxy:
 
     # ── frame reader ───────────────────────────────────────────────────────
 
-    async def _read_frames(self) -> None:
+    async def _read_frames(self, proc: asyncio.subprocess.Process) -> None:
         """Continuously read stdout and extract JPEG frames. Auto-restarts on exit if clients remain."""
         buf = b""
-        while self._proc and self._proc.returncode is None:
+        while proc.returncode is None:
             try:
-                chunk = await self._proc.stdout.read(65536)
+                chunk = await proc.stdout.read(65536)
                 if not chunk:
                     break
                 buf += chunk
@@ -153,10 +161,11 @@ class BambuCameraProxy:
                 break
 
         # ffmpeg exited — restart if clients are still watching
-        if self._clients > 0:
+        if self._proc is proc:
+            self._proc = None
+        if self._clients > 0 and self._reader and not self._reader.cancelled():
             log.warning("camera stream dropped, restarting in 3s: %s", self._id)
             await asyncio.sleep(3)
-            self._proc = None
             await self._start()
 
     # ── streaming ──────────────────────────────────────────────────────────

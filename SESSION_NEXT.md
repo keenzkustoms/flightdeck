@@ -1,5 +1,13 @@
 # Flightdeck — next session brief
-_Last updated 1 June 2026 (Session 28.113 NAS USB hardware passthrough)_
+_Last updated 1 June 2026 (Session 28.114 Runtime footer label)_
+
+## What was built - Session 28.114 (Runtime footer label - 1 June)
+- Added `/api/instance` so Flightdeck reports its local address, runtime, and detected hardware label.
+- Dashboard footer now shows the detected host, e.g. `flightdeck · 192.168.4.127 · running on Pi 5 8GB`, instead of a hardcoded Pi IP.
+- Raspberry Pi installs auto-detect model and memory from `/proc/device-tree/model` and `/proc/meminfo`; NAS/Docker installs can override the label with `FLIGHTDECK_INSTANCE_NAME`.
+- Documented optional `.env` overrides for footer address and instance label.
+- Added a camera proxy start lock so multiple browser image requests cannot race and spawn duplicate Bambu `ffmpeg` workers.
+- Reduced proxied Bambu camera output to a Pi-friendlier stream size and frame rate to keep the live UI from overwhelming the 4GB Pi.
 
 ## What was built - Session 28.113 (NAS USB hardware passthrough - 1 June)
 - Added `usbutils` to the NAS Docker image so hardware detection can run `lsusb` inside the container.

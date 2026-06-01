@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import re
+import socket
 import sqlite3
 import subprocess
 import urllib.request
@@ -1494,6 +1495,78 @@ def _systemd_status() -> tuple[bool, str]:
         return active.returncode == 0, f"{state}, {enable_state}"
     except Exception as exc:
         return False, str(exc)
+
+
+def _local_ipv4() -> str:
+    configured = os.environ.get("FLIGHTDECK_HOST_ADDRESS", "").strip()
+    if configured:
+        return configured
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.connect(("8.8.8.8", 80))
+            return sock.getsockname()[0]
+    except Exception:
+        pass
+    try:
+        output = subprocess.run(
+            ["hostname", "-I"],
+            text=True,
+            capture_output=True,
+            timeout=2,
+        ).stdout
+        for token in output.split():
+            if "." in token and not token.startswith("127."):
+                return token
+    except Exception:
+        pass
+    return socket.gethostname()
+
+
+def _ram_label() -> str:
+    try:
+        meminfo = Path("/proc/meminfo").read_text(encoding="utf-8", errors="ignore")
+        match = re.search(r"^MemTotal:\s+(\d+)\s+kB", meminfo, re.MULTILINE)
+        if not match:
+            return ""
+        gib = int(match.group(1)) / 1024 / 1024
+        for size in (2, 4, 8, 16, 32, 64):
+            if gib <= size + 0.5:
+                return f"{size}GB"
+        return f"{round(gib)}GB"
+    except Exception:
+        return ""
+
+
+def _hardware_label() -> str:
+    configured = (
+        os.environ.get("FLIGHTDECK_INSTANCE_NAME", "").strip()
+        or os.environ.get("FLIGHTDECK_HARDWARE_LABEL", "").strip()
+    )
+    if configured:
+        return configured
+    try:
+        model = Path("/proc/device-tree/model").read_text(encoding="utf-8", errors="ignore").strip("\x00\n ")
+    except Exception:
+        model = ""
+    ram = _ram_label()
+    if model.startswith("Raspberry Pi"):
+        model = re.sub(r"\s+Rev\s+.*$", "", model)
+        model = model.replace("Raspberry ", "")
+        return " ".join(part for part in (model, ram) if part)
+    if Path("/.dockerenv").exists():
+        manager = os.environ.get("FLIGHTDECK_SERVICE_MANAGER", "").strip()
+        return manager or "Container"
+    return " ".join(part for part in (socket.gethostname(), ram) if part) or "Local host"
+
+
+@app.get("/api/instance")
+async def instance_info():
+    return {
+        "app": "flightdeck",
+        "address": _local_ipv4(),
+        "hardware": _hardware_label(),
+        "runtime": os.environ.get("FLIGHTDECK_RUNTIME", "").strip() or ("docker" if Path("/.dockerenv").exists() else "systemd"),
+    }
 
 
 def _tailnet_hint(url: str) -> tuple[bool, str]:

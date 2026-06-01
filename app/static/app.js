@@ -2,6 +2,7 @@
 
 let _serverSettings = {};
 let _moistureWatchMemory = {};
+let _instanceInfo = null;
 
 function _toDisplayTemp(celsius) {
   return _serverSettings.temp_unit === 'F'
@@ -84,6 +85,20 @@ async function loadSettings() {
 
   const accent = _serverSettings.accent ?? '#3b82f6';
   document.documentElement.style.setProperty('--printing', accent);
+}
+
+async function loadInstanceInfo() {
+  try {
+    const r = await fetch('/api/instance');
+    if (r.ok) _instanceInfo = await r.json();
+  } catch {}
+}
+
+function _footerInstanceText() {
+  const parts = ['flightdeck'];
+  if (_instanceInfo?.address) parts.push(_instanceInfo.address);
+  if (_instanceInfo?.hardware) parts.push(`running on ${_instanceInfo.hardware}`);
+  return parts.join(' · ');
 }
 
 // ── Per-printer accent colours ────────────────────────────────────────────
@@ -5907,7 +5922,7 @@ function updateDashboard(printers) {
   const active = printers.filter(p => p.state === 'printing' || p.state === 'paused').length;
   const idle = printers.filter(p => p.state === 'idle' || p.state === 'finished').length;
   document.getElementById('dash-footer').innerHTML =
-    `<span>flightdeck · 192.168.4.127</span>` +
+    `<span>${esc(_footerInstanceText())}</span>` +
     `<span>${printers.length} printers · ${active} active · ${idle} idle</span>`;
 }
 
@@ -9414,6 +9429,9 @@ async function renderSettingsView() {
 }
 
 loadSettings();
+loadInstanceInfo().then(() => {
+  if (_latestPrinters?.length) updateDashboard(_latestPrinters);
+});
 connectWS();
 _refreshSpoolsByPrinter();
 initNotifBtn();
