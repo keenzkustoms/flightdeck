@@ -142,9 +142,6 @@ const _historyYear = {};        // printer_id → selected year (int)
 const _dayPrintsCache = {};     // `${printerId}:${dateStr}` → prints[]
 let _camerasFull = false;       // true once cameras grid has been fully rendered
 let _camerasMode = 'live';       // live | sim30
-let _securityCameraIndex = 0;
-let _securityCameraLastRotate = 0;
-let _securityCameraZoom = false;
 let _camZoom = 0;               // 0=normal, 1=wide, 2=fullscreen
 let _onSettings = false;        // true while settings view is active
 let _onFailures = false;        // true while failure review is active
@@ -514,7 +511,6 @@ function _commandStaticItems() {
     ['Flight Tower', '#/mission', 'Dispatch and queue intelligence'],
     ['Telemetry', '#/stats', 'Stats, RH, utilisation'],
     ['Cameras', '#/cameras', 'All live feeds'],
-    ['Security Cameras', '#/security-cameras', 'Rotating watchtower and alert lock'],
     ['Queue', '#/queue', 'Pending print jobs'],
     ['Global Print Bay', '#/files', 'Files, printer storage, and reprint staging'],
     ['Spools', '#/spools', 'Spool inventory'],
@@ -1544,7 +1540,6 @@ function parseRoute() {
   if (spoolMatch) return { view: 'spool', id: parseInt(spoolMatch[1], 10) };
   if (hash === '#/mission' || hash.startsWith('#/mission?')) return { view: 'mission' };
   if (hash === '#/cameras' || hash.startsWith('#/cameras?')) return { view: 'cameras' };
-  if (hash === '#/security-cameras' || hash.startsWith('#/security-cameras?')) return { view: 'security-cameras' };
   if (hash === '#/stats' || hash.startsWith('#/stats?')) return { view: 'stats' };
   if (hash === '#/queue') return { view: 'queue' };
   if (hash === '#/files') return { view: 'files' };
@@ -1588,11 +1583,6 @@ function router() {
     document.querySelectorAll('#cameras-grid img').forEach(img => { img.src = ''; });
     _camerasFull = false;
   }
-  if (route.view !== 'security-cameras') {
-    document.querySelectorAll('#security-cameras-page img').forEach(img => { img.src = ''; });
-    _securityCameraZoom = false;
-  }
-
   const wasOnSettings = _onSettings;
   const wasOnFailures = _onFailures;
   const wasOnSpools = _onSpools;
@@ -1608,7 +1598,6 @@ function router() {
   document.getElementById('view-printer').hidden   = route.view !== 'printer';
   document.getElementById('view-spool').hidden     = route.view !== 'spool';
   document.getElementById('view-cameras').hidden   = route.view !== 'cameras';
-  document.getElementById('view-security-cameras').hidden = route.view !== 'security-cameras';
   document.getElementById('view-queue').hidden     = route.view !== 'queue';
   document.getElementById('view-files').hidden     = route.view !== 'files';
   document.getElementById('view-failures').hidden  = route.view !== 'failures';
@@ -1627,7 +1616,6 @@ function router() {
       (route.view === 'stats'     && href === '#/stats') ||
       printerTabActive ||
       (route.view === 'cameras'  && href === '#/cameras') ||
-      (route.view === 'security-cameras' && href === '#/security-cameras') ||
       (route.view === 'queue'    && href === '#/queue') ||
       (route.view === 'files'    && href === '#/files') ||
       (route.view === 'failures' && href === '#/failures') ||
@@ -1648,7 +1636,6 @@ function router() {
     renderSpoolDetail(route.id);
   }
   if (route.view === 'cameras') renderCamerasView();
-  if (route.view === 'security-cameras') renderSecurityCamerasView();
   if (route.view === 'queue') renderQueueView();
   if (route.view === 'files' && !_fileDeskRenderInFlight) renderFileDeskView();
   if (route.view === 'failures' && !wasOnFailures) renderFailuresView();
@@ -1680,7 +1667,6 @@ function buildTabs(printers) {
     `<div class="tab-section">Printers</div>`,
     printerGroups,
     `<div class="tab-section">Operations</div>`,
-    `<a class="tab" href="#/security-cameras">Security Cameras</a>`,
     `<a class="tab" href="#/queue">Queue</a>`,
     `<a class="tab" href="#/files">Global Print Bay</a>`,
     `<a class="tab" href="#/spools">Spools</a>`,
@@ -5567,122 +5553,6 @@ async function _queueHandleAction(e) {
   }
 }
 
-
-// ── Security Cameras watchtower ───────────────────────────────────────────
-function _securityCameraFault(p) {
-  if (!p) return null;
-  if (p.state === 'estop') return { level: 'critical', label: 'Emergency stop', detail: p.error || 'Printer requires attention' };
-  if (p.state === 'error') return { level: 'critical', label: 'Printer fault', detail: p.error || 'Error reported by printer' };
-  if (p.state === 'paused' && p.error) return { level: 'warning', label: 'Paused with alert', detail: p.error };
-  const spaghetti = (p.error || p.substage || '').toString().match(/spaghetti|first layer|tangle|filament/i);
-  if (spaghetti) return { level: 'warning', label: 'Print watch alert', detail: p.error || p.substage };
-  return null;
-}
-
-function _securityCameraLabel(p) {
-  return _dashboardPrinterName(p) || p.custom_name || p.id;
-}
-
-function _securityCameraStatus(p) {
-  const fault = _securityCameraFault(p);
-  if (fault) return fault;
-  if (p.state === 'offline') return { level: 'offline', label: 'Offline', detail: `Last contact ${fmtLastSeen(p.last_seen)}` };
-  if (p.state === 'printing') return { level: 'ok', label: 'Printing', detail: p.job ? `${Math.round((p.job.progress || 0) * 100)}% complete` : 'Print in progress' };
-  if (p.state === 'paused') return { level: 'warning', label: 'Paused', detail: 'Print paused' };
-  return { level: 'ok', label: (p.state || 'idle').replace(/^./, c => c.toUpperCase()), detail: p.job ? jobDisplayName(p.job) : 'Camera watch active' };
-}
-
-async function _ensureCameraUrls(printers) {
-  await Promise.all((printers || []).map(async p => {
-    const id = p._camera_id || p.id;
-    if (_cameraUrlCache[id] !== undefined) return;
-    try {
-      const r = await fetch(`/api/printers/${id}/camera`);
-      const body = r.ok ? await r.json() : null;
-      _cameraUrlCache[id] = body?.url || null;
-    } catch { _cameraUrlCache[id] = null; }
-  }));
-}
-
-function _securityCameraFeed(p) {
-  const cameraId = p._camera_id || p.id;
-  const camSrc = _cameraStreamSrc(cameraId);
-  return (camSrc && p.state !== 'offline')
-    ? `<img src="${camSrc}" alt="${esc(p.custom_name || p.id)}" data-camera-id="${cameraId}">`
-    : _cameraOfflineContent(p, 'security-camera-offline');
-}
-
-function _securityCameraThumb(p, activeId, lockedId) {
-  const status = _securityCameraStatus(p);
-  const isActive = p.id === activeId;
-  const isLocked = p.id === lockedId;
-  return `<button class="security-thumb ${isActive ? 'active' : ''} security-thumb-${status.level}" data-security-printer="${p.id}" type="button">
-    <span class="security-thumb-top"><strong>${esc(_securityCameraLabel(p))}</strong><em>${isLocked ? 'Locked' : esc(status.label)}</em></span>
-    <span class="security-thumb-feed">${_securityCameraFeed(p)}</span>
-  </button>`;
-}
-
-async function renderSecurityCamerasView() {
-  const el = document.getElementById('security-cameras-page');
-  const printers = _latestPrinters || [];
-  if (!printers.length) {
-    el.innerHTML = `<div class="detail-placeholder">Connecting security cameras...</div>`;
-    return;
-  }
-  await _ensureCameraUrls(printers);
-
-  const faultPrinter = printers.find(p => _securityCameraFault(p));
-  const lockedId = faultPrinter?.id || null;
-  if (!lockedId && Date.now() - _securityCameraLastRotate > 5000) {
-    _securityCameraIndex = (_securityCameraIndex + 1) % Math.max(1, printers.length);
-    _securityCameraLastRotate = Date.now();
-  }
-  const active = faultPrinter || printers[_securityCameraIndex % printers.length] || printers[0];
-  const status = _securityCameraStatus(active);
-  const job = active.job ? jobDisplayName(active.job) : '';
-  const zoomClass = _securityCameraZoom ? ' security-zoomed' : '';
-
-  el.innerHTML = `<div class="security-page${zoomClass}">
-    <section class="security-spotlight security-${status.level}" data-active-printer="${active.id}">
-      <div class="security-spotlight-head">
-        <div>
-          <span class="mission-eyebrow">${lockedId ? 'Alert lock' : 'Rotating watch'}</span>
-          <h2>${esc(_securityCameraLabel(active))}</h2>
-          <p>${esc(status.detail)}${job ? ` · ${esc(job)}` : ''}</p>
-        </div>
-        <div class="security-actions">
-          <span class="security-status-pill">${esc(status.label)}</span>
-          <button class="btn ghost" type="button" id="security-zoom-toggle">${_securityCameraZoom ? 'Normal view' : 'Zoom'}</button>
-        </div>
-      </div>
-      <div class="security-feed">${_securityCameraFeed(active)}</div>
-    </section>
-    <aside class="security-side">
-      <div class="security-panel">
-        <span class="mission-eyebrow">Watch mode</span>
-        <strong>${lockedId ? 'Locked to printer alert' : 'Cycling every 5 seconds'}</strong>
-        <small>${lockedId ? 'The spotlight will release when the printer state clears.' : 'Click any camera to bring it into the spotlight.'}</small>
-      </div>
-      <div class="security-thumbs">${printers.map(p => _securityCameraThumb(p, active.id, lockedId)).join('')}</div>
-    </aside>
-  </div>`;
-
-  _attachCameraRetries(el);
-  el.querySelector('#security-zoom-toggle')?.addEventListener('click', () => {
-    _securityCameraZoom = !_securityCameraZoom;
-    renderSecurityCamerasView();
-  });
-  el.querySelectorAll('[data-security-printer]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const idx = printers.findIndex(p => p.id === btn.dataset.securityPrinter);
-      if (idx >= 0) {
-        _securityCameraIndex = idx;
-        _securityCameraLastRotate = Date.now();
-        renderSecurityCamerasView();
-      }
-    });
-  });
-}
 
 // ── Cameras grid ──────────────────────────────────────────────────────────
 
