@@ -1,5 +1,10 @@
 # Flightdeck — next session brief
-_Last updated 1 June 2026 (Session 28.110 NAS Docker staging)_
+_Last updated 1 June 2026 (Session 28.111 NAS staging restore prep)_
+
+## What was built - Session 28.111 (NAS staging restore prep - 1 June)
+- Moved the NAS Docker preview host port to `8010` so it does not collide with Portainer/ASUSTOR services already listening on `8000`.
+- Documented the NAS preview URL/port expectation before the first Portainer stack test.
+- Staged the latest Pi backup archive for restore into `/volume2/flightdeck-data` on the ASUSTOR NAS.
 
 ## What was built - Session 28.110 (NAS Docker staging - 1 June)
 - Added a NAS-ready `Dockerfile` for running Flightdeck in a Python 3.13 container with FFmpeg and USB support libraries available.

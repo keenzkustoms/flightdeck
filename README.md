@@ -279,6 +279,8 @@ The container maps:
 /volume3/flightdeck-backups -> /backups
 ```
 
+The NAS preview publishes Flightdeck on host port `8010` to avoid clashing with ASUSTOR/Portainer services that may already use `8000`.
+
 This is intended for a staged NAS deployment first. Keep the Pi service as the live host until the NAS container has been tested with copied backup data and printer connectivity.
 
 ---

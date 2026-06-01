@@ -9,7 +9,7 @@ services:
       FLIGHTDECK_DATA_DIR: /data
       FLIGHTDECK_PRINT_LIBRARY: /print_library
     ports:
-      - "8000:8000"
+      - "8010:8000"
     volumes:
       - /volume2/flightdeck-data:/data
       - /volume3/flightdeck-vault:/print_library
