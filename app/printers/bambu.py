@@ -18,7 +18,7 @@ log = logging.getLogger(__name__)
 
 FINISHED_TTL = timedelta(minutes=30)
 _BAMBU_PREVIEW_FAILED = object()  # sentinel: FTP failed, don't retry until job changes
-_BAMBU_STALE_REPORT_SECONDS = 150
+_BAMBU_STALE_REPORT_SECONDS = 45
 _BAMBU_CARE_LABELS = {
     "cr": "Clean carbon rods",
     "ls": "Lubricate lead screws",

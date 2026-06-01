@@ -1,5 +1,8 @@
 # Flightdeck — next session brief
-_Last updated 1 June 2026 (Session 28.102 Camera tile live refresh fix)_
+_Last updated 1 June 2026 (Session 28.103 Faster Bambu offline timeout)_
+
+## What was built - Session 28.103 (Faster Bambu offline timeout - 1 June)
+- Reduced Bambu MQTT stale detection from 150 seconds to 45 seconds so powered-off printers leave `IDLE` faster while still avoiding brief LAN/MQTT flaps.
 
 ## What was built - Session 28.102 (Camera tile live refresh fix - 1 June)
 - Fixed the All Cameras refresh path so tile bodies update when printers move between offline and online, not just the header badge.
