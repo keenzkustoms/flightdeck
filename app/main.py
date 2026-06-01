@@ -1587,13 +1587,15 @@ async def setup_health():
     ))
 
     systemd_ok, systemd_detail = _systemd_status()
-    service_label = "Container service" if "managed" in systemd_detail.lower() else "systemd service"
+    container_managed = "managed" in systemd_detail.lower()
+    service_label = "Container service" if container_managed else "systemd service"
     checks.append(_setup_check(
         "systemd",
         service_label,
         systemd_ok,
         systemd_detail,
-        optional=True,
+        level="ok" if container_managed and systemd_ok else None,
+        optional=not container_managed,
     ))
 
     required = [c for c in checks if not c["optional"]]
