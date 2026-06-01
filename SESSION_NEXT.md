@@ -1,5 +1,10 @@
 # Flightdeck — next session brief
-_Last updated 1 June 2026 (Session 28.105 Security Cameras first pass)_
+_Last updated 1 June 2026 (Session 28.106 Security camera anti-flash)_
+
+## What was built - Session 28.106 (Security camera anti-flash - 1 June)
+- Stopped the Security Cameras screen from rebuilding the spotlight and thumbnails on every live websocket tick.
+- The watchtower now redraws only when the active camera, zoom mode, lock state, or printer state changes, keeping camera streams steady between rotations.
+- Static cache-bust bumped to `app.js?v=203`.
 
 ## What was built - Session 28.105 (Security Cameras first pass - 1 June)
 - Added a dedicated Operations > Security Cameras screen with a rotating spotlight that cycles printer feeds every 5 seconds.
