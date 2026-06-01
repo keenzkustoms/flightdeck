@@ -1559,6 +1559,42 @@ def _hardware_label() -> str:
     return " ".join(part for part in (socket.gethostname(), ram) if part) or "Local host"
 
 
+def _camera_worker_status() -> dict:
+    expected_max = max(0, len(_cam_proxies))
+    try:
+        proc = subprocess.run(
+            ["ps", "-eo", "pid=,ppid=,comm=,args="],
+            text=True,
+            capture_output=True,
+            timeout=2,
+        )
+        workers = [
+            line.strip()
+            for line in proc.stdout.splitlines()
+            if "ffmpeg" in line and "streaming/live" in line and "image2pipe" in line
+        ]
+    except Exception as exc:
+        return {
+            "count": None,
+            "expected_max": expected_max,
+            "ok": False,
+            "detail": str(exc),
+        }
+    count = len(workers)
+    ok = count <= expected_max
+    detail = f"{count} active Bambu camera worker{'s' if count != 1 else ''}"
+    if expected_max:
+        detail += f" (expected <= {expected_max})"
+    if not ok:
+        detail += "; run scripts/clear-camera-workers.sh"
+    return {
+        "count": count,
+        "expected_max": expected_max,
+        "ok": ok,
+        "detail": detail,
+    }
+
+
 @app.get("/api/instance")
 async def instance_info():
     return {
@@ -1566,6 +1602,7 @@ async def instance_info():
         "address": _local_ipv4(),
         "hardware": _hardware_label(),
         "runtime": os.environ.get("FLIGHTDECK_RUNTIME", "").strip() or ("docker" if Path("/.dockerenv").exists() else "systemd"),
+        "camera_workers": _camera_worker_status(),
     }
 
 
@@ -1656,6 +1693,16 @@ async def setup_health():
         "QL-700 label printer",
         label_status.available,
         "Detected" if label_status.available else (label_status.last_error or "Not detected"),
+        optional=True,
+    ))
+    camera_workers = _camera_worker_status()
+    camera_workers_ok = bool(camera_workers.get("ok"))
+    checks.append(_setup_check(
+        "camera_workers",
+        "Camera workers",
+        camera_workers_ok,
+        str(camera_workers.get("detail") or "Unavailable"),
+        level="ok" if camera_workers_ok else "warn",
         optional=True,
     ))
 

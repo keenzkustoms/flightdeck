@@ -22,6 +22,14 @@ sudo ./scripts/safe-restart-flightdeck.sh
 
 The helper stops the service, cleans only Flightdeck-owned leftover `uvicorn` and Bambu RTSP `ffmpeg` processes, starts the service again, and prints a compact `/api/printers` health check.
 
+If only the camera feeds are misbehaving and the rest of Flightdeck is responsive, reset just the camera transcoders without restarting the app:
+
+```bash
+./scripts/clear-camera-workers.sh
+```
+
+The Setup health screen also reports the current Bambu camera worker count so duplicate stream workers are visible before they overload a Pi.
+
 ---
 
 ## Backup and Restore

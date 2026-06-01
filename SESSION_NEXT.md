@@ -1,5 +1,10 @@
 # Flightdeck — next session brief
-_Last updated 1 June 2026 (Session 28.114 Runtime footer label)_
+_Last updated 1 June 2026 (Session 28.115 Camera worker guardrails)_
+
+## What was built - Session 28.115 (Camera worker guardrails - 1 June)
+- Added camera worker diagnostics to `/api/instance` and Settings > Setup health so runaway Bambu `ffmpeg` workers are visible before they overload the Pi.
+- Added `scripts/clear-camera-workers.sh` to reset only Bambu camera transcoders without restarting Flightdeck.
+- Documented the camera-only recovery script in the README.
 
 ## What was built - Session 28.114 (Runtime footer label - 1 June)
 - Added `/api/instance` so Flightdeck reports its local address, runtime, and detected hardware label.
