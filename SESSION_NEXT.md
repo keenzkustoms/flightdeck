@@ -1,5 +1,10 @@
 # Flightdeck — next session brief
-_Last updated 1 June 2026 (Session 28.105 Security Cameras first pass)_
+_Last updated 1 June 2026 (Session 28.107 Security camera rollback)_
+
+## What was built - Session 28.107 (Security camera rollback - 1 June)
+- Reverted the anti-flash render guard because it caused black camera screens in live use.
+- Restored the Security Cameras page to the first-pass watchtower behavior while we design a safer no-flash implementation.
+- Static cache-bust bumped to pp.js?v=204.
 
 ## What was built - Session 28.105 (Security Cameras first pass - 1 June)
 - Added a dedicated Operations > Security Cameras screen with a rotating spotlight that cycles printer feeds every 5 seconds.
