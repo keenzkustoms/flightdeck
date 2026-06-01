@@ -124,7 +124,7 @@ fi
 mkdir -p "${BACKUP_REPO_DIR}/backups"
 archive="${BACKUP_REPO_DIR}/backups/${backup_name}.tar.gz"
 tar -czf "${archive}" -C "${work_dir}" "${backup_name}"
-sha256sum "${archive}" > "${archive}.sha256"
+(cd "$(dirname "${archive}")" && sha256sum "$(basename "${archive}")") > "${archive}.sha256"
 
 if [[ ! -f "${BACKUP_REPO_DIR}/README.md" ]]; then
   cat > "${BACKUP_REPO_DIR}/README.md" <<'TXT'
