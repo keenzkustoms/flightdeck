@@ -529,6 +529,7 @@ function _commandStaticItems() {
     ['Queue', '#/queue', 'Pending print jobs'],
     ['Global Print Bay', '#/files', 'Files, printer storage, and reprint staging'],
     ['Spools', '#/spools', 'Spool inventory'],
+    ['Flight Manual', '#/manual', 'Setup, recovery, Bambu and demo notes'],
     ['Settings', '#/settings', 'Configuration'],
   ].map(([label, hash, meta]) => _commandItem({
     label: `Go to ${label}`,
@@ -1545,6 +1546,107 @@ document.getElementById('view-printer').addEventListener('click', e => {
   );
 });
 
+// ── Flight Manual ─────────────────────────────────────────────────────────
+
+function _manualCheck(label, ok, detail = '') {
+  const cls = ok ? 'manual-check-ok' : 'manual-check-watch';
+  return `<div class="manual-check ${cls}">
+    <span>${ok ? 'Ready' : 'Check'}</span>
+    <strong>${esc(label)}</strong>
+    ${detail ? `<small>${esc(detail)}</small>` : ''}
+  </div>`;
+}
+
+function _manualSection(title, body, items = []) {
+  return `<section class="manual-card">
+    <div class="manual-card-head">
+      <span>${esc(title)}</span>
+    </div>
+    ${body ? `<p>${body}</p>` : ''}
+    ${items.length ? `<div class="manual-list">${items.map(item => `<div>${item}</div>`).join('')}</div>` : ''}
+  </section>`;
+}
+
+async function renderManualView() {
+  const el = document.getElementById('manual-page');
+  if (!el) return;
+  el.innerHTML = `<div class="detail-placeholder" style="min-height:40vh">Loading flight manual...</div>`;
+  const [instance, health, printers] = await Promise.all([
+    fetch('/api/instance').then(r => r.ok ? r.json() : (_instanceInfo || {})).catch(() => (_instanceInfo || {})),
+    fetch('/api/setup/health').then(r => r.ok ? r.json() : null).catch(() => null),
+    fetch('/api/printers').then(r => r.ok ? r.json() : (_latestPrinters || [])).catch(() => (_latestPrinters || [])),
+  ]);
+  if (instance?.app) _instanceInfo = instance;
+  const checks = health?.checks || [];
+  const checkMap = Object.fromEntries(checks.map(c => [c.id, c]));
+  const cameraWorkers = instance.camera_workers || {};
+  const host = instance.host || {};
+  const memoryPct = host.memory?.pct;
+  const diskPct = host.disk?.pct;
+  const printerCount = printers.length || _latestPrinters.length || 0;
+  const onlineCount = (printers || []).filter(p => p.state !== 'offline').length;
+  const readyChecks = [
+    _manualCheck('Printer fleet', printerCount > 0, `${printerCount} configured - ${onlineCount} online`),
+    _manualCheck('Runtime host', !!instance.hardware, [instance.hardware, instance.runtime].filter(Boolean).join(' - ')),
+    _manualCheck('Memory headroom', !(Number(memoryPct) >= 85), memoryPct != null ? `${Math.round(memoryPct)}% used` : 'unavailable'),
+    _manualCheck('Data disk', !(Number(diskPct) >= 90), diskPct != null ? `${Math.round(diskPct)}% used` : 'unavailable'),
+    _manualCheck('Camera workers', cameraWorkers.ok !== false, cameraWorkers.detail || 'not checked'),
+    _manualCheck('Print Vault', checkMap.print_library?.ok !== false, checkMap.print_library?.detail || 'configured in Settings'),
+  ].join('');
+
+  el.innerHTML = `<div class="manual-page">
+    <section class="manual-hero">
+      <div>
+        <div class="mission-eyebrow">Flight Manual</div>
+        <h1>Operator handbook</h1>
+        <p>Quick rules, recovery steps, and demo notes for running Flightdeck without needing the whole backstory.</p>
+      </div>
+      <div class="manual-hero-actions">
+        <a href="#/settings/setup">Setup Health</a>
+        <a href="#/stats">Telemetry</a>
+      </div>
+    </section>
+
+    <section class="manual-ready">
+      <div class="manual-card-head"><span>Demo Readiness</span></div>
+      <div class="manual-check-grid">${readyChecks}</div>
+    </section>
+
+    <section class="manual-grid">
+      ${_manualSection('Daily Flow', 'The normal shop rhythm is simple: check Dashboard, watch Flight Tower, then use each printer page for live control and history.', [
+        '<strong>Dashboard</strong><span>Use it for fleet state, reliability hints, loaded filament, and quick camera access.</span>',
+        '<strong>Flight Tower</strong><span>Queue intelligence tells you what can dispatch now, what is blocked, and what spool or printer needs attention.</span>',
+        '<strong>Printer pages</strong><span>Live, Print Bay, History, Failures, and Maintenance stay together per printer.</span>',
+      ])}
+      ${_manualSection('Bambu Multi-Colour Rules', 'Most multi-colour failures come from slicer grouping or AMS profile mismatch rather than the model itself.', [
+        '<strong>Group nozzles deliberately</strong><span>On H2D, confirm left and right nozzle grouping before sending a multi-material print.</span>',
+        '<strong>Match material, colour, and brand intent</strong><span>Flightdeck can trust its spool assignment or trust the printer report from the AMS slot editor.</span>',
+        '<strong>Use AMS Profile Doctor</strong><span>If the printer says Generic but Flightdeck knows the real roll, use Trust Flightdeck to push the profile back to AMS.</span>',
+      ])}
+      ${_manualSection('Spools And Labels', 'The scale and Brother QL-700 are optional, but they turn the inventory into something much harder to lie to.', [
+        '<strong>Weigh after weird prints</strong><span>Use reconcile when purge, multi-spool usage, or printer reports do not line up cleanly.</span>',
+        '<strong>Trust confidence</strong><span>Verified means weighed; estimated means model deductions have been applied since the last weigh-in.</span>',
+        '<strong>Labels carry identity</strong><span>Spool number, material, colour name, colour code, and location print where useful.</span>',
+      ])}
+      ${_manualSection('Recovery', 'When something feels off, recover the smallest piece first. Full restarts are there, but not always the first move.', [
+        '<strong>Camera pressure</strong><span>Run scripts/clear-camera-workers.sh if camera workers climb above expected count.</span>',
+        '<strong>App restart</strong><span>Use scripts/safe-restart-flightdeck.sh when the service is wedged or after system updates.</span>',
+        '<strong>Backup path</strong><span>Use scripts/backup-flightdeck-data.sh before risky upgrades or Pi/NAS migration work.</span>',
+      ])}
+      ${_manualSection('Maintenance', 'Maintenance is per-printer, not generic. Bambu care hours and manual tasks live together so reminders stay grounded in real usage.', [
+        '<strong>Bambu care feed</strong><span>Flightdeck reads printer maintenance counters where available and keeps model-specific wording.</span>',
+        '<strong>Voron tasks</strong><span>Voron maintenance tracks the Vivid/MMU path and manual service schedule separately from Bambu rules.</span>',
+        '<strong>Telemetry</strong><span>Printer hours, print count, RH, and host health belong on Telemetry for the long view.</span>',
+      ])}
+      ${_manualSection('Tester Notes', 'For a demo or friend testing pass, give them these rails so they can explore without breaking the story.', [
+        '<strong>Try read-only first</strong><span>Dashboard, Cameras, Telemetry, History, Failures, and Flight Manual are safe places to browse.</span>',
+        '<strong>Ask before destructive controls</strong><span>Cancel, E-stop, SD cleanup, delete, and archive actions should be deliberate.</span>',
+        '<strong>Report exact screen</strong><span>When something looks wrong, note the page name, printer, and whether the printer screen agrees.</span>',
+      ])}
+    </section>
+  </div>`;
+}
+
 // ── Routing ────────────────────────────────────────────────────────────────
 
 function parseRoute() {
@@ -1560,6 +1662,7 @@ function parseRoute() {
   if (hash === '#/files') return { view: 'files' };
   if (hash === '#/failures' || hash.startsWith('#/failures?')) return { view: 'failures' };
   if (hash === '#/spools' || hash.startsWith('#/spools?')) return { view: 'spools' };
+  if (hash === '#/manual') return { view: 'manual' };
   const settingsMatch = hash.match(/^#\/settings\/([^/]+)/);
   if (settingsMatch?.[1] === 'spools') return { view: 'spools' };
   if (settingsMatch?.[1] === 'filament') return { view: 'spools', legacyFilament: true };
@@ -1618,6 +1721,7 @@ function router() {
   document.getElementById('view-failures').hidden  = route.view !== 'failures';
   document.getElementById('view-spools').hidden    = route.view !== 'spools';
   document.getElementById('view-settings').hidden  = route.view !== 'settings';
+  document.getElementById('view-manual').hidden    = route.view !== 'manual';
 
   document.querySelectorAll('#tab-strip .tab').forEach(tab => {
     const href = tab.getAttribute('href');
@@ -1635,6 +1739,7 @@ function router() {
       (route.view === 'files'    && href === '#/files') ||
       (route.view === 'failures' && href === '#/failures') ||
       (route.view === 'spools'   && href === '#/spools') ||
+      (route.view === 'manual'   && href === '#/manual') ||
       (route.view === 'settings' && (
         href === '#/settings' ||
         href === `#/settings/${_settingsCategory}` ||
@@ -1656,6 +1761,7 @@ function router() {
   if (route.view === 'failures' && !wasOnFailures) renderFailuresView();
   if (route.view === 'spools' && !wasOnSpools) renderSpoolsView();
   if (route.view === 'settings' && (!wasOnSettings || categoryBeforeRoute !== _settingsCategory)) renderSettingsView();
+  if (route.view === 'manual') renderManualView();
 }
 
 function buildTabs(printers) {
@@ -1686,6 +1792,7 @@ function buildTabs(printers) {
     `<a class="tab" href="#/files">Global Print Bay</a>`,
     `<a class="tab" href="#/spools">Spools</a>`,
     `<div class="tab-section">System</div>`,
+    `<a class="tab" href="#/manual">Flight Manual</a>`,
     `<a class="tab" href="#/settings">Settings</a>`,
   ].join('');
   _tabsBuilt = true;

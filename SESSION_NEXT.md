@@ -1,5 +1,10 @@
 # Flightdeck — next session brief
-_Last updated 1 June 2026 (Session 28.116 System health telemetry)_
+_Last updated 2 June 2026 (Session 28.117 Flight Manual first pass)_
+
+## What was built - Session 28.117 (Flight Manual first pass - 2 June)
+- Added a first-class Flight Manual page under System for demo readiness, daily flow, Bambu multi-colour rules, spool/label notes, recovery steps, maintenance notes, and tester guidance.
+- Added live demo-readiness checks on the manual page using setup health, instance health, printer count, memory, disk, and camera worker status.
+- Added Flight Manual to the sidebar and command palette so it is easy to find during testing.
 
 ## What was built - Session 28.116 (System health telemetry - 1 June)
 - Expanded `/api/instance` with host load, memory, and data-disk usage so Flightdeck can surface Pi/NAS pressure without another diagnostic tool.
