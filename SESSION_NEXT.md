@@ -1,5 +1,10 @@
 # Flightdeck — next session brief
-_Last updated 1 June 2026 (Session 28.111 NAS staging restore prep)_
+_Last updated 1 June 2026 (Session 28.112 NAS Docker service health polish)_
+
+## What was built - Session 28.112 (NAS Docker service health polish - 1 June)
+- Made the setup health check Docker-aware so NAS/Portainer installs no longer show a missing `systemctl` warning.
+- Added NAS compose environment labels for `FLIGHTDECK_RUNTIME`, `FLIGHTDECK_SERVICE_MANAGER`, and `FLIGHTDECK_INSTANCE_NAME`.
+- Docker installs now report the service as Docker / Portainer managed while Pi installs keep the normal systemd check.
 
 ## What was built - Session 28.111 (NAS staging restore prep - 1 June)
 - Moved the NAS Docker preview host port to `8010` so it does not collide with Portainer/ASUSTOR services already listening on `8000`.

@@ -1472,6 +1472,10 @@ def _is_writable_dir(path: Path) -> bool:
 
 
 def _systemd_status() -> tuple[bool, str]:
+    runtime = os.environ.get("FLIGHTDECK_RUNTIME", "").strip().lower()
+    if runtime in {"docker", "container", "portainer"} or Path("/.dockerenv").exists():
+        manager = os.environ.get("FLIGHTDECK_SERVICE_MANAGER", "Docker / Portainer").strip()
+        return True, f"{manager} managed"
     try:
         active = subprocess.run(
             ["systemctl", "is-active", "flightdeck.service"],
@@ -1583,9 +1587,10 @@ async def setup_health():
     ))
 
     systemd_ok, systemd_detail = _systemd_status()
+    service_label = "Container service" if "managed" in systemd_detail.lower() else "systemd service"
     checks.append(_setup_check(
         "systemd",
-        "systemd service",
+        service_label,
         systemd_ok,
         systemd_detail,
         optional=True,
