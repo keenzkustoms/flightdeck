@@ -145,7 +145,6 @@ let _camerasMode = 'live';       // live | sim30
 let _securityCameraIndex = 0;
 let _securityCameraLastRotate = 0;
 let _securityCameraZoom = false;
-let _securityCameraRenderKey = '';
 let _camZoom = 0;               // 0=normal, 1=wide, 2=fullscreen
 let _onSettings = false;        // true while settings view is active
 let _onFailures = false;        // true while failure review is active
@@ -1592,7 +1591,6 @@ function router() {
   if (route.view !== 'security-cameras') {
     document.querySelectorAll('#security-cameras-page img').forEach(img => { img.src = ''; });
     _securityCameraZoom = false;
-    _securityCameraRenderKey = '';
   }
 
   const wasOnSettings = _onSettings;
@@ -5643,19 +5641,6 @@ async function renderSecurityCamerasView() {
   const status = _securityCameraStatus(active);
   const job = active.job ? jobDisplayName(active.job) : '';
   const zoomClass = _securityCameraZoom ? ' security-zoomed' : '';
-  const renderKey = [
-    active.id,
-    active.state || '',
-    status.level || '',
-    status.label || '',
-    lockedId || '',
-    _securityCameraZoom ? 'zoom' : 'normal',
-    printers.map(p => `${p.id}:${p.state || ''}:${_securityCameraFault(p)?.label || ''}`).join('|'),
-  ].join('::');
-  if (_securityCameraRenderKey === renderKey && el.querySelector('.security-page')) {
-    return;
-  }
-  _securityCameraRenderKey = renderKey;
 
   el.innerHTML = `<div class="security-page${zoomClass}">
     <section class="security-spotlight security-${status.level}" data-active-printer="${active.id}">
