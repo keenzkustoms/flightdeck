@@ -161,6 +161,7 @@ let _camZoom = 0;               // 0=normal, 1=wide, 2=fullscreen
 let _onSettings = false;        // true while settings view is active
 let _onFailures = false;        // true while failure review is active
 let _onSpools = false;          // true while spool inventory is active
+let _onManual = false;          // true while flight manual is active
 let _renderedSpoolDetailId = null;
 
 // ── Toast notifications ────────────────────────────────────────────────────
@@ -1704,10 +1705,12 @@ function router() {
   const wasOnSettings = _onSettings;
   const wasOnFailures = _onFailures;
   const wasOnSpools = _onSpools;
+  const wasOnManual = _onManual;
   const wasSpoolDetailId = _renderedSpoolDetailId;
   _onSettings = route.view === 'settings';
   _onFailures = route.view === 'failures';
   _onSpools = route.view === 'spools';
+  _onManual = route.view === 'manual';
   if (route.view !== 'spool') _renderedSpoolDetailId = null;
 
   document.getElementById('view-dashboard').hidden = route.view !== 'dashboard';
@@ -1761,7 +1764,7 @@ function router() {
   if (route.view === 'failures' && !wasOnFailures) renderFailuresView();
   if (route.view === 'spools' && !wasOnSpools) renderSpoolsView();
   if (route.view === 'settings' && (!wasOnSettings || categoryBeforeRoute !== _settingsCategory)) renderSettingsView();
-  if (route.view === 'manual') renderManualView();
+  if (route.view === 'manual' && !wasOnManual) renderManualView();
 }
 
 function buildTabs(printers) {

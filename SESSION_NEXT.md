@@ -1,5 +1,9 @@
 # Flightdeck — next session brief
-_Last updated 2 June 2026 (Session 28.117 Flight Manual first pass)_
+_Last updated 2 June 2026 (Session 28.118 Flight Manual render guard)_
+
+## What was fixed - Session 28.118 (Flight Manual render guard - 2 June)
+- Stopped the Flight Manual from rebuilding on every printer refresh tick, which was causing the page to flash while live updates arrived.
+- Bumped the static cache version so browsers pick up the guarded manual route immediately.
 
 ## What was built - Session 28.117 (Flight Manual first pass - 2 June)
 - Added a first-class Flight Manual page under System for demo readiness, daily flow, Bambu multi-colour rules, spool/label notes, recovery steps, maintenance notes, and tester guidance.
