@@ -8,7 +8,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     FLIGHTDECK_PRINT_LIBRARY=/print_library
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg libusb-1.0-0 \
+    && apt-get install -y --no-install-recommends ffmpeg libusb-1.0-0 usbutils \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

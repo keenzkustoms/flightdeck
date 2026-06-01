@@ -283,6 +283,8 @@ The NAS preview publishes Flightdeck on host port `8010` to avoid clashing with 
 
 The NAS compose also marks the instance as Docker / Portainer managed so the setup health page does not expect a host `systemd` service inside the container.
 
+For optional hardware support, the NAS Docker image includes `usbutils` and the compose file passes through `/dev/bus/usb` plus `/dev/hidraw0` so the Dymo scale and Brother QL-700 can be detected from inside the container.
+
 This is intended for a staged NAS deployment first. Keep the Pi service as the live host until the NAS container has been tested with copied backup data and printer connectivity.
 
 ---

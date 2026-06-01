@@ -1,5 +1,10 @@
 # Flightdeck — next session brief
-_Last updated 1 June 2026 (Session 28.112 NAS Docker service health polish)_
+_Last updated 1 June 2026 (Session 28.113 NAS USB hardware passthrough)_
+
+## What was built - Session 28.113 (NAS USB hardware passthrough - 1 June)
+- Added `usbutils` to the NAS Docker image so hardware detection can run `lsusb` inside the container.
+- Passed `/dev/bus/usb` and `/dev/hidraw0` through the NAS compose file for the Brother QL-700 and Dymo scale.
+- Documented NAS Docker hardware passthrough for optional scale and label-printer support.
 
 ## What was built - Session 28.112 (NAS Docker service health polish - 1 June)
 - Made the setup health check Docker-aware so NAS/Portainer installs no longer show a missing `systemctl` warning.

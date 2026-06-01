@@ -17,3 +17,6 @@ services:
       - /volume2/flightdeck-data:/data
       - /volume3/flightdeck-vault:/print_library
       - /volume3/flightdeck-backups:/backups
+      - /dev/bus/usb:/dev/bus/usb
+    devices:
+      - /dev/hidraw0:/dev/hidraw0
