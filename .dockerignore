@@ -1,0 +1,15 @@
+.git
+.venv
+__pycache__
+*.pyc
+*.pyo
+.env
+*.db
+flightdeck-data
+data
+uploads
+print_library
+backups
+*.tar.gz
+*.sha256
+node_modules

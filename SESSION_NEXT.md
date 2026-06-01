@@ -1,5 +1,11 @@
 # Flightdeck — next session brief
-_Last updated 1 June 2026 (Session 28.109 Backup and restore foundation)_
+_Last updated 1 June 2026 (Session 28.110 NAS Docker staging)_
+
+## What was built - Session 28.110 (NAS Docker staging - 1 June)
+- Added a NAS-ready `Dockerfile` for running Flightdeck in a Python 3.13 container with FFmpeg and USB support libraries available.
+- Added `.dockerignore` so live databases, secrets, print vaults, backups, caches, and virtual environments are not copied into Docker builds.
+- Added `docker-compose.nas.yml` mapping the ASUSTOR SSD paths: `/volume2/flightdeck-data`, `/volume3/flightdeck-vault`, and `/volume3/flightdeck-backups`.
+- Documented the NAS/Portainer preview deployment while keeping the Pi as the live host until the container is tested.
 
 ## What was built - Session 28.109 (Backup and restore foundation - 1 June)
 - Added `scripts/backup-flightdeck-data.sh` for private recovery archives of Flightdeck live data.

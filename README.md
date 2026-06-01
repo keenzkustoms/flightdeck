@@ -251,6 +251,36 @@ sudo systemctl stop flightdeck.service
 
 The script asks you to type `MIGRATE` before it moves anything.
 
+### NAS / Docker Preview
+
+Flightdeck can be staged on the ASUSTOR NAS with Portainer using the included Docker files.
+
+Recommended NAS paths:
+
+```text
+/volume2/flightdeck-data      # 500 GB NVMe: DB, config, uploads, active data
+/volume3/flightdeck-vault     # 2 TB NVMe: print vault
+/volume3/flightdeck-backups   # 2 TB NVMe: backup archives
+```
+
+The preview stack is:
+
+```text
+docker-compose.nas.yml
+Dockerfile
+.dockerignore
+```
+
+The container maps:
+
+```text
+/volume2/flightdeck-data    -> /data
+/volume3/flightdeck-vault   -> /print_library
+/volume3/flightdeck-backups -> /backups
+```
+
+This is intended for a staged NAS deployment first. Keep the Pi service as the live host until the NAS container has been tested with copied backup data and printer connectivity.
+
 ---
 
 ## Usage

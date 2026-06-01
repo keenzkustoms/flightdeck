@@ -1,0 +1,16 @@
+services:
+  flightdeck:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: flightdeck
+    restart: unless-stopped
+    environment:
+      FLIGHTDECK_DATA_DIR: /data
+      FLIGHTDECK_PRINT_LIBRARY: /print_library
+    ports:
+      - "8000:8000"
+    volumes:
+      - /volume2/flightdeck-data:/data
+      - /volume3/flightdeck-vault:/print_library
+      - /volume3/flightdeck-backups:/backups
