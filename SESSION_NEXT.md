@@ -1,5 +1,11 @@
 # Flightdeck — next session brief
-_Last updated 1 June 2026 (Session 28.104 Camera nav convenience)_
+_Last updated 1 June 2026 (Session 28.105 Security Cameras first pass)_
+
+## What was built - Session 28.105 (Security Cameras first pass - 1 June)
+- Added a dedicated Operations > Security Cameras screen with a rotating spotlight that cycles printer feeds every 5 seconds.
+- Added alert-lock behavior so printer faults, emergency stops, and faulted pauses pin the spotlight to the affected printer.
+- Added camera thumbnails, status context, offline cards, and a zoom toggle for closer inspection.
+- Static cache-bust bumped to `app.js?v=202` and `style.css?v=165`.
 
 ## What was built - Session 28.104 (Camera nav convenience - 1 June)
 - Moved the printer camera wall up directly under Dashboard in the left navigation for faster daily access.
