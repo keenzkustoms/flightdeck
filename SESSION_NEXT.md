@@ -1,5 +1,10 @@
 # Flightdeck — next session brief
-_Last updated 1 June 2026 (Session 28.103 Faster Bambu offline timeout)_
+_Last updated 1 June 2026 (Session 28.104 Camera nav convenience)_
+
+## What was built - Session 28.104 (Camera nav convenience - 1 June)
+- Moved the printer camera wall up directly under Dashboard in the left navigation for faster daily access.
+- Kept Operations focused on queue and global print bay work, leaving room for a future separate Security Cameras screen.
+- Static cache-bust bumped to `app.js?v=201`.
 
 ## What was built - Session 28.103 (Faster Bambu offline timeout - 1 June)
 - Reduced Bambu MQTT stale detection from 150 seconds to 45 seconds so powered-off printers leave `IDLE` faster while still avoiding brief LAN/MQTT flaps.

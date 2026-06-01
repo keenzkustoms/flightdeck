@@ -1662,12 +1662,12 @@ function buildTabs(printers) {
   }).join('');
   nav.innerHTML = [
     `<a class="tab" href="#/">Dashboard</a>`,
+    `<a class="tab" href="#/cameras">Cameras</a>`,
     `<a class="tab" href="#/mission">Flight Tower</a>`,
     `<a class="tab" href="#/stats">Telemetry</a>`,
     `<div class="tab-section">Printers</div>`,
     printerGroups,
     `<div class="tab-section">Operations</div>`,
-    `<a class="tab" href="#/cameras">Cameras</a>`,
     `<a class="tab" href="#/queue">Queue</a>`,
     `<a class="tab" href="#/files">Global Print Bay</a>`,
     `<a class="tab" href="#/spools">Spools</a>`,
