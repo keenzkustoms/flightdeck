@@ -3,6 +3,10 @@
 
   const nowIso = () => new Date().toISOString();
   const clone = (value) => JSON.parse(JSON.stringify(value));
+  const demoCameraAssets = {
+    h2d: '/static/demo-assets/h2d-camera.png',
+    x1c: '/static/demo-assets/x1c-camera.png',
+  };
 
   const demoSpools = [
     spool(3, 'ASA', 'Siddament', 'Normal', '#FFFFFF', 'White', 536, 'h2d', 0, null, null, 88),
@@ -22,7 +26,7 @@
       custom_name: 'BigBoy',
       icon: 'bambu',
       kind: 'bambu',
-      state: 'printing',
+      state: 'paused',
       temps: {
         hotend_l: { actual: 252, target: 255 },
         hotend_r: { actual: 252, target: 255 },
@@ -37,7 +41,7 @@
         layer_current: 196,
         layer_total: 530,
       },
-      substage: 'Printing outer wall',
+      substage: 'Print paused',
       idle_info: {},
       ams: [
         ams(0, 'AMS 1', 33, 25.5, [
@@ -300,7 +304,7 @@
     if (path === '/api/printers') return jsonResponse(clone(demoPrinters));
     if (path.match(/^\/api\/printers\/[^/]+\/camera$/)) {
       const id = decodeURIComponent(path.split('/')[3]);
-      return jsonResponse({ url: demoImage(`${id.toUpperCase()} camera`, id === 'h2d' ? '#ef4444' : '#3b82f6') });
+      return jsonResponse({ url: demoCameraAssets[id] || demoImage(`${id.toUpperCase()} camera`, id === 'h2d' ? '#ef4444' : '#3b82f6') });
     }
     if (path.match(/^\/api\/printers\/[^/]+\/thumbnail$/)) return textResponse('', 404);
     if (path.match(/^\/api\/printers\/[^/]+\/control$/)) return jsonResponse({ ok: true, demo: true });

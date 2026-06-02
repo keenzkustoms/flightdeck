@@ -313,6 +313,8 @@ Use **System -> Demo Mode** when showing Flightdeck to a tester or someone seein
 
 For public or pre-install demos, use `/demo`. It loads the normal Flightdeck interface with a simulated API and WebSocket runtime, so the screens, navigation, and buttons feel like Flightdeck while real printer APIs and hardware commands stay untouched.
 
+Demo mode uses static camera captures under `/static/demo-assets/` and simulated state. It does not start live camera workers or call printer media routes.
+
 Recommended flow:
 
 1. Start with **Dashboard** for fleet state, loaded filament, reliability, and camera access.

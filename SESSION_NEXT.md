@@ -1,5 +1,12 @@
 # Flightdeck — next session brief
-_Last updated 2 June 2026 (Session 28.124 True Flightdeck demo mode)_
+_Last updated 2 June 2026 (Session 28.125 Demo camera captures)_
+
+## What was polished - Session 28.125 (Demo camera captures - 2 June)
+- Added real H2D and X1C camera captures as static demo assets so `/demo` looks like the actual Flightdeck live surfaces without starting camera workers.
+- Demo camera endpoints now return those static captures for H2D and X1C, with the generated placeholder kept as a fallback for future demo printers.
+- Set the demo H2D state to paused so the live page showcases Flightdeck's guarded pause/resume/cancel controls and alert surface.
+- Kept the Voron offline state rendered by Flightdeck UI rather than embedding an offline screenshot inside the feed.
+- Bumped the demo runtime cache version to `demo-runtime.js?v=2`.
 
 ## What was rebuilt - Session 28.124 (True Flightdeck demo mode - 2 June)
 - Replaced the first-pass standalone promo demo with the real Flightdeck interface served in demo mode.
