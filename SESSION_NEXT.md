@@ -1,5 +1,12 @@
 # Flightdeck — next session brief
-_Last updated 2 June 2026 (Session 28.126 Demo authenticity pass)_
+_Last updated 2 June 2026 (Session 28.127 Public website first pass)_
+
+## What was built - Session 28.127 (Public website first pass - 2 June)
+- Added a GitHub Pages-ready public website under `docs/`.
+- Built a Flightdeck-branded landing page with real screenshots for the live printer screen, camera wall, spool inventory, and print details.
+- Added public positioning for Flightdeck as a self-hosted, LAN-first mixed Bambu/Voron/Klipper fleet dashboard.
+- Included GitHub, install, roadmap, and `flightdeck@gmail.com` contact calls to action.
+- Added `docs/.nojekyll` and a README pointer so GitHub Pages can serve the site from `/docs` on `main`.
 
 ## What was fixed - Session 28.126 (Demo authenticity pass - 2 June)
 - Replaced the generated demo print thumbnail with a real can-opener preview capture for H2D.

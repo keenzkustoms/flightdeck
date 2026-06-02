@@ -10,6 +10,8 @@ Flightdeck is a self-hosted dashboard that brings disparate 3D printers — Klip
 
 It's built primarily for my own bench (one Voron Greyhound Elite V2, a Bambu H2D, and a Bambu X1C), but the architecture is generic enough that anyone running a similar mixed fleet should be able to adapt it.
 
+Project website files live in [`docs/`](docs/) for GitHub Pages.
+
 ---
 
 ## Safe Restart
