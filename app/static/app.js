@@ -162,6 +162,7 @@ let _onSettings = false;        // true while settings view is active
 let _onFailures = false;        // true while failure review is active
 let _onSpools = false;          // true while spool inventory is active
 let _onManual = false;          // true while flight manual is active
+let _onDemo = false;            // true while demo mode is active
 let _renderedSpoolDetailId = null;
 
 // ── Toast notifications ────────────────────────────────────────────────────
@@ -530,6 +531,7 @@ function _commandStaticItems() {
     ['Queue', '#/queue', 'Pending print jobs'],
     ['Global Print Bay', '#/files', 'Files, printer storage, and reprint staging'],
     ['Spools', '#/spools', 'Spool inventory'],
+    ['Demo Mode', '#/demo', 'Guided first-look tour for testers'],
     ['Flight Manual', '#/manual', 'Setup, recovery, Bambu and demo notes'],
     ['Settings', '#/settings', 'Configuration'],
   ].map(([label, hash, meta]) => _commandItem({
@@ -1648,6 +1650,102 @@ async function renderManualView() {
   </div>`;
 }
 
+// ── Demo Mode ─────────────────────────────────────────────────────────────
+
+function _demoMetric(label, value, detail = '', tone = '') {
+  return `<div class="demo-metric ${tone}">
+    <span>${esc(label)}</span>
+    <strong>${esc(value)}</strong>
+    ${detail ? `<small>${esc(detail)}</small>` : ''}
+  </div>`;
+}
+
+function _demoStep(n, title, route, body, bullets = []) {
+  return `<a class="demo-step" href="${esc(route)}">
+    <div class="demo-step-num">${n}</div>
+    <div>
+      <strong>${esc(title)}</strong>
+      <p>${esc(body)}</p>
+      ${bullets.length ? `<div class="demo-step-points">${bullets.map(b => `<span>${esc(b)}</span>`).join('')}</div>` : ''}
+    </div>
+  </a>`;
+}
+
+async function renderDemoView() {
+  const el = document.getElementById('demo-page');
+  if (!el) return;
+  const [instance, health, printers] = await Promise.all([
+    fetch('/api/instance').then(r => r.ok ? r.json() : (_instanceInfo || {})).catch(() => (_instanceInfo || {})),
+    fetch('/api/setup/health').then(r => r.ok ? r.json() : null).catch(() => null),
+    fetch('/api/printers').then(r => r.ok ? r.json() : (_latestPrinters || [])).catch(() => (_latestPrinters || [])),
+  ]);
+  if (instance?.app) _instanceInfo = instance;
+  const fleet = printers.length ? printers : _latestPrinters;
+  const online = fleet.filter(p => p.state !== 'offline').length;
+  const active = fleet.filter(p => ['printing', 'paused'].includes(p.state)).length;
+  const faulted = fleet.filter(p => ['error', 'offline'].includes(p.state)).length;
+  const checks = health?.checks || [];
+  const requiredBad = checks.filter(c => c.required && !c.ok).length;
+  const cameraWorkers = instance.camera_workers || {};
+  const demoReady = requiredBad === 0 && cameraWorkers.ok !== false;
+  const firstPrinter = fleet[0]?.id ? `#/printer/${fleet[0].id}` : '#/';
+  const bambu = fleet.find(p => (p.kind || p.connection?.type) === 'bambu') || fleet[0];
+  const bambuRoute = bambu?.id ? `#/printer/${bambu.id}` : firstPrinter;
+
+  el.innerHTML = `<div class="demo-page">
+    <section class="demo-hero">
+      <div>
+        <div class="mission-eyebrow">Demo Mode</div>
+        <h1>Flightdeck first-look tour</h1>
+        <p>A guided, low-risk path through the screens that make Flightdeck feel different: fleet awareness, dispatch intelligence, live printer control, spool truth, and recovery.</p>
+      </div>
+      <div class="demo-hero-status ${demoReady ? 'ready' : 'watch'}">
+        <span>${demoReady ? 'Ready to show' : 'Check before demo'}</span>
+        <strong>${online}/${fleet.length || 0}</strong>
+        <small>printers online</small>
+      </div>
+    </section>
+
+    <section class="demo-metrics">
+      ${_demoMetric('Fleet', `${fleet.length || 0} printers`, `${online} online - ${active} active`, demoReady ? 'ok' : '')}
+      ${_demoMetric('Host', instance.hardware || 'Unknown host', instance.runtime || 'runtime unknown', 'ok')}
+      ${_demoMetric('Setup', requiredBad ? `${requiredBad} blockers` : 'Ready', health?.summary ? `${health.summary.required_ok}/${health.summary.required_total} required checks` : 'health unavailable', requiredBad ? 'warn' : 'ok')}
+      ${_demoMetric('Cameras', cameraWorkers.ok === false ? 'Watch' : 'Ready', cameraWorkers.detail || 'workers normal', cameraWorkers.ok === false ? 'warn' : 'ok')}
+    </section>
+
+    <section class="demo-grid">
+      <div class="demo-card demo-tour">
+        <div class="manual-card-head"><span>Tour Path</span></div>
+        ${_demoStep(1, 'Dashboard', '#/', 'Open with the fleet view. Show online state, loaded spools, reliability flags, and camera shortcuts.', ['fleet health', 'loaded filament', 'low-risk overview'])}
+        ${_demoStep(2, 'Flight Tower', '#/mission', 'Show the advisory dispatcher: ready jobs, blocked jobs, and why Flightdeck recommends a printer.', ['dispatch intel', 'stock checks', 'operator notes'])}
+        ${_demoStep(3, 'Live Printer', bambuRoute, 'Use one printer page to show the camera hero, status strip, print details, objects, and AMS/Vivid filament route.', ['live feed', 'filament route', 'pause/cancel/E-stop are guarded'])}
+        ${_demoStep(4, 'Spools', '#/spools', 'Show the paint-chart inventory, weight confidence, labels, cabinet view, and multi-spool grouping.', ['scale-ready', 'label-ready', 'cabinet map'])}
+        ${_demoStep(5, 'Print Bay', '#/files', 'Show printer storage, vault staging, compatible-printer badges, and safe queue actions.', ['SD cleanup', 'vault', 'bulk actions'])}
+        ${_demoStep(6, 'Maintenance', `${bambuRoute}/maintenance`, 'Close with automatic care counters, manual schedules, and history tied to the printer.', ['Bambu care', 'manual tasks', 'service history'])}
+      </div>
+
+      <div class="demo-card">
+        <div class="manual-card-head"><span>Talk Track</span></div>
+        <div class="demo-script">
+          <p><strong>Opening:</strong> Flightdeck is built for a mixed printer workshop, not just one brand. It keeps printers, filament, queue decisions, history, maintenance, and recovery in one cockpit.</p>
+          <p><strong>Key difference:</strong> it does not just show status. It explains what is safe to run, which spool will be used, why a print is blocked, and what to check next.</p>
+          <p><strong>Trust point:</strong> risky actions are deliberate, state is visible, and the system health panel tells you when the host is under pressure.</p>
+        </div>
+      </div>
+
+      <div class="demo-card">
+        <div class="manual-card-head"><span>Do Not Demo First</span></div>
+        <div class="demo-avoid">
+          <span>Do not start with Settings unless someone asks install questions.</span>
+          <span>Do not press E-stop, delete, archive, SD cleanup, or format actions during a casual walkthrough.</span>
+          <span>Do not open all camera feeds on a small Pi while screen sharing unless host health looks comfortable.</span>
+          <span>Do not explain every edge case. Show the daily workflow first, then go deeper.</span>
+        </div>
+      </div>
+    </section>
+  </div>`;
+}
+
 // ── Routing ────────────────────────────────────────────────────────────────
 
 function parseRoute() {
@@ -1663,6 +1761,7 @@ function parseRoute() {
   if (hash === '#/files') return { view: 'files' };
   if (hash === '#/failures' || hash.startsWith('#/failures?')) return { view: 'failures' };
   if (hash === '#/spools' || hash.startsWith('#/spools?')) return { view: 'spools' };
+  if (hash === '#/demo') return { view: 'demo' };
   if (hash === '#/manual') return { view: 'manual' };
   const settingsMatch = hash.match(/^#\/settings\/([^/]+)/);
   if (settingsMatch?.[1] === 'spools') return { view: 'spools' };
@@ -1706,11 +1805,13 @@ function router() {
   const wasOnFailures = _onFailures;
   const wasOnSpools = _onSpools;
   const wasOnManual = _onManual;
+  const wasOnDemo = _onDemo;
   const wasSpoolDetailId = _renderedSpoolDetailId;
   _onSettings = route.view === 'settings';
   _onFailures = route.view === 'failures';
   _onSpools = route.view === 'spools';
   _onManual = route.view === 'manual';
+  _onDemo = route.view === 'demo';
   if (route.view !== 'spool') _renderedSpoolDetailId = null;
 
   document.getElementById('view-dashboard').hidden = route.view !== 'dashboard';
@@ -1724,6 +1825,7 @@ function router() {
   document.getElementById('view-failures').hidden  = route.view !== 'failures';
   document.getElementById('view-spools').hidden    = route.view !== 'spools';
   document.getElementById('view-settings').hidden  = route.view !== 'settings';
+  document.getElementById('view-demo').hidden      = route.view !== 'demo';
   document.getElementById('view-manual').hidden    = route.view !== 'manual';
 
   document.querySelectorAll('#tab-strip .tab').forEach(tab => {
@@ -1742,6 +1844,7 @@ function router() {
       (route.view === 'files'    && href === '#/files') ||
       (route.view === 'failures' && href === '#/failures') ||
       (route.view === 'spools'   && href === '#/spools') ||
+      (route.view === 'demo'     && href === '#/demo') ||
       (route.view === 'manual'   && href === '#/manual') ||
       (route.view === 'settings' && (
         href === '#/settings' ||
@@ -1764,6 +1867,7 @@ function router() {
   if (route.view === 'failures' && !wasOnFailures) renderFailuresView();
   if (route.view === 'spools' && !wasOnSpools) renderSpoolsView();
   if (route.view === 'settings' && (!wasOnSettings || categoryBeforeRoute !== _settingsCategory)) renderSettingsView();
+  if (route.view === 'demo' && !wasOnDemo) renderDemoView();
   if (route.view === 'manual' && !wasOnManual) renderManualView();
 }
 
@@ -1795,6 +1899,7 @@ function buildTabs(printers) {
     `<a class="tab" href="#/files">Global Print Bay</a>`,
     `<a class="tab" href="#/spools">Spools</a>`,
     `<div class="tab-section">System</div>`,
+    `<a class="tab" href="#/demo">Demo Mode</a>`,
     `<a class="tab" href="#/manual">Flight Manual</a>`,
     `<a class="tab" href="#/settings">Settings</a>`,
   ].join('');

@@ -1,5 +1,12 @@
 # Flightdeck — next session brief
-_Last updated 2 June 2026 (Session 28.118 Flight Manual render guard)_
+_Last updated 2 June 2026 (Session 28.119 Demo Mode first pass)_
+
+## What was built - Session 28.119 (Demo Mode first pass - 2 June)
+- Added a dedicated System > Demo Mode page for a safe first-look Flightdeck walkthrough.
+- Demo Mode now shows live demo readiness across fleet count, host/runtime, setup health, and camera-worker state.
+- Added a guided tour path covering Dashboard, Flight Tower, Live Printer, Spools, Global Print Bay, and Maintenance.
+- Added demo talk-track notes and a "Do Not Demo First" guardrail list to keep walkthroughs focused and low-risk.
+- Added Demo Mode to the sidebar and command palette, with static cache bumped to `app.js?v=210` and `style.css?v=170`.
 
 ## What was fixed - Session 28.118 (Flight Manual render guard - 2 June)
 - Stopped the Flight Manual from rebuilding on every printer refresh tick, which was causing the page to flash while live updates arrived.
