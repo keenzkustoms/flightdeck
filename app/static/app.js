@@ -26,6 +26,10 @@ function esc(s) {
 }
 
 function _demoMediaUrl(label = 'Flightdeck demo', colour = '#3b82f6') {
+  const source = String(label || '');
+  if (source.includes('/api/printers/h2d/thumbnail')) {
+    return '/static/demo-assets/can-opener-preview.png';
+  }
   const safeLabel = esc(label).replace(/&apos;/g, "'").replace(/&quot;/g, '"');
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360">
     <rect width="640" height="360" fill="#070910"/>
@@ -41,7 +45,7 @@ function _demoMediaUrl(label = 'Flightdeck demo', colour = '#3b82f6') {
 }
 
 function _mediaUrl(url, label = 'Flightdeck demo', colour = '#3b82f6') {
-  return FLIGHTDECK_DEMO ? _demoMediaUrl(label, colour) : url;
+  return FLIGHTDECK_DEMO ? _demoMediaUrl(url || label, colour) : url;
 }
 
 function _effectiveLightState(p) {

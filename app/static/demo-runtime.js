@@ -36,9 +36,9 @@
       job: {
         filename: 'can_openerV2.gcode.3mf',
         subtask_name: 'can_openerV2',
-        progress: 0.37,
-        eta_seconds: 9660,
-        layer_current: 196,
+        progress: 0,
+        eta_seconds: 15900,
+        layer_current: 0,
         layer_total: 530,
       },
       substage: 'Print paused',
@@ -64,7 +64,7 @@
       error: null,
       last_seen: nowIso(),
       updated_at: nowIso(),
-      eta_calibration: { ratio: 1.0, count: 7 },
+      eta_calibration: { ratio: 1.004, count: 8 },
       health: health('watch', 'Watch', 68, 19, 6, ['17 failed/cancelled prints in 14d']),
       _error_print_id: null,
     },
@@ -110,7 +110,7 @@
       custom_name: 'Greyhound Elite V2',
       icon: 'voron',
       kind: 'moonraker',
-      state: 'idle',
+      state: 'offline',
       temps: {
         hotend: { actual: 31, target: 0 },
         bed: { actual: 28, target: 0 },
@@ -118,7 +118,7 @@
       },
       job: null,
       substage: null,
-      idle_info: { Toolhead: 'homed', MMU: 'T1 PLA loaded to gear' },
+      idle_info: { 'Last contact': 'Last connected 1 Jun, 22:18' },
       ams: [],
       mmu: [
         { unit: 0, label: 'Vivid', gates: [
@@ -131,10 +131,10 @@
       maintenance: [
         maint('manual:vivid', 'vivid', 'Inspect Vivid filament path', 'ok', false, 'Manual Voron task'),
       ],
-      light_state: 'on',
+      light_state: 'off',
       temperature_presets: presets(),
       error: null,
-      last_seen: nowIso(),
+      last_seen: '2026-06-01T22:18:00+10:00',
       updated_at: nowIso(),
       health: health('watch', 'Watch', 44, 6, 3, ['3 failed/cancelled prints in 14d']),
       _error_print_id: null,
@@ -315,9 +315,13 @@
     if (path.match(/^\/api\/printers\/[^/]+\/objects$/)) return jsonResponse({
       supported: true,
       objects: [
-        { id: 1, name: 'can_opener_body.stl', label: 'can_opener_body.stl', state: 'printing' },
-        { id: 2, name: 'can_opener_hook.stl', label: 'can_opener_hook.stl', state: 'queued' },
-        { id: 3, name: 'can_opener_spring.stl', label: 'can_opener_spring.stl', state: 'excluded' },
+        { id: 1, name: 'Can_opener_body1_5.2mm_holes.STL', label: 'Can_opener_body1_5.2mm_holes.STL', state: 'printing' },
+        { id: 2, name: 'Can_opener_button_part1_5.2mm_holes.STL', label: 'Can_opener_button_part1_5.2mm_holes.STL', state: 'queued' },
+        { id: 3, name: 'Can_opener_side2_4.8mm_pins.STL', label: 'Can_opener_side2_4.8mm_pins.STL', state: 'queued' },
+        { id: 4, name: 'Can_opener_side1_4.8mm_pins.STL', label: 'Can_opener_side1_4.8mm_pins.STL', state: 'queued' },
+        { id: 5, name: 'Can_opener_button_part2_5.2mm_holes.STL', label: 'Can_opener_button_part2_5.2mm_holes.STL', state: 'queued' },
+        { id: 6, name: 'Can_opener_spring1.STL', label: 'Can_opener_spring1.STL', state: 'queued' },
+        { id: 7, name: 'Can_opener_hook1_6.2mm_hole.STL', label: 'Can_opener_hook1_6.2mm_hole.STL', state: 'queued' },
       ],
     });
     if (path.match(/^\/api\/printers\/[^/]+\/maintenance$/)) return jsonResponse([
@@ -383,9 +387,9 @@
     if (path.match(/^\/api\/queue\/\d+/) || path === '/api/queue/upload' || path === '/api/queue/completed') return jsonResponse({ ok: true, demo: true });
     if (path === '/api/failures') return jsonResponse(failuresDemo());
     if (path === '/api/printers/usage') return jsonResponse([
-      { printer_id: 'h2d', hours: 71, prints: 22 },
-      { printer_id: 'x1c', hours: 7, prints: 4 },
-      { printer_id: 'greyhound', hours: 112, prints: 38 },
+      { printer_id: 'h2d', total_seconds: 71 * 3600, total_prints: 22 },
+      { printer_id: 'x1c', total_seconds: 7 * 3600, total_prints: 4 },
+      { printer_id: 'greyhound', total_seconds: 112 * 3600, total_prints: 38 },
     ]);
     if (path === '/api/notifications') return method === 'DELETE' ? jsonResponse({ ok: true }) : jsonResponse(clone(demoNotifications));
     if (path.startsWith('/api/notifications/')) return jsonResponse({ ok: true, demo: true });
@@ -424,7 +428,14 @@
         { id: 601, printer_id: 'x1c', printer_name: 'X1C', filename: 'abbiesdogtest.gcode.3mf', status: 'failed', started_at: '2026-06-01 12:00:00', error: 'AMS profile mismatch', progress: 0.08, material: 'PLA', timing_bucket: 'First 10m', spool_label: 'Unknown', has_snapshot: false },
         { id: 602, printer_id: 'greyhound', printer_name: 'Voron 2.4 350', filename: 'Cube_ABS_1h14m.gcode', status: 'cancelled', started_at: '2026-06-01 15:00:00', error: 'Toolhead not homed', progress: 0.02, material: 'ABS', timing_bucket: 'First 10m', spool_label: 'Spool #4', has_snapshot: false },
       ],
-      summary: { total: 2, by_printer: { X1C: 1, 'Voron 2.4 350': 1 }, by_material: { PLA: 1, ABS: 1 }, by_timing: { 'First 10m': 2 }, by_spool: { Unknown: 1, 'Spool #4': 1 } },
+      total: 2,
+      summary: {
+        total: 2,
+        by_printer: [{ key: 'x1c', label: 'X1C', count: 1 }, { key: 'greyhound', label: 'Voron 2.4 350', count: 1 }],
+        by_material: [{ key: 'PLA', count: 1 }, { key: 'ABS', count: 1 }],
+        by_timing: [{ key: 'First 10m', count: 2 }],
+        by_spool: [{ key: 'Unknown', count: 1 }, { key: 'Spool #4', count: 1 }],
+      },
     };
   }
 
@@ -440,7 +451,21 @@
     };
   }
 
-  const realFetch = window.fetch.bind(window);
+  const realFetch = typeof window.fetch === 'function'
+    ? window.fetch.bind(window)
+    : (input, options = {}) => new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open(options.method || 'GET', typeof input === 'string' ? input : input?.url);
+        Object.entries(options.headers || {}).forEach(([key, value]) => xhr.setRequestHeader(key, value));
+        xhr.responseType = 'arraybuffer';
+        xhr.onload = () => resolve(new Response(xhr.response, {
+          status: xhr.status,
+          statusText: xhr.statusText,
+          headers: { 'Content-Type': xhr.getResponseHeader('Content-Type') || 'application/octet-stream' },
+        }));
+        xhr.onerror = () => reject(new TypeError('Network request failed'));
+        xhr.send(options.body || null);
+      });
   window.fetch = (input, options = {}) => {
     const url = typeof input === 'string' ? input : input?.url;
     if (url && new URL(url, location.origin).pathname.startsWith('/api/')) {

@@ -1,5 +1,13 @@
 # Flightdeck — next session brief
-_Last updated 2 June 2026 (Session 28.125 Demo camera captures)_
+_Last updated 2 June 2026 (Session 28.126 Demo authenticity pass)_
+
+## What was fixed - Session 28.126 (Demo authenticity pass - 2 June)
+- Replaced the generated demo print thumbnail with a real can-opener preview capture for H2D.
+- Set the demo H2D job to 0% / layer 0 of 530 with the authentic 4h25/4h26 ETA treatment so Print Details matches the real first-pass job screen.
+- Expanded the demo print-object list to the seven can-opener STL objects shown in the real UI.
+- Removed the generated Greyhound camera placeholder by putting the demo Voron into the native Flightdeck offline state.
+- Added a demo fetch fallback and corrected demo failure/usage payload shapes so Telemetry renders in demo mode.
+- Bumped demo app cache loading to `app.js?v=214` so demo media changes are picked up immediately.
 
 ## What was polished - Session 28.125 (Demo camera captures - 2 June)
 - Added real H2D and X1C camera captures as static demo assets so `/demo` looks like the actual Flightdeck live surfaces without starting camera workers.
