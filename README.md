@@ -309,7 +309,9 @@ There's no user account system — Flightdeck assumes you trust everyone on your
 
 ### Demo Mode
 
-Use **System -> Demo Mode** when showing Flightdeck to a tester or someone seeing it for the first time. It is a read-only walkthrough surface that links into the real app without starting from risky controls.
+Use **System -> Demo Mode** when showing Flightdeck to a tester or someone seeing it for the first time. It is a walkthrough surface that links into the real app without starting from risky controls.
+
+For public or pre-install demos, use the standalone page at `/demo`. It runs from static demo data, does not call printer APIs, and simulates command feedback without touching hardware.
 
 Recommended flow:
 

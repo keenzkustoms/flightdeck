@@ -1,5 +1,11 @@
 # Flightdeck — next session brief
-_Last updated 2 June 2026 (Session 28.122 Manual demo shortcut)_
+_Last updated 2 June 2026 (Session 28.123 Standalone demo mode)_
+
+## What was built - Session 28.123 (Standalone demo mode - 2 June)
+- Added a standalone `/demo` page for prospects/testers to try Flightdeck without connecting to live printer APIs.
+- Built the standalone demo with simulated fleet cards, live printer controls, filament route, spools, Print Bay, maintenance, alerts, and activity log.
+- Demo commands now respond locally with simulated feedback while real printer commands stay disabled.
+- Added README notes explaining when to use `/demo` versus the in-app Flightdeck walkthrough.
 
 ## What was polished - Session 28.122 (Manual demo shortcut - 2 June)
 - Added a direct Demo Mode button to the Flight Manual hero so testers can jump from the handbook into the guided walkthrough.

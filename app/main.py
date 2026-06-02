@@ -377,6 +377,18 @@ def index():
     )
 
 
+@app.get("/demo", include_in_schema=False)
+@app.get("/demo/", include_in_schema=False)
+def standalone_demo():
+    return FileResponse(
+        _STATIC / "demo.html",
+        headers={
+            "Cache-Control": "no-store, max-age=0",
+            "Pragma": "no-cache",
+        },
+    )
+
+
 @app.get("/healthz")
 def healthz():
     return {

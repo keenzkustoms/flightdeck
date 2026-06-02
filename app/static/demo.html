@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Flightdeck Demo</title>
+  <link rel="icon" type="image/svg+xml" href="/static/flightdeck-icon.svg">
+  <link rel="stylesheet" href="/static/demo.css?v=1">
+</head>
+<body>
+  <header class="demo-topbar">
+    <div class="demo-status">
+      <span class="demo-pill">Standalone demo</span>
+      <span id="demo-clock">00:00</span>
+    </div>
+    <a class="demo-wordmark" href="/demo">
+      <img src="/static/flightdeck-logo.svg" alt="Flightdeck">
+    </a>
+    <div class="demo-actions">
+      <a href="https://github.com/Kidabah/flightdeck" target="_blank" rel="noreferrer">Download</a>
+      <a href="/">Live app</a>
+    </div>
+  </header>
+
+  <main class="demo-shell">
+    <section class="demo-hero">
+      <div>
+        <p class="eyebrow">Flightdeck demo mode</p>
+        <h1>Run a print farm walkthrough without touching real hardware.</h1>
+        <p class="hero-copy">This standalone demo uses simulated printers, spools, print jobs, alerts, maintenance and file flow. Click around freely: commands respond, but nothing is sent to a printer.</p>
+      </div>
+      <div class="hero-card">
+        <span>Demo safety</span>
+        <strong>Real commands disabled</strong>
+        <small>Pause, dry, queue, label, trust AMS and maintenance actions are simulated here.</small>
+      </div>
+    </section>
+
+    <nav class="demo-nav" aria-label="Demo sections">
+      <button class="active" data-view="overview">Overview</button>
+      <button data-view="live">Live Printer</button>
+      <button data-view="spools">Spools</button>
+      <button data-view="bay">Print Bay</button>
+      <button data-view="maintenance">Maintenance</button>
+    </nav>
+
+    <section class="demo-grid">
+      <aside class="demo-panel fleet-panel">
+        <div class="panel-head">
+          <span>Fleet</span>
+          <strong id="fleet-summary">3 printers</strong>
+        </div>
+        <div id="fleet-list" class="fleet-list"></div>
+      </aside>
+
+      <section class="demo-panel demo-stage">
+        <div id="stage"></div>
+      </section>
+
+      <aside class="demo-panel demo-side">
+        <div class="panel-head">
+          <span>Alerts</span>
+          <button id="clear-alerts" type="button">Clear</button>
+        </div>
+        <div id="alerts" class="alerts"></div>
+        <div class="panel-head second">
+          <span>Activity</span>
+          <strong>demo log</strong>
+        </div>
+        <div id="activity" class="activity"></div>
+      </aside>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" hidden></div>
+  <script type="module" src="/static/demo.js?v=1"></script>
+</body>
+</html>
