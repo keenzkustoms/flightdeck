@@ -1,5 +1,13 @@
 # Flightdeck — next session brief
-_Last updated 2 June 2026 (Session 28.127 Public website first pass)_
+_Last updated 2 June 2026 (Session 28.128 Public website positioning polish)_
+
+## What was polished - Session 28.128 (Public website positioning polish - 2 June)
+- Added the Flightdeck logo mark above the hero title on the public website.
+- Reworded the public website positioning from "built for the room" into clearer mixed-fleet printer-room language.
+- Changed the status band to say Flightdeck is tested and proven on Bambu + Voron.
+- Added mobile-ready positioning for phone/tablet checks away from the desk.
+- Added a real all-three-camera screenshot with Voron, X1C, and H2D online.
+- Added a tester callout for other printer ecosystems such as Prusa, Qidi, Creality, and RatRig.
 
 ## What was built - Session 28.127 (Public website first pass - 2 June)
 - Added a GitHub Pages-ready public website under `docs/`.

@@ -127,6 +127,11 @@ img {
   padding: 9rem 0 6.5rem;
 }
 
+.hero-mark {
+  width: clamp(138px, 16vw, 218px);
+  margin-bottom: 1.2rem;
+}
+
 .eyebrow,
 .section-kicker {
   color: #94bfff;
@@ -256,7 +261,7 @@ h1 {
 .feature-grid {
   margin-top: 2rem;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 0.85rem;
 }
 
@@ -444,6 +449,12 @@ code {
   }
 }
 
+@media (min-width: 921px) and (max-width: 1120px) {
+  .feature-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 620px) {
   .site-header {
     height: 66px;
@@ -476,5 +487,9 @@ code {
 
   h1 {
     font-size: clamp(3rem, 18vw, 5rem);
+  }
+
+  .hero-mark {
+    width: 128px;
   }
 }
