@@ -1,5 +1,9 @@
 # Flightdeck — next session brief
-_Last updated 2 June 2026 (Session 28.121 Demo docs)_
+_Last updated 2 June 2026 (Session 28.122 Manual demo shortcut)_
+
+## What was polished - Session 28.122 (Manual demo shortcut - 2 June)
+- Added a direct Demo Mode button to the Flight Manual hero so testers can jump from the handbook into the guided walkthrough.
+- Bumped static cache versions to `app.js?v=212` and `style.css?v=172`.
 
 ## What was documented - Session 28.121 (Demo docs - 2 June)
 - Added a README Demo Mode section under Flight Manual.

@@ -1605,6 +1605,7 @@ async function renderManualView() {
         <p>Quick rules, recovery steps, and demo notes for running Flightdeck without needing the whole backstory.</p>
       </div>
       <div class="manual-hero-actions">
+        <a href="#/demo">Demo Mode</a>
         <a href="#/settings/setup">Setup Health</a>
         <a href="#/stats">Telemetry</a>
       </div>
