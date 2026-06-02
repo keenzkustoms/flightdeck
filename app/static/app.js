@@ -1671,6 +1671,35 @@ function _demoStep(n, title, route, body, bullets = []) {
   </a>`;
 }
 
+function _demoPrinterCard(p) {
+  const route = `#/printer/${p.id}`;
+  const bayRoute = `${route}/bay`;
+  const failuresRoute = `${route}/failures`;
+  const state = _liveStateLabel(p.state);
+  const loaded = (_latestSpoolsByPrinter[p.id] || []).filter(s => !s.archived_at);
+  const loadedCount = loaded.length;
+  const signals = [];
+  if (p.state === 'offline') signals.push(`offline ${fmtLastSeen(p.last_seen)}`);
+  if (p.state === 'error' || p.state === 'estop') signals.push(p.error || 'fault active');
+  if (p.state === 'paused') signals.push(p.error || 'paused print');
+  if (p.health?.failures_14d) signals.push(`${p.health.failures_14d} failures in 14d`);
+  if (loadedCount) signals.push(`${loadedCount} loaded spool${loadedCount === 1 ? '' : 's'}`);
+  const signalText = signals.length ? signals.slice(0, 2).join(' - ') : 'ready for walkthrough';
+  return `<article class="demo-printer-card">
+    <div>
+      <span class="badge badge-${esc(p.state || 'idle')}">${esc(state)}</span>
+      <h3>${esc(_dashboardPrinterName(p))}</h3>
+      <p>${esc(p.custom_name || p.shop_name || p.kind || '')}</p>
+    </div>
+    <small>${esc(signalText)}</small>
+    <div class="demo-printer-actions">
+      <a href="${esc(route)}">Live</a>
+      <a href="${esc(bayRoute)}">Bay</a>
+      <a href="${esc(failuresRoute)}">Failures</a>
+    </div>
+  </article>`;
+}
+
 async function renderDemoView() {
   const el = document.getElementById('demo-page');
   if (!el) return;
@@ -1711,6 +1740,7 @@ async function renderDemoView() {
       ${_demoMetric('Host', instance.hardware || 'Unknown host', instance.runtime || 'runtime unknown', 'ok')}
       ${_demoMetric('Setup', requiredBad ? `${requiredBad} blockers` : 'Ready', health?.summary ? `${health.summary.required_ok}/${health.summary.required_total} required checks` : 'health unavailable', requiredBad ? 'warn' : 'ok')}
       ${_demoMetric('Cameras', cameraWorkers.ok === false ? 'Watch' : 'Ready', cameraWorkers.detail || 'workers normal', cameraWorkers.ok === false ? 'warn' : 'ok')}
+      ${_demoMetric('Attention', faulted ? `${faulted} to explain` : 'Clear', faulted ? 'use it as a live recovery example' : 'no active fault story', faulted ? 'warn' : 'ok')}
     </section>
 
     <section class="demo-grid">
@@ -1730,6 +1760,13 @@ async function renderDemoView() {
           <p><strong>Opening:</strong> Flightdeck is built for a mixed printer workshop, not just one brand. It keeps printers, filament, queue decisions, history, maintenance, and recovery in one cockpit.</p>
           <p><strong>Key difference:</strong> it does not just show status. It explains what is safe to run, which spool will be used, why a print is blocked, and what to check next.</p>
           <p><strong>Trust point:</strong> risky actions are deliberate, state is visible, and the system health panel tells you when the host is under pressure.</p>
+        </div>
+      </div>
+
+      <div class="demo-card">
+        <div class="manual-card-head"><span>Live Fleet Picks</span></div>
+        <div class="demo-printer-list">
+          ${fleet.length ? fleet.map(_demoPrinterCard).join('') : '<p class="muted">No printers configured yet.</p>'}
         </div>
       </div>
 

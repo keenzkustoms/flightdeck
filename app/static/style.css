@@ -1544,7 +1544,7 @@ header {
 
 .demo-metrics {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 0.75rem;
   margin: 1rem 0;
 }
@@ -1650,6 +1650,53 @@ header {
 
 .demo-script strong {
   color: #fff;
+}
+
+.demo-printer-list {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.demo-printer-card {
+  border: 1px solid rgba(148,163,184,0.18);
+  border-radius: 10px;
+  background: rgba(2,6,23,0.28);
+  padding: 0.75rem;
+}
+
+.demo-printer-card h3 {
+  margin: 0.45rem 0 0.1rem;
+  font-size: 1rem;
+}
+
+.demo-printer-card p,
+.demo-printer-card small {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.demo-printer-card small {
+  display: block;
+  margin: 0.55rem 0 0.65rem;
+}
+
+.demo-printer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.demo-printer-actions a {
+  border: 1px solid rgba(59,130,246,0.45);
+  border-radius: 6px;
+  color: #93c5fd;
+  padding: 0.25rem 0.5rem;
+  text-decoration: none;
+  font-size: 0.75rem;
+}
+
+.demo-printer-actions a:hover {
+  background: rgba(59,130,246,0.12);
 }
 
 .demo-avoid {

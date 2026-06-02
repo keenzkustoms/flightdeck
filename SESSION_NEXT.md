@@ -1,5 +1,10 @@
 # Flightdeck — next session brief
-_Last updated 2 June 2026 (Session 28.119 Demo Mode first pass)_
+_Last updated 2 June 2026 (Session 28.120 Demo fleet cards)_
+
+## What was built - Session 28.120 (Demo fleet cards - 2 June)
+- Added Live Fleet Picks to Demo Mode so each configured printer has a compact state card with Live, Bay, and Failures shortcuts.
+- Demo Mode now surfaces attention context such as offline/fault state, recent failures, and loaded spool count before opening a printer page.
+- Expanded demo readiness metrics with an Attention tile and bumped static cache to `app.js?v=211` and `style.css?v=171`.
 
 ## What was built - Session 28.119 (Demo Mode first pass - 2 June)
 - Added a dedicated System > Demo Mode page for a safe first-look Flightdeck walkthrough.
