@@ -3,6 +3,7 @@
 let _serverSettings = {};
 let _moistureWatchMemory = {};
 let _instanceInfo = null;
+const FLIGHTDECK_DEMO = window.FLIGHTDECK_DEMO === true;
 
 function _toDisplayTemp(celsius) {
   return _serverSettings.temp_unit === 'F'
@@ -22,6 +23,25 @@ function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   }[c]));
+}
+
+function _demoMediaUrl(label = 'Flightdeck demo', colour = '#3b82f6') {
+  const safeLabel = esc(label).replace(/&apos;/g, "'").replace(/&quot;/g, '"');
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360">
+    <rect width="640" height="360" fill="#070910"/>
+    <rect x="30" y="38" width="580" height="284" rx="18" fill="#111827" stroke="#334155"/>
+    <path d="M132 240h376" stroke="#475569" stroke-width="10" stroke-linecap="round"/>
+    <path d="M178 126h250l58 72H118z" fill="${colour}" opacity="0.92"/>
+    <circle cx="208" cy="248" r="18" fill="#64748b"/>
+    <circle cx="478" cy="248" r="18" fill="#64748b"/>
+    <text x="58" y="76" fill="#93c5fd" font-family="Arial, sans-serif" font-size="20" font-weight="700">FLIGHTDECK DEMO</text>
+    <text x="58" y="306" fill="#e5e7eb" font-family="Arial, sans-serif" font-size="25" font-weight="700">${safeLabel}</text>
+  </svg>`;
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
+function _mediaUrl(url, label = 'Flightdeck demo', colour = '#3b82f6') {
+  return FLIGHTDECK_DEMO ? _demoMediaUrl(label, colour) : url;
 }
 
 function _effectiveLightState(p) {
@@ -2442,7 +2462,7 @@ function _detailPrintPanel(p) {
     ? `${job.layer_current} / ${job.layer_total}` : '—';
 
   const thumb = `<div class="detail-thumb">
-    <img class="detail-thumb-img" src="/api/printers/${p.id}/thumbnail" alt="Print thumbnail"
+    <img class="detail-thumb-img" src="${_mediaUrl(`/api/printers/${p.id}/thumbnail`, name)}" alt="Print thumbnail"
          onerror="this.parentElement.hidden=true">
   </div>`;
 
@@ -3069,7 +3089,7 @@ function _showPrintDetail(printerId, dateStr, print) {
 
   const snapshotHtml = print.has_snapshot
     ? `<div class="print-failure-snapshot">
-         <img src="/api/printers/${printerId}/prints/${print.id}/snapshot" alt="Last frame before failure" loading="lazy">
+         <img src="${_mediaUrl(`/api/printers/${printerId}/prints/${print.id}/snapshot`, print.filename || 'Failure snapshot', '#ef4444')}" alt="Last frame before failure" loading="lazy">
          <div class="snapshot-caption">Last frame before failure</div>
        </div>`
     : '';
@@ -3792,7 +3812,7 @@ function _failureRow(item) {
     ? item.spool_usage.map(u => `<a href="#/spool/${u.spool_id}">#${u.spool_id}</a>`).join(', ')
     : '—';
   const snapshot = item.has_snapshot
-    ? `<img src="/api/printers/${item.printer_id}/prints/${item.id}/snapshot" alt="" loading="lazy">`
+    ? `<img src="${_mediaUrl(`/api/printers/${item.printer_id}/prints/${item.id}/snapshot`, item.filename || 'Failure snapshot', '#ef4444')}" alt="" loading="lazy">`
     : '<span>No snapshot</span>';
   const error = item.error_message ? `<div class="failure-error">${esc(item.error_message)}</div>` : '';
   const dateHash = item.started_at ? item.started_at.slice(0, 10) : '';
@@ -4248,7 +4268,7 @@ function _printBayReprintHtml(items, targets) {
     const material = [print.material, print.filament_grams != null ? `${Number(print.filament_grams).toFixed(1)}g` : ''].filter(Boolean).join(' · ');
     const duration = print.duration_seconds ? formatEta(print.duration_seconds) : '';
     const snapshot = print.has_snapshot
-      ? `<img src="/api/printers/${esc(print.printer_id)}/prints/${print.id}/snapshot" alt="" loading="lazy">`
+      ? `<img src="${_mediaUrl(`/api/printers/${esc(print.printer_id)}/prints/${print.id}/snapshot`, print.filename || 'Print snapshot')}" alt="" loading="lazy">`
       : `<span>${esc(state.label)}</span>`;
     const action = match
       ? `<button class="filedesk-action-btn filedesk-queue-primary" data-file-action="queue" data-source-id="${esc(match.target.id)}" data-path="${esc(match.path)}">Queue</button>`
@@ -5628,7 +5648,7 @@ function _queueJobCard(job, isFirst, isLast) {
   const isPending   = job.status === 'pending';
   const isActive    = job.status === 'printing' || job.status === 'uploading';
   const isRecoverable = job.status === 'failed' || job.status === 'cancelled';
-  const previewSrc  = job.has_preview ? `/api/queue/${job.id}/preview` : '';
+  const previewSrc  = job.has_preview ? _mediaUrl(`/api/queue/${job.id}/preview`, job.filename || 'Queued print') : '';
   const preflight = job.preflight;
   const canSend = !preflight || preflight.can_start;
   const meta = [
@@ -5840,6 +5860,7 @@ function _camHeaderInner(p) {
 function _cameraStreamSrc(printerId) {
   const url = _cameraUrlCache[printerId];
   if (!url) return null;
+  if (FLIGHTDECK_DEMO && url.startsWith('data:')) return url;
   return `${url}${url.includes('?') ? '&' : '?'}t=${Date.now()}`;
 }
 
@@ -9743,7 +9764,7 @@ _refreshSpoolsByPrinter();
 initNotifBtn();
 window.addEventListener('hashchange', router);
 
-if ('serviceWorker' in navigator) {
+if (!FLIGHTDECK_DEMO && 'serviceWorker' in navigator) {
   navigator.serviceWorker.register('/static/sw.js').catch(() => {});
 }
 router();

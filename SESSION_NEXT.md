@@ -1,5 +1,12 @@
 # Flightdeck — next session brief
-_Last updated 2 June 2026 (Session 28.123 Standalone demo mode)_
+_Last updated 2 June 2026 (Session 28.124 True Flightdeck demo mode)_
+
+## What was rebuilt - Session 28.124 (True Flightdeck demo mode - 2 June)
+- Replaced the first-pass standalone promo demo with the real Flightdeck interface served in demo mode.
+- `/demo` now loads the normal Flightdeck shell and `app.js` with a demo runtime that mocks API and WebSocket data.
+- Demo controls simulate command feedback locally and do not call live printer, scale, label, camera, queue, or file endpoints.
+- Demo media uses generated Flightdeck preview/camera placeholders so no camera workers or printer media routes are started.
+- Bumped static cache versions to `app.js?v=213` and `style.css?v=173`.
 
 ## What was built - Session 28.123 (Standalone demo mode - 2 June)
 - Added a standalone `/demo` page for prospects/testers to try Flightdeck without connecting to live printer APIs.

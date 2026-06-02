@@ -5,74 +5,135 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Flightdeck Demo</title>
   <link rel="icon" type="image/svg+xml" href="/static/flightdeck-icon.svg">
-  <link rel="stylesheet" href="/static/demo.css?v=1">
+  <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
+  <link rel="manifest" href="/static/manifest.json">
+  <meta name="theme-color" content="#0a0a0f">
+  <link rel="stylesheet" href="/static/style.css?v=173">
 </head>
 <body>
-  <header class="demo-topbar">
-    <div class="demo-status">
-      <span class="demo-pill">Standalone demo</span>
-      <span id="demo-clock">00:00</span>
+  <script>
+    window.FLIGHTDECK_DEMO = true;
+  </script>
+  <header>
+    <div class="header-status">
+      <span id="refresh-time"></span>
+      <span id="status-pill" class="status-pill"></span>
     </div>
-    <a class="demo-wordmark" href="/demo">
-      <img src="/static/flightdeck-logo.svg" alt="Flightdeck">
+    <a class="wordmark" href="#/">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="38" height="38" aria-hidden="true">
+        <path d="M10,52 L42,52 C44,52 46,51 47,49 L55,39 C56,37 56,36 54,36 L22,36 C20,36 18,37 17,39 L11,49 C10,51 10,52 12,52 Z" fill="#EF4444" opacity="0.3"/>
+        <path d="M10,38 L42,38 C44,38 46,37 47,35 L55,25 C56,23 56,22 54,22 L22,22 C20,22 18,23 17,25 L11,35 C10,37 10,38 12,38 Z" fill="#EF4444" opacity="0.6"/>
+        <path d="M10,24 L42,24 C44,24 46,23 47,21 L55,11 C56,9 56,8 54,8 L22,8 C20,8 18,9 17,11 L11,21 C10,23 10,24 12,24 Z" fill="#EF4444" opacity="1.0"/>
+        <line x1="36" y1="2" x2="36" y2="8" stroke="#e0e0e0" stroke-width="2.5" stroke-linecap="round"/>
+        <circle cx="36" cy="2" r="2.5" fill="#e0e0e0"/>
+      </svg>
+      <span class="wordmark-text">
+        <span class="flight-text">FLIGHT</span>
+        <span class="deck-text">DECK</span>
+      </span>
     </a>
-    <div class="demo-actions">
-      <a href="https://github.com/Kidabah/flightdeck" target="_blank" rel="noreferrer">Download</a>
-      <a href="/">Live app</a>
+    <div class="header-right">
+      <a class="demo-download-btn" href="https://github.com/Kidabah/flightdeck" target="_blank" rel="noreferrer">Download</a>
+      <button id="command-btn" class="command-header-btn" type="button" title="Open command palette">
+        <span>Command</span>
+        <kbd>Ctrl K</kbd>
+      </button>
+      <div class="notif-shell">
+        <button id="notif-btn" class="notif-btn notif-text-btn" title="Alerts">
+          <span class="notif-label">Alerts</span>
+          <span id="notif-count" class="notif-count" hidden></span>
+        </button>
+        <div id="notif-panel" class="notif-panel" hidden></div>
+      </div>
+      <div id="live-indicator">
+        <div class="live-radar live-connecting" id="live-dot" aria-hidden="true">
+          <span class="live-radar-sweep"></span>
+          <span class="live-radar-blip live-radar-blip-a"></span>
+          <span class="live-radar-blip live-radar-blip-b"></span>
+        </div>
+        <span id="live-text">Demo</span>
+      </div>
     </div>
   </header>
 
-  <main class="demo-shell">
-    <section class="demo-hero">
-      <div>
-        <p class="eyebrow">Flightdeck demo mode</p>
-        <h1>Run a print farm walkthrough without touching real hardware.</h1>
-        <p class="hero-copy">This standalone demo uses simulated printers, spools, print jobs, alerts, maintenance and file flow. Click around freely: commands respond, but nothing is sent to a printer.</p>
-      </div>
-      <div class="hero-card">
-        <span>Demo safety</span>
-        <strong>Real commands disabled</strong>
-        <small>Pause, dry, queue, label, trust AMS and maintenance actions are simulated here.</small>
-      </div>
-    </section>
+  <div class="demo-mode-ribbon">
+    <strong>Demo Mode</strong>
+    <span>Simulated fleet. Buttons are interactive, but no printer commands are sent.</span>
+  </div>
 
-    <nav class="demo-nav" aria-label="Demo sections">
-      <button class="active" data-view="overview">Overview</button>
-      <button data-view="live">Live Printer</button>
-      <button data-view="spools">Spools</button>
-      <button data-view="bay">Print Bay</button>
-      <button data-view="maintenance">Maintenance</button>
-    </nav>
-
-    <section class="demo-grid">
-      <aside class="demo-panel fleet-panel">
-        <div class="panel-head">
-          <span>Fleet</span>
-          <strong id="fleet-summary">3 printers</strong>
-        </div>
-        <div id="fleet-list" class="fleet-list"></div>
-      </aside>
-
-      <section class="demo-panel demo-stage">
-        <div id="stage"></div>
+  <div class="app-shell">
+    <aside class="app-sidebar">
+      <nav id="tab-strip"></nav>
+    </aside>
+    <div class="app-views">
+      <section id="view-dashboard" class="view">
+        <main id="printer-grid"></main>
+        <footer id="dash-footer"></footer>
       </section>
 
-      <aside class="demo-panel demo-side">
-        <div class="panel-head">
-          <span>Alerts</span>
-          <button id="clear-alerts" type="button">Clear</button>
+      <section id="view-mission" class="view" hidden>
+        <div class="mission-page" id="mission-page">
+          <div class="detail-placeholder">Loading...</div>
         </div>
-        <div id="alerts" class="alerts"></div>
-        <div class="panel-head second">
-          <span>Activity</span>
-          <strong>demo log</strong>
-        </div>
-        <div id="activity" class="activity"></div>
-      </aside>
-    </section>
-  </main>
+      </section>
 
-  <div id="toast" class="toast" hidden></div>
-  <script type="module" src="/static/demo.js?v=1"></script>
+      <section id="view-stats" class="view" hidden>
+        <div id="stats-page"></div>
+      </section>
+
+      <section id="view-printer" class="view" hidden>
+        <div id="printer-detail"></div>
+      </section>
+
+      <section id="view-spool" class="view" hidden>
+        <div id="spool-detail"></div>
+      </section>
+
+      <section id="view-cameras" class="view" hidden>
+        <div id="cameras-grid"></div>
+      </section>
+
+      <section id="view-queue" class="view" hidden>
+        <div class="queue-page" id="queue-page">
+          <div class="detail-placeholder">Loading...</div>
+        </div>
+      </section>
+
+      <section id="view-files" class="view" hidden>
+        <div class="filedesk-page" id="filedesk-page">
+          <div class="detail-placeholder">Loading...</div>
+        </div>
+      </section>
+
+      <section id="view-failures" class="view" hidden>
+        <div class="failures-page" id="failures-page">
+          <div class="detail-placeholder">Loading...</div>
+        </div>
+      </section>
+
+      <section id="view-spools" class="view" hidden>
+        <div class="settings-body" id="spools-body">
+          <div class="detail-placeholder">Loading...</div>
+        </div>
+      </section>
+
+      <section id="view-settings" class="view" hidden>
+        <div class="settings-body" id="settings-body">
+          <div class="detail-placeholder">Loading...</div>
+        </div>
+      </section>
+
+      <section id="view-demo" class="view" hidden>
+        <div id="demo-page"></div>
+      </section>
+
+      <section id="view-manual" class="view" hidden>
+        <div id="manual-page"></div>
+      </section>
+    </div>
+  </div>
+
+  <script src="/static/demo-runtime.js?v=1"></script>
+  <script type="module" src="/static/app.js?v=213"></script>
 </body>
 </html>
