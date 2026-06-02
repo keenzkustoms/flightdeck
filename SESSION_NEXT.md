@@ -1,5 +1,10 @@
 # Flightdeck — next session brief
-_Last updated 2 June 2026 (Session 28.120 Demo fleet cards)_
+_Last updated 2 June 2026 (Session 28.121 Demo docs)_
+
+## What was documented - Session 28.121 (Demo docs - 2 June)
+- Added a README Demo Mode section under Flight Manual.
+- Documented the recommended demo flow: Dashboard, Flight Tower, Live printer, Spools, Global Print Bay, then Maintenance.
+- Added a short reminder to avoid destructive controls during casual walkthroughs.
 
 ## What was built - Session 28.120 (Demo fleet cards - 2 June)
 - Added Live Fleet Picks to Demo Mode so each configured printer has a compact state card with Live, Bay, and Failures shortcuts.

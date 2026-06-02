@@ -307,6 +307,21 @@ There's no user account system — Flightdeck assumes you trust everyone on your
 
 ## Flight Manual
 
+### Demo Mode
+
+Use **System -> Demo Mode** when showing Flightdeck to a tester or someone seeing it for the first time. It is a read-only walkthrough surface that links into the real app without starting from risky controls.
+
+Recommended flow:
+
+1. Start with **Dashboard** for fleet state, loaded filament, reliability, and camera access.
+2. Open **Flight Tower** to show queue intelligence: ready jobs, blocked jobs, and why a printer is recommended.
+3. Open one **Live** printer page to show the camera hero, status strip, print details, object exclusion, and filament route.
+4. Open **Spools** to show inventory confidence, labels, cabinet view, and multi-spool grouping.
+5. Open **Global Print Bay** to show printer storage, vault staging, compatibility badges, and safe queue actions.
+6. Finish with **Maintenance** to show automatic Bambu care counters and manual per-printer tasks.
+
+Avoid destructive controls during a casual walkthrough: E-stop, cancel, delete, archive, SD cleanup, and format actions should only be used deliberately.
+
 ### H2D Dual-Nozzle Colour Prints
 
 For Bambu H2D jobs that use both nozzles, confirm the slicer has built the nozzle mapping before sending the job.
