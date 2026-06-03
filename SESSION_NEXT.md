@@ -2349,6 +2349,12 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Updated Voron/VVD operator labels from `G1/G2/G3/G4` to `T0/T1/T2/T3`, matching the Vivid/Happy Hare tool-position naming where the selector moves to the tool position.
 - Static cache-bust bumped to `app.js?v=191`.
 
+### Bambu RFID AMS profile matching
+- Investigated H2D AMS slot re-load where Bambu RFID filament reported `A00-P6 · PLA Basic` and Flightdeck showed a false profile mismatch against the assigned spool.
+- Confirmed the live printer was reading the RFID slot correctly and Flightdeck had already moved spool `#28` into `AMS 1 · S3`; the mismatch was caused by comparing Bambu profile codes as if they were human-readable filament names.
+- Added Bambu profile-code tolerance so codes such as `A00-P6` do not trigger a profile mismatch once material and colour already match.
+- Added profile-family matching so Bambu RFID names such as `PLA Basic` can match spools stored as `Bambu Lab / Basic / PLA`.
+
 ---
 
 ## Architecture decisions locked

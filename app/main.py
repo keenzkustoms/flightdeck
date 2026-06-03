@@ -2395,6 +2395,35 @@ def _spool_matches_material(spool: dict, material: str) -> bool:
     return bool(got) and (wanted in got or got in wanted)
 
 
+def _looks_like_bambu_profile_code(value: Optional[str]) -> bool:
+    raw = str(value or "").strip().upper()
+    return bool(re.fullmatch(r"[A-Z]\d{2}[-_ ]?[A-Z0-9]+", raw))
+
+
+def _reported_brand_matches_spool(reported_brand: str, spool: dict) -> bool:
+    reported = _norm_material(reported_brand)
+    spool_brand = _norm_material(spool.get("brand") or "")
+    if not reported or reported == "generic" or reported == spool_brand:
+        return True
+    spool_profile = _norm_material(" ".join([
+        str(spool.get("brand") or ""),
+        str(spool.get("material") or ""),
+        str(spool.get("subtype") or ""),
+    ]))
+    if reported in spool_profile or spool_profile in reported:
+        return True
+    # Bambu RFID reports profile-family names such as "PLA Basic" where the
+    # operator-facing spool may be stored as Bambu Lab / Basic / PLA.
+    reported_material = _norm_material(re.sub(r"\bbambu\s+lab\b", "", reported_brand, flags=re.I))
+    spool_material_profile = _norm_material(" ".join([
+        str(spool.get("material") or ""),
+        str(spool.get("subtype") or ""),
+    ]))
+    return bool(reported_material and spool_material_profile and (
+        reported_material in spool_material_profile or spool_material_profile in reported_material
+    ))
+
+
 def _queue_filament_colors(job: dict) -> list[dict]:
     raw = job.get("filament_colors")
     if not raw:
@@ -2553,7 +2582,7 @@ def _reported_slot_mismatch(spool: Optional[dict], slot: Optional[dict]) -> str:
 
     reported_brand = _norm_material(slot.get("brand") or "")
     spool_brand = _norm_material(spool.get("brand") or "")
-    if reported_brand and spool_brand and reported_brand != spool_brand and reported_brand != "generic":
+    if reported_brand and spool_brand and not _reported_brand_matches_spool(str(slot.get("brand") or ""), spool):
         return f"Brand mismatch: printer {slot.get('brand')}, Flightdeck {spool.get('brand')}"
     reported_profile = _norm_material(slot.get("profile_name") or "")
     spool_profile = _norm_material(" ".join([
@@ -2561,6 +2590,8 @@ def _reported_slot_mismatch(spool: Optional[dict], slot: Optional[dict]) -> str:
         str(spool.get("material") or ""),
         str(spool.get("subtype") or ""),
     ]))
+    if _looks_like_bambu_profile_code(slot.get("profile_name")):
+        return ""
     if reported_profile and spool_profile and reported_profile != "generic" and reported_profile not in spool_profile and spool_profile not in reported_profile:
         expected = " ".join(str(spool.get(k) or "") for k in ("brand", "material", "subtype")).strip()
         return f"Profile mismatch: printer {slot.get('profile_name')}, Flightdeck {expected}"
