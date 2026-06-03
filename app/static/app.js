@@ -1879,6 +1879,11 @@ async function renderManualView() {
         '<strong>Trust confidence</strong><span>Verified means weighed; estimated means model deductions have been applied since the last weigh-in.</span>',
         '<strong>Labels carry identity</strong><span>Spool number, material, colour name, colour code, and location print where useful.</span>',
       ])}
+      ${_manualSection('Spool Return Memory', 'Flightdeck remembers where rolls live so loading and unloading stays natural, even when Bambu RFID reports a roll before you manually assign it.', [
+        '<strong>Home shelf</strong><span>When a spool moves from a shelf into AMS/MMU, Flightdeck keeps that shelf as its home unless you deliberately return it somewhere else.</span>',
+        '<strong>Auto-return</strong><span>If a printer later reports the slot empty, Flightdeck returns the stale assignment to the remembered home shelf.</span>',
+        '<strong>RFID auto-claim</strong><span>When Bambu reports a loaded roll and Flightdeck has a strong shelved match, it can claim the right spool back into that AMS slot and logs the move.</span>',
+      ])}
       ${_manualSection('Recovery', 'When something feels off, recover the smallest piece first. Full restarts are there, but not always the first move.', [
         '<strong>Camera pressure</strong><span>Run scripts/clear-camera-workers.sh if camera workers climb above expected count.</span>',
         '<strong>App restart</strong><span>Use scripts/safe-restart-flightdeck.sh when the service is wedged or after system updates.</span>',
@@ -4000,6 +4005,12 @@ async function renderSpoolDetail(spoolId) {
   const activity = data.activity || [];
   const confidence = data.confidence || {};
   const confidenceReasons = (confidence.reasons || []).map(r => `<span>${esc(r)}</span>`).join('');
+  const homeLocation = data.home_storage_location_name || _spoolStorageLocationName(data.home_storage_location_id);
+  const hasHomeLocation = !!(data.home_storage_location_id || data.home_storage_location_name);
+  const homeTitle = hasHomeLocation ? homeLocation : 'Learning';
+  const homeDetail = hasHomeLocation
+    ? `Flightdeck returns this spool to ${homeLocation} when an AMS/MMU slot reports empty.`
+    : 'Return this spool to a shelf once and Flightdeck will remember its home position.';
 
   el.innerHTML = `<div class="spool-detail-page">
     <div class="spool-detail-top">
@@ -4037,6 +4048,11 @@ async function renderSpoolDetail(spoolId) {
         <span>${Math.round(used)}g consumed</span>
         <span>${Number(data.usage_total_g || 0).toFixed(1)}g traced</span>
         <span>${data.usage_count || 0} print${data.usage_count === 1 ? '' : 's'}</span>
+      </div>
+      <div class="spool-home-memory spool-home-${hasHomeLocation ? 'set' : 'learning'}">
+        <span>Home shelf memory</span>
+        <strong>${esc(homeTitle)}</strong>
+        <small>${esc(homeDetail)}</small>
       </div>
       ${data.notes ? `<div class="spool-detail-notes">${esc(data.notes)}</div>` : ''}
     </section>
@@ -7733,12 +7749,48 @@ function _settingToggle(key, options, current) {
   ).join('');
 }
 
-function _setupHealthHtml(health) {
+function _setupCheckByLabel(checks, pattern) {
+  return checks.find(c => pattern.test(String(c.label || '')));
+}
+
+function _setupReadinessTile(label, value, detail, cls = 'ok') {
+  return `<div class="setup-ready-tile setup-ready-${cls}">
+    <span>${esc(label)}</span>
+    <strong>${esc(value)}</strong>
+    <small>${esc(detail)}</small>
+  </div>`;
+}
+
+function _setupHealthHtml(health, context = {}) {
   const checks = health?.checks || [];
   const summary = health?.summary || {};
   const requiredText = `${summary.required_ok ?? 0}/${summary.required_total ?? 0}`;
   const optionalText = `${summary.optional_ok ?? 0}/${summary.optional_total ?? 0}`;
   const statusText = health?.status === 'ready' ? 'Ready' : 'Needs attention';
+  const printers = context.printers || _latestPrinters || [];
+  const scaleOk = !!context.scale?.available;
+  const labelOk = !!context.labelPrinter?.available;
+  const dataCheck = _setupCheckByLabel(checks, /data|database|folder|path/i);
+  const cameraCheck = _setupCheckByLabel(checks, /camera|worker/i);
+  const backupCheck = _setupCheckByLabel(checks, /backup|vault|archive/i);
+  const baseUrl = _serverSettings.system_base_url || location.origin;
+  const dataOk = dataCheck ? !!dataCheck.ok : health?.status === 'ready';
+  const cameraOk = cameraCheck ? !!cameraCheck.ok : true;
+  const readyLabel = health?.status === 'ready'
+    ? (scaleOk && labelOk ? 'Ready for flight' : 'Ready for real use')
+    : 'Preflight checks needed';
+  const readyDetail = health?.status === 'ready'
+    ? 'Required services are healthy. Optional hardware can be added whenever the bench needs it.'
+    : 'Finish the required checks before putting Flightdeck in charge of the room.';
+  const readyTiles = [
+    _setupReadinessTile('Fleet', `${printers.length} printer${printers.length === 1 ? '' : 's'}`, printers.length ? 'Configured and visible to Flightdeck' : 'Add printers before first use', printers.length ? 'ok' : 'warn'),
+    _setupReadinessTile('Data', dataOk ? 'Healthy' : 'Check', dataCheck?.detail || 'Database and data folder status', dataOk ? 'ok' : 'warn'),
+    _setupReadinessTile('Cameras', cameraOk ? 'Ready' : 'Check', cameraCheck?.detail || 'Camera workers available when printers are online', cameraOk ? 'ok' : 'warn'),
+    _setupReadinessTile('Scale', scaleOk ? 'Detected' : 'Optional', scaleOk ? 'Dymo scale ready for weigh-ins' : (context.scale?.last_error || 'Only needed for live spool weighing'), scaleOk ? 'ok' : 'optional'),
+    _setupReadinessTile('Labels', labelOk ? 'Detected' : 'Optional', labelOk ? `QL-700 ready for ${context.labelPrinter?.label_size || 'DK-22212'}` : (context.labelPrinter?.last_error || 'Only needed for QR spool labels'), labelOk ? 'ok' : 'optional'),
+    _setupReadinessTile('Access', baseUrl, 'Use this URL for labels, phones, and remote access', 'info'),
+    _setupReadinessTile('Backup', backupCheck?.ok ? 'Ready' : 'Configure', backupCheck?.detail || 'GitHub/private backup path can be configured after install', backupCheck?.ok ? 'ok' : 'optional'),
+  ].join('');
   const rows = checks.map(c => `
     <div class="setup-check setup-check-${esc(c.level || 'warn')}">
       <div class="setup-check-main">
@@ -7756,6 +7808,15 @@ function _setupHealthHtml(health) {
   `).join('');
   return `
     <div class="settings-section setup-health-panel">
+      <div class="setup-ready-banner setup-ready-banner-${health?.status === 'ready' ? 'ok' : 'warn'}">
+        <div>
+          <span>First-run readiness</span>
+          <strong>${esc(readyLabel)}</strong>
+          <small>${esc(readyDetail)}</small>
+        </div>
+        <a class="modal-btn" href="#/manual">Flight Manual</a>
+      </div>
+      <div class="setup-ready-grid">${readyTiles}</div>
       <div class="setup-health-head">
         <div>
           <div class="settings-section-title">Setup Health</div>
@@ -8325,6 +8386,11 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
     const autoLocationLabel = homeName
       ? `Return home (${homeName})`
       : 'Return home';
+    const returnHelp = current
+      ? (homeName && homeName !== 'Unassigned'
+        ? `Home shelf memory is set: empty-slot auto-return and Return spool will put spool #${current.id} back in ${homeName} unless you choose another shelf.`
+        : `Home shelf memory is still learning: return spool #${current.id} to a shelf once and Flightdeck will use that as its default home next time.`)
+      : '';
     const locationOptions = `<option value="">${esc(autoLocationLabel)}</option>` + (
       _spoolLocations.length
         ? _spoolLocations.map(loc => `<option value="${loc.id}">${esc(loc.name)}</option>`).join('')
@@ -8364,7 +8430,8 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
             ${report ? `<button class="spool-action-btn spool-action-edit" data-slot-trust-printer="${current.id}">Trust Printer</button>` : ''}
             <select class="slot-clear-location" data-slot-clear-location>${locationOptions}</select>
             <button class="spool-action-btn spool-action-danger" data-slot-clear="${current.id}">Return spool</button>
-          </div>` : ''}
+          </div>
+          ${returnHelp ? `<div class="slot-return-memory">${esc(returnHelp)}</div>` : ''}` : ''}
       </div>
       <div class="slot-assign">
         <label class="spool-form-label" for="slot-spool-filter">Assign stored spool</label>
@@ -9987,8 +10054,15 @@ async function _renderSettingsContent(category) {
 
   if (category === 'setup') {
     el.innerHTML = `<div class="detail-placeholder" style="min-height:10rem">Checking install…</div>`;
-    const health = await fetch('/api/setup/health').then(r => r.json()).catch(() => null);
-    el.innerHTML = health ? _setupHealthHtml(health) : `<div class="settings-empty">Setup health is unavailable.</div>`;
+    const [health, printers, scale, labelPrinter] = await Promise.all([
+      fetch('/api/setup/health').then(r => r.json()).catch(() => null),
+      fetch('/api/printers').then(r => r.json()).catch(() => (_latestPrinters || [])),
+      fetch('/api/scale/status').then(r => r.json()).catch(() => ({})),
+      fetch('/api/label_printer/status').then(r => r.json()).catch(() => ({})),
+    ]);
+    el.innerHTML = health
+      ? _setupHealthHtml(health, { printers, scale, labelPrinter })
+      : `<div class="settings-empty">Setup health is unavailable.</div>`;
   } else if (category === 'printers') {
     el.innerHTML = `<div class="detail-placeholder" style="min-height:10rem">Loading…</div>`;
     let printers = [];

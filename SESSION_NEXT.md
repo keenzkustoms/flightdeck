@@ -1,5 +1,13 @@
 # Flightdeck — next session brief
-_Last updated 3 June 2026 (Session 28.139 Warning target + manual polish)_
+_Last updated 4 June 2026 (Session 28.140 Setup readiness + spool return polish)_
+
+## What was polished - Session 28.140 (Setup readiness + spool return polish - 4 June)
+- Expanded Setup Health into a first-run readiness summary covering fleet config, data path, camera workers, optional scale/QL-700, access URL, and backup/vault status.
+- Wired Setup Health to the same live printer, scale, and label-printer status used elsewhere so the ready summary reflects the actual bench.
+- Added clearer "ready for real use / preflight checks needed" wording so missing optional hardware does not look like a blocked install.
+- Added home-shelf memory guidance to spool detail pages and AMS Profile Doctor, making auto-return/default return behaviour visible at the point of use.
+- Updated the Flight Manual with the spool return/RFID auto-claim workflow.
+- Bumped static cache versions to `app.js?v=223` and `style.css?v=179`; no service restart is needed for this static-only pass.
 
 ## What was polished - Session 28.139 (Warning target + manual polish - 3 June)
 - Kept warning rows visually clean while preserving click-through guidance: dashboard briefing rows and Needs Attention rows now carry the same target metadata/title text as the top warning pill.
