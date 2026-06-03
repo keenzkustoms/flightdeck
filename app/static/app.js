@@ -1154,7 +1154,7 @@ function _dashboardBriefingRow(row) {
     return `<button class="briefing-row briefing-${row.tone || 'info'}"${attrs}>${content}</button>`;
   }
   if (row.href || row.target?.hash) {
-    return `<a class="briefing-row briefing-${row.tone || 'info'}" href="${esc(row.target?.hash || row.href)}">${content}</a>`;
+    return `<a class="briefing-row briefing-${row.tone || 'info'}" href="${esc(row.target?.hash || row.href)}"${attrs}>${content}</a>`;
   }
   return `<div class="briefing-row briefing-${row.tone || 'info'}">${content}</div>`;
 }
@@ -1283,7 +1283,7 @@ function _renderDashboardOverview(printers) {
         <span class="dash-attention-text">${esc(_dashboardIssueText(p))}</span>
       </button>`;
     }
-    return `<a class="dash-attention-item dash-attention-${severity}" href="${target?.hash || href}">
+    return `<a class="dash-attention-item dash-attention-${severity}" href="${target?.hash || href}"${target ? _warningTargetAttrs(target) : ''}>
       <span class="dash-attention-name">${esc(_dashboardPrinterName(p))}</span>
       <span class="dash-attention-text">${esc(_dashboardIssueText(p))}</span>
     </a>`;
@@ -1861,6 +1861,13 @@ async function renderManualView() {
         '<strong>Dashboard</strong><span>Use it for fleet state, reliability hints, loaded filament, and quick camera access.</span>',
         '<strong>Flight Tower</strong><span>Queue intelligence tells you what can dispatch now, what is blocked, and what spool or printer needs attention.</span>',
         '<strong>Printer pages</strong><span>Live, Print Bay, History, Failures, and Maintenance stay together per printer.</span>',
+      ])}
+      ${_manualSection('Warnings And Attention', 'Warnings should take the operator to the source, not just announce that something is wrong.', [
+        '<strong>Top warning pill</strong><span>Click the orange or red status pill to open the highest-priority active warning.</span>',
+        '<strong>Flight Briefing</strong><span>Rows on the dashboard point to the printer, spool, failure list, or exact AMS slot that needs eyes.</span>',
+        '<strong>AMS Profile Doctor</strong><span>AMS profile mismatch warnings open the slot editor so Trust Flightdeck, Trust Printer, Load, or Return home are right there.</span>',
+        '<strong>Clear skies</strong><span>No active faults, AMS profile warnings, or loaded-spool risks are currently asking for action.</span>',
+        '<strong>Cancelled is not failed</strong><span>Operator-cancelled prints stay in history without counting as reliability failures.</span>',
       ])}
       ${_manualSection('Bambu Multi-Colour Rules', 'Most multi-colour failures come from slicer grouping or AMS profile mismatch rather than the model itself.', [
         '<strong>Group nozzles deliberately</strong><span>On H2D, confirm left and right nozzle grouping before sending a multi-material print.</span>',

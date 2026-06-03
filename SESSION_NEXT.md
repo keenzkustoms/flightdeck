@@ -1,5 +1,10 @@
 # Flightdeck — next session brief
-_Last updated 3 June 2026 (Session 28.138 Dashboard briefing mobile polish)_
+_Last updated 3 June 2026 (Session 28.139 Warning target + manual polish)_
+
+## What was polished - Session 28.139 (Warning target + manual polish - 3 June)
+- Kept warning rows visually clean while preserving click-through guidance: dashboard briefing rows and Needs Attention rows now carry the same target metadata/title text as the top warning pill.
+- Added a `Warnings And Attention` section to the Flight Manual explaining the orange/red pill, Flight Briefing rows, AMS Profile Doctor targets, Clear skies, and failed-vs-cancelled handling.
+- Bumped the static cache to `app.js?v=222`; no service restart is needed for this static-only pass.
 
 ## What was fixed - Session 28.138 (Dashboard briefing mobile polish - 3 June)
 - Tightened the new `Flight Briefing` dashboard panel on narrow/mobile widths so briefing rows stack cleanly instead of pushing the action label off-screen.
