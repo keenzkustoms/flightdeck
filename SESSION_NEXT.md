@@ -1,5 +1,10 @@
 # Flightdeck — next session brief
-_Last updated 2 June 2026 (Session 28.128 Public website positioning polish)_
+_Last updated 3 June 2026 (Session 28.129 Public website fleet screenshot polish)_
+
+## What was polished - Session 28.129 (Public website fleet screenshot polish - 3 June)
+- Expanded the public website fleet camera screenshot into a full-width showcase so Voron, X1C, and H2D all remain visible.
+- Changed the fleet camera image rendering from cropped cover mode to contained display for the cross-ecosystem screenshot.
+- Updated the caption to call out the live cross-ecosystem view.
 
 ## What was polished - Session 28.128 (Public website positioning polish - 2 June)
 - Added the Flightdeck logo mark above the hero title on the public website.
