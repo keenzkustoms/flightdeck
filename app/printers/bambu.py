@@ -542,8 +542,32 @@ class BambuPrinter:
 
             if self._current_job_key:
                 # In-session failure: close the job and start showing the error.
+                # If the operator has already requested a cancel, treat Bambu's
+                # retained FAILED state as the cancel resolving rather than a
+                # reliability failure.
                 job_key = self._current_job_key
                 err_msg = alarm_message or (f"Bambu error: {err_code}" if err_code else "Print failed")
+                if self._cancel_requested:
+                    print_id = db.on_print_ended(
+                        self.id, job_key,
+                        final_state="CANCELLED",
+                        layers_completed=job.layer_current if job else None,
+                    )
+                    if print_id:
+                        db.log_decision(self.id, "cancel_resolved",
+                                       f"User-initiated cancel confirmed from Bambu FAILED state ({err_msg})",
+                                       print_id=print_id)
+                        if self._ams_slot_snapshot_print_id == print_id:
+                            db.log_decision(self.id, "spool_no_deduction_cancelled",
+                                           "Print cancelled; no filament deducted from spools",
+                                           print_id=print_id)
+                    self._current_job_key = None
+                    self._current_print_id = None
+                    self._cancel_requested = False
+                    self._error_job_key = None
+                    self._error_print_id = None
+                    self._error_seen_at = 0.0
+                    return "idle"
                 print_id = db.on_print_ended(
                     self.id, job_key,
                     final_state="ERROR",
