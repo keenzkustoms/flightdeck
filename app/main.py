@@ -83,6 +83,7 @@ async def _gather_all() -> list[dict]:
         _update_last_seen(status)
         d = asdict(status)
         _reconcile_empty_reported_slots(d)
+        _reconcile_reported_loaded_slots(d)
         cal = db.get_calibration(p.id)
         if cal:
             d["eta_calibration"] = cal
@@ -151,6 +152,150 @@ def _reconcile_empty_reported_slots(printer_status: dict) -> None:
                 "spool_auto_returned",
                 f"Spool #{spool['id']} auto-returned from empty {slot.get('label') or flat_slot}",
             )
+
+
+def _remaining_g(spool: dict) -> float:
+    try:
+        return float(spool.get("remaining_g") or 0)
+    except Exception:
+        return 0.0
+
+
+def _spool_reported_profile_score(slot: dict, spool: dict) -> Optional[tuple[float, str]]:
+    """Score a shelved spool against a non-empty printer-reported AMS slot."""
+    if spool.get("location_printer_id") is not None or spool.get("archived_at"):
+        return None
+
+    reported_material = slot.get("type") or slot.get("material") or ""
+    if not _spool_matches_material(spool, str(reported_material)):
+        return None
+
+    color_dist = _hex_dist(slot.get("color"), spool.get("color_hex"))
+    if color_dist > 125:
+        return None
+
+    score = 0.0
+    reasons: list[str] = []
+    reported_brand = str(slot.get("brand") or "")
+    reported_profile = str(slot.get("profile_name") or "")
+    reported_profile_id = str(slot.get("profile_id") or "")
+    spool_brand = _norm_material(spool.get("brand") or "")
+    spool_subtype = _norm_material(spool.get("subtype") or "")
+    reported_brand_norm = _norm_material(reported_brand)
+    reported_profile_norm = _norm_material(reported_profile)
+
+    if _reported_brand_matches_spool(reported_brand, spool):
+        score += 30
+        reasons.append("profile")
+
+    # Bambu RFID reports profile families such as "PLA Basic" with codes like
+    # A00-P6/GFA00. Prefer the operator's Bambu Lab Basic spool over older
+    # generic catalog entries that only happen to share a nearby colour.
+    if spool_brand == "bambulab":
+        score += 18
+        reasons.append("bambu")
+    if spool_subtype and spool_subtype in reported_brand_norm:
+        score += 18
+        reasons.append("subtype")
+    if reported_brand_norm and reported_brand_norm in _norm_material(" ".join([
+        str(spool.get("material") or ""),
+        str(spool.get("subtype") or ""),
+        str(spool.get("brand") or ""),
+    ])):
+        score += 12
+    if _looks_like_bambu_profile_code(reported_profile) or _looks_like_bambu_profile_code(reported_profile_id):
+        score += 8
+    if reported_profile_norm and reported_profile_norm in _norm_material(spool.get("brand") or ""):
+        score += 8
+
+    score += max(0.0, 45.0 - (color_dist / 2.5))
+    reasons.append(f"colour {color_dist:.0f}")
+
+    remaining = _remaining_g(spool)
+    if remaining >= 150:
+        score += 20
+        reasons.append("usable")
+    elif remaining >= 75:
+        score += 5
+    else:
+        score -= 40
+        reasons.append("near-empty")
+
+    confidence = spool.get("confidence_score")
+    try:
+        if confidence is not None:
+            score += max(0.0, min(float(confidence), 100.0)) / 10.0
+    except Exception:
+        pass
+
+    return score, ", ".join(reasons)
+
+
+def _best_spool_for_reported_slot(slot: dict, candidates: list[dict]) -> Optional[tuple[dict, float, str]]:
+    scored: list[tuple[float, float, float, dict, str]] = []
+    for spool in candidates:
+        result = _spool_reported_profile_score(slot, spool)
+        if result is None:
+            continue
+        score, reason = result
+        scored.append((score, -_hex_dist(slot.get("color"), spool.get("color_hex")), _remaining_g(spool), spool, reason))
+
+    if not scored:
+        return None
+    scored.sort(key=lambda item: (item[0], item[1], item[2]), reverse=True)
+    best = scored[0]
+    runner_up = scored[1] if len(scored) > 1 else None
+    if best[0] < 70:
+        return None
+    if runner_up and best[0] - runner_up[0] < 18:
+        return None
+    return best[3], best[0], best[4]
+
+
+def _reconcile_reported_loaded_slots(printer_status: dict) -> None:
+    """Claim a shelved spool when Bambu reports a loaded RFID/profile slot."""
+    printer_id = printer_status.get("id")
+    if not printer_id:
+        return
+
+    loaded_by_slot = db.get_spools_by_printer(str(printer_id))
+    available = [
+        spool for spool in db.get_spools()
+        if spool.get("location_printer_id") is None and not spool.get("archived_at")
+    ]
+    if not available:
+        return
+
+    for slot in _flatten_reported_ams_slots(printer_status, include_empty=True):
+        if slot.get("empty"):
+            continue
+        flat_slot = slot.get("flat_slot")
+        if flat_slot is None or loaded_by_slot.get(int(flat_slot)):
+            continue
+        best = _best_spool_for_reported_slot(slot, available)
+        if not best:
+            continue
+
+        spool, score, reason = best
+        result = db.move_spool(
+            int(spool["id"]),
+            str(printer_id),
+            int(flat_slot),
+            spool.get("storage_location_id") or spool.get("home_storage_location_id"),
+        )
+        if not result.get("ok"):
+            continue
+        db.log_decision(
+            str(printer_id),
+            "spool_auto_claimed",
+            (
+                f"Spool #{spool['id']} auto-claimed for {slot.get('label') or flat_slot} "
+                f"from printer report {slot.get('brand') or slot.get('type') or 'filament'} "
+                f"{slot.get('color') or ''} (score {score:.0f}: {reason})"
+            ),
+        )
+        loaded_by_slot[int(flat_slot)] = spool
+        available = [candidate for candidate in available if int(candidate["id"]) != int(spool["id"])]
 
 
 async def _grab_snapshot(printer_id: str) -> Optional[bytes]:

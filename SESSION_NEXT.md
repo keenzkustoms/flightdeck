@@ -1,5 +1,11 @@
 # Flightdeck — next session brief
-_Last updated 3 June 2026 (Session 28.133 AMS ghost-spool cleanup + clickable warnings)_
+_Last updated 3 June 2026 (Session 28.134 Bambu RFID spool auto-claim)_
+
+## What was fixed - Session 28.134 (Bambu RFID spool auto-claim - 3 June)
+- Added Bambu reported-loaded slot reconciliation so if the printer reports an RFID/profile-family spool in an empty Flightdeck AMS slot, Flightdeck can auto-claim the matching shelved spool.
+- The auto-claim scorer prefers confident material/profile-family matches, Bambu Lab + subtype matches such as `PLA Basic`, close colour, and enough remaining weight, so old near-empty catalogue ghosts do not win just because their colour is exact.
+- Repaired the current H2D AMS 1 S3 case by moving spool `#71` from Shelf #1 into the reported printer slot while leaving old spool `#28` shelved.
+- Kept the warning pill behaviour unchanged: the current top warning is valid when Voron is offline and real failed-print count warnings exist.
 
 ## What was fixed - Session 28.133 (AMS ghost-spool cleanup + clickable warnings - 3 June)
 - Added Bambu empty-slot reconciliation so if the printer reports an AMS/HT slot empty, Flightdeck automatically returns any stale assigned spool to its home shelf, falling back to the first active shelf if the spool predates home-shelf memory.
