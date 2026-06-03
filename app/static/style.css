@@ -2622,6 +2622,32 @@ button.briefing-row {
   font-size: 0.74rem;
 }
 
+@media (max-width: 760px) {
+  .dashboard-briefing {
+    grid-template-columns: 1fr;
+  }
+
+  .briefing-head {
+    flex-direction: row;
+    align-items: flex-end;
+    padding: 0.1rem;
+  }
+
+  .briefing-list {
+    grid-template-columns: 1fr;
+  }
+
+  .briefing-row {
+    grid-template-columns: 1fr;
+    gap: 0.35rem;
+  }
+
+  .briefing-row-kicker {
+    width: fit-content;
+    max-width: 100%;
+  }
+}
+
 #printer-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));

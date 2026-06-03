@@ -1,5 +1,10 @@
 # Flightdeck — next session brief
-_Last updated 3 June 2026 (Session 28.137 Dashboard flight briefing)_
+_Last updated 3 June 2026 (Session 28.138 Dashboard briefing mobile polish)_
+
+## What was fixed - Session 28.138 (Dashboard briefing mobile polish - 3 June)
+- Tightened the new `Flight Briefing` dashboard panel on narrow/mobile widths so briefing rows stack cleanly instead of pushing the action label off-screen.
+- Moved the responsive briefing rules after the base briefing styles so the mobile layout actually wins in the final cascade.
+- Bumped static cache versions to `app.js?v=221` and `style.css?v=178`.
 
 ## What was polished - Session 28.137 (Dashboard flight briefing - 3 June)
 - Added a `Flight Briefing` handover panel at the top of the dashboard so the first view now summarises what needs operator eyes before the printer cards.
