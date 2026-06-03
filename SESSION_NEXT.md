@@ -37,7 +37,7 @@ _Last updated 3 June 2026 (Session 28.132 H2D AMS-test cancellations repaired)_
 - Added a GitHub Pages-ready public website under `docs/`.
 - Built a Flightdeck-branded landing page with real screenshots for the live printer screen, camera wall, spool inventory, and print details.
 - Added public positioning for Flightdeck as a self-hosted, LAN-first mixed Bambu/Voron/Klipper fleet dashboard.
-- Included GitHub, install, roadmap, and `flightdeck@gmail.com` contact calls to action.
+- Included GitHub, install, roadmap, and `flightdeck3dprinters@gmail.com` contact calls to action.
 - Added `docs/.nojekyll` and a README pointer so GitHub Pages can serve the site from `/docs` on `main`.
 
 ## What was fixed - Session 28.126 (Demo authenticity pass - 2 June)
@@ -2356,6 +2356,9 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Added profile-family matching so Bambu RFID names such as `PLA Basic` can match spools stored as `Bambu Lab / Basic / PLA`.
 - Mirrored the same Bambu RFID tolerance in the frontend AMS slot tooltip/Profile Doctor path, which had its own profile mismatch logic.
 - Bumped the app cache to `app.js?v=216` so browsers pick up the frontend AMS matching fix.
+
+### Public contact address
+- Corrected the public landing-page contact address to `flightdeck3dprinters@gmail.com`.
 
 ---
 
