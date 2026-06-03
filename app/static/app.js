@@ -8091,9 +8091,6 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
     const report = _slotReport(printer, slotIndex);
     const mismatch = _slotMismatch(current, report);
     const doctor = _slotDoctorState(current, report);
-    const reportLine = report
-      ? (report.empty ? 'Printer reports empty' : `Printer reports ${[_slotProfileLabel(report), report.color].filter(Boolean).join(' · ') || 'filament loaded'}`)
-      : 'No printer slot report available';
     const candidates = spools
       .filter(s => !s.archived_at && !s.location_printer_id)
       .sort((a, b) =>
@@ -8102,6 +8099,39 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
         (a.material || '').localeCompare(b.material || '') ||
         (a.color_name || '').localeCompare(b.color_name || '')
       );
+    const bestCandidate = report && !report.empty ? candidates.find(s => _slotCandidateScore(s, report) < 320) : null;
+    const reportProfile = report ? (_slotProfileLabel(report) || 'Loaded filament') : 'No report';
+    const reportColour = report?.empty ? 'Empty' : (report?.color || 'Unknown');
+    const reportMaterial = report?.empty ? 'Empty' : (_slotReportedMaterial(report) || 'Unknown');
+    const reportBrand = report?.empty ? 'Empty' : (report?.brand || report?.profile_name || 'Unknown');
+    const printerReportHtml = report
+      ? `<div class="slot-facts">
+          <div><span>State</span><strong>${esc(report.empty ? 'Empty' : 'Loaded')}</strong></div>
+          <div><span>Material</span><strong>${esc(reportMaterial)}</strong></div>
+          <div><span>Brand/profile</span><strong>${esc(reportBrand)}</strong></div>
+          <div><span>Colour</span><strong>${esc(reportColour)}</strong></div>
+        </div>
+        <div class="slot-printer-report">${esc(report.empty ? 'Printer reports this slot empty.' : reportProfile)}</div>`
+      : '<div class="slot-empty-state">No printer slot report available.</div>';
+    const currentHtml = current ? `
+      <div class="slot-current-card">
+        <span class="location-spool-swatch" style="background:${current.color_hex || '#808080'}"></span>
+        <div class="location-spool-main">
+          <div class="location-spool-title">${esc(current.color_name || current.color_hex || 'Colour')} · ${esc(current.material)}${current.subtype ? ` ${esc(current.subtype)}` : ''}</div>
+          <div class="location-spool-sub">${esc(current.brand || 'Unknown brand')} · #${current.id} · ${Math.round(current.remaining_g || 0)}g</div>
+        </div>
+      </div>`
+      : '<div class="slot-empty-state">No Flightdeck spool assigned to this slot.</div>';
+    const suggestionHtml = bestCandidate && (!current || mismatch) ? `
+      <div class="slot-suggestion">
+        <div>
+          <span>Best stored match</span>
+          <strong>${esc(bestCandidate.color_name || bestCandidate.color_hex || 'Colour')} · ${esc(bestCandidate.material)}${bestCandidate.subtype ? ` ${esc(bestCandidate.subtype)}` : ''}</strong>
+          <p>${esc(bestCandidate.brand || 'Unknown brand')} · #${bestCandidate.id} · ${Math.round(bestCandidate.remaining_g || 0)}g · ${esc(_spoolStorageLocationName(bestCandidate.storage_location_id))}</p>
+        </div>
+        <button type="button" class="spool-action-btn spool-action-label" data-slot-spool-id="${bestCandidate.id}">Assign suggested spool</button>
+      </div>`
+      : '';
     const pickerRows = candidates.length ? candidates.map(s => {
       const pct = s.label_weight_g > 0 ? Math.round(s.remaining_g * 100 / s.label_weight_g) : 0;
       const loc = _spoolStorageLocationName(s.storage_location_id);
@@ -8135,28 +8165,32 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
         <p>${esc(doctor.detail)}</p>
       </div>
       <div class="slot-current">
-        <div class="slot-current-label">Current assignment</div>
-        <div class="slot-printer-report">${esc(reportLine)}</div>
-        ${mismatch ? `<div class="slot-warning">${esc(mismatch)}</div>` : ''}
-        ${current ? `
-          <div class="slot-current-card">
-            <span class="location-spool-swatch" style="background:${current.color_hex || '#808080'}"></span>
-            <div class="location-spool-main">
-              <div class="location-spool-title">${esc(current.color_name || current.color_hex || 'Colour')} · ${esc(current.material)}${current.subtype ? ` ${esc(current.subtype)}` : ''}</div>
-              <div class="location-spool-sub">${esc(current.brand || 'Unknown brand')} · #${current.id} · ${Math.round(current.remaining_g || 0)}g</div>
-            </div>
+        <div class="slot-trust-board">
+          <div class="slot-trust-card">
+            <div class="slot-current-label">Printer report</div>
+            ${printerReportHtml}
           </div>
-          <div class="slot-actions">
+          <div class="slot-trust-card">
+            <div class="slot-current-label">Flightdeck assignment</div>
+            ${currentHtml}
+          </div>
+        </div>
+        ${mismatch ? `<div class="slot-warning">${esc(mismatch)}</div>` : ''}
+        ${suggestionHtml}
+        ${current ? `
+          <div class="slot-actions slot-actions-primary">
             <a class="spool-action-btn spool-action-detail" href="#/spool/${current.id}">Details</a>
             ${report && !report.empty && !report.active ? `<button class="spool-action-btn spool-action-label" data-slot-load>Load AMS slot</button>` : ''}
             ${report && !report.empty && report.active ? `<button class="spool-action-btn spool-action-weigh" data-slot-unload>Unload AMS slot</button>` : ''}
-            <button class="spool-action-btn spool-action-label" data-slot-trust-flightdeck="${current.id}">Trust Flightdeck</button>
-            ${report ? `<button class="spool-action-btn spool-action-edit" data-slot-trust-printer="${current.id}">Trust Printer</button>` : ''}
             <button class="spool-action-btn spool-action-label" data-slot-label-print="${current.id}">Label</button>
             <button class="spool-action-btn spool-action-weigh" data-slot-weigh="${current.id}">Weigh</button>
+          </div>
+          <div class="slot-actions slot-actions-secondary">
+            <button class="spool-action-btn spool-action-label" data-slot-trust-flightdeck="${current.id}">Trust Flightdeck</button>
+            ${report ? `<button class="spool-action-btn spool-action-edit" data-slot-trust-printer="${current.id}">Trust Printer</button>` : ''}
             <select class="slot-clear-location" data-slot-clear-location>${locationOptions}</select>
             <button class="spool-action-btn spool-action-danger" data-slot-clear="${current.id}">Return spool</button>
-          </div>` : `<div class="slot-empty-state">No Flightdeck spool assigned to this slot.</div>`}
+          </div>` : ''}
       </div>
       <div class="slot-assign">
         <label class="spool-form-label" for="slot-spool-filter">Assign stored spool</label>
@@ -8235,7 +8269,9 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
     body.querySelector('#slot-spool-filter')?.addEventListener('input', e => {
       const q = e.target.value.trim().toLowerCase();
       body.querySelectorAll('[data-slot-spool-id]').forEach(row => {
-        row.classList.toggle('hidden', q && !row.dataset.search.includes(q));
+        const search = row.dataset.search || '';
+        if (!search) return;
+        row.classList.toggle('hidden', q && !search.includes(q));
       });
     });
 

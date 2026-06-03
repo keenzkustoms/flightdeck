@@ -1,5 +1,12 @@
 # Flightdeck — next session brief
-_Last updated 3 June 2026 (Session 28.134 Bambu RFID spool auto-claim)_
+_Last updated 3 June 2026 (Session 28.135 AMS spool doctor polish)_
+
+## What was polished - Session 28.135 (AMS spool doctor polish - 3 June)
+- Reworked the AMS slot modal so it clearly separates the printer's reported slot state from Flightdeck's assigned spool.
+- Added a best stored-spool suggestion card above the search list, using the same assignment path as the normal spool picker.
+- Split current-slot actions into everyday controls (`Details`, `Load/Unload`, `Label`, `Weigh`) and correction controls (`Trust Flightdeck`, `Trust Printer`, `Return spool`) so mismatch repair is easier for a layman to follow.
+- Widened the modal and added responsive layouts so the Profile Doctor stays readable on desktop and mobile.
+- Bumped static cache versions to `app.js?v=218` and `style.css?v=175`.
 
 ## What was fixed - Session 28.134 (Bambu RFID spool auto-claim - 3 June)
 - Added Bambu reported-loaded slot reconciliation so if the printer reports an RFID/profile-family spool in an empty Flightdeck AMS slot, Flightdeck can auto-claim the matching shelved spool.

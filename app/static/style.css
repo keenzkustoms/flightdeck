@@ -5064,7 +5064,7 @@ button.live-route-node:hover {
 }
 
 .slot-modal {
-  max-width: 620px;
+  max-width: 760px;
 }
 
 .slot-modal-body {
@@ -5076,6 +5076,22 @@ button.live-route-node:hover {
 .slot-assign {
   display: grid;
   gap: 0.65rem;
+}
+
+.slot-trust-board {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0.65rem;
+}
+
+.slot-trust-card {
+  display: grid;
+  gap: 0.55rem;
+  min-width: 0;
+  border: 1px solid rgba(122,162,216,0.18);
+  border-radius: 0.55rem;
+  background: rgba(15,23,42,0.34);
+  padding: 0.75rem;
 }
 
 .slot-doctor {
@@ -5144,6 +5160,43 @@ button.live-route-node:hover {
   font-size: 0.8rem;
 }
 
+.slot-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
+.slot-facts div {
+  min-width: 0;
+  border: 1px solid rgba(122,162,216,0.16);
+  border-radius: 0.45rem;
+  background: rgba(5,8,14,0.32);
+  padding: 0.48rem 0.55rem;
+}
+
+.slot-facts span,
+.slot-facts strong {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.slot-facts span {
+  color: var(--muted);
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.slot-facts strong {
+  margin-top: 0.16rem;
+  color: var(--text);
+  font-size: 0.76rem;
+}
+
 .slot-warning {
   border: 1px solid rgba(245,158,11,0.45);
   background: rgba(245,158,11,0.11);
@@ -5170,6 +5223,51 @@ button.live-route-node:hover {
   flex-wrap: wrap;
   align-items: center;
   gap: 0.45rem;
+}
+
+.slot-actions-primary {
+  padding-top: 0.1rem;
+}
+
+.slot-actions-secondary {
+  border-top: 1px solid rgba(122,162,216,0.12);
+  padding-top: 0.55rem;
+}
+
+.slot-suggestion {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border: 1px solid rgba(34,197,94,0.38);
+  border-radius: 0.55rem;
+  background: rgba(34,197,94,0.08);
+  padding: 0.7rem 0.75rem;
+}
+
+.slot-suggestion span,
+.slot-suggestion strong,
+.slot-suggestion p {
+  display: block;
+}
+
+.slot-suggestion span {
+  color: #86efac;
+  font-size: 0.6rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.slot-suggestion strong {
+  color: var(--text);
+  font-size: 0.84rem;
+}
+
+.slot-suggestion p {
+  margin: 0.1rem 0 0;
+  color: var(--muted);
+  font-size: 0.72rem;
 }
 
 .slot-empty-state {
@@ -5263,6 +5361,18 @@ button.live-route-node:hover {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+  .slot-trust-board,
+  .slot-facts {
+    grid-template-columns: 1fr;
+  }
+
+  .slot-suggestion {
+    align-items: stretch;
+    flex-direction: column;
+  }
 }
 
 /* ── Object exclusion panel ── */
