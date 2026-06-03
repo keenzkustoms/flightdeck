@@ -1,5 +1,11 @@
 # Flightdeck — next session brief
-_Last updated 3 June 2026 (Session 28.130 Spool home shelf memory + installer guide)_
+_Last updated 3 June 2026 (Session 28.131 Operator cancels separated from failures)_
+
+## What was fixed - Session 28.131 (Operator cancels separated from failures - 3 June)
+- Stopped operator-cancelled prints from counting as reliability failures or dashboard Needs Attention causes.
+- Kept `CANCELLED` prints visible in normal history, while Failure Review now focuses on real failure states (`ERROR` / `ESTOP`).
+- Added a separate cancelled-print counter in usage summaries so cancellations remain reportable without skewing failure metrics.
+- Changed health wording from "failed/cancelled" to "failed" so printer cards read honestly.
 
 ## What was built - Session 28.130 (Spool home shelf memory + installer guide - 3 June)
 - Added spool home-shelf memory with `home_storage_location_id`, so a spool loaded from a shelf can automatically return to that shelf when cleared from an AMS/MMU slot.

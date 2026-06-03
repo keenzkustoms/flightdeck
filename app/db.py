@@ -556,7 +556,8 @@ def get_printer_usage_summary() -> list[dict]:
             """SELECT printer_id,
                       COUNT(*) AS total_prints,
                       SUM(CASE WHEN final_state = 'FINISHED' THEN 1 ELSE 0 END) AS finished_prints,
-                      SUM(CASE WHEN final_state IN ('ERROR', 'CANCELLED') THEN 1 ELSE 0 END) AS failed_prints,
+                      SUM(CASE WHEN final_state IN ('ERROR', 'ESTOP') THEN 1 ELSE 0 END) AS failed_prints,
+                      SUM(CASE WHEN final_state = 'CANCELLED' THEN 1 ELSE 0 END) AS cancelled_prints,
                       COALESCE(SUM(CASE WHEN duration_seconds IS NOT NULL THEN duration_seconds ELSE 0 END), 0) AS total_seconds,
                       COALESCE(SUM(CASE WHEN final_state = 'FINISHED' THEN duration_seconds ELSE 0 END), 0) AS finished_seconds,
                       COALESCE(SUM(filament_grams), 0) AS filament_grams
@@ -647,7 +648,7 @@ def _mark_reconcile_suggestions(usage: list[dict], spools: dict[int, dict], low_
 
 
 def get_failure_review(days: int = 90) -> dict:
-    """Recent failed/cancelled prints plus aggregate buckets for review."""
+    """Recent failed prints plus aggregate buckets for review."""
     import json
     days = max(1, min(int(days or 90), 365))
     with _conn() as conn:
@@ -658,7 +659,7 @@ def get_failure_review(days: int = 90) -> dict:
                       snapshot_captured_at IS NOT NULL AS has_snapshot,
                       spool_usage
                FROM prints
-               WHERE final_state IN ('ERROR', 'CANCELLED', 'ESTOP')
+               WHERE final_state IN ('ERROR', 'ESTOP')
                  AND started_at >= datetime('now', ?)
                ORDER BY started_at DESC
                LIMIT 200""",
@@ -739,9 +740,10 @@ def get_printer_health(printer_id: str) -> dict:
     with _conn() as conn:
         recent = conn.execute(
             """SELECT
-                   COUNT(*) AS total,
+                   SUM(CASE WHEN final_state IN ('FINISHED', 'ERROR', 'ESTOP') THEN 1 ELSE 0 END) AS total,
                    SUM(CASE WHEN final_state = 'FINISHED' THEN 1 ELSE 0 END) AS finished,
-                   SUM(CASE WHEN final_state IN ('ERROR', 'CANCELLED', 'ESTOP') THEN 1 ELSE 0 END) AS failed
+                   SUM(CASE WHEN final_state IN ('ERROR', 'ESTOP') THEN 1 ELSE 0 END) AS failed,
+                   SUM(CASE WHEN final_state = 'CANCELLED' THEN 1 ELSE 0 END) AS cancelled
                FROM prints
                WHERE printer_id = ?
                  AND final_state IS NOT NULL
@@ -752,7 +754,7 @@ def get_printer_health(printer_id: str) -> dict:
             """SELECT COUNT(*) AS n
                FROM prints
                WHERE printer_id = ?
-                 AND final_state IN ('ERROR', 'CANCELLED', 'ESTOP')
+                 AND final_state IN ('ERROR', 'ESTOP')
                  AND started_at >= datetime('now', '-14 days')
                  AND (
                    (duration_seconds IS NOT NULL AND duration_seconds <= 600)
@@ -773,6 +775,7 @@ def get_printer_health(printer_id: str) -> dict:
 
     total = int(recent["total"] or 0)
     failed = int(recent["failed"] or 0)
+    cancelled = int(recent["cancelled"] or 0)
     finished = int(recent["finished"] or 0)
     early_failures = int(early["n"] or 0)
     failed_queue = int(queue["failed"] or 0)
@@ -781,9 +784,9 @@ def get_printer_health(printer_id: str) -> dict:
     if due_maintenance:
         reasons.append({"level": "attention", "message": f"{len(due_maintenance)} maintenance due"})
     if failed >= 3:
-        reasons.append({"level": "attention", "message": f"{failed} failed/cancelled prints in 14d"})
+        reasons.append({"level": "attention", "message": f"{failed} failed prints in 14d"})
     elif failed >= 1:
-        reasons.append({"level": "watch", "message": f"{failed} failed/cancelled print{'s' if failed != 1 else ''} in 14d"})
+        reasons.append({"level": "watch", "message": f"{failed} failed print{'s' if failed != 1 else ''} in 14d"})
     if early_failures >= 3:
         reasons.append({"level": "watch", "message": f"{early_failures} early failures in 14d"})
     if failed_queue:
@@ -808,6 +811,7 @@ def get_printer_health(printer_id: str) -> dict:
         "success_rate_14d": success_rate,
         "prints_14d": total,
         "failures_14d": failed,
+        "cancelled_14d": cancelled,
         "early_failures_14d": early_failures,
         "reasons": reasons[:4],
     }
