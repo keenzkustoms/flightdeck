@@ -7984,9 +7984,15 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
         <span class="slot-spool-location">${esc(loc)}</span>
       </button>`;
     }).join('') : '<div class="slot-empty-state">No stored spools available.</div>';
-    const locationOptions = _spoolLocations.length
-      ? _spoolLocations.map(loc => `<option value="${loc.id}">${esc(loc.name)}</option>`).join('')
-      : '<option value="">Unassigned</option>';
+    const homeName = current?.home_storage_location_name || _spoolStorageLocationName(current?.home_storage_location_id);
+    const autoLocationLabel = homeName
+      ? `Return home (${homeName})`
+      : 'Return home';
+    const locationOptions = `<option value="">${esc(autoLocationLabel)}</option>` + (
+      _spoolLocations.length
+        ? _spoolLocations.map(loc => `<option value="${loc.id}">${esc(loc.name)}</option>`).join('')
+        : ''
+    );
     body.innerHTML = `
       <div class="slot-doctor slot-doctor-${doctor.cls}">
         <div>
@@ -8016,7 +8022,7 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
             <button class="spool-action-btn spool-action-label" data-slot-label-print="${current.id}">Label</button>
             <button class="spool-action-btn spool-action-weigh" data-slot-weigh="${current.id}">Weigh</button>
             <select class="slot-clear-location" data-slot-clear-location>${locationOptions}</select>
-            <button class="spool-action-btn spool-action-danger" data-slot-clear="${current.id}">Clear to storage</button>
+            <button class="spool-action-btn spool-action-danger" data-slot-clear="${current.id}">Return spool</button>
           </div>` : `<div class="slot-empty-state">No Flightdeck spool assigned to this slot.</div>`}
       </div>
       <div class="slot-assign">

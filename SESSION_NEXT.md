@@ -1,5 +1,12 @@
 # Flightdeck — next session brief
-_Last updated 3 June 2026 (Session 28.129 Public website fleet screenshot polish)_
+_Last updated 3 June 2026 (Session 28.130 Spool home shelf memory + installer guide)_
+
+## What was built - Session 28.130 (Spool home shelf memory + installer guide - 3 June)
+- Added spool home-shelf memory with `home_storage_location_id`, so a spool loaded from a shelf can automatically return to that shelf when cleared from an AMS/MMU slot.
+- Updated spool moves so manually returning a spool to a different shelf teaches Flightdeck the new home location.
+- Updated the AMS slot modal to default to `Return home (Shelf #x)` while still allowing an explicit shelf override.
+- Added a plain-English `INSTALL.md` for Raspberry Pi testers and linked it from the README.
+- Bumped the app cache to `app.js?v=215` so the AMS modal update is picked up immediately.
 
 ## What was polished - Session 28.129 (Public website fleet screenshot polish - 3 June)
 - Expanded the public website fleet camera screenshot into a full-width showcase so Voron, X1C, and H2D all remain visible.

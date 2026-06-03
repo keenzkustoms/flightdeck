@@ -107,6 +107,7 @@ def init() -> None:
                 location_printer_id TEXT,
                 location_slot       INTEGER,
                 storage_location_id INTEGER,
+                home_storage_location_id INTEGER,
                 notes               TEXT,
                 added_at            TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 archived_at         TIMESTAMP,
@@ -224,6 +225,7 @@ def init() -> None:
             "ALTER TABLE prints ADD COLUMN ams_slot_snapshot TEXT",
             "ALTER TABLE spools ADD COLUMN empty_spool_weight_g REAL",
             "ALTER TABLE spools ADD COLUMN storage_location_id INTEGER",
+            "ALTER TABLE spools ADD COLUMN home_storage_location_id INTEGER",
             "ALTER TABLE print_queue ADD COLUMN filament_colors TEXT",
         ):
             try:
@@ -292,9 +294,20 @@ def init() -> None:
                 (shelf1["id"], storage["id"]),
             )
             conn.execute(
+                "UPDATE spools SET home_storage_location_id = ? WHERE home_storage_location_id = ?",
+                (shelf1["id"], storage["id"]),
+            )
+            conn.execute(
                 "UPDATE spool_locations SET archived_at = CURRENT_TIMESTAMP WHERE id = ?",
                 (storage["id"],),
             )
+        conn.execute(
+            """UPDATE spools
+               SET home_storage_location_id = storage_location_id
+               WHERE home_storage_location_id IS NULL
+                 AND location_printer_id IS NULL
+                 AND storage_location_id IS NOT NULL"""
+        )
 
     # Clean up prints that started >24 h ago but never got a final_state
     # (backend crash during a print that has since ended)
@@ -1485,11 +1498,13 @@ def create_spool(
             """INSERT INTO spools
                (material, brand, subtype, color_hex, color_name,
                 label_weight_g, remaining_g, empty_spool_weight_g,
-                location_printer_id, location_slot, storage_location_id, notes)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                location_printer_id, location_slot, storage_location_id,
+                home_storage_location_id, notes)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (material, brand, subtype, color_hex, color_name,
              label_weight_g, remaining_g, empty_spool_weight_g,
-             location_printer_id, location_slot, storage_location_id, notes),
+             location_printer_id, location_slot, storage_location_id,
+             storage_location_id, notes),
         )
         spool_id = cursor.lastrowid
     printer = location_printer_id or "none"
@@ -1505,7 +1520,9 @@ def get_spools(include_archived: bool = False) -> list:
             f"""SELECT id, material, brand, subtype, color_hex, color_name,
                        label_weight_g, remaining_g, empty_spool_weight_g,
                        location_printer_id, location_slot, storage_location_id,
+                       home_storage_location_id,
                        (SELECT name FROM spool_locations WHERE id = spools.storage_location_id) AS storage_location_name,
+                       (SELECT name FROM spool_locations WHERE id = spools.home_storage_location_id) AS home_storage_location_name,
                        notes, added_at, archived_at
                 FROM spools {where}
                 ORDER BY material, brand, id"""
@@ -1521,7 +1538,9 @@ def get_spool(spool_id: int) -> Optional[dict]:
             """SELECT id, material, brand, subtype, color_hex, color_name,
                       label_weight_g, remaining_g, empty_spool_weight_g,
                       location_printer_id, location_slot, storage_location_id,
+                      home_storage_location_id,
                       (SELECT name FROM spool_locations WHERE id = spools.storage_location_id) AS storage_location_name,
+                      (SELECT name FROM spool_locations WHERE id = spools.home_storage_location_id) AS home_storage_location_name,
                       notes, added_at, archived_at
                FROM spools WHERE id = ?""",
             (spool_id,),
@@ -1788,20 +1807,39 @@ def move_spool(
             if conflict:
                 return {"ok": False, "conflict_spool_id": conflict["id"]}
         old = conn.execute(
-            "SELECT location_printer_id, location_slot, storage_location_id FROM spools WHERE id = ?",
+            """SELECT location_printer_id, location_slot, storage_location_id, home_storage_location_id
+               FROM spools WHERE id = ?""",
             (spool_id,),
         ).fetchone()
+        old_storage_id = old["storage_location_id"] if old else None
+        old_home_id = old["home_storage_location_id"] if old else None
+        if printer_id is not None:
+            target_storage_id = None
+            target_home_id = old_home_id
+            if old and old["location_printer_id"] is None and old_storage_id is not None:
+                target_home_id = old_storage_id
+            elif target_home_id is None and storage_location_id is not None:
+                target_home_id = storage_location_id
+        else:
+            target_storage_id = storage_location_id if storage_location_id is not None else (old_home_id or old_storage_id)
+            target_home_id = target_storage_id or old_home_id
         conn.execute(
             """UPDATE spools
-               SET location_printer_id = ?, location_slot = ?, storage_location_id = ?
+               SET location_printer_id = ?, location_slot = ?,
+                   storage_location_id = ?, home_storage_location_id = ?
                WHERE id = ?""",
-            (printer_id, slot, None if printer_id else storage_location_id, spool_id),
+            (printer_id, slot, target_storage_id, target_home_id, spool_id),
         )
     if old:
         old_loc = f"{old['location_printer_id']}:{old['location_slot']}" if old["location_printer_id"] else "storage"
-        new_loc = f"{printer_id}:{slot}" if printer_id else f"storage:{storage_location_id or 'none'}"
+        new_loc = f"{printer_id}:{slot}" if printer_id else f"storage:{target_storage_id or 'none'}"
         log_decision("system", "spool_moved", f"Spool #{spool_id} {old_loc} → {new_loc}")
-    return {"ok": True, "conflict_spool_id": None}
+    return {
+        "ok": True,
+        "conflict_spool_id": None,
+        "storage_location_id": target_storage_id,
+        "home_storage_location_id": target_home_id,
+    }
 
 
 def get_spool_locations(include_archived: bool = False) -> list:
@@ -1847,6 +1885,10 @@ def archive_spool_location(location_id: int) -> bool:
         if c.rowcount:
             conn.execute(
                 "UPDATE spools SET storage_location_id = NULL WHERE storage_location_id = ?",
+                (location_id,),
+            )
+            conn.execute(
+                "UPDATE spools SET home_storage_location_id = NULL WHERE home_storage_location_id = ?",
                 (location_id,),
             )
     return c.rowcount > 0

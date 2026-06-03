@@ -12,6 +12,8 @@ It's built primarily for my own bench (one Voron Greyhound Elite V2, a Bambu H2D
 
 Project website files live in [`docs/`](docs/) for GitHub Pages.
 
+New tester? Start with the plain-English setup guide: [`INSTALL.md`](INSTALL.md).
+
 ---
 
 ## Safe Restart
