@@ -3802,6 +3802,49 @@ function _spoolTraceRow(row) {
   </div>`;
 }
 
+function _spoolActivityMeta(row) {
+  const ts = row.logged_at ? new Date(row.logged_at.endsWith('Z') ? row.logged_at : row.logged_at + 'Z') : null;
+  const when = ts ? ts.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
+  const p = _latestPrinters.find(x => x.id === row.printer_id);
+  const source = row.printer_id === 'system'
+    ? 'Flightdeck'
+    : (p?.custom_name || row.printer_id || 'Flightdeck');
+  return `${source} · ${when}`;
+}
+
+function _spoolActivityLabel(event) {
+  const labels = {
+    spool_added: 'Added',
+    spool_moved: 'Moved',
+    spool_auto_returned: 'Auto-returned',
+    spool_auto_claimed: 'Auto-claimed',
+    spool_trusted_printer: 'Trusted printer',
+    spool_deducted: 'Deducted',
+    spool_overdrawn: 'Overdraw',
+    spool_missing: 'Missing',
+  };
+  return labels[event] || String(event || 'Activity').replace(/^spool_/, '').replace(/_/g, ' ');
+}
+
+function _spoolActivityClass(event) {
+  if (event === 'spool_auto_claimed' || event === 'spool_auto_returned') return 'good';
+  if (event === 'spool_trusted_printer' || event === 'spool_moved' || event === 'spool_added') return 'info';
+  if (event === 'spool_overdrawn' || event === 'spool_missing') return 'warn';
+  return 'info';
+}
+
+function _spoolActivityRow(row) {
+  const cls = _spoolActivityClass(row.event);
+  return `<div class="spool-activity-row spool-activity-${cls}">
+    <div class="spool-activity-dot"></div>
+    <div class="spool-activity-main">
+      <div class="spool-activity-title">${esc(_spoolActivityLabel(row.event))}</div>
+      <div class="spool-activity-detail">${esc(row.detail || '')}</div>
+      <div class="spool-activity-meta">${esc(_spoolActivityMeta(row))}</div>
+    </div>
+  </div>`;
+}
+
 async function renderSpoolDetail(spoolId) {
   const el = document.getElementById('spool-detail');
   if (!el) return;
@@ -3828,6 +3871,7 @@ async function renderSpoolDetail(spoolId) {
   const textColor = _spoolTextColor(bandColor);
   const progressColor = _spoolProgressColor(pct);
   const trace = data.usage || [];
+  const activity = data.activity || [];
   const confidence = data.confidence || {};
   const confidenceReasons = (confidence.reasons || []).map(r => `<span>${esc(r)}</span>`).join('');
 
@@ -3869,6 +3913,10 @@ async function renderSpoolDetail(spoolId) {
         <span>${data.usage_count || 0} print${data.usage_count === 1 ? '' : 's'}</span>
       </div>
       ${data.notes ? `<div class="spool-detail-notes">${esc(data.notes)}</div>` : ''}
+    </section>
+    <section class="spool-trace-panel">
+      <div class="history-day-header">AMS / Shelf Activity</div>
+      ${activity.length ? activity.map(_spoolActivityRow).join('') : '<div class="print-empty">No spool activity recorded yet.</div>'}
     </section>
     <section class="spool-trace-panel">
       <div class="history-day-header">Print Usage</div>

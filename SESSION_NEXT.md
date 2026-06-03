@@ -1,5 +1,11 @@
 # Flightdeck — next session brief
-_Last updated 3 June 2026 (Session 28.135 AMS spool doctor polish)_
+_Last updated 3 June 2026 (Session 28.136 Spool activity trace polish)_
+
+## What was polished - Session 28.136 (Spool activity trace polish - 3 June)
+- Extended `/api/spools/{id}/trace` so spool detail pages include matching spool activity from the Flightdeck decision log.
+- Added an `AMS / Shelf Activity` timeline to spool detail pages showing moves, auto-returns, auto-claims, printer-trust updates, and warning events for that spool.
+- Styled the activity timeline with clear event labels and colour-coded dots so a spool's shelf/AMS story is readable without digging through logs.
+- Bumped static cache versions to `app.js?v=219` and `style.css?v=176`.
 
 ## What was polished - Session 28.135 (AMS spool doctor polish - 3 June)
 - Reworked the AMS slot modal so it clearly separates the printer's reported slot state from Flightdeck's assigned spool.

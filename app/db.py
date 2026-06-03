@@ -1680,12 +1680,13 @@ def _attach_spool_confidence(conn: sqlite3.Connection, spools: list[dict]) -> No
 
 
 def get_spool_trace(spool_id: int) -> Optional[dict]:
-    """Return spool identity plus every print row that recorded usage for it."""
+    """Return spool identity plus print usage and movement/activity rows."""
     spool = get_spool(spool_id)
     if not spool:
         return None
     import json
     usage = []
+    activity = []
     with _conn() as conn:
         rows = conn.execute(
             """SELECT id, printer_id, filename, subtask_name, started_at, ended_at,
@@ -1694,6 +1695,14 @@ def get_spool_trace(spool_id: int) -> Optional[dict]:
                FROM prints
                WHERE spool_usage IS NOT NULL
                ORDER BY started_at DESC""",
+        ).fetchall()
+        activity_rows = conn.execute(
+            """SELECT id, printer_id, event, detail, logged_at
+               FROM decisions
+               WHERE detail LIKE ?
+               ORDER BY logged_at DESC, id DESC
+               LIMIT 80""",
+            (f"%Spool #{int(spool_id)}%",),
         ).fetchall()
     total_used = 0.0
     for row in rows:
@@ -1713,9 +1722,12 @@ def get_spool_trace(spool_id: int) -> Optional[dict]:
             item["waste_grams"] = round(float(entry.get("waste_grams") or 0), 2)
             item["usage_slot"] = entry.get("slot")
             usage.append(item)
+    for row in activity_rows:
+        activity.append(dict(row))
     spool["usage"] = usage
     spool["usage_count"] = len(usage)
     spool["usage_total_g"] = round(total_used, 2)
+    spool["activity"] = activity
     return spool
 
 
