@@ -2354,6 +2354,8 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Confirmed the live printer was reading the RFID slot correctly and Flightdeck had already moved spool `#28` into `AMS 1 · S3`; the mismatch was caused by comparing Bambu profile codes as if they were human-readable filament names.
 - Added Bambu profile-code tolerance so codes such as `A00-P6` do not trigger a profile mismatch once material and colour already match.
 - Added profile-family matching so Bambu RFID names such as `PLA Basic` can match spools stored as `Bambu Lab / Basic / PLA`.
+- Mirrored the same Bambu RFID tolerance in the frontend AMS slot tooltip/Profile Doctor path, which had its own profile mismatch logic.
+- Bumped the app cache to `app.js?v=216` so browsers pick up the frontend AMS matching fix.
 
 ---
 

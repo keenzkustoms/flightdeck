@@ -7857,6 +7857,21 @@ function _slotProfileLabel(report) {
   return bits.join(' · ');
 }
 
+function _looksLikeBambuProfileCode(value) {
+  return /^[A-Z]\d{2}[-_ ]?[A-Z0-9]+$/i.test(String(value || '').trim());
+}
+
+function _reportedBrandMatchesSpool(reportedBrand, spool) {
+  const reported = _normMat(reportedBrand);
+  const spoolBrand = _normMat(spool?.brand || '');
+  if (!reported || reported === 'GENERIC' || reported === spoolBrand) return true;
+  const spoolProfile = _normMat([spool?.brand, spool?.material, spool?.subtype].filter(Boolean).join(' '));
+  if (spoolProfile && (spoolProfile.includes(reported) || reported.includes(spoolProfile))) return true;
+  const reportedFamily = _normMat(String(reportedBrand || '').replace(/\bbambu\s+lab\b/ig, ''));
+  const spoolFamily = _normMat([spool?.material, spool?.subtype].filter(Boolean).join(' '));
+  return !!(reportedFamily && spoolFamily && (spoolFamily.includes(reportedFamily) || reportedFamily.includes(spoolFamily)));
+}
+
 function _slotMismatch(spool, report) {
   const printerLoaded = report && !report.empty;
   if (!spool && printerLoaded) return 'Printer reports filament but no Flightdeck spool is assigned';
@@ -7873,15 +7888,18 @@ function _slotMismatch(spool, report) {
   }
   const reportedBrand = _normMat(report.brand || '');
   const spoolBrand = _normMat(spool.brand || '');
-  if (reportedBrand && spoolBrand && reportedBrand !== spoolBrand && reportedBrand !== 'generic') {
+  if (reportedBrand && spoolBrand && !_reportedBrandMatchesSpool(report.brand || '', spool)) {
     return `Brand mismatch: printer ${report.brand}, Flightdeck ${spool.brand}`;
   }
   const reportedProfile = _normMat(report.profile_name || '');
   const spoolProfile = _normMat([spool.brand, spool.material, spool.subtype].filter(Boolean).join(' '));
+  if (_looksLikeBambuProfileCode(report.profile_name)) {
+    return '';
+  }
   if (reportedProfile && spoolProfile && reportedProfile !== 'generic' && !spoolProfile.includes(reportedProfile) && !reportedProfile.includes(spoolProfile)) {
     return `Profile mismatch: printer ${report.profile_name}, Flightdeck ${[spool.brand, spool.material, spool.subtype].filter(Boolean).join(' ')}`;
   }
-  if (reportedBrand === 'generic' && spoolBrand && spoolBrand !== 'generic') {
+  if (reportedBrand === 'GENERIC' && spoolBrand && spoolBrand !== 'GENERIC') {
     return `Profile review: printer reports Generic, Flightdeck has ${spool.brand}`;
   }
   return '';
