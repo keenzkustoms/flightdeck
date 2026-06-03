@@ -393,6 +393,17 @@ body {
   font-weight: 800;
 }
 
+.mission-signal-button {
+  border: 0;
+  cursor: pointer;
+  font-family: inherit;
+  line-height: inherit;
+}
+
+.mission-signal-button:hover {
+  outline: 1px solid currentColor;
+}
+
 .mission-signal-ok { color: #86efac; background: rgba(34,197,94,0.08); }
 .mission-signal-warn { color: #fcd34d; background: rgba(245,158,11,0.1); }
 .mission-signal-bad { color: #fca5a5; background: rgba(239,68,68,0.1); }
@@ -2406,6 +2417,15 @@ header {
   background: rgba(59,130,246,0.08);
 }
 
+.dash-attention-button {
+  width: 100%;
+  border: 1px solid rgba(255,255,255,0.045);
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
 .dash-attention-name {
   color: var(--text);
   font-weight: 700;
@@ -2814,6 +2834,8 @@ header {
   letter-spacing: 0.05em;
   white-space: nowrap;
 }
+.status-pill[role="button"] { cursor: pointer; }
+.status-pill[role="button"]:hover { filter: brightness(1.12); }
 .pill-ok    { background: #14532d; color: #bbf7d0; }
 .pill-warn  { background: #78350f; color: #fde68a; }
 .pill-error { background: #7f1d1d; color: #fecaca; }

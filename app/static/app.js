@@ -1086,6 +1086,54 @@ function _dashboardIssueText(p) {
   return p.state || 'idle';
 }
 
+function _printerWarningTarget(p) {
+  if (!p) return null;
+  const loaded = _latestSpoolsByPrinter[p.id] || [];
+  const amsWarning = _amsMismatchSignals(p, loaded)[0];
+  if (amsWarning?.slotIndex != null) {
+    return {
+      type: 'slot',
+      printerId: p.id,
+      slotIndex: Number(amsWarning.slotIndex),
+      slotLabel: amsWarning.slotLabel || `S${Number(amsWarning.slotIndex) + 1}`,
+      title: amsWarning.title || amsWarning.label,
+    };
+  }
+  if (_healthIsActionable(p.health)) {
+    return {
+      type: 'hash',
+      hash: `#/printer/${encodeURIComponent(p.id)}/failures`,
+      title: p.health?.reasons?.[0]?.message || 'Open printer attention',
+    };
+  }
+  if (p.state === 'offline' || p.state === 'error' || p.state === 'estop' || p.state === 'paused') {
+    return {
+      type: 'hash',
+      hash: `#/printer/${encodeURIComponent(p.id)}`,
+      title: _dashboardIssueText(p),
+    };
+  }
+  return null;
+}
+
+function _firstWarningTarget(printers) {
+  return [...(printers || [])]
+    .sort((a, b) => _dashboardStateRank(a) - _dashboardStateRank(b) || _dashboardPrinterName(a).localeCompare(_dashboardPrinterName(b)))
+    .map(_printerWarningTarget)
+    .find(Boolean) || null;
+}
+
+function _warningTargetAttrs(target) {
+  if (!target) return '';
+  if (target.type === 'slot') {
+    return ` data-warning-target="slot" data-printer-id="${esc(target.printerId)}" data-slot-index="${Number(target.slotIndex)}" data-slot-label="${esc(target.slotLabel)}" title="${esc(target.title || 'Open AMS slot warning')}"`;
+  }
+  if (target.type === 'hash') {
+    return ` data-warning-target="hash" data-hash="${esc(target.hash)}" title="${esc(target.title || 'Open warning')}"`;
+  }
+  return '';
+}
+
 function _renderDashboardOverview(printers) {
   const counts = printers.reduce((acc, p) => {
     acc[p.state] = (acc[p.state] || 0) + 1;
@@ -1109,7 +1157,14 @@ function _renderDashboardOverview(printers) {
         ? 'warn'
         : 'muted';
     const href = _healthIsActionable(p.health) ? `#/printer/${encodeURIComponent(p.id)}/failures` : `#/printer/${encodeURIComponent(p.id)}`;
-    return `<a class="dash-attention-item dash-attention-${severity}" href="${href}">
+    const target = _printerWarningTarget(p);
+    if (target?.type === 'slot') {
+      return `<button class="dash-attention-item dash-attention-${severity} dash-attention-button"${_warningTargetAttrs(target)}>
+        <span class="dash-attention-name">${esc(_dashboardPrinterName(p))}</span>
+        <span class="dash-attention-text">${esc(_dashboardIssueText(p))}</span>
+      </button>`;
+    }
+    return `<a class="dash-attention-item dash-attention-${severity}" href="${target?.hash || href}">
       <span class="dash-attention-name">${esc(_dashboardPrinterName(p))}</span>
       <span class="dash-attention-text">${esc(_dashboardIssueText(p))}</span>
     </a>`;
@@ -1284,7 +1339,29 @@ function updateStatusPill(printers) {
   const pill = document.getElementById('status-pill');
   if (!pill || !printers.length) return;
   const faults   = printers.filter(p => p.state === 'error').length;
-  const warnings = printers.filter(p => p.state === 'paused' || p.state === 'offline').length;
+  const warnings = printers.filter(p =>
+    p.state === 'paused' ||
+    p.state === 'offline' ||
+    (_printerWarningTarget(p) && p.state !== 'error' && p.state !== 'estop')
+  ).length;
+  const target = faults || warnings ? _firstWarningTarget(printers) : null;
+  ['warningTarget', 'printerId', 'slotIndex', 'slotLabel', 'hash'].forEach(k => delete pill.dataset[k]);
+  pill.removeAttribute('title');
+  pill.removeAttribute('role');
+  pill.removeAttribute('tabindex');
+  if (target) {
+    pill.dataset.warningTarget = target.type;
+    pill.title = target.title || 'Open warning';
+    pill.setAttribute('role', 'button');
+    pill.setAttribute('tabindex', '0');
+    if (target.type === 'slot') {
+      pill.dataset.printerId = target.printerId;
+      pill.dataset.slotIndex = String(target.slotIndex);
+      pill.dataset.slotLabel = target.slotLabel;
+    } else if (target.type === 'hash') {
+      pill.dataset.hash = target.hash;
+    }
+  }
   if (faults > 0) {
     pill.className = 'status-pill pill-error';
     pill.textContent = `${faults} fault${faults > 1 ? 's' : ''}`;
@@ -1501,6 +1578,26 @@ document.addEventListener('click', e => {
   e.preventDefault();
   e.stopPropagation();
   toggleBambuLight(lightToggle.dataset.lightToggle);
+}, true);
+
+document.addEventListener('click', e => {
+  const target = e.target.closest('[data-warning-target], [data-slot-edit]');
+  if (!target) return;
+  if (target.dataset.warningTarget === 'hash') {
+    e.preventDefault();
+    e.stopPropagation();
+    if (target.dataset.hash) location.hash = target.dataset.hash;
+    return;
+  }
+  if (target.dataset.warningTarget === 'slot' || target.dataset.slotEdit !== undefined) {
+    e.preventDefault();
+    e.stopPropagation();
+    _openSlotEditor(
+      target.dataset.printerId,
+      Number(target.dataset.slotIndex),
+      target.dataset.slotLabel || `S${Number(target.dataset.slotIndex) + 1}`
+    );
+  }
 }, true);
 
 document.addEventListener('keydown', e => {
@@ -4950,6 +5047,9 @@ function _missionPrinterSignals(p, jobs, spools, maint) {
     level: 'warn',
     text: m.label,
     title: m.title,
+    slotIndex: m.slotIndex,
+    slotLabel: m.slotLabel,
+    printerId: p.id,
   }));
   const dueMaint = (maint[p.id] || []).filter(i => !i.archived_at && (i.status === 'due' || i.due));
   if (dueMaint.length) signals.push({ level: 'warn', text: `${dueMaint.length} maintenance item${dueMaint.length === 1 ? '' : 's'} due` });
@@ -4957,6 +5057,21 @@ function _missionPrinterSignals(p, jobs, spools, maint) {
   if (failedQueue) signals.push({ level: 'warn', text: `${failedQueue} failed queue job${failedQueue === 1 ? '' : 's'}` });
   if (!signals.length && !jobs.length && p.state === 'idle') signals.push({ level: 'ok', text: 'Idle and available' });
   return signals.slice(0, 4);
+}
+
+function _missionSignalHtml(signal) {
+  const title = signal.title || signal.text;
+  if (signal.slotIndex != null) {
+    const target = {
+      type: 'slot',
+      printerId: signal.printerId,
+      slotIndex: Number(signal.slotIndex),
+      slotLabel: signal.slotLabel || `S${Number(signal.slotIndex) + 1}`,
+      title,
+    };
+    return `<button class="mission-signal mission-signal-${signal.level} mission-signal-button"${_warningTargetAttrs(target)}>${esc(signal.text)}</button>`;
+  }
+  return `<span class="mission-signal mission-signal-${signal.level}" title="${esc(title)}">${esc(signal.text)}</span>`;
 }
 
 function _missionQueueForPrinter(jobs, printerId) {
@@ -5568,7 +5683,7 @@ async function renderMissionControl() {
         <div class="mission-timeline">${queueHtml}${queueMore}</div>
         <div class="mission-loaded">${_missionLoadedLine(p, spools)}</div>
         <div class="mission-signals">
-          ${signals.map(s => `<span class="mission-signal mission-signal-${s.level}" title="${esc(s.title || s.text)}">${esc(s.text)}</span>`).join('')}
+          ${signals.map(_missionSignalHtml).join('')}
         </div>
       </section>`;
     }).join('') || `<div class="mission-empty-filter">No printers match this filter.</div>`;

@@ -1,5 +1,12 @@
 # Flightdeck — next session brief
-_Last updated 3 June 2026 (Session 28.132 H2D AMS-test cancellations repaired)_
+_Last updated 3 June 2026 (Session 28.133 AMS ghost-spool cleanup + clickable warnings)_
+
+## What was fixed - Session 28.133 (AMS ghost-spool cleanup + clickable warnings - 3 June)
+- Added Bambu empty-slot reconciliation so if the printer reports an AMS/HT slot empty, Flightdeck automatically returns any stale assigned spool to its home shelf, falling back to the first active shelf if the spool predates home-shelf memory.
+- Repaired the current ghost assignment by returning spool `#28` from H2D AMS 1 S3 to Shelf #1; the actual loaded state should remain `#3` in AMS1 S1, `#31` in AMS1 S2, and `#2` in AMS HT.
+- Made AMS mismatch warnings click-through controls: dashboard attention rows, Flight Tower warning chips, and the top warning pill can now open the exact AMS slot/Profile Doctor when Flightdeck knows the warning source.
+- The header warning pill now counts actionable health/AMS warnings, not just paused/offline printer states.
+- Bumped static cache versions to `app.js?v=217` and `style.css?v=174`.
 
 ## What was fixed - Session 28.132 (H2D AMS-test cancellations repaired - 3 June)
 - Reclassified the known H2D AMS mismatch test stops from `ERROR` to `CANCELLED` so they no longer cry wolf on the dashboard.

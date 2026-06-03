@@ -82,6 +82,7 @@ async def _gather_all() -> list[dict]:
         status.temperature_presets = _presets.get(p.id, {})
         _update_last_seen(status)
         d = asdict(status)
+        _reconcile_empty_reported_slots(d)
         cal = db.get_calibration(p.id)
         if cal:
             d["eta_calibration"] = cal
@@ -112,6 +113,44 @@ def _update_last_seen(status) -> None:
         db.set_last_seen(status.id, status.last_seen)
     elif status.state == "offline" and status.id in _last_seen_cache:
         status.last_seen = _last_seen_cache[status.id]
+
+
+def _default_spool_location_id() -> Optional[int]:
+    for loc in db.get_spool_locations():
+        if not loc.get("archived_at"):
+            return int(loc["id"])
+    return None
+
+
+def _reconcile_empty_reported_slots(printer_status: dict) -> None:
+    """Return stale Flightdeck assignments when Bambu reports the slot empty."""
+    printer_id = printer_status.get("id")
+    if not printer_id:
+        return
+    loaded_by_slot = db.get_spools_by_printer(str(printer_id))
+    if not loaded_by_slot:
+        return
+
+    for slot in _flatten_reported_ams_slots(printer_status, include_empty=True):
+        if not slot.get("empty"):
+            continue
+        flat_slot = slot.get("flat_slot")
+        if flat_slot is None:
+            continue
+        spool = loaded_by_slot.get(int(flat_slot))
+        if not spool:
+            continue
+
+        full_spool = db.get_spool(int(spool["id"])) or spool
+        home_id = full_spool.get("home_storage_location_id") or full_spool.get("storage_location_id")
+        target_location_id = int(home_id) if home_id is not None else _default_spool_location_id()
+        result = db.move_spool(int(spool["id"]), None, None, target_location_id)
+        if result.get("ok"):
+            db.log_decision(
+                str(printer_id),
+                "spool_auto_returned",
+                f"Spool #{spool['id']} auto-returned from empty {slot.get('label') or flat_slot}",
+            )
 
 
 async def _grab_snapshot(printer_id: str) -> Optional[bytes]:
