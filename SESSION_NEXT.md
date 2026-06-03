@@ -5,6 +5,7 @@ _Last updated 3 June 2026 (Session 28.132 H2D AMS-test cancellations repaired)_
 - Reclassified the known H2D AMS mismatch test stops from `ERROR` to `CANCELLED` so they no longer cry wolf on the dashboard.
 - Added an audit note before each repair so the original printer error text is still traceable in the decision trail.
 - Tightened Bambu cancel handling so a user-requested cancel that lands in Bambu's retained `FAILED` state resolves as `CANCELLED`, not a reliability failure.
+- Repaired the one X1C history row that explicitly said it was cancelled, while leaving real/suspicious X1C error-code rows visible for review.
 
 ## What was fixed - Session 28.131 (Operator cancels separated from failures - 3 June)
 - Stopped operator-cancelled prints from counting as reliability failures or dashboard Needs Attention causes.
