@@ -1,5 +1,12 @@
 # Flightdeck — next session brief
-_Last updated 3 June 2026 (Session 28.136 Spool activity trace polish)_
+_Last updated 3 June 2026 (Session 28.137 Dashboard flight briefing)_
+
+## What was polished - Session 28.137 (Dashboard flight briefing - 3 June)
+- Added a `Flight Briefing` handover panel at the top of the dashboard so the first view now summarises what needs operator eyes before the printer cards.
+- The briefing uses existing Flightdeck state only: printer faults/offline/paused states, actionable health warnings, AMS profile warnings, active prints, and loaded low-spool risk.
+- Briefing rows link directly to the relevant printer, spool, Flight Tower, or exact AMS slot/Profile Doctor when Flightdeck knows the warning source.
+- Added a calm `Clear skies` state when there are no active warnings or loaded spool risks.
+- Bumped static cache versions to `app.js?v=220` and `style.css?v=177`.
 
 ## What was polished - Session 28.136 (Spool activity trace polish - 3 June)
 - Extended `/api/spools/{id}/trace` so spool detail pages include matching spool activity from the Flightdeck decision log.
