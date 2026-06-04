@@ -1,5 +1,11 @@
 # Flightdeck — next session brief
-_Last updated 4 June 2026 (Session 28.156 History gallery removed)_
+_Last updated 4 June 2026 (Session 28.157 History heatmap ranges)_
+
+## What was built - Session 28.157 (History heatmap ranges - 4 June)
+- Added a compact History heatmap range selector with Week, Month, and Year views.
+- Kept Year as the default existing daily heatmap; Week and Month summarize from the same per-day history calendar data.
+- Weekly/monthly summary tiles open the busiest day in that range so the existing day/detail drill-in remains the only print detail surface.
+- Bumped static cache versions to `app.js?v=240` and `style.css?v=190`.
 
 ## What was reverted - Session 28.156 (History gallery removed - 4 June)
 - Removed the History thumbnail gallery after live review; the History tab is back to year nav, heatmap, and day/detail drill-in only.

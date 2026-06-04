@@ -191,6 +191,7 @@ const _lightOptimistic = {};    // printer_id → { state, expiresAt }
 const _tempOptimistic = {};     // `${id}:${heater}` → { sentTarget, expiresAt }
 const _objectsCache = {};       // printer_id → { supported, objects }
 const _historyYear = {};        // printer_id → selected year (int)
+const _historyHeatmapMode = {}; // printer_id -> yearly | monthly | weekly
 const _dayPrintsCache = {};     // `${printerId}:${dateStr}` → prints[]
 let _camerasFull = false;       // true once cameras grid has been fully rendered
 let _camerasMode = 'live';       // live | sim30
@@ -3216,7 +3217,126 @@ function _historySummaryLine(summary) {
   return `<div class="heat-summary">${parts.join(' · ')}</div>`;
 }
 
-function _historyHeatmap(printerId, dayData, year) {
+function _historyModeControl(mode) {
+  const modes = [
+    ['weekly', 'Week'],
+    ['monthly', 'Month'],
+    ['yearly', 'Year'],
+  ];
+  return `<div class="heat-mode-control" role="tablist" aria-label="History heatmap range">
+    ${modes.map(([value, label]) => `
+      <button class="heat-mode-btn${mode === value ? ' active' : ''}" data-history-mode="${value}" type="button" role="tab" aria-selected="${mode === value ? 'true' : 'false'}">${label}</button>
+    `).join('')}
+  </div>`;
+}
+
+function _historyAggregateDay(a, d) {
+  const total = Number(d.total || 0);
+  a.total += total;
+  a.finished += Number(d.finished || 0);
+  a.cancelled += Number(d.cancelled || 0);
+  a.errors += Number(d.errors || 0);
+  if (total > a.peakTotal) {
+    a.peakTotal = total;
+    a.peakDay = d.day;
+  }
+}
+
+function _historyAggregateColor(total, maxTotal) {
+  if (!total) return null;
+  if (maxTotal <= 1) return 'rgba(34,197,94,0.35)';
+  const level = total / maxTotal;
+  if (level >= 0.75) return 'rgba(34,197,94,1)';
+  if (level >= 0.4) return 'rgba(34,197,94,0.62)';
+  return 'rgba(34,197,94,0.3)';
+}
+
+function _historyAggregateTile(a, maxTotal, extraClass = '') {
+  const color = _historyAggregateColor(a.total, maxTotal);
+  const cls = ['heat-agg-tile', color ? '' : 'heat-empty', extraClass].filter(Boolean).join(' ');
+  const tip = a.total
+    ? `${a.label}: ${a.total} print${a.total !== 1 ? 's' : ''} (${a.finished} finished)`
+    : `${a.label}: no prints`;
+  return `<button class="${cls}" type="button" data-date="${a.peakDay || a.start}"${color ? ` style="background:${color}"` : ''} title="${tip}">
+    <span class="heat-agg-label">${a.label}</span>
+    <strong>${a.total || ''}</strong>
+  </button>`;
+}
+
+function _historyWeeklyHeatmap(dayData, year) {
+  const byDate = {};
+  for (const d of dayData) byDate[d.day] = d;
+
+  const jan1 = new Date(Date.UTC(year, 0, 1));
+  const jan1dow = jan1.getUTCDay();
+  const daysToMon = jan1dow === 0 ? 6 : jan1dow - 1;
+  const gridStart = new Date(jan1);
+  gridStart.setUTCDate(jan1.getUTCDate() - daysToMon);
+
+  const dec31 = new Date(Date.UTC(year, 11, 31));
+  const dec31dow = dec31.getUTCDay();
+  const daysToSun = dec31dow === 0 ? 0 : 7 - dec31dow;
+  const gridEnd = new Date(dec31);
+  gridEnd.setUTCDate(dec31.getUTCDate() + daysToSun);
+
+  const weeks = [];
+  for (let start = new Date(gridStart); start <= gridEnd; start.setUTCDate(start.getUTCDate() + 7)) {
+    const end = new Date(start);
+    end.setUTCDate(start.getUTCDate() + 6);
+    if (end.getUTCFullYear() !== year && start.getUTCFullYear() !== year) continue;
+    const agg = {
+      label: start.toLocaleDateString([], { month: 'short', day: 'numeric', timeZone: 'UTC' }),
+      start: start.toISOString().slice(0, 10),
+      total: 0,
+      finished: 0,
+      cancelled: 0,
+      errors: 0,
+      peakTotal: 0,
+      peakDay: null,
+    };
+    for (let i = 0; i < 7; i++) {
+      const cell = new Date(start);
+      cell.setUTCDate(start.getUTCDate() + i);
+      if (cell.getUTCFullYear() !== year) continue;
+      const dateStr = cell.toISOString().slice(0, 10);
+      if (byDate[dateStr]) _historyAggregateDay(agg, byDate[dateStr]);
+    }
+    weeks.push(agg);
+  }
+
+  const maxTotal = Math.max(1, ...weeks.map(w => w.total));
+  return `<div class="history-section">
+    <div class="heat-agg-grid heat-week-grid">
+      ${weeks.map(w => _historyAggregateTile(w, maxTotal)).join('')}
+    </div>
+  </div>`;
+}
+
+function _historyMonthlyHeatmap(dayData, year) {
+  const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const months = MONTHS.map((label, idx) => ({
+    label,
+    start: `${year}-${String(idx + 1).padStart(2, '0')}-01`,
+    total: 0,
+    finished: 0,
+    cancelled: 0,
+    errors: 0,
+    peakTotal: 0,
+    peakDay: null,
+  }));
+  for (const d of dayData) {
+    const month = Number(d.day.slice(5, 7)) - 1;
+    if (months[month]) _historyAggregateDay(months[month], d);
+  }
+  const maxTotal = Math.max(1, ...months.map(m => m.total));
+  return `<div class="history-section">
+    <div class="heat-agg-grid heat-month-grid">
+      ${months.map(m => _historyAggregateTile(m, maxTotal, 'heat-month-tile')).join('')}
+    </div>
+  </div>`;
+}
+
+function _historyYearlyHeatmap(printerId, dayData, year) {
   const byDate = {};
   for (const d of dayData) byDate[d.day] = d;
 
@@ -3281,6 +3401,12 @@ function _historyHeatmap(printerId, dayData, year) {
       </div>
     </div>
   </div>`;
+}
+
+function _historyHeatmap(printerId, dayData, year, mode) {
+  if (mode === 'weekly') return _historyWeeklyHeatmap(dayData, year);
+  if (mode === 'monthly') return _historyMonthlyHeatmap(dayData, year);
+  return _historyYearlyHeatmap(printerId, dayData, year);
 }
 
 function _printBadge(state) {
@@ -3565,7 +3691,9 @@ async function _renderHistoryBody(printerId) {
   if (!el) return;
 
   if (!_historyYear[printerId]) _historyYear[printerId] = new Date().getUTCFullYear();
+  if (!_historyHeatmapMode[printerId]) _historyHeatmapMode[printerId] = 'yearly';
   const year = _historyYear[printerId];
+  const mode = _historyHeatmapMode[printerId];
   const currentYear = new Date().getUTCFullYear();
 
   let data = { days: [], summary: {} };
@@ -3576,8 +3704,9 @@ async function _renderHistoryBody(printerId) {
 
   el.innerHTML =
     _historyYearNav(year, currentYear) +
+    _historyModeControl(mode) +
     _historySummaryLine(data.summary) +
-    _historyHeatmap(printerId, data.days, year) +
+    _historyHeatmap(printerId, data.days, year, mode) +
     `<div id="history-day-detail"></div>`;
 
   el.querySelector('[data-year-prev]')?.addEventListener('click', () => {
@@ -3588,11 +3717,18 @@ async function _renderHistoryBody(printerId) {
     _historyYear[printerId] = year + 1;
     _renderHistoryBody(printerId);
   });
+  el.querySelectorAll('[data-history-mode]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      _historyHeatmapMode[printerId] = btn.dataset.historyMode;
+      _renderHistoryBody(printerId);
+    });
+  });
 
-  el.querySelector(`#heat-grid-${printerId}`)?.addEventListener('click', e => {
-    const cell = e.target.closest('.heat-cell');
+  el.querySelector('.history-section')?.addEventListener('click', e => {
+    const cell = e.target.closest('.heat-cell, .heat-agg-tile');
     if (!cell || cell.classList.contains('heat-future') || cell.classList.contains('heat-out')) return;
-    el.querySelectorAll('.heat-cell.selected').forEach(c => c.classList.remove('selected'));
+    if (!cell.dataset.date) return;
+    el.querySelectorAll('.heat-cell.selected, .heat-agg-tile.selected').forEach(c => c.classList.remove('selected'));
     cell.classList.add('selected');
     _loadDayDetail(printerId, cell.dataset.date);
   });
