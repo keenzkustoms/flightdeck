@@ -6560,16 +6560,23 @@ function _statsBarRows(rows, opts = {}) {
 
 function _statsMonthRows(rows) {
   const items = [...(rows || [])].reverse();
-  if (!items.length) return `<div class="stats-empty">Usage timeline will appear after completed prints.</div>`;
+  if (!items.length) return `<div class="stats-empty">Usage timeline will appear after completed prints with spool deductions.</div>`;
   const max = Math.max(...items.map(r => Number(r.grams || 0)), 1);
-  return `<div class="stats-months">${items.map(r => {
+  const total = items.reduce((sum, r) => sum + Number(r.grams || 0), 0);
+  const youngTrend = items.length < 2 || total < 250;
+  return `<div class="stats-month-wrap">
+    ${youngTrend ? `<div class="stats-note">Filament trend is warming up from completed prints. More deducted prints will build the shape over time.</div>` : ''}
+    <div class="stats-months">${items.map(r => {
     const [y, mo] = String(r.month || '').split('-');
     const label = y && mo ? new Date(+y, +mo - 1).toLocaleString('default', { month: 'short' }) : r.month;
+    const grams = Number(r.grams || 0);
     return `<div class="stats-month">
-      <div class="stats-month-bar" style="height:${_statsPct(Number(r.grams || 0), max)}%"></div>
+      <strong class="stats-month-value">${esc(_fmtGrams(grams))}</strong>
+      <div class="stats-month-bar" style="height:${_statsPct(grams, max)}%"></div>
       <span>${esc(label || '')}</span>
     </div>`;
-  }).join('')}</div>`;
+  }).join('')}</div>
+  </div>`;
 }
 
 function _statsPrinterRows(printers, filamentSummary, failureSummary, allSpools = [], usageSummary = []) {

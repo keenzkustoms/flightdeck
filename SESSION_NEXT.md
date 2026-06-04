@@ -1,5 +1,11 @@
 # Flightdeck — next session brief
-_Last updated 4 June 2026 (Session 28.144 Demo breadcrumb docs)_
+_Last updated 4 June 2026 (Session 28.145 Telemetry filament trend polish)_
+
+## What was polished - Session 28.145 (Telemetry filament trend polish - 4 June)
+- Confirmed live filament telemetry is already recording deductions: `/api/filament/summary` reports 110.4 g total usage, split across ASA and PLA, all currently in one month.
+- Updated the Telemetry filament trend panel so early single-month history explains itself instead of looking empty or broken.
+- Added gram labels to month bars so the user can see actual usage even before multiple months build a visible trend shape.
+- Bumped static cache versions to `app.js?v=226` and `style.css?v=180`; no service restart is needed for this static-only pass.
 
 ## What was polished - Session 28.144 (Demo breadcrumb docs - 4 June)
 - Updated the install guide so new testers know they can open either **System -> Demo Mode** or the standalone `/demo` page before touching live printer controls.

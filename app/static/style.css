@@ -1984,13 +1984,37 @@ header {
   padding-top: 0.5rem;
 }
 
+.stats-month-wrap {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.stats-note {
+  border: 1px solid rgba(59, 130, 246, 0.25);
+  border-radius: 0.45rem;
+  background: rgba(59, 130, 246, 0.07);
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.45;
+  padding: 0.55rem 0.65rem;
+}
+
 .stats-month {
   min-width: 0;
   height: 100%;
   display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
-  gap: 0.45rem;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 0.35rem;
   align-items: end;
+}
+
+.stats-month-value {
+  color: var(--text);
+  font-size: 0.68rem;
+  font-weight: 800;
+  line-height: 1;
+  text-align: center;
+  white-space: nowrap;
 }
 
 .stats-month-bar {
