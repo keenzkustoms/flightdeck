@@ -54,6 +54,8 @@ _ntfy: NtfyConfig | None = None
 _prev_states: dict[str, str] = {}  # printer_id → last known state
 _last_seen_cache: dict[str, datetime] = {}  # printer_id → last successful contact
 _latest_printers: dict[str, dict] = {}  # printer_id → most recent gathered status
+_latest_printers_at: datetime | None = None
+_gather_lock: asyncio.Lock | None = None
 _scale = Scale()
 _label_printer = LabelPrinter()
 
@@ -65,6 +67,16 @@ def _dt_default(obj):
 
 
 async def _gather_all() -> list[dict]:
+    global _latest_printers_at, _gather_lock
+    if _gather_lock is None:
+        _gather_lock = asyncio.Lock()
+    async with _gather_lock:
+        return await _gather_all_locked()
+
+
+async def _gather_all_locked() -> list[dict]:
+    global _latest_printers_at
+
     async def _fetch_moonraker(id, model_name, custom_name, icon, url):
         status = await moonraker.fetch(id, model_name, custom_name, icon, url)
         status.temperature_presets = _presets.get(id, {})
@@ -105,7 +117,17 @@ async def _gather_all() -> list[dict]:
             out.append(r)
     _latest_printers.clear()
     _latest_printers.update({p["id"]: p for p in out})
+    _latest_printers_at = datetime.utcnow()
     return out
+
+
+def _cached_printers(max_age_seconds: float = 8.0) -> Optional[list[dict]]:
+    if not _latest_printers or _latest_printers_at is None:
+        return None
+    age = (datetime.utcnow() - _latest_printers_at).total_seconds()
+    if age > max_age_seconds:
+        return None
+    return list(_latest_printers.values())
 
 
 def _update_last_seen(status) -> None:
@@ -968,6 +990,9 @@ async def clear_bambu_sd_print_files(printer_id: str, body: BambuSdClearRequest)
 
 @app.get("/api/printers")
 async def get_printers():
+    cached = _cached_printers()
+    if cached is not None:
+        return cached
     return await _gather_all()
 
 

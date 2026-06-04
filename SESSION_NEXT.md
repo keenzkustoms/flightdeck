@@ -1,5 +1,11 @@
 # Flightdeck — next session brief
-_Last updated 4 June 2026 (Session 28.151 Spool activity exact match fix)_
+_Last updated 4 June 2026 (Session 28.152 Flight Tower printer snapshot cache)_
+
+## What was fixed - Session 28.152 (Flight Tower printer snapshot cache - 4 June)
+- Diagnosed Flight Tower sluggishness to `/api/printers`, which was taking about 3.1s because every request forced a fresh hardware gather even though the background broadcast loop already polls printers every 5s.
+- Added a recent printer snapshot cache for `/api/printers` so normal UI reads return the latest known state instantly when it is fresh, while still falling back to a live gather if the cache is empty/stale.
+- Added a gather lock so overlapping printer polls do not stack up and make the Pi work harder than needed.
+- Backend restart required before this takes effect.
 
 ## What was fixed - Session 28.151 (Spool activity exact match fix - 4 June)
 - Fixed spool detail activity rows so `Spool #1` no longer also matches `Spool #17`, `Spool #18`, `Spool #19`, etc.
