@@ -27,8 +27,21 @@ function esc(s) {
 
 function _demoMediaUrl(label = 'Flightdeck demo', colour = '#3b82f6') {
   const source = String(label || '');
-  if (source.includes('/api/printers/h2d/thumbnail')) {
+  if (
+    source.includes('/api/printers/h2d/thumbnail') ||
+    source.includes('/api/queue/101/preview') ||
+    source.includes('/api/queue/102/preview')
+  ) {
     return '/static/demo-assets/can-opener-preview.png';
+  }
+  if (source.includes('/api/printers/greyhound/camera')) {
+    return '/static/demo-assets/voron-camera.png';
+  }
+  if (source.includes('/api/printers/x1c/camera')) {
+    return '/static/demo-assets/x1c-camera.png';
+  }
+  if (source.includes('/api/printers/h2d/camera')) {
+    return '/static/demo-assets/h2d-camera.png';
   }
   const safeLabel = esc(label).replace(/&apos;/g, "'").replace(/&quot;/g, '"');
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360">

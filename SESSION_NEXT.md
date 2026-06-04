@@ -1,5 +1,12 @@
 # Flightdeck — next session brief
-_Last updated 4 June 2026 (Session 28.142 Easy install + public repo cleanup)_
+_Last updated 4 June 2026 (Session 28.143 Standalone demo realism)_
+
+## What was polished - Session 28.143 (Standalone demo realism - 4 June)
+- Cut a real Voron camera frame from the all-cameras screenshot and added it as `app/static/demo-assets/voron-camera.png`.
+- Wired the standalone demo camera data so H2D, X1C, and Voron all show real Flightdeck-style camera imagery instead of the generated blue placeholder.
+- Changed the demo Voron state back to an online/idle cross-ecosystem example so the demo fleet better shows Bambu + Voron together.
+- Updated demo host/camera-worker telemetry so the Telemetry page has believable demo data instead of looking empty.
+- Routed demo printer/queue preview media to the real can-opener preview asset and bumped demo/static cache versions to `demo-runtime.js?v=4` and `app.js?v=225`.
 
 ## What was polished - Session 28.142 (Easy install + public repo cleanup - 4 June)
 - Reworded the install path around the public promise: Flightdeck install is easy as 1-2-3: install, add printers, add spools.

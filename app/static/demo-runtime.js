@@ -6,6 +6,7 @@
   const demoCameraAssets = {
     h2d: '/static/demo-assets/h2d-camera.png',
     x1c: '/static/demo-assets/x1c-camera.png',
+    greyhound: '/static/demo-assets/voron-camera.png',
   };
 
   const demoSpools = [
@@ -110,7 +111,7 @@
       custom_name: 'Greyhound Elite V2',
       icon: 'voron',
       kind: 'moonraker',
-      state: 'offline',
+      state: 'idle',
       temps: {
         hotend: { actual: 31, target: 0 },
         bed: { actual: 28, target: 0 },
@@ -118,7 +119,7 @@
       },
       job: null,
       substage: null,
-      idle_info: { 'Last contact': 'Last connected 1 Jun, 22:18' },
+      idle_info: { 'Last print': 'Cube_ABS_1h14m.gcode - cancelled' },
       ams: [],
       mmu: [
         { unit: 0, label: 'Vivid', gates: [
@@ -134,7 +135,7 @@
       light_state: 'off',
       temperature_presets: presets(),
       error: null,
-      last_seen: '2026-06-01T22:18:00+10:00',
+      last_seen: nowIso(),
       updated_at: nowIso(),
       health: health('watch', 'Watch', 44, 6, 3, ['3 failed/cancelled prints in 14d']),
       _error_print_id: null,
@@ -291,7 +292,7 @@
         memory: { total: 8589934592, available: 6442450944, used: 2147483648, pct: 25 },
         disk: { path: '/demo-data', total: 503446224896, free: 460820905984, used: 42625318912, pct: 8.5 },
       },
-      camera_workers: { count: 0, expected_max: 0, ok: true, detail: 'Demo cameras are static and do not start workers' },
+      camera_workers: { count: 3, expected_max: 3, ok: true, detail: '3 static demo camera feeds' },
     });
     if (path === '/api/setup/health') return jsonResponse({
       status: 'ready',
