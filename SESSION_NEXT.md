@@ -1,5 +1,10 @@
 # Flightdeck — next session brief
-_Last updated 4 June 2026 (Session 28.158 Compatibility simulator)_
+_Last updated 4 June 2026 (Session 28.159 Simulator notification polish)_
+
+## What was polished - Session 28.159 (Simulator notification polish - 4 June)
+- Simulated printer state-change notifications now stay inside Flightdeck with a `SIM` title prefix.
+- External ntfy alerts are skipped for simulated printer complete/error/paused/cancelled transitions so phone alerts remain reserved for real hardware.
+- Real printer notification behaviour is unchanged.
 
 ## What was built - Session 28.158 (Compatibility simulator - 4 June)
 - Added a `simulated` printer connection type with PrusaLink, RepRapFirmware, and OctoPrint profiles plus idle/printing/paused/error/mixed scenarios.

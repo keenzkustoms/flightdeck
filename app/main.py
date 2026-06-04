@@ -430,11 +430,14 @@ def _check_transitions(data: list[dict]) -> None:
         sub = job.get("subtask_name", "").strip()
         label = sub if sub and sub != fname else fname
         has_error_print = p.get("_error_print_id") is not None
+        is_simulated = bool(p.get("_simulated"))
+        title_prefix = "SIM " if is_simulated else ""
 
         if prev == "printing" and curr == "finished":
             msg = f"{name}" + (f" · {label}" if label else "")
-            _notify("success", "Print complete", msg, printer_id=pid, link=f"#/printer/{pid}/history")
-            asyncio.create_task(_send_ntfy("Print complete", msg, ["white_check_mark"]))
+            _notify("success", f"{title_prefix}Print complete", msg, printer_id=pid, link=f"#/printer/{pid}/history")
+            if not is_simulated:
+                asyncio.create_task(_send_ntfy("Print complete", msg, ["white_check_mark"]))
             asyncio.create_task(_on_print_finished_queue(pid))
         elif curr in ("error", "estop"):
             error_pid = p.get("_error_print_id")
@@ -445,19 +448,22 @@ def _check_transitions(data: list[dict]) -> None:
                 msg = f"{name}" + (f" · {label}" if label else "")
                 if p.get("error"):
                     msg += f" · {p['error']}"
-                _notify("error", "Print error", msg, printer_id=pid, print_id=error_pid, link=f"#/printer/{pid}/live")
-                asyncio.create_task(_send_ntfy("Print error", msg, ["warning"], priority=4))
+                _notify("error", f"{title_prefix}Print error", msg, printer_id=pid, print_id=error_pid, link=f"#/printer/{pid}/live")
+                if not is_simulated:
+                    asyncio.create_task(_send_ntfy("Print error", msg, ["warning"], priority=4))
                 db.queue_cancel_active(pid, "failed")
         elif prev == "printing" and curr == "paused":
             msg = f"{name}" + (f" · {label}" if label else "")
             if p.get("error"):
                 msg += f" · {p['error']}"
-            _notify("info", "Print paused", msg, printer_id=pid, link=f"#/printer/{pid}/live")
-            asyncio.create_task(_send_ntfy("Print paused", msg, ["double_vertical_bar"]))
+            _notify("info", f"{title_prefix}Print paused", msg, printer_id=pid, link=f"#/printer/{pid}/live")
+            if not is_simulated:
+                asyncio.create_task(_send_ntfy("Print paused", msg, ["double_vertical_bar"]))
         elif prev == "printing" and curr == "idle":
             msg = f"{name}" + (f" · {label}" if label else "")
-            _notify("warn", "Print cancelled", msg, printer_id=pid, link=f"#/printer/{pid}/history")
-            asyncio.create_task(_send_ntfy("Print cancelled", msg, ["x"]))
+            _notify("warn", f"{title_prefix}Print cancelled", msg, printer_id=pid, link=f"#/printer/{pid}/history")
+            if not is_simulated:
+                asyncio.create_task(_send_ntfy("Print cancelled", msg, ["x"]))
             db.queue_cancel_active(pid, "cancelled")
 
 
