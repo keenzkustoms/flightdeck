@@ -1,5 +1,12 @@
 # Flightdeck — next session brief
-_Last updated 4 June 2026 (Session 28.157 History heatmap ranges)_
+_Last updated 4 June 2026 (Session 28.158 Compatibility simulator)_
+
+## What was built - Session 28.158 (Compatibility simulator - 4 June)
+- Added a `simulated` printer connection type with PrusaLink, RepRapFirmware, and OctoPrint profiles plus idle/printing/paused/error/mixed scenarios.
+- Simulated printers now flow through the normal printer gather/websocket/status card path with synthetic temps, jobs, care items, idle info, and preview thumbnails.
+- Settings can add/remove simulated printers without editing YAML.
+- Hardware controls, temperature commands, and queue uploads intentionally reject simulated printers for now so the simulator cannot masquerade as real hardware.
+- Bumped static cache to `app.js?v=241`; backend restart required.
 
 ## What was built - Session 28.157 (History heatmap ranges - 4 June)
 - Added a compact History heatmap range selector with Week, Month, and Year views.

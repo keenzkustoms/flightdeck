@@ -7154,7 +7154,9 @@ function _printersCategoryHtml(printers) {
     ? printers.map(p => {
         const connInfo = p.connection?.type === 'moonraker'
           ? `moonraker · ${p.connection.host}:${p.connection.port ?? 7125}`
-          : `bambu · ${p.connection?.host ?? ''}`;
+          : p.connection?.type === 'simulated'
+            ? `simulated · ${p.connection.profile}${p.connection.scenario ? ` · ${p.connection.scenario}` : ''}`
+            : `bambu · ${p.connection?.host ?? ''}`;
         return `<div class="settings-printer-row">
           <div class="printer-identity">
             <div class="printer-icon">${getIcon(p.icon ?? 'generic')}</div>
@@ -7197,6 +7199,7 @@ function _printersCategoryHtml(printers) {
           <div class="settings-type-toggle">
             <button type="button" class="type-btn type-btn-active" data-conn-type="moonraker">Moonraker</button>
             <button type="button" class="type-btn" data-conn-type="bambu">Bambu</button>
+            <button type="button" class="type-btn" data-conn-type="simulated">Simulated</button>
           </div>
         </div>
 
@@ -7294,6 +7297,27 @@ function _printersCategoryHtml(printers) {
           </div>
         </div>
 
+        <div class="settings-form-group" id="simulated-fields" hidden>
+          <div class="settings-form-row">
+            <label class="settings-label" for="p-sim-profile">Simulator Profile</label>
+            <select class="settings-input" id="p-sim-profile" style="max-width:14rem">
+              <option value="prusalink">PrusaLink</option>
+              <option value="reprap">RepRapFirmware</option>
+              <option value="octoprint">OctoPrint</option>
+            </select>
+          </div>
+          <div class="settings-form-row">
+            <label class="settings-label" for="p-sim-scenario">Scenario</label>
+            <select class="settings-input" id="p-sim-scenario" style="max-width:14rem">
+              <option value="mixed">Mixed states</option>
+              <option value="idle">Idle</option>
+              <option value="printing">Printing</option>
+              <option value="paused">Paused</option>
+              <option value="error">Error</option>
+            </select>
+          </div>
+        </div>
+
         <div class="settings-form-row">
           <label class="settings-label">Temp Presets</label>
           <table class="preset-table">
@@ -7328,8 +7352,11 @@ function _attachPrintersEvents(el) {
       );
       el.querySelector('#moonraker-fields').hidden = connType !== 'moonraker';
       el.querySelector('#bambu-fields').hidden     = connType !== 'bambu';
+      el.querySelector('#simulated-fields').hidden = connType !== 'simulated';
       if (connType === 'bambu') {
         el.querySelector('input[name="icon"][value="bambu"]').checked = true;
+      } else if (connType === 'simulated') {
+        el.querySelector('input[name="icon"][value="generic"]').checked = true;
       }
     });
   });
@@ -7390,7 +7417,7 @@ function _collectFormData(el, connType) {
       if (snapUrl) camera.snapshot_url = snapUrl;
     }
     return { ...base, connection: conn, ...(camera ? { camera } : {}) };
-  } else {
+  } else if (connType === 'bambu') {
     const host       = v('p-bambu-host');
     const accessCode = v('p-access-code');
     const serial     = v('p-serial');
@@ -7399,6 +7426,10 @@ function _collectFormData(el, connType) {
     const camera     = hasCam ? { type: 'bambu_rtsp' } : null;
     return { ...base, connection: conn, ...(camera ? { camera } : {}) };
   }
+
+  const profile = el.querySelector('#p-sim-profile')?.value || 'prusalink';
+  const scenario = el.querySelector('#p-sim-scenario')?.value || 'mixed';
+  return { ...base, connection: { type: 'simulated', profile, scenario } };
 }
 
 function _validateFormData(data, connType, errorEl) {
@@ -7415,7 +7446,7 @@ function _validateFormData(data, connType, errorEl) {
     if (!data.connection.host) return fail('Host / IP is required');
     if (data.camera?.type === 'mjpeg_direct' && !data.camera.stream_url)
       return fail('Stream URL is required for MJPEG camera');
-  } else {
+  } else if (connType === 'bambu') {
     if (!data.connection.host)        return fail('Host / IP is required');
     if (!data.connection.access_code) return fail('Access code is required');
     if (!data.connection.serial)      return fail('Serial number is required');
@@ -7475,6 +7506,8 @@ async function _checkDuplicateConnection(data, connType) {
         if (conn.host === data.connection.host && conn.port === data.connection.port) return p;
       } else if (connType === 'bambu' && conn.type === 'bambu') {
         if (conn.host === data.connection.host || conn.serial === data.connection.serial) return p;
+      } else if (connType === 'simulated' && conn.type === 'simulated') {
+        if (p.id === data.id) return p;
       }
     }
   } catch {}
@@ -9978,7 +10011,7 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
   function updateSlots() {
     const opt = printerSel.options[printerSel.selectedIndex];
     const kind = opt?.dataset.kind || 'bambu';
-    if (kind === 'moonraker') {
+    if (kind !== 'bambu') {
       const printer = _latestPrinters.find(x => x.id === printerSel.value);
       const mmuUnit = printer?.mmu?.[0];
       if (mmuUnit?.num_gates > 1) {

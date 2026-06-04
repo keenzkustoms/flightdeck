@@ -28,8 +28,14 @@ class BambuConnection(BaseModel):
     serial: str
 
 
+class SimulatedConnection(BaseModel):
+    type: Literal["simulated"]
+    profile: Literal["prusalink", "reprap", "octoprint"] = "prusalink"
+    scenario: Literal["idle", "printing", "paused", "error", "mixed"] = "mixed"
+
+
 Connection = Annotated[
-    Union[MoonrakerConnection, BambuConnection],
+    Union[MoonrakerConnection, BambuConnection, SimulatedConnection],
     Field(discriminator="type"),
 ]
 

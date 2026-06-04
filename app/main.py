@@ -38,13 +38,14 @@ from .camera import BambuCameraProxy
 from .label_printer import LabelPrinter
 from .models import PrintPreview
 from .paths import APP_DIR, DATA_DIR, DB_PATH, PRINTERS_CONFIG_PATH, PRINT_LIBRARY_DIR, UPLOADS_DIR
-from .printer_config import BambuConnection, BambuRtspCamera, MjpegDirectCamera, MoonrakerConnection, NtfyConfig, PrinterEntry, load, save
-from .printers import moonraker
+from .printer_config import BambuConnection, BambuRtspCamera, MjpegDirectCamera, MoonrakerConnection, NtfyConfig, PrinterEntry, SimulatedConnection, load, save
+from .printers import moonraker, simulated
 from .printers.bambu import BambuPrinter
 from .scale import Scale
 
 _bambu: list[BambuPrinter] = []
 _moonraker: list[tuple[str, str, str, str, str]] = []  # (id, model_name, custom_name, icon, url)
+_simulated: list[tuple[str, str, str, str, str, str]] = []  # (id, model_name, custom_name, icon, profile, scenario)
 _cameras: dict = {}          # printer_id → Camera config
 _presets: dict[str, dict] = {}  # printer_id → temperature_presets dict
 _cam_proxies: dict[str, BambuCameraProxy] = {}  # printer_id → live RTSP proxy
@@ -103,10 +104,24 @@ async def _gather_all_locked() -> list[dict]:
         d["_error_print_id"] = p._error_print_id
         return d
 
+    async def _fetch_simulated(id, model_name, custom_name, icon, profile, scenario):
+        status = simulated.status(id, model_name, custom_name, icon, profile, scenario)
+        status.temperature_presets = _presets.get(id, {})
+        _update_last_seen(status)
+        d = asdict(status)
+        cal = db.get_calibration(id)
+        if cal:
+            d["eta_calibration"] = cal
+        d["health"] = db.get_printer_health(id)
+        d["_simulated"] = True
+        return d
+
     tasks = (
         [_fetch_moonraker(id, model_name, custom_name, icon, url)
          for (id, model_name, custom_name, icon, url) in _moonraker] +
         [_fetch_bambu(p) for p in _bambu]
+        + [_fetch_simulated(id, model_name, custom_name, icon, profile, scenario)
+           for (id, model_name, custom_name, icon, profile, scenario) in _simulated]
     )
     results = await asyncio.gather(*tasks, return_exceptions=True)
     out = []
@@ -511,6 +526,15 @@ async def lifespan(app: FastAPI):
                     f":322/streaming/live/1"
                 )
                 _cam_proxies[entry.id] = BambuCameraProxy(rtsp_url, entry.id)
+        elif isinstance(conn, SimulatedConnection):
+            _simulated.append((
+                entry.id,
+                entry.model_name,
+                entry.custom_name,
+                entry.icon_key(),
+                conn.profile,
+                conn.scenario,
+            ))
 
     # Seed prev states so startup doesn't fire spurious notifications
     try:
@@ -535,6 +559,7 @@ async def lifespan(app: FastAPI):
             pass
     _bambu.clear()
     _moonraker.clear()
+    _simulated.clear()
 
 
 _STATIC = Path(__file__).parent / "static"
@@ -858,12 +883,26 @@ async def get_file_desk(printer_id: Optional[str] = None):
             "actions": {"format_sd": True, "format_sd_ready": False},
         }
 
+    async def _simulated_target(pid: str, model_name: str, custom_name: str, profile: str) -> dict:
+        return {
+            "id": pid,
+            "label": custom_name or model_name,
+            "model": model_name,
+            "kind": profile,
+            "files": [],
+            "error": "Simulated printer: no hardware file store",
+            "actions": {"format_sd": False},
+        }
+
     source_tasks = (
         [_moonraker_target(pid, model_name, custom_name, url)
          for (pid, model_name, custom_name, _icon, url) in _moonraker
          if printer_id is None or pid == printer_id] +
         [_bambu_target(p) for p in _bambu
          if printer_id is None or p.id == printer_id]
+        + [_simulated_target(pid, model_name, custom_name, profile)
+           for (pid, model_name, custom_name, _icon, profile, _scenario) in _simulated
+           if printer_id is None or pid == printer_id]
     )
     if source_tasks:
         targets.extend(await asyncio.gather(*source_tasks))
@@ -882,6 +921,10 @@ async def get_file_desk_reprints(limit: int = 12):
         p.id: {"id": p.id, "model_name": p.model_name, "custom_name": p.custom_name, "kind": "bambu"}
         for p in _bambu
     })
+    printers.update({
+        id: {"id": id, "model_name": model_name, "custom_name": custom_name, "kind": profile}
+        for (id, model_name, custom_name, _icon, profile, _scenario) in _simulated
+    })
     items = []
     for row in db.get_recent_reprints(limit):
         item = dict(row)
@@ -899,6 +942,8 @@ async def queue_file_from_file_desk(body: FileQueueRequest):
     target_kind = _printer_kind(printer_id)
     if target_kind is None:
         raise HTTPException(status_code=404, detail="Target printer not found")
+    if target_kind not in {"moonraker", "bambu"}:
+        raise HTTPException(status_code=422, detail="queueing to simulated printers is not supported yet")
 
     filename, data = await _read_file_desk_source(source_id, source_path)
     ext = _queue_file_extension(filename)
@@ -1017,6 +1062,10 @@ async def get_printer(printer_id: str):
         if p.id == printer_id:
             return asdict(await asyncio.to_thread(p.status))
 
+    for (id, model_name, custom_name, icon, profile, scenario) in _simulated:
+        if id == printer_id:
+            return asdict(simulated.status(id, model_name, custom_name, icon, profile, scenario))
+
     raise HTTPException(status_code=404, detail="printer not found")
 
 
@@ -1124,6 +1173,23 @@ async def get_printer_preview(printer_id: str):
                 filament_type=preview.filament_type,
             )
 
+    for (id, model_name, custom_name, icon, profile, scenario) in _simulated:
+        if id == printer_id:
+            status = simulated.status(id, model_name, custom_name, icon, profile, scenario)
+            if not status.job:
+                raise HTTPException(status_code=404, detail="no active job")
+            estimated = 16200
+            elapsed = int(status.job.progress * estimated)
+            return PrintPreview(
+                image_url=f"/api/printers/{printer_id}/thumbnail",
+                image_type="static",
+                filename=status.job.subtask_name or status.job.filename,
+                estimated_total_seconds=estimated,
+                elapsed_seconds=elapsed,
+                filament_weight_g=86.5,
+                filament_type="PETG" if profile == "prusalink" else "PLA",
+            )
+
     raise HTTPException(status_code=404, detail="printer not found")
 
 
@@ -1181,6 +1247,10 @@ async def set_printer_temp(printer_id: str, req: SetTempRequest):
             await asyncio.to_thread(p.set_temp, req.heater, req.target)
             return {"ok": True}
 
+    for (id, *_) in _simulated:
+        if id == printer_id:
+            raise HTTPException(status_code=422, detail="simulated printer does not accept hardware temperature commands")
+
     raise HTTPException(status_code=404, detail="printer not found")
 
 
@@ -1204,6 +1274,10 @@ async def control_printer(printer_id: str, req: ControlRequest):
             fn = getattr(p, req.action)
             await asyncio.to_thread(fn)
             return {"ok": True}
+
+    for (id, *_) in _simulated:
+        if id == printer_id:
+            raise HTTPException(status_code=422, detail="simulated printer does not accept hardware control commands")
 
     raise HTTPException(status_code=404, detail="printer not found")
 
@@ -1482,6 +1556,9 @@ def _assert_printer(printer_id: str) -> None:
     for p in _bambu:
         if p.id == printer_id:
             return
+    for (id, *_) in _simulated:
+        if id == printer_id:
+            return
     raise HTTPException(status_code=404, detail="printer not found")
 
 
@@ -1498,6 +1575,9 @@ async def get_printer_objects(printer_id: str):
     for p in _bambu:
         if p.id == printer_id:
             return await asyncio.to_thread(p.get_objects)
+    for (id, *_) in _simulated:
+        if id == printer_id:
+            return {"objects": [], "simulated": True}
     raise HTTPException(status_code=404, detail="printer not found")
 
 
@@ -1512,7 +1592,7 @@ async def add_printer(entry: PrinterEntry):
     if not re.match(r"^[a-z][a-z0-9_-]*$", entry.id):
         raise HTTPException(status_code=422, detail="id must be lowercase letters/digits/underscores/hyphens, starting with a letter")
 
-    all_ids = [id for (id, *_) in _moonraker] + [p.id for p in _bambu]
+    all_ids = [id for (id, *_) in _moonraker] + [p.id for p in _bambu] + [id for (id, *_) in _simulated]
     if entry.id in all_ids:
         raise HTTPException(status_code=409, detail=f"printer id '{entry.id}' already exists")
 
@@ -1537,6 +1617,15 @@ async def add_printer(entry: PrinterEntry):
         if isinstance(entry.camera, BambuRtspCamera):
             rtsp_url = f"rtsps://bblp:{conn.access_code}@{conn.host}:322/streaming/live/1"
             _cam_proxies[entry.id] = BambuCameraProxy(rtsp_url, entry.id)
+    elif isinstance(conn, SimulatedConnection):
+        _simulated.append((
+            entry.id,
+            entry.model_name,
+            entry.custom_name,
+            entry.icon_key(),
+            conn.profile,
+            conn.scenario,
+        ))
 
     cfg = load()
     cfg.printers.append(entry)
@@ -1565,6 +1654,12 @@ async def remove_printer(printer_id: str):
             proxy = _cam_proxies.pop(printer_id, None)
             if proxy:
                 await proxy.stop()
+            found = True
+            break
+
+    for item in list(_simulated):
+        if item[0] == printer_id:
+            _simulated.remove(item)
             found = True
             break
 
@@ -1622,6 +1717,25 @@ async def get_printer_thumbnail(printer_id: str):
             if preview and preview.image_png:
                 return Response(content=preview.image_png, media_type="image/png")
             raise HTTPException(status_code=404, detail="no thumbnail")
+
+    for (id, model_name, custom_name, _icon, profile, scenario) in _simulated:
+        if id == printer_id:
+            status = simulated.status(id, model_name, custom_name, _icon, profile, scenario)
+            if not status.job:
+                raise HTTPException(status_code=404, detail="no thumbnail")
+            label = status.job.subtask_name or status.job.filename
+            colour = "#f97316" if profile == "prusalink" else "#22c55e" if profile == "reprap" else "#60a5fa"
+            svg = f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360">
+  <rect width="640" height="360" fill="#070910"/>
+  <rect x="32" y="36" width="576" height="288" rx="18" fill="#111827" stroke="#334155"/>
+  <path d="M122 244h396" stroke="#475569" stroke-width="10" stroke-linecap="round"/>
+  <path d="M168 132h262l62 76H108z" fill="{colour}" opacity="0.92"/>
+  <circle cx="204" cy="250" r="18" fill="#64748b"/>
+  <circle cx="484" cy="250" r="18" fill="#64748b"/>
+  <text x="58" y="78" fill="#93c5fd" font-family="Arial, sans-serif" font-size="20" font-weight="700">SIMULATED {profile.upper()}</text>
+  <text x="58" y="308" fill="#e5e7eb" font-family="Arial, sans-serif" font-size="25" font-weight="700">{label}</text>
+</svg>"""
+            return Response(content=svg, media_type="image/svg+xml")
 
     raise HTTPException(status_code=404, detail="printer not found")
 
@@ -2589,6 +2703,9 @@ def _printer_kind(printer_id: str) -> Optional[str]:
     for p in _bambu:
         if p.id == printer_id:
             return "bambu"
+    for (pid, _model_name, _custom_name, _icon, profile, _scenario) in _simulated:
+        if pid == printer_id:
+            return profile
     return None
 
 
@@ -3047,6 +3164,8 @@ async def queue_upload(printer_id: str = Form(...), file: UploadFile = File(...)
     kind = _printer_kind(printer_id)
     if kind is None:
         raise HTTPException(status_code=404, detail="printer not found")
+    if kind not in {"moonraker", "bambu"}:
+        raise HTTPException(status_code=422, detail="queueing to simulated printers is not supported yet")
 
     raw_name = (file.filename or "upload").rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
     # Resolve multi-part extensions in priority order
