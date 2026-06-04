@@ -2141,10 +2141,7 @@ function router() {
 
   document.querySelectorAll('#tab-strip .tab').forEach(tab => {
     const href = tab.getAttribute('href');
-    const printerTabActive = route.view === 'printer' && (
-      (route.subtab === 'live' && href === `#/printer/${route.id}`) ||
-      (route.subtab !== 'live' && href === `#/printer/${route.id}/${route.subtab}`)
-    );
+    const printerTabActive = route.view === 'printer' && href === `#/printer/${route.id}`;
     tab.classList.toggle('active',
       (route.view === 'dashboard' && href === '#/') ||
       (route.view === 'mission'   && href === '#/mission') ||
@@ -2191,16 +2188,13 @@ function buildTabs(printers) {
   const printerGroups = printers.map((p, i) => {
     const color = _PRINTER_ACCENT_PALETTE[i % _PRINTER_ACCENT_PALETTE.length];
     const label = _printerNavLabel(p);
-    return `<div class="tab-printer-group" style="--tab-accent:${color}">
-      <div class="tab-printer-parent">${label}</div>
-      <div class="tab-printer-subnav">
-        <a class="tab tab-printer-child" href="#/printer/${p.id}">Live</a>
-        <a class="tab tab-printer-child" href="#/printer/${p.id}/bay">Print Bay</a>
-        <a class="tab tab-printer-child" href="#/printer/${p.id}/history">History</a>
-        <a class="tab tab-printer-child" href="#/printer/${p.id}/failures">Failures</a>
-        <a class="tab tab-printer-child" href="#/printer/${p.id}/maintenance">Maintenance</a>
-      </div>
-    </div>`;
+    const state = p.state || 'unknown';
+    const progress = p.job?.progress != null ? `${Math.round(p.job.progress * 100)}%` : '';
+    return `<a class="tab tab-printer" href="#/printer/${p.id}" style="--tab-accent:${color}" title="${esc(label)} · ${esc(_liveStateLabel(state))}">
+      <span class="tab-printer-state tab-printer-state-${esc(state)}"></span>
+      <span class="tab-printer-name">${esc(label)}</span>
+      ${progress ? `<span class="tab-printer-progress">${progress}</span>` : ''}
+    </a>`;
   }).join('');
   nav.innerHTML = [
     `<a class="tab" href="#/">Dashboard</a>`,

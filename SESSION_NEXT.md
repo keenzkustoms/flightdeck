@@ -1,5 +1,11 @@
 # Flightdeck — next session brief
-_Last updated 4 June 2026 (Session 28.159 Simulator notification polish)_
+_Last updated 4 June 2026 (Session 28.160 Sidebar printer picker)_
+
+## What was polished - Session 28.160 (Sidebar printer picker - 4 June)
+- Changed the left sidebar printer section into a compact printer picker instead of expanding every printer into Live/Print Bay/History/Failures/Maintenance links.
+- Printer rows now show a status dot, printer label, and active-print progress where available.
+- The selected printer stays highlighted across all top printer sub-tabs; task navigation remains in the existing horizontal printer tab bar.
+- Bumped static cache to `app.js?v=242` and `style.css?v=191`.
 
 ## What was polished - Session 28.159 (Simulator notification polish - 4 June)
 - Simulated printer state-change notifications now stay inside Flightdeck with a `SIM` title prefix.

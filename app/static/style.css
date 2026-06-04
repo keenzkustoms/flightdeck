@@ -1192,38 +1192,41 @@ header {
 }
 
 .tab-printer {
-  padding-left: 1rem;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 2rem;
+  padding: 0.35rem 0.65rem;
   font-size: 0.78rem;
 }
 
-.tab-printer-group {
-  display: grid;
-  gap: 0.18rem;
-  border-radius: 0.45rem;
+.tab-printer-state {
+  width: 0.46rem;
+  height: 0.46rem;
+  border-radius: 50%;
+  background: var(--offline);
+  box-shadow: 0 0 0 3px rgba(107,114,128,0.14);
 }
-.tab-printer-parent {
-  padding: 0.35rem 0.65rem 0.1rem;
-  color: var(--text);
-  font-size: 0.82rem;
-  font-weight: 800;
-  line-height: 1.2;
+
+.tab-printer-state-printing { background: var(--printing); box-shadow: 0 0 0 3px rgba(59,130,246,0.16); }
+.tab-printer-state-paused { background: var(--paused); box-shadow: 0 0 0 3px rgba(245,158,11,0.16); }
+.tab-printer-state-idle,
+.tab-printer-state-finished { background: var(--idle); box-shadow: 0 0 0 3px rgba(34,197,94,0.16); }
+.tab-printer-state-error,
+.tab-printer-state-estop { background: var(--error); box-shadow: 0 0 0 3px rgba(239,68,68,0.16); }
+
+.tab-printer-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.tab-printer-subnav {
-  display: grid;
-  gap: 0.12rem;
-  padding: 0 0 0.18rem 0.55rem;
-}
-.tab-printer-child {
-  min-height: 1.55rem;
-  padding: 0.18rem 0.52rem;
+
+.tab-printer-progress {
   color: #8fb0df;
-  font-size: 0.72rem;
-}
-.tab-printer-group:has(.tab.active) {
-  background: rgba(255,255,255,0.025);
-}
-.tab-printer-group:has(.tab.active) .tab-printer-parent {
-  color: var(--text);
+  font-size: 0.68rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
 }
 
 @media (max-width: 760px) {
@@ -1276,24 +1279,7 @@ header {
     min-width: max-content;
   }
   .tab-section { display: none; }
-  .tab-printer { padding-left: 0.65rem; }
-  .tab-printer-group {
-    display: flex;
-    align-items: center;
-    gap: 0.25rem;
-  }
-  .tab-printer-parent {
-    padding: 0.35rem 0.2rem 0.35rem 0.55rem;
-  }
-  .tab-printer-subnav {
-    display: flex;
-    align-items: center;
-    padding: 0;
-  }
-  .tab-printer-child {
-    min-height: 2rem;
-    padding: 0.35rem 0.55rem;
-  }
+  .tab-printer { min-width: 7rem; padding: 0.35rem 0.65rem; }
   .app-views { overflow: visible; }
   .view { overflow: visible; }
   #dashboard-overview { padding: 1rem 1rem 0; }
