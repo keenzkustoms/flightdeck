@@ -1412,15 +1412,6 @@ async def get_history_day(printer_id: str, date: str):
     return db.get_prints_for_day(printer_id, date)
 
 
-@app.get("/api/printers/{printer_id}/history/gallery")
-async def get_history_gallery(printer_id: str, year: int | None = None, limit: int = 36):
-    from datetime import datetime as _dt
-    _assert_printer(printer_id)
-    if year is None:
-        year = _dt.utcnow().year
-    return {"items": db.get_history_gallery(printer_id, year, limit)}
-
-
 @app.get("/api/printers/usage")
 async def get_printer_usage():
     return db.get_printer_usage_summary()

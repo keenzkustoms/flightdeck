@@ -1,12 +1,18 @@
 # Flightdeck — next session brief
-_Last updated 4 June 2026 (Session 28.155 History thumbnail gallery)_
+_Last updated 4 June 2026 (Session 28.156 History gallery removed)_
+
+## What was reverted - Session 28.156 (History gallery removed - 4 June)
+- Removed the History thumbnail gallery after live review; the History tab is back to year nav, heatmap, and day/detail drill-in only.
+- Removed the `/api/printers/{printer_id}/history/gallery` endpoint and gallery-only frontend/CSS.
+- Bumped static cache versions to `app.js?v=239` and `style.css?v=189`.
+- Keep future history work focused on the existing heatmap/day/detail surface unless the gallery is explicitly re-requested.
 
 ## What was built - Session 28.155 (History thumbnail gallery - 4 June)
 - Added a per-printer History gallery endpoint, `/api/printers/{printer_id}/history/gallery`, returning recent print rows for the selected year.
 - Added a `Recent print snapshots` gallery below the History heatmap, using captured print snapshots when available and compact state tiles otherwise.
-- Gallery cards open the existing History print detail above the gallery, preserving notes, spool usage, and decision trail as the single detail surface.
-- Added selected-card feedback and automatic scrolling so gallery clicks visibly reveal the detail panel.
-- Bumped static cache versions to `app.js?v=237` and `style.css?v=187`.
+- Gallery cards open the existing History print detail below the gallery, preserving notes, spool usage, and decision trail as the single detail surface.
+- Restored the original gallery-first layout after the above-gallery detail treatment felt too jumpy in use.
+- Bumped static cache versions to `app.js?v=238` and `style.css?v=188`.
 - Verified live H2D gallery data: 36 items with 13 snapshots; gallery card click opened `can_openerV2` detail with notes and decision trail visible.
 
 ## What was fixed - Session 28.154 (Bambu Print Bay scoped file loading - 4 June)

@@ -606,27 +606,6 @@ def get_prints_for_day(printer_id: str, date_str: str) -> list[dict]:
     return result
 
 
-def get_history_gallery(printer_id: str, year: int, limit: int = 36) -> list[dict]:
-    """Recent print rows for a printer/year gallery."""
-    limit = max(1, min(int(limit or 36), 96))
-    y0, y1 = f"{year}-01-01", f"{year + 1}-01-01"
-    with _conn() as conn:
-        rows = conn.execute(
-            """SELECT id, printer_id, filename, subtask_name, started_at, ended_at,
-                      duration_seconds, final_state, error_message,
-                      filament_grams, material,
-                      snapshot_captured_at IS NOT NULL AS has_snapshot
-               FROM prints
-               WHERE printer_id = ? AND final_state IS NOT NULL
-                 AND started_at >= ? AND started_at < ?
-                 AND (error_message IS NULL OR error_message != 'Abandoned (stale open row)')
-               ORDER BY started_at DESC
-               LIMIT ?""",
-            (printer_id, y0, y1, limit),
-        ).fetchall()
-    return [dict(r) for r in rows]
-
-
 def _mark_reconcile_suggestions(usage: list[dict], spools: dict[int, dict], low_pct: float) -> None:
     """Add light-touch weigh-in hints to risky usage rows.
 
