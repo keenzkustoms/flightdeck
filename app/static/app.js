@@ -3602,7 +3602,17 @@ async function _openHistoryPrint(printerId, dateStr, printId) {
   if (!_dayPrintsCache[key]) await _loadDayDetail(printerId, dateStr);
   const prints = _dayPrintsCache[key] || [];
   const print = prints.find(p => String(p.id) === String(printId));
-  if (print) _showPrintDetail(printerId, dateStr, print);
+  if (!print) return false;
+  _showPrintDetail(printerId, dateStr, print);
+  requestAnimationFrame(() => setTimeout(() => {
+    const detail = document.querySelector('#history-day-detail .history-day-panel') ||
+      document.getElementById('history-day-detail');
+    if (!detail) return;
+    const rect = detail.getBoundingClientRect();
+    const target = window.scrollY + rect.top - Math.max(24, (window.innerHeight - rect.height) / 2);
+    window.scrollTo({ top: Math.max(0, target), behavior: 'smooth' });
+  }, 50));
+  return true;
 }
 
 async function _renderHistoryBody(printerId) {
@@ -3628,8 +3638,8 @@ async function _renderHistoryBody(printerId) {
     _historyYearNav(year, currentYear) +
     _historySummaryLine(data.summary) +
     _historyHeatmap(printerId, data.days, year) +
-    _historyGalleryHtml(printerId, gallery.items || []) +
-    `<div id="history-day-detail"></div>`;
+    `<div id="history-day-detail"></div>` +
+    _historyGalleryHtml(printerId, gallery.items || []);
 
   el.querySelector('[data-year-prev]')?.addEventListener('click', () => {
     _historyYear[printerId] = year - 1;
@@ -3660,6 +3670,8 @@ async function _renderHistoryBody(printerId) {
     }
     const card = e.target.closest('.history-gallery-card[data-gallery-print-id]');
     if (card) {
+      el.querySelectorAll('.history-gallery-card.selected').forEach(c => c.classList.remove('selected'));
+      card.classList.add('selected');
       _openHistoryPrint(printerId, card.dataset.galleryDate, card.dataset.galleryPrintId);
     }
   });
