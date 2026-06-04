@@ -1,5 +1,9 @@
 # Flightdeck — next session brief
-_Last updated 4 June 2026 (Session 28.143 Standalone demo realism)_
+_Last updated 4 June 2026 (Session 28.144 Demo breadcrumb docs)_
+
+## What was polished - Session 28.144 (Demo breadcrumb docs - 4 June)
+- Updated the install guide so new testers know they can open either **System -> Demo Mode** or the standalone `/demo` page before touching live printer controls.
+- Updated the public website tester path to mention the standalone `/demo` page alongside Demo Mode, Setup Health, and the first-printer walkthrough.
 
 ## What was polished - Session 28.143 (Standalone demo realism - 4 June)
 - Cut a real Voron camera frame from the all-cameras screenshot and added it as `app/static/demo-assets/voron-camera.png`.

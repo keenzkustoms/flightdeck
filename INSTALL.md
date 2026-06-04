@@ -37,7 +37,7 @@ For a first install, use this path:
 2. **Add printers** in **System -> Settings -> Printers**.
 3. **Add spools** in **Spools**, then add shelves, scale, and label printer if you have them.
 
-After that, open **System -> Demo Mode** for a safe tour and **System -> Settings -> Setup** to confirm the install health checks.
+After that, open **System -> Demo Mode** for a guided tour, or open `/demo` for the standalone interactive demo. Then use **System -> Settings -> Setup** to confirm the install health checks.
 
 Keep destructive actions such as cancel, E-stop, SD cleanup, delete, and archive for a deliberate test pass.
 
