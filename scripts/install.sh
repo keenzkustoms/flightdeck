@@ -50,7 +50,14 @@ cat <<EOF
 
 Install complete.
 
-Edit printer config:
+Next steps:
+  1. Install: done.
+  2. Add printers in Flightdeck:
+     System -> Settings -> Printers
+  3. Add spools in Flightdeck:
+     Spools
+
+Advanced printer config file:
   ${DATA_DIR}/printers.yaml
 
 Run locally:

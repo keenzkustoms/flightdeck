@@ -1,31 +1,61 @@
 # Flightdeck Install Guide
 
-This is the simple first-install path for testers running Flightdeck on a Raspberry Pi.
+Flightdeck install, easy as 1-2-3:
+
+1. **Install Flightdeck**
+2. **Add printers**
+3. **Add spools**
+
+That is the normal path. Optional hardware such as scales and label printers can be checked afterwards from the Flightdeck settings screen.
 
 Flightdeck is still early software. Start on your LAN, keep printer credentials private, and use Tailscale or another private VPN for remote access instead of exposing it directly to the public internet.
 
 ## What You Need
 
-- Raspberry Pi 5 recommended, 8 GB or better preferred for several camera feeds.
 - Raspberry Pi OS 64-bit.
 - Bambu printers in LAN mode, if you use Bambu machines.
 - Moonraker reachable on the network, if you use Voron/Klipper machines.
 - Optional hardware: Dymo USB scale and Brother QL-700 label printer.
 - Optional remote access: Tailscale.
 
-## First Tester Path
+## Raspberry Pi Sizing
 
-If you are installing Flightdeck for the first time, use this order:
+These are practical starting points, not hard limits. Camera feeds, browser tabs, and Bambu RTSP workers are usually what decide how much headroom you need.
 
-1. Install Flightdeck and open the app.
-2. Visit **System -> Demo Mode** to see the intended workflow without touching printers.
-3. Visit **System -> Settings -> Setup** and confirm the required checks are green.
-4. Add one printer and confirm its live page opens.
-5. Browse Dashboard, Cameras, Telemetry, Print Bay, Spools, Failures, History, and Maintenance before testing queue or hardware actions.
+| Host | Best fit |
+| --- | --- |
+| Pi 5 4 GB | Small installs, up to about 5 printers, lighter camera use |
+| Pi 5 8 GB | Recommended default for more than 5 printers or several live camera feeds |
+| Pi 5 16 GB | Bigger rooms, more than 10 printers, heavy camera use, demo/testing headroom |
+| Pi 4 4 GB | Light installs should run, but expect less camera headroom; Pi 5 is the main recommendation |
+
+## Easy As 1-2-3
+
+For a first install, use this path:
+
+1. **Install** Flightdeck on the Pi using the command below.
+2. **Add printers** in **System -> Settings -> Printers**.
+3. **Add spools** in **Spools**, then add shelves, scale, and label printer if you have them.
+
+After that, open **System -> Demo Mode** for a safe tour and **System -> Settings -> Setup** to confirm the install health checks.
 
 Keep destructive actions such as cancel, E-stop, SD cleanup, delete, and archive for a deliberate test pass.
 
-## 1. Install System Packages
+## 1. Install Flightdeck
+
+SSH into the Pi, then run this one command:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Kidabah/flightdeck/main/scripts/install-pi.sh | bash
+```
+
+When it finishes, open the URL printed by the installer.
+
+## Manual Install
+
+Use this only if you want to run each step yourself.
+
+### Install System Packages
 
 SSH into the Pi, then run:
 
@@ -34,7 +64,7 @@ sudo apt update
 sudo apt install -y git python3 python3-venv python3-pip ffmpeg curl
 ```
 
-## 2. Clone Flightdeck
+### Clone Flightdeck
 
 ```bash
 cd ~
@@ -42,7 +72,7 @@ git clone https://github.com/Kidabah/flightdeck.git
 cd flightdeck
 ```
 
-## 3. Run the Installer
+### Run the Installer
 
 ```bash
 ./scripts/install.sh
@@ -56,15 +86,14 @@ This creates the Python environment and prepares the default data folder:
 
 Your live data lives there, not inside the repo. That keeps clean installs and GitHub updates from overwriting your printers, history, spools, uploads, or print vault.
 
-## 4. Configure Printers
+## 2. Add Printers
 
-Edit the generated printer config:
+For normal installs, add printers from inside Flightdeck:
 
-```bash
-nano ~/flightdeck-data/printers.yaml
-```
-
-Use `printers.yaml.example` in the repo as a guide.
+1. Open Flightdeck in your browser.
+2. Go to **System -> Settings -> Printers**.
+3. Click **Add printer**.
+4. Choose the printer type and enter the connection details.
 
 For Bambu printers, you generally need:
 
@@ -78,7 +107,26 @@ For Voron/Klipper printers, you generally need:
 - Moonraker URL
 - camera URL, if available
 
-## 5. Run Flightdeck Once
+Advanced/manual option: Flightdeck still stores printer config in:
+
+```text
+~/flightdeck-data/printers.yaml
+```
+
+You can edit that file directly for migrations, backups, or bulk setup. Use `printers.yaml.example` in the repo as a guide.
+
+## 3. Add Spools
+
+Open **Spools** in Flightdeck, then add your filament rolls.
+
+For the best first pass:
+
+1. Add shelf locations.
+2. Add each spool with material, brand, colour, label weight, and remaining weight.
+3. Use the optional scale to verify weight if connected.
+4. Use the optional Brother QL-700 label printer to print spool labels if connected.
+
+## Run Flightdeck Once Manually
 
 ```bash
 FLIGHTDECK_DATA_DIR=~/flightdeck-data .venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
@@ -92,7 +140,7 @@ http://<your-pi-ip>:8000
 
 Press `Ctrl+C` in the terminal when you are ready to install it as a service.
 
-## 6. Install the Service
+## Install the Service Manually
 
 ```bash
 ./scripts/install-systemd.sh

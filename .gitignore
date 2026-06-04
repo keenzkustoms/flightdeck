@@ -10,4 +10,5 @@ uploads/
 print_library/
 printers.yaml
 backup_metadata.json
+kprofiles/
 spools.db

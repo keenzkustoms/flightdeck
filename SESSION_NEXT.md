@@ -1,5 +1,13 @@
 # Flightdeck — next session brief
-_Last updated 4 June 2026 (Session 28.141 Tester path polish)_
+_Last updated 4 June 2026 (Session 28.142 Easy install + public repo cleanup)_
+
+## What was polished - Session 28.142 (Easy install + public repo cleanup - 4 June)
+- Reworded the install path around the public promise: Flightdeck install is easy as 1-2-3: install, add printers, add spools.
+- Added practical Pi sizing guidance: Pi 5 4 GB for small fleets, Pi 5 8 GB as the recommended default beyond 5 printers, Pi 5 16 GB for 10+ printers/camera-heavy rooms, and Pi 4 as a light-install fallback rather than the main target.
+- Added a one-command Raspberry Pi installer entry point, `scripts/install-pi.sh`, so layman installs can start with a single copy/paste command.
+- Updated README and GitHub Pages install wording so the public page, repo, and install guide all lead with UI setup instead of YAML editing.
+- Removed tracked legacy profile backup artifacts from the public repo and ignored `kprofiles/` so clean clones do not expose private/old profile exports.
+- Renamed the default MQTT topic prefix in tracked app settings from the old external-project value to `flightdeck`.
 
 ## What was polished - Session 28.141 (Tester path polish - 4 June)
 - Tightened the public GitHub Pages landing page so the primary action opens the plain-English install guide, with a secondary GitHub link and contact CTA.
@@ -306,7 +314,7 @@ Telemetry now includes per-printer historical print counters.
 
 ## What was built - Session 28.91 (Bambu MQTT maintenance automation - 31 May)
 
-Flightdeck now reads Bambu MQTT care advisories into the printer Maintenance tab without copying Bambuddy.
+Flightdeck now reads Bambu MQTT care advisories into the printer Maintenance tab using its own maintenance model.
 
 ### Backend
 - Bambu status parses MQTT `print.care` into live maintenance advisories.
@@ -1840,7 +1848,7 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Static cache-bust bumped to `v=78`.
 
 ### Session 28.23 AMS drying diagnostics
-- Matched Flightdeck's AMS drying payload to Bambuddy's current wire shape, including `filament` and `close_power_conflict`.
+- Matched Flightdeck's AMS drying payload to the observed Bambu MQTT wire shape, including `filament` and `close_power_conflict`.
 - Parsed Bambu `dry_sf_reason`, `dry_status`, and `dry_sub_status` from raw AMS MQTT.
 - Added backend guardrails so blocked drying starts return a useful 409 error instead of silently doing nothing.
 - Added AMS drying modal warning text for known block reasons such as filament sitting at the AMS outlet.
@@ -2375,7 +2383,7 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Static cache-bust bumped to `app.js?v=183`.
 
 ### BambuStudio-shaped AMS load/unload commands
-- Updated Flightdeck's Bambu AMS load/unload MQTT payloads to match captured BambuStudio/Bambuddy command shape more closely.
+- Updated Flightdeck's Bambu AMS load/unload MQTT payloads to match captured Bambu command traffic more closely.
 - Load now sends `ams_id`, `slot_id`, `target`, and `curr_temp/tar_temp=-1`.
 - Unload now sends `slot_id=255` and `target=255`, with source `ams_id` derived from the clicked/active slot.
 - This replaces the older bambulabs_api helper shape that was accepted by MQTT but ignored by the H2D AMS state machine.
@@ -2387,7 +2395,7 @@ First real hardware pass for the Dymo M10 scale and Brother QL-700 label printer
 - Updated the live printer config model name from `Voron` to `Voron 2.4 350`; the shop name remains `Greyhound Elite V2`.
 
 ### Localhost-only service hardening
-- Reviewed the Bambuddy 0.2.4.4 fail-open auth advisory against Flightdeck.
+- Reviewed a third-party fail-open auth advisory against Flightdeck's own authentication and error handling.
 - Flightdeck does not currently have a comparable auth gate that can fail open, but it was still listening on `0.0.0.0:8000`, which exposed the raw HTTP app to the LAN.
 - Changed the shipped systemd service and install docs to bind Uvicorn to `127.0.0.1:8000` by default.
 - Tailscale Serve remains the intended remote doorway: `tailscale serve --bg http://127.0.0.1:8000`.

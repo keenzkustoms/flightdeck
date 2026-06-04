@@ -14,6 +14,12 @@ Project website files live in [`docs/`](docs/) for GitHub Pages.
 
 New tester? Start with the plain-English setup guide: [`INSTALL.md`](INSTALL.md).
 
+Flightdeck install is meant to be easy as 1-2-3:
+
+1. Install Flightdeck.
+2. Add printers from the Settings screen.
+3. Add spools from the Spools screen.
+
 ---
 
 ## Safe Restart
@@ -186,20 +192,35 @@ Flightdeck collapses that into one interface, owned by me, running on my network
 
 ### Prerequisites
 
-- Raspberry Pi 5 (or equivalent Linux host) with at least 4 GB RAM
+- Raspberry Pi OS 64-bit on a Pi 5, or an equivalent Linux host
 - Debian 13 (Trixie) or similar
 - Python 3.13+
 - Network reachability to all printers
 
+Practical Pi sizing:
+
+- Pi 5 4 GB: small installs, up to about 5 printers, lighter camera use
+- Pi 5 8 GB: recommended default for more than 5 printers or several live camera feeds
+- Pi 5 16 GB: bigger rooms, more than 10 printers, heavy camera use, demo/testing headroom
+- Pi 4 4 GB: light installs should run, but expect less camera headroom
+
 ### Setup
 
+For most Raspberry Pi installs:
+
 ```bash
-# Clone
+curl -fsSL https://raw.githubusercontent.com/Kidabah/flightdeck/main/scripts/install-pi.sh | bash
+```
+
+That installs system packages, clones or updates Flightdeck, creates `.venv`, `.env`, the data directory, SQLite DB, uploads, print library, and systemd service.
+
+Manual install:
+
+```bash
 git clone https://github.com/Kidabah/flightdeck.git
 cd flightdeck
-
-# Creates .venv, .env, the data directory, SQLite DB, uploads, and print library.
 ./scripts/install.sh
+./scripts/install-systemd.sh
 ```
 
 By default the installer stores live data in `~/flightdeck-data`:
@@ -235,7 +256,9 @@ This keeps Flightdeck off the raw LAN interface while exposing it over your tail
 
 ### Configuration
 
-Printers are declared in the data directory's `printers.yaml`. The installer creates it from `printers.yaml.example` if it does not already exist.
+For normal installs, add printers in Flightdeck from **System -> Settings -> Printers** and add filament from **Spools**.
+
+Advanced/manual option: printers are stored in the data directory's `printers.yaml`. The installer creates it from `printers.yaml.example` if it does not already exist.
 
 ```bash
 $EDITOR ~/flightdeck-data/printers.yaml

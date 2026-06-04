@@ -41,7 +41,7 @@
     "mqtt_port": "1883",
     "mqtt_username": "",
     "mqtt_password": "",
-    "mqtt_topic_prefix": "bambuddy",
+    "mqtt_topic_prefix": "flightdeck",
     "mqtt_use_tls": "false",
     "external_url": "http://flightdeck:8001",
     "ha_enabled": "false",
