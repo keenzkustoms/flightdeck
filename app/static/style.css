@@ -7661,6 +7661,16 @@ select.settings-input { cursor: pointer; }
   min-width: 0;
 }
 
+.spool-card[data-spool-id] {
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, transform 0.15s;
+}
+
+.spool-card[data-spool-id]:hover {
+  border-color: rgba(59,130,246,0.55);
+  background: rgba(59,130,246,0.045);
+}
+
 .spool-card-band {
   min-height: 48px;
   display: flex;

@@ -1,5 +1,11 @@
 # Flightdeck — next session brief
-_Last updated 4 June 2026 (Session 28.149 Add spool catalogue flow polish)_
+_Last updated 4 June 2026 (Session 28.150 Spool card detail navigation)_
+
+## What was polished - Session 28.150 (Spool card detail navigation - 4 June)
+- Made single-spool cards in Cards view open the spool detail page when the non-control card surface is clicked.
+- Kept Label/Edit/Actions buttons and multiple-roll chip links independent so operators do not accidentally leave the page while using controls.
+- Added a subtle hover cue to clickable spool cards.
+- Bumped static cache versions to `app.js?v=231` and `style.css?v=184`; no service restart is needed for this static-only pass.
 
 ## What was polished - Session 28.149 (Add spool catalogue flow polish - 4 June)
 - Added a live spool draft preview inside the Add/Edit Spool modal so catalogue selections, colour, location, and weight are visible before saving.

@@ -9208,6 +9208,12 @@ function _refreshSpoolsSurface() {
 }
 
 function _attachSpoolListEvents(el, listEl, refresh = _refreshSpoolsSurface) {
+  listEl.addEventListener('click', e => {
+    if (e.target.closest('button, a, input, select, textarea, summary, details, .spool-action-menu')) return;
+    const card = e.target.closest('.spool-card[data-spool-id]');
+    if (!card || !listEl.contains(card)) return;
+    location.hash = `#/spool/${card.dataset.spoolId}`;
+  });
   listEl.querySelectorAll('.spool-action-btn[data-action]').forEach(btn => {
     btn.addEventListener('click', async e => {
       e.stopPropagation();
