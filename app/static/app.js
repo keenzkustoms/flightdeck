@@ -199,10 +199,12 @@ let _camZoom = 0;               // 0=normal, 1=wide, 2=fullscreen
 let _onSettings = false;        // true while settings view is active
 let _onFailures = false;        // true while failure review is active
 let _onSpools = false;          // true while spool inventory is active
+let _onMemory = false;          // true while Print Memory is active
 let _onManual = false;          // true while flight manual is active
 let _onDemo = false;            // true while demo mode is active
 let _renderedSpoolDetailId = null;
 let _lastSpoolsRouteKey = '';
+let _lastMemoryRouteKey = '';
 
 // ── Toast notifications ────────────────────────────────────────────────────
 
@@ -2115,13 +2117,16 @@ function router() {
   const wasOnSettings = _onSettings;
   const wasOnFailures = _onFailures;
   const wasOnSpools = _onSpools;
+  const wasOnMemory = _onMemory;
   const wasOnManual = _onManual;
   const wasOnDemo = _onDemo;
   const wasSpoolDetailId = _renderedSpoolDetailId;
   const spoolsRouteKey = route.view === 'spools' ? (location.hash || '#/spools') : '';
+  const memoryRouteKey = route.view === 'memory' ? (location.hash || '#/memory') : '';
   _onSettings = route.view === 'settings';
   _onFailures = route.view === 'failures';
   _onSpools = route.view === 'spools';
+  _onMemory = route.view === 'memory';
   _onManual = route.view === 'manual';
   _onDemo = route.view === 'demo';
   if (route.view !== 'spool') _renderedSpoolDetailId = null;
@@ -2175,13 +2180,17 @@ function router() {
   if (route.view === 'cameras') renderCamerasView();
   if (route.view === 'queue') renderQueueView();
   if (route.view === 'files' && !_fileDeskRenderInFlight) renderFileDeskView();
-  if (route.view === 'memory') renderPrintMemoryView();
+  if (route.view === 'memory' && (!wasOnMemory || _lastMemoryRouteKey !== memoryRouteKey)) {
+    _lastMemoryRouteKey = memoryRouteKey;
+    renderPrintMemoryView();
+  }
   if (route.view === 'failures' && !wasOnFailures) renderFailuresView();
   if (route.view === 'spools' && (!wasOnSpools || _lastSpoolsRouteKey !== spoolsRouteKey)) {
     _lastSpoolsRouteKey = spoolsRouteKey;
     renderSpoolsView();
   }
   if (route.view !== 'spools') _lastSpoolsRouteKey = '';
+  if (route.view !== 'memory') _lastMemoryRouteKey = '';
   if (route.view === 'settings' && (!wasOnSettings || categoryBeforeRoute !== _settingsCategory)) renderSettingsView();
   if (route.view === 'demo' && !wasOnDemo) renderDemoView();
   if (route.view === 'manual' && !wasOnManual) renderManualView();

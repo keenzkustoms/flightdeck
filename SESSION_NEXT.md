@@ -1,5 +1,10 @@
 # Flightdeck — next session brief
-_Last updated 4 June 2026 (Session 28.161 Print Memory v1)_
+_Last updated 4 June 2026 (Session 28.162 Print Memory render guard)_
+
+## What was fixed - Session 28.162 (Print Memory render guard - 4 June)
+- Stopped Print Memory from rerendering on every fleet refresh while the route and filters are unchanged.
+- This removes the visible flashing/flicker while staying on `#/memory` or filtered memory routes.
+- Bumped static cache to `app.js?v=244`; no backend restart required.
 
 ## What was built - Session 28.161 (Print Memory v1 - 4 June)
 - Added a fleet-level Print Memory page under Operations as the first cross-printer print passport surface.
