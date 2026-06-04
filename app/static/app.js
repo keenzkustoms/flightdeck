@@ -3283,6 +3283,43 @@ function _historyHeatmap(printerId, dayData, year) {
   </div>`;
 }
 
+function _historyGalleryHtml(printerId, items = []) {
+  const cards = items.map(print => {
+    const rawName = print.subtask_name || (print.filename || '').replace(/.*[/\\]/, '');
+    const name = rawName.replace(/\.gcode(?:\.3mf)?$/i, '').replace(/\.3mf$/i, '') || 'Print';
+    const state = _printBadge(print.final_state || 'running');
+    const started = print.started_at
+      ? new Date(print.started_at.endsWith('Z') ? print.started_at : print.started_at + 'Z')
+        .toLocaleDateString([], { month: 'short', day: 'numeric' })
+      : '';
+    const duration = print.duration_seconds ? formatTime(print.duration_seconds) : '';
+    const material = [print.material, print.filament_grams != null ? `${Number(print.filament_grams).toFixed(1)}g` : '']
+      .filter(Boolean).join(' · ');
+    const dateStr = (print.started_at || '').slice(0, 10);
+    const media = print.has_snapshot
+      ? `<img src="${_mediaUrl(`/api/printers/${esc(printerId)}/prints/${print.id}/snapshot`, print.filename || 'Print snapshot')}" alt="" loading="lazy">`
+      : `<span>${esc(state.label)}</span>`;
+    return `<button class="history-gallery-card history-gallery-${state.cls}" data-gallery-date="${esc(dateStr)}" data-gallery-print-id="${print.id}" title="${esc(print.filename || name)}">
+      <div class="history-gallery-thumb">${media}</div>
+      <div class="history-gallery-main">
+        <strong>${esc(name)}</strong>
+        <span>${esc([started, duration].filter(Boolean).join(' · '))}</span>
+        ${material ? `<em>${esc(material)}</em>` : ''}
+      </div>
+    </button>`;
+  }).join('');
+  return `<section class="history-gallery">
+    <div class="history-gallery-head">
+      <div>
+        <div class="mission-eyebrow">Gallery</div>
+        <h2>Recent print snapshots</h2>
+      </div>
+      <span>${items.length} shown</span>
+    </div>
+    <div class="history-gallery-grid">${cards || '<div class="print-empty">No prints recorded for this year.</div>'}</div>
+  </section>`;
+}
+
 function _printBadge(state) {
   const cls = state === 'FINISHED' ? 'idle' : state === 'CANCELLED' ? 'paused' : state === 'ERROR' ? 'error' : 'printing';
   const label = state === 'FINISHED' ? 'done' : state === 'CANCELLED' ? 'cancelled' : state === 'ERROR' ? 'failed' : 'running';
@@ -3560,6 +3597,14 @@ async function _loadDayDetail(printerId, dateStr) {
   _renderDayList(printerId, dateStr, prints, el);
 }
 
+async function _openHistoryPrint(printerId, dateStr, printId) {
+  const key = `${printerId}:${dateStr}`;
+  if (!_dayPrintsCache[key]) await _loadDayDetail(printerId, dateStr);
+  const prints = _dayPrintsCache[key] || [];
+  const print = prints.find(p => String(p.id) === String(printId));
+  if (print) _showPrintDetail(printerId, dateStr, print);
+}
+
 async function _renderHistoryBody(printerId) {
   const el = document.getElementById('history-body');
   if (!el) return;
@@ -3569,15 +3614,21 @@ async function _renderHistoryBody(printerId) {
   const currentYear = new Date().getUTCFullYear();
 
   let data = { days: [], summary: {} };
+  let gallery = { items: [] };
   try {
-    const r = await fetch(`/api/printers/${printerId}/history/calendar?year=${year}`);
-    if (r.ok) data = await r.json();
+    const [calendarResp, galleryResp] = await Promise.all([
+      fetch(`/api/printers/${printerId}/history/calendar?year=${year}`),
+      fetch(`/api/printers/${printerId}/history/gallery?year=${year}&limit=36`),
+    ]);
+    if (calendarResp.ok) data = await calendarResp.json();
+    if (galleryResp.ok) gallery = await galleryResp.json();
   } catch {}
 
   el.innerHTML =
     _historyYearNav(year, currentYear) +
     _historySummaryLine(data.summary) +
     _historyHeatmap(printerId, data.days, year) +
+    _historyGalleryHtml(printerId, gallery.items || []) +
     `<div id="history-day-detail"></div>`;
 
   el.querySelector('[data-year-prev]')?.addEventListener('click', () => {
@@ -3606,6 +3657,10 @@ async function _renderHistoryBody(printerId) {
       const key = `${printerId}:${row.dataset.date}`;
       const prints = _dayPrintsCache[key];
       if (prints) _showPrintDetail(printerId, row.dataset.date, prints[parseInt(row.dataset.printIdx, 10)]);
+    }
+    const card = e.target.closest('.history-gallery-card[data-gallery-print-id]');
+    if (card) {
+      _openHistoryPrint(printerId, card.dataset.galleryDate, card.dataset.galleryPrintId);
     }
   });
 }

@@ -1,5 +1,12 @@
 # Flightdeck — next session brief
-_Last updated 4 June 2026 (Session 28.154 Bambu Print Bay scoped file loading)_
+_Last updated 4 June 2026 (Session 28.155 History thumbnail gallery)_
+
+## What was built - Session 28.155 (History thumbnail gallery - 4 June)
+- Added a per-printer History gallery endpoint, `/api/printers/{printer_id}/history/gallery`, returning recent print rows for the selected year.
+- Added a `Recent print snapshots` gallery below the History heatmap, using captured print snapshots when available and compact state tiles otherwise.
+- Gallery cards open the existing History print detail, preserving notes, spool usage, and decision trail as the single detail surface.
+- Bumped static cache versions to `app.js?v=234` and `style.css?v=186`.
+- Verified live H2D gallery data: 36 items with 13 snapshots; gallery card click opened `can_openerV2` detail with notes and decision trail visible.
 
 ## What was fixed - Session 28.154 (Bambu Print Bay scoped file loading - 4 June)
 - Diagnosed X1C/H2D Print Bay slowness to printer-specific bay tabs fetching the full fleet `/api/files` payload.

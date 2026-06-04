@@ -5772,6 +5772,111 @@ button.live-route-node:hover {
 .heat-cell.heat-future { opacity: 0.3; cursor: default; pointer-events: none; }
 .heat-cell.selected { outline: 2px solid var(--text); outline-offset: 1px; }
 
+.history-gallery {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.history-gallery-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.history-gallery-head h2 {
+  margin: 0.15rem 0 0;
+  font-size: 1rem;
+  color: var(--text);
+}
+
+.history-gallery-head span {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.history-gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 0.75rem;
+}
+
+.history-gallery-card {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+  min-height: 82px;
+  padding: 0;
+  overflow: hidden;
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  color: var(--text);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, transform 0.15s;
+}
+
+.history-gallery-card:hover {
+  border-color: rgba(255, 255, 255, 0.24);
+  background: rgba(255, 255, 255, 0.04);
+  transform: translateY(-1px);
+}
+
+.history-gallery-thumb {
+  width: 88px;
+  min-height: 82px;
+  aspect-ratio: 1 / 1;
+  display: grid;
+  place-items: center;
+  background: rgba(15, 23, 42, 0.82);
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.history-gallery-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.history-gallery-idle .history-gallery-thumb { color: var(--idle); }
+.history-gallery-paused .history-gallery-thumb { color: var(--paused); }
+.history-gallery-error .history-gallery-thumb { color: var(--error); }
+
+.history-gallery-main {
+  min-width: 0;
+  padding: 0.65rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.25rem;
+}
+
+.history-gallery-main strong {
+  min-width: 0;
+  color: var(--text);
+  font-size: 0.85rem;
+  line-height: 1.25;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.history-gallery-main span,
+.history-gallery-main em {
+  min-width: 0;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-style: normal;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* Day detail */
 .history-day-panel {
   background: var(--surface);
