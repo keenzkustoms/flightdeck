@@ -1447,6 +1447,11 @@ class NotesRequest(BaseModel):
     notes: str = ""
 
 
+class PrintMemoryMetadataRequest(BaseModel):
+    tags: Optional[list[str]] = None
+    exclude_from_stats: Optional[bool] = None
+
+
 class MaintenanceRequest(BaseModel):
     title: str
     notes: Optional[str] = None
@@ -1498,6 +1503,7 @@ async def get_print_memory(
     printer_id: Optional[str] = None,
     state: Optional[str] = None,
     material: Optional[str] = None,
+    tag: Optional[str] = None,
     q: Optional[str] = None,
     days: Optional[int] = None,
 ):
@@ -1507,6 +1513,7 @@ async def get_print_memory(
             printer_id=printer_id or None,
             state=state or None,
             material=material or None,
+            tag=tag or None,
             query=q or None,
             days=days,
         ),
@@ -1517,6 +1524,18 @@ async def get_print_memory(
 @app.get("/api/print-memory/{print_id}")
 async def get_print_memory_detail(print_id: int):
     item = db.get_print_by_id(print_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="print not found")
+    return item
+
+
+@app.patch("/api/print-memory/{print_id}")
+async def update_print_memory_metadata(print_id: int, body: PrintMemoryMetadataRequest):
+    item = db.update_print_memory_metadata(
+        print_id,
+        tags=body.tags,
+        exclude_from_stats=body.exclude_from_stats,
+    )
     if not item:
         raise HTTPException(status_code=404, detail="print not found")
     return item

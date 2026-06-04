@@ -221,6 +221,8 @@ def init() -> None:
             "ALTER TABLE material_costs ADD COLUMN comment TEXT",
             "ALTER TABLE material_costs ADD COLUMN empty_spool_weight_g REAL",
             "ALTER TABLE prints ADD COLUMN notes TEXT",
+            "ALTER TABLE prints ADD COLUMN tags TEXT",
+            "ALTER TABLE prints ADD COLUMN exclude_from_stats INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE prints ADD COLUMN spool_usage TEXT",
             "ALTER TABLE prints ADD COLUMN ams_slot_snapshot TEXT",
             "ALTER TABLE spools ADD COLUMN empty_spool_weight_g REAL",
@@ -577,6 +579,7 @@ def get_prints_for_day(printer_id: str, date_str: str) -> list[dict]:
                       duration_seconds, final_state, error_message,
                       layers_total, layers_completed, filament_grams, material,
                       snapshot_captured_at IS NOT NULL AS has_snapshot, notes,
+                      tags, exclude_from_stats,
                       spool_usage
                FROM prints
                WHERE printer_id = ? AND date(started_at) = ?
@@ -597,10 +600,17 @@ def get_prints_for_day(printer_id: str, date_str: str) -> list[dict]:
     for r in rows:
         item = dict(r)
         raw_usage = item.pop("spool_usage", None)
+        raw_tags = item.pop("tags", None)
         try:
             item["spool_usage"] = json.loads(raw_usage) if raw_usage else []
         except Exception:
             item["spool_usage"] = []
+        try:
+            tags = json.loads(raw_tags) if raw_tags else []
+            item["tags"] = [str(t).strip() for t in tags if str(t).strip()]
+        except Exception:
+            item["tags"] = []
+        item["exclude_from_stats"] = bool(item.get("exclude_from_stats"))
         _mark_reconcile_suggestions(item["spool_usage"], spools, low_pct)
         result.append(item)
     return result
@@ -622,10 +632,17 @@ def _hydrate_print_rows(rows) -> list[dict]:
     for r in rows:
         item = dict(r)
         raw_usage = item.pop("spool_usage", None)
+        raw_tags = item.pop("tags", None)
         try:
             item["spool_usage"] = json.loads(raw_usage) if raw_usage else []
         except Exception:
             item["spool_usage"] = []
+        try:
+            tags = json.loads(raw_tags) if raw_tags else []
+            item["tags"] = [str(t).strip() for t in tags if str(t).strip()]
+        except Exception:
+            item["tags"] = []
+        item["exclude_from_stats"] = bool(item.get("exclude_from_stats"))
         _mark_reconcile_suggestions(item["spool_usage"], spools, low_pct)
         result.append(item)
     return result
@@ -637,6 +654,7 @@ def get_print_memory(
     printer_id: Optional[str] = None,
     state: Optional[str] = None,
     material: Optional[str] = None,
+    tag: Optional[str] = None,
     query: Optional[str] = None,
     days: Optional[int] = None,
 ) -> list[dict]:
@@ -653,15 +671,19 @@ def get_print_memory(
     if material:
         where.append("LOWER(COALESCE(material, '')) = LOWER(?)")
         params.append(material)
+    if tag:
+        where.append("LOWER(COALESCE(tags, '')) LIKE ?")
+        params.append(f"%{tag.strip().lower()}%")
     if query:
         like = f"%{query.strip().lower()}%"
         where.append("""(
             LOWER(COALESCE(filename, '')) LIKE ?
             OR LOWER(COALESCE(subtask_name, '')) LIKE ?
             OR LOWER(COALESCE(notes, '')) LIKE ?
+            OR LOWER(COALESCE(tags, '')) LIKE ?
             OR LOWER(COALESCE(error_message, '')) LIKE ?
         )""")
-        params.extend([like, like, like, like])
+        params.extend([like, like, like, like, like])
     if days:
         days = max(1, min(int(days), 3650))
         where.append("started_at >= datetime('now', ?)")
@@ -670,6 +692,7 @@ def get_print_memory(
                      duration_seconds, estimated_duration_seconds, final_state, error_message,
                      layers_total, layers_completed, filament_grams, material,
                      snapshot_captured_at IS NOT NULL AS has_snapshot, notes,
+                     tags, exclude_from_stats,
                      spool_usage
               FROM prints
               WHERE {' AND '.join(where)}
@@ -687,6 +710,7 @@ def get_print_by_id(print_id: int) -> Optional[dict]:
                       duration_seconds, estimated_duration_seconds, final_state, error_message,
                       layers_total, layers_completed, filament_grams, material,
                       snapshot_captured_at IS NOT NULL AS has_snapshot, notes,
+                      tags, exclude_from_stats,
                       spool_usage
                FROM prints
                WHERE id = ?""",
@@ -708,9 +732,21 @@ def get_print_memory_facets() -> dict:
                WHERE final_state IS NOT NULL AND material IS NOT NULL AND material != ''
                ORDER BY material"""
         ).fetchall()
+        tag_rows = conn.execute(
+            """SELECT tags FROM prints
+               WHERE final_state IS NOT NULL AND tags IS NOT NULL AND tags != ''"""
+        ).fetchall()
+    import json
+    tags = set()
+    for row in tag_rows:
+        try:
+            tags.update(str(t).strip() for t in json.loads(row["tags"]) if str(t).strip())
+        except Exception:
+            continue
     return {
         "printers": [r["printer_id"] for r in printers],
         "materials": [r["material"] for r in materials],
+        "tags": sorted(tags, key=str.lower),
         "states": ["FINISHED", "CANCELLED", "ERROR", "ESTOP"],
     }
 
@@ -1015,6 +1051,46 @@ def update_print_notes(print_id: int, notes: str) -> bool:
             (notes or None, print_id),
         ).rowcount
     return n > 0
+
+
+def update_print_memory_metadata(
+    print_id: int,
+    *,
+    tags: Optional[list[str]] = None,
+    exclude_from_stats: Optional[bool] = None,
+) -> Optional[dict]:
+    """Update operator metadata on a print and return the hydrated row."""
+    import json
+    assignments = []
+    params: list = []
+    if tags is not None:
+        clean_tags = []
+        seen = set()
+        for tag in tags:
+            value = str(tag).strip()
+            if not value:
+                continue
+            key = value.lower()
+            if key in seen:
+                continue
+            clean_tags.append(value[:40])
+            seen.add(key)
+            if len(clean_tags) >= 12:
+                break
+        assignments.append("tags = ?")
+        params.append(json.dumps(clean_tags) if clean_tags else None)
+    if exclude_from_stats is not None:
+        assignments.append("exclude_from_stats = ?")
+        params.append(1 if exclude_from_stats else 0)
+    if not assignments:
+        return get_print_by_id(print_id)
+    params.append(print_id)
+    with _conn() as conn:
+        n = conn.execute(
+            f"UPDATE prints SET {', '.join(assignments)} WHERE id = ?",
+            params,
+        ).rowcount
+    return get_print_by_id(print_id) if n > 0 else None
 
 
 def get_latest_finished_print_id(printer_id: str) -> Optional[int]:

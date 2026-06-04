@@ -286,6 +286,83 @@ function _showNoteEditor(printerId, printId, existing, onSaved) {
   });
 }
 
+const _PRINT_MEMORY_TAGS = [
+  'Flightdeck testing',
+  'Calibration',
+  'Prototype',
+  'Customer job',
+  'Maintenance',
+  'First layer',
+];
+
+function _normalisePrintTags(tags) {
+  const seen = new Set();
+  return (tags || [])
+    .flatMap(tag => String(tag || '').split(','))
+    .map(tag => tag.trim())
+    .filter(tag => {
+      const key = tag.toLowerCase();
+      if (!tag || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, 12);
+}
+
+function _showPrintMemoryMetadataEditor(print, onSaved) {
+  const currentTags = _normalisePrintTags(print.tags || []);
+  const selected = new Set(currentTags.map(t => t.toLowerCase()));
+  const customTags = currentTags
+    .filter(tag => !_PRINT_MEMORY_TAGS.some(preset => preset.toLowerCase() === tag.toLowerCase()))
+    .join(', ');
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal-box note-editor-modal print-memory-editor">
+      <div class="modal-message" style="margin-bottom:0.75rem">Print memory</div>
+      <div class="memory-tag-grid">
+        ${_PRINT_MEMORY_TAGS.map(tag => `
+          <label class="memory-tag-choice">
+            <input type="checkbox" value="${esc(tag)}"${selected.has(tag.toLowerCase()) ? ' checked' : ''}>
+            <span>${esc(tag)}</span>
+          </label>`).join('')}
+      </div>
+      <label class="memory-custom-label">Custom tags</label>
+      <input class="memory-custom-tags" type="text" placeholder="Comma separated" value="${esc(customTags)}">
+      <label class="memory-exclude-choice">
+        <input type="checkbox" class="memory-exclude-input"${print.exclude_from_stats ? ' checked' : ''}>
+        <span>Exclude from reliability stats</span>
+      </label>
+      <div class="modal-actions" style="margin-top:0.75rem">
+        <button class="modal-btn" id="memory-meta-cancel">Cancel</button>
+        <button class="modal-btn" id="memory-meta-save" style="background:rgba(30,80,30,0.4);border-color:#16a34a;color:#86efac">Save</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  overlay.querySelector('#memory-meta-cancel').addEventListener('click', close);
+  overlay.querySelector('#memory-meta-save').addEventListener('click', async () => {
+    const presetTags = [...overlay.querySelectorAll('.memory-tag-choice input:checked')].map(el => el.value);
+    const custom = overlay.querySelector('.memory-custom-tags')?.value || '';
+    const tags = _normalisePrintTags([...presetTags, custom]);
+    const exclude_from_stats = !!overlay.querySelector('.memory-exclude-input')?.checked;
+    try {
+      const r = await fetch(`/api/print-memory/${print.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tags, exclude_from_stats }),
+      });
+      if (!r.ok) throw new Error('Unable to save print memory');
+      const saved = await r.json();
+      close();
+      if (onSaved) onSaved(saved);
+    } catch (err) {
+      showToast('Print memory not saved', err.message || '', 'error');
+    }
+  });
+  overlay.addEventListener('keydown', e => { if (e.key === 'Escape') close(); });
+}
+
 // ── Temperature modal ─────────────────────────────────────────────────────
 
 const _tempModal = (() => {
@@ -3494,11 +3571,22 @@ function _showPrintDetail(printerId, dateStr, print) {
   const notesHtml = `<div class="print-notes-block" data-print-id="${print.id}" data-printer-id="${printerId}">
     <div class="print-notes-view">
       ${print.notes
-        ? `<div class="print-notes-text">${print.notes}</div>`
+        ? `<div class="print-notes-text">${esc(print.notes)}</div>`
         : `<span class="print-notes-empty">No notes</span>`}
       <button class="print-notes-edit-btn">${print.notes ? 'Edit' : 'Add note'}</button>
     </div>
   </div>`;
+
+  const memoryMetaHtml = print.id ? `<div class="print-memory-meta" data-print-id="${print.id}">
+    <div class="print-memory-meta-head">
+      <span>Memory tags</span>
+      <button class="print-memory-edit-btn">Edit</button>
+    </div>
+    <div class="print-memory-tag-list">
+      ${(print.tags || []).map(tag => `<span class="print-memory-tag">${esc(tag)}</span>`).join('') || '<span class="print-notes-empty">No tags</span>'}
+      ${print.exclude_from_stats ? '<span class="print-memory-tag print-memory-tag-muted">Excluded from stats</span>' : ''}
+    </div>
+  </div>` : '';
 
   const spoolUsageHtml = print.spool_usage?.length
     ? `<div class="print-spool-usage">
@@ -3531,6 +3619,7 @@ function _showPrintDetail(printerId, dateStr, print) {
     <div>${rows.join('')}</div>
     ${spoolUsageHtml}
     ${notesHtml}
+    ${memoryMetaHtml}
     ${decisionHtml}
   </div>`;
 
@@ -3538,7 +3627,7 @@ function _showPrintDetail(printerId, dateStr, print) {
   if (notesBlock) {
     const _refreshNotesView = (notes) => {
       notesBlock.querySelector('.print-notes-view').innerHTML = notes
-        ? `<div class="print-notes-text">${notes}</div><button class="print-notes-edit-btn">Edit</button>`
+        ? `<div class="print-notes-text">${esc(notes)}</div><button class="print-notes-edit-btn">Edit</button>`
         : `<span class="print-notes-empty">No notes</span><button class="print-notes-edit-btn">Add note</button>`;
     };
     notesBlock.addEventListener('click', e => {
@@ -3547,6 +3636,24 @@ function _showPrintDetail(printerId, dateStr, print) {
       const pid  = parseInt(notesBlock.dataset.printId, 10);
       const existing = notesBlock.querySelector('.print-notes-text')?.textContent ?? '';
       _showNoteEditor(prid, pid, existing, saved => _refreshNotesView(saved));
+    });
+  }
+
+  const memoryMeta = el.querySelector('.print-memory-meta');
+  if (memoryMeta) {
+    const refreshMemoryMeta = (saved) => {
+      print = { ...print, ...saved };
+      memoryMeta.querySelector('.print-memory-tag-list').innerHTML = `
+        ${(print.tags || []).map(tag => `<span class="print-memory-tag">${esc(tag)}</span>`).join('') || '<span class="print-notes-empty">No tags</span>'}
+        ${print.exclude_from_stats ? '<span class="print-memory-tag print-memory-tag-muted">Excluded from stats</span>' : ''}`;
+      const row = document.querySelector(`.memory-row[data-print-id="${CSS.escape(String(print.id))}"]`);
+      if (row) {
+        const flags = row.querySelector('.memory-flags');
+        if (flags) flags.innerHTML = _memoryFlags(print);
+      }
+    };
+    memoryMeta.querySelector('.print-memory-edit-btn')?.addEventListener('click', () => {
+      _showPrintMemoryMetadataEditor(print, refreshMemoryMeta);
     });
   }
 
@@ -3771,6 +3878,15 @@ function _memoryPrinterLabel(id) {
   return p ? _printerNavLabel(p) : id;
 }
 
+function _memoryFlags(item) {
+  const tags = (item.tags || []).slice(0, 2).map(tag => `<span class="memory-pill">${esc(tag)}</span>`).join('');
+  const moreTags = (item.tags || []).length > 2 ? `<span class="memory-pill">+${item.tags.length - 2}</span>` : '';
+  const excluded = item.exclude_from_stats ? '<span class="memory-pill memory-pill-muted">no stats</span>' : '';
+  const notes = item.notes ? '<span class="memory-pill">note</span>' : '';
+  const snap = item.has_snapshot ? '<span class="memory-pill memory-pill-warn">snapshot</span>' : '';
+  return `${tags}${moreTags}${excluded}${notes}${snap}`;
+}
+
 function _memoryRow(item) {
   const started = item.started_at ? new Date(item.started_at.endsWith('Z') ? item.started_at : item.started_at + 'Z') : null;
   const dateLabel = started ? started.toLocaleDateString([], { month: 'short', day: 'numeric' }) : 'No date';
@@ -3781,8 +3897,6 @@ function _memoryRow(item) {
     : '';
   const material = item.material || (item.spool_usage || [])[0]?.material || '';
   const spoolCount = (item.spool_usage || []).length;
-  const notes = item.notes ? '<span class="memory-pill">note</span>' : '';
-  const snap = item.has_snapshot ? '<span class="memory-pill memory-pill-warn">snapshot</span>' : '';
   return `<button class="memory-row" type="button" data-print-id="${item.id}" data-printer-id="${esc(item.printer_id)}">
     <span class="memory-date"><strong>${esc(dateLabel)}</strong><em>${esc(timeLabel)}</em></span>
     <span class="memory-main">
@@ -3790,7 +3904,7 @@ function _memoryRow(item) {
       <em>${esc(_memoryPrinterLabel(item.printer_id))}${material ? ` · ${esc(material)}` : ''}${spoolCount ? ` · ${spoolCount} spool${spoolCount !== 1 ? 's' : ''}` : ''}</em>
     </span>
     <span class="memory-meta">${_memoryStateBadge(item.final_state)}<em>${esc(dur)}</em>${estimate}</span>
-    <span class="memory-flags">${notes}${snap}</span>
+    <span class="memory-flags">${_memoryFlags(item)}</span>
   </button>`;
 }
 
@@ -3805,6 +3919,9 @@ function _memoryFiltersHtml(data, params) {
   const materialOpts = (facets.materials || []).map(m =>
     `<option value="${esc(m)}"${params.material === m ? ' selected' : ''}>${esc(m)}</option>`
   ).join('');
+  const tagOpts = (facets.tags || []).map(t =>
+    `<option value="${esc(t)}"${params.tag === t ? ' selected' : ''}>${esc(t)}</option>`
+  ).join('');
   return `<div class="memory-toolbar">
     <input class="memory-search" type="search" placeholder="Search files, notes, errors..." value="${esc(params.q || '')}">
     <select class="memory-filter" data-memory-filter="printer_id">
@@ -3815,6 +3932,9 @@ function _memoryFiltersHtml(data, params) {
     </select>
     <select class="memory-filter" data-memory-filter="material">
       <option value="">All materials</option>${materialOpts}
+    </select>
+    <select class="memory-filter" data-memory-filter="tag">
+      <option value="">All tags</option>${tagOpts}
     </select>
     <select class="memory-filter" data-memory-filter="days">
       <option value="">All time</option>
@@ -3830,12 +3950,14 @@ function _memorySummary(items) {
   const finished = items.filter(i => i.final_state === 'FINISHED').length;
   const failed = items.filter(i => i.final_state === 'ERROR' || i.final_state === 'ESTOP').length;
   const cancelled = items.filter(i => i.final_state === 'CANCELLED').length;
+  const excluded = items.filter(i => i.exclude_from_stats).length;
   const hours = items.reduce((sum, i) => sum + Number(i.duration_seconds || 0), 0) / 3600;
   return `<div class="memory-summary">
     <span><strong>${items.length}</strong> prints</span>
     <span><strong>${finished}</strong> finished</span>
     <span><strong>${cancelled}</strong> cancelled</span>
     <span><strong>${failed}</strong> failed</span>
+    ${excluded ? `<span><strong>${excluded}</strong> no stats</span>` : ''}
     <span><strong>${hours.toFixed(1)}</strong> h</span>
   </div>`;
 }

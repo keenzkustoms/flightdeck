@@ -1,5 +1,13 @@
 # Flightdeck — next session brief
-_Last updated 4 June 2026 (Session 28.162 Print Memory render guard)_
+_Last updated 4 June 2026 (Session 28.163 Print Memory tags)_
+
+## What was built - Session 28.163 (Print Memory tags - 4 June)
+- Added Stage 2 Print Memory operator metadata: per-print tags and an `Exclude from reliability stats` flag.
+- Print Memory rows now show tag/no-stats pills, and the filter toolbar includes a tag filter.
+- Print passports now include a Memory Tags section with preset tags (`Flightdeck testing`, `Calibration`, `Prototype`, `Customer job`, `Maintenance`, `First layer`), custom comma-separated tags, and the stats-exclusion toggle.
+- Added `PATCH /api/print-memory/{print_id}` plus SQLite migrations for `prints.tags` and `prints.exclude_from_stats`.
+- Escaped print note display while touching the shared history/passport detail renderer.
+- Bumped static cache to `app.js?v=245` and `style.css?v=193`; backend restart required.
 
 ## What was fixed - Session 28.162 (Print Memory render guard - 4 June)
 - Stopped Print Memory from rerendering on every fleet refresh while the route and filters are unchanged.
