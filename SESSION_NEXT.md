@@ -1,5 +1,12 @@
 # Flightdeck — next session brief
-_Last updated 4 June 2026 (Session 28.163 Print Memory tags)_
+_Last updated 5 June 2026 (Session 28.164 Print Memory scorecard)_
+
+## What was built - Session 28.164 (Print Memory scorecard - 5 June)
+- Added the Stage 3 Print Memory score layer with `/api/print-memory-score`.
+- Reliability score counts trusted real attempts only: `FINISHED` vs `ERROR`/`ESTOP`; `CANCELLED` is visible but neutral, and `exclude_from_stats` rows are ignored.
+- Print Memory now shows a compact score panel with fleet score, trusted attempt count, excluded count, per-printer scores, ETA error where available, and top material score chips.
+- The score panel follows the Memory `days` filter while remaining independent of state/tag/search filters so browsing does not distort reliability.
+- Bumped static cache to `app.js?v=246` and `style.css?v=194`; backend restart required.
 
 ## What was built - Session 28.163 (Print Memory tags - 4 June)
 - Added Stage 2 Print Memory operator metadata: per-print tags and an `Exclude from reliability stats` flag.

@@ -1529,6 +1529,11 @@ async def get_print_memory_detail(print_id: int):
     return item
 
 
+@app.get("/api/print-memory-score")
+async def get_print_memory_score(days: Optional[int] = None):
+    return db.get_print_memory_score(days=days)
+
+
 @app.patch("/api/print-memory/{print_id}")
 async def update_print_memory_metadata(print_id: int, body: PrintMemoryMetadataRequest):
     item = db.update_print_memory_metadata(

@@ -751,6 +751,106 @@ def get_print_memory_facets() -> dict:
     }
 
 
+def get_print_memory_score(days: Optional[int] = None) -> dict:
+    """Fleet reliability scorecard from Print Memory operator-trusted rows."""
+    where = ["final_state IS NOT NULL"]
+    params: list = []
+    excluded_where = ["final_state IS NOT NULL", "COALESCE(exclude_from_stats, 0) = 1"]
+    excluded_params: list = []
+    if days:
+        days = max(1, min(int(days), 3650))
+        clause = "started_at >= datetime('now', ?)"
+        value = f"-{days} days"
+        where.append(clause)
+        params.append(value)
+        excluded_where.append(clause)
+        excluded_params.append(value)
+
+    trusted_where = where + ["COALESCE(exclude_from_stats, 0) = 0"]
+    with _conn() as conn:
+        fleet = conn.execute(
+            f"""SELECT COUNT(*) AS total,
+                       SUM(CASE WHEN final_state = 'FINISHED' THEN 1 ELSE 0 END) AS finished,
+                       SUM(CASE WHEN final_state IN ('ERROR', 'ESTOP') THEN 1 ELSE 0 END) AS failed,
+                       SUM(CASE WHEN final_state = 'CANCELLED' THEN 1 ELSE 0 END) AS cancelled,
+                       COALESCE(SUM(CASE WHEN duration_seconds IS NOT NULL THEN duration_seconds ELSE 0 END), 0) AS seconds,
+                       COALESCE(SUM(CASE WHEN final_state = 'FINISHED' THEN duration_seconds ELSE 0 END), 0) AS finished_seconds,
+                       COALESCE(SUM(filament_grams), 0) AS filament_grams
+                FROM prints
+                WHERE {' AND '.join(trusted_where)}""",
+            params,
+        ).fetchone()
+        excluded = conn.execute(
+            f"""SELECT COUNT(*) AS total
+                FROM prints
+                WHERE {' AND '.join(excluded_where)}""",
+            excluded_params,
+        ).fetchone()
+        printers = conn.execute(
+            f"""SELECT printer_id,
+                       COUNT(*) AS total,
+                       SUM(CASE WHEN final_state = 'FINISHED' THEN 1 ELSE 0 END) AS finished,
+                       SUM(CASE WHEN final_state IN ('ERROR', 'ESTOP') THEN 1 ELSE 0 END) AS failed,
+                       SUM(CASE WHEN final_state = 'CANCELLED' THEN 1 ELSE 0 END) AS cancelled,
+                       COALESCE(SUM(CASE WHEN duration_seconds IS NOT NULL THEN duration_seconds ELSE 0 END), 0) AS seconds,
+                       COALESCE(SUM(CASE WHEN final_state = 'FINISHED' THEN duration_seconds ELSE 0 END), 0) AS finished_seconds,
+                       COALESCE(AVG(CASE
+                           WHEN final_state = 'FINISHED'
+                            AND estimated_duration_seconds IS NOT NULL
+                            AND estimated_duration_seconds > 0
+                            AND duration_seconds IS NOT NULL
+                           THEN ABS(duration_seconds - estimated_duration_seconds) * 1.0 / estimated_duration_seconds
+                       END), NULL) AS eta_error_ratio
+                FROM prints
+                WHERE {' AND '.join(trusted_where)}
+                GROUP BY printer_id
+                ORDER BY printer_id""",
+            params,
+        ).fetchall()
+        materials = conn.execute(
+            f"""SELECT COALESCE(NULLIF(material, ''), 'Unknown') AS material,
+                       COUNT(*) AS total,
+                       SUM(CASE WHEN final_state = 'FINISHED' THEN 1 ELSE 0 END) AS finished,
+                       SUM(CASE WHEN final_state IN ('ERROR', 'ESTOP') THEN 1 ELSE 0 END) AS failed
+                FROM prints
+                WHERE {' AND '.join(trusted_where)}
+                GROUP BY COALESCE(NULLIF(material, ''), 'Unknown')
+                ORDER BY total DESC, material
+                LIMIT 8""",
+            params,
+        ).fetchall()
+
+    def _score(finished, failed) -> Optional[float]:
+        finished = int(finished or 0)
+        failed = int(failed or 0)
+        attempts = finished + failed
+        if attempts <= 0:
+            return None
+        return round((finished / attempts) * 100, 1)
+
+    fleet_d = dict(fleet) if fleet else {}
+    excluded_d = dict(excluded) if excluded else {}
+    fleet_d["excluded"] = int(excluded_d.get("total") or 0)
+    fleet_d["score"] = _score(fleet_d.get("finished"), fleet_d.get("failed"))
+    printer_rows = []
+    for row in printers:
+        item = dict(row)
+        item["score"] = _score(item.get("finished"), item.get("failed"))
+        if item.get("eta_error_ratio") is not None:
+            item["eta_error_pct"] = round(float(item["eta_error_ratio"]) * 100, 1)
+        else:
+            item["eta_error_pct"] = None
+        item.pop("eta_error_ratio", None)
+        printer_rows.append(item)
+
+    return {
+        "days": days,
+        "fleet": fleet_d,
+        "printers": printer_rows,
+        "materials": [dict(r) for r in materials],
+    }
+
+
 def _mark_reconcile_suggestions(usage: list[dict], spools: dict[int, dict], low_pct: float) -> None:
     """Add light-touch weigh-in hints to risky usage rows.
 

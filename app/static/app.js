@@ -3962,6 +3962,52 @@ function _memorySummary(items) {
   </div>`;
 }
 
+function _memoryScoreLabel(score) {
+  return score == null ? '--' : `${Number(score).toFixed(1)}%`;
+}
+
+function _memoryScoreClass(score) {
+  if (score == null) return 'memory-score-unknown';
+  if (score >= 95) return 'memory-score-good';
+  if (score >= 85) return 'memory-score-watch';
+  return 'memory-score-review';
+}
+
+function _memoryScorePanel(score) {
+  const fleet = score?.fleet || {};
+  const printers = score?.printers || [];
+  const materials = score?.materials || [];
+  const trustedAttempts = Number(fleet.finished || 0) + Number(fleet.failed || 0);
+  const printerRows = printers.length ? printers.map(p => {
+    const attempts = Number(p.finished || 0) + Number(p.failed || 0);
+    const eta = p.eta_error_pct == null ? '' : `<span>ETA +/- ${Number(p.eta_error_pct).toFixed(1)}%</span>`;
+    return `<div class="memory-score-printer">
+      <div>
+        <strong>${esc(_memoryPrinterLabel(p.printer_id))}</strong>
+        <span>${attempts} scored · ${Number(p.cancelled || 0)} cancelled</span>
+      </div>
+      <div class="memory-score-printer-metrics">
+        <b class="${_memoryScoreClass(p.score)}">${_memoryScoreLabel(p.score)}</b>
+        ${eta}
+      </div>
+    </div>`;
+  }).join('') : '<div class="memory-score-empty">No scored print attempts yet.</div>';
+  const materialRows = materials.length ? materials.slice(0, 5).map(m => {
+    const attempts = Number(m.finished || 0) + Number(m.failed || 0);
+    const scoreVal = attempts ? (Number(m.finished || 0) / attempts) * 100 : null;
+    return `<span><b>${esc(m.material || 'Unknown')}</b> ${_memoryScoreLabel(scoreVal)}</span>`;
+  }).join('') : '<span>No material signal yet</span>';
+  return `<section class="memory-score-panel">
+    <div class="memory-score-main ${_memoryScoreClass(fleet.score)}">
+      <span>Reliability Score</span>
+      <strong>${_memoryScoreLabel(fleet.score)}</strong>
+      <em>${trustedAttempts} trusted attempts · ${Number(fleet.excluded || 0)} excluded</em>
+    </div>
+    <div class="memory-score-printers">${printerRows}</div>
+    <div class="memory-score-materials">${materialRows}</div>
+  </section>`;
+}
+
 function _memoryParamsFromControls(page) {
   const params = new URLSearchParams();
   const q = page.querySelector('.memory-search')?.value.trim();
@@ -4012,9 +4058,16 @@ async function renderPrintMemoryView() {
   apiParams.set('limit', '160');
   page.innerHTML = '<div class="detail-placeholder">Loading print memory...</div>';
   let data = { items: [], facets: {} };
+  let score = null;
   try {
-    const r = await fetch(`/api/print-memory?${apiParams.toString()}`);
-    if (r.ok) data = await r.json();
+    const scoreParams = new URLSearchParams();
+    if (params.days) scoreParams.set('days', params.days);
+    const [memoryResp, scoreResp] = await Promise.all([
+      fetch(`/api/print-memory?${apiParams.toString()}`),
+      fetch(`/api/print-memory-score?${scoreParams.toString()}`),
+    ]);
+    if (memoryResp.ok) data = await memoryResp.json();
+    if (scoreResp.ok) score = await scoreResp.json();
   } catch {}
   const rows = (data.items || []).map(_memoryRow).join('');
   page.innerHTML = `<div class="memory-shell">
@@ -4027,6 +4080,7 @@ async function renderPrintMemoryView() {
         ${_memorySummary(data.items || [])}
       </div>
       ${_memoryFiltersHtml(data, params)}
+      ${_memoryScorePanel(score)}
       <div class="memory-list">${rows || '<div class="filedesk-empty">No matching prints yet.</div>'}</div>
     </section>
     <aside class="memory-passport" id="memory-passport">
