@@ -1,8 +1,13 @@
 # Flightdeck — next session brief
-_Last updated 5 June 2026 (Session 28.167 Tomorrow spool agenda)_
+_Last updated 5 June 2026 (Session 28.168 AMS auto-load reconciliation)_
+
+## What was built - Session 28.168 (AMS auto-load reconciliation - 5 June)
+- Tightened the existing AMS auto-claim path so printer-reported slots can infer material from profile names such as `Generic PLA` when the direct material field is missing.
+- The auto-load path remains conservative: only a unique high-confidence stored spool match is moved into the printer/slot; ambiguous or low-score candidates are ignored for manual review.
+- Backend restart required.
 
 ## Next up - Tomorrow morning
-- First pass: add auto-load reconciliation for spools physically inserted into a printer AMS/MMU.
+- Validate auto-load reconciliation for spools physically inserted into a printer AMS/MMU.
 - Desired behaviour: when a printer reports a newly loaded AMS slot, Flightdeck should find a high-confidence matching stored spool, move it from storage into the selected printer/slot, and keep its home shelf memory for return.
 - Confidence rules should start conservative: auto-move only obvious unique matches, prompt/flag possible matches when colour/material/brand are ambiguous, and never guess between near-identical spools.
 - Validate against the overnight H2D print: final state, spool deduction, AMS generic-profile tolerance, notifications, and Print Memory scoring/exclusion.

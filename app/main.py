@@ -198,12 +198,49 @@ def _remaining_g(spool: dict) -> float:
         return 0.0
 
 
+def _reported_slot_material_text(slot: dict) -> str:
+    """Return the best material hint from a printer-reported AMS slot."""
+    material = str(slot.get("type") or slot.get("material") or "").strip()
+    if material:
+        return material
+
+    fallback = " ".join(
+        str(slot.get(key) or "").strip()
+        for key in ("profile_name", "brand")
+        if str(slot.get(key) or "").strip()
+    )
+    if not fallback:
+        return ""
+
+    # Some firmware reports only a profile family, e.g. "Generic PLA".
+    known_materials = (
+        "PA-CF",
+        "PLA+",
+        "PETG",
+        "PLA",
+        "ABS",
+        "ASA",
+        "TPU",
+        "PVA",
+        "PC",
+        "PA",
+    )
+    normalised = _norm_material(fallback)
+    fallback_lower = fallback.lower()
+    for candidate in known_materials:
+        if "+" in candidate and "+" not in fallback and "plus" not in fallback_lower:
+            continue
+        if _norm_material(candidate) in normalised:
+            return candidate
+    return re.sub(r"\bgeneric\b", "", fallback, flags=re.IGNORECASE).strip() or fallback
+
+
 def _spool_reported_profile_score(slot: dict, spool: dict) -> Optional[tuple[float, str]]:
     """Score a shelved spool against a non-empty printer-reported AMS slot."""
     if spool.get("location_printer_id") is not None or spool.get("archived_at"):
         return None
 
-    reported_material = slot.get("type") or slot.get("material") or ""
+    reported_material = _reported_slot_material_text(slot)
     if not _spool_matches_material(spool, str(reported_material)):
         return None
 
@@ -2958,7 +2995,10 @@ def _reported_active_slot(printer_status: Optional[dict]) -> Optional[dict]:
 
 def _reported_slot_matches_requirement(slot: dict, req: dict) -> bool:
     return (
-        _spool_matches_material({"material": slot.get("type") or "", "subtype": "", "brand": ""}, req["material"])
+        _spool_matches_material(
+            {"material": _reported_slot_material_text(slot), "subtype": "", "brand": ""},
+            req["material"],
+        )
         and _hex_dist(slot.get("color"), req["color"]) <= 95
     )
 
@@ -2972,13 +3012,14 @@ def _reported_slot_mismatch(spool: Optional[dict], slot: Optional[dict]) -> str:
     if not spool or not printer_loaded or not slot:
         return ""
 
-    reported_mat = _norm_material(slot.get("type") or slot.get("material") or "")
+    reported_material_text = _reported_slot_material_text(slot)
+    reported_mat = _norm_material(reported_material_text)
     spool_mat = _norm_material(" ".join([
         str(spool.get("material") or ""),
         str(spool.get("subtype") or ""),
     ]))
     if reported_mat and spool_mat and reported_mat not in spool_mat and spool_mat not in reported_mat:
-        return f"Material mismatch: printer {slot.get('type') or 'unknown'}, Flightdeck {spool.get('material') or 'unknown'}"
+        return f"Material mismatch: printer {reported_material_text or 'unknown'}, Flightdeck {spool.get('material') or 'unknown'}"
     if _hex_dist(slot.get("color"), spool.get("color_hex")) > 95:
         return f"Colour mismatch: printer {_colour_label(slot.get('color'))}, Flightdeck {_colour_label(spool.get('color_hex'))}"
 
@@ -3047,7 +3088,13 @@ def _ams_mismatch_impacts_job(mismatch: dict, material: Optional[str], color_req
     if material:
         return (
             bool(spool and _spool_matches_material(spool, material))
-            or bool(report and _spool_matches_material({"material": report.get("type") or "", "subtype": "", "brand": ""}, material))
+            or bool(
+                report
+                and _spool_matches_material(
+                    {"material": _reported_slot_material_text(report), "subtype": "", "brand": ""},
+                    material,
+                )
+            )
         )
     return False
 
