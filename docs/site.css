@@ -367,6 +367,17 @@ h1 {
   padding: 1rem;
 }
 
+.install-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.tester-callout {
+  align-self: stretch;
+}
+
 pre {
   margin: 0;
   overflow: auto;

@@ -1857,6 +1857,11 @@ async function renderManualView() {
     </section>
 
     <section class="manual-grid">
+      ${_manualSection('First Tester Path', 'When Flightdeck is new to someone, start with the safe tour before touching real printer controls.', [
+        '<strong>Demo Mode</strong><span>Use the guided tour to show Dashboard, Flight Tower, Live printer pages, Spools, Print Bay, and Maintenance in the right order.</span>',
+        '<strong>Setup Health</strong><span>Confirm required checks first, then treat optional scale, label, backup, and vault items as upgrades rather than blockers.</span>',
+        '<strong>One printer first</strong><span>Add or test one printer, browse read-only pages, then move on to queue, file, AMS, and hardware actions.</span>',
+      ])}
       ${_manualSection('Daily Flow', 'The normal shop rhythm is simple: check Dashboard, watch Flight Tower, then use each printer page for live control and history.', [
         '<strong>Dashboard</strong><span>Use it for fleet state, reliability hints, loaded filament, and quick camera access.</span>',
         '<strong>Flight Tower</strong><span>Queue intelligence tells you what can dispatch now, what is blocked, and what spool or printer needs attention.</span>',

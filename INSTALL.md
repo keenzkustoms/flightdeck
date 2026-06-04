@@ -13,6 +13,18 @@ Flightdeck is still early software. Start on your LAN, keep printer credentials 
 - Optional hardware: Dymo USB scale and Brother QL-700 label printer.
 - Optional remote access: Tailscale.
 
+## First Tester Path
+
+If you are installing Flightdeck for the first time, use this order:
+
+1. Install Flightdeck and open the app.
+2. Visit **System -> Demo Mode** to see the intended workflow without touching printers.
+3. Visit **System -> Settings -> Setup** and confirm the required checks are green.
+4. Add one printer and confirm its live page opens.
+5. Browse Dashboard, Cameras, Telemetry, Print Bay, Spools, Failures, History, and Maintenance before testing queue or hardware actions.
+
+Keep destructive actions such as cancel, E-stop, SD cleanup, delete, and archive for a deliberate test pass.
+
 ## 1. Install System Packages
 
 SSH into the Pi, then run:

@@ -18,6 +18,7 @@
       <a href="#features">Features</a>
       <a href="#screens">Screens</a>
       <a href="#install">Install</a>
+      <a href="#testers">Testers</a>
       <a href="#roadmap">Roadmap</a>
     </nav>
     <a class="header-cta" href="https://github.com/Kidabah/flightdeck">GitHub</a>
@@ -33,7 +34,8 @@
         <h1>Flightdeck</h1>
         <p class="hero-lede">A LAN-first control tower for mixed Bambu, Voron, and Klipper 3D printer fleets.</p>
         <div class="hero-actions">
-          <a class="button primary" href="https://github.com/Kidabah/flightdeck">Download from GitHub</a>
+          <a class="button primary" href="https://github.com/Kidabah/flightdeck/blob/main/INSTALL.md">Read the install guide</a>
+          <a class="button ghost" href="https://github.com/Kidabah/flightdeck">View on GitHub</a>
           <a class="button ghost" href="mailto:flightdeck3dprinters@gmail.com">Contact</a>
         </div>
       </div>
@@ -141,7 +143,23 @@ cd flightdeck
           <h3>Recommended starting point</h3>
           <p>Raspberry Pi 5, 8 GB RAM, SSD/NVMe storage, LAN access to your printers, and Tailscale if you want private remote access.</p>
           <p class="muted">Optional hardware: Dymo M10/S250-style USB scale and Brother QL-700 label printer.</p>
+          <div class="install-actions">
+            <a class="button primary" href="https://github.com/Kidabah/flightdeck/blob/main/INSTALL.md">Open install guide</a>
+            <a class="button ghost" href="https://github.com/Kidabah/flightdeck#demo-mode">See demo notes</a>
+          </div>
         </div>
+      </div>
+    </section>
+
+    <section class="section split" id="testers">
+      <div>
+        <div class="section-kicker">Tester path</div>
+        <h2>First run should feel safe, not technical.</h2>
+        <p>Flightdeck ships with Demo Mode and a Flight Manual so a new tester can explore the dashboard, cameras, printer pages, Print Bay, spools, failures, telemetry, and maintenance before touching real printer controls.</p>
+      </div>
+      <div class="callout tester-callout">
+        <h3>Best first pass</h3>
+        <p>Install on a Pi, open Demo Mode, confirm Setup Health, add one printer, then browse read-only screens before testing queue, file, AMS, or hardware actions.</p>
       </div>
     </section>
 

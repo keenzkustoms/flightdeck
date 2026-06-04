@@ -1,5 +1,12 @@
 # Flightdeck — next session brief
-_Last updated 4 June 2026 (Session 28.140 Setup readiness + spool return polish)_
+_Last updated 4 June 2026 (Session 28.141 Tester path polish)_
+
+## What was polished - Session 28.141 (Tester path polish - 4 June)
+- Tightened the public GitHub Pages landing page so the primary action opens the plain-English install guide, with a secondary GitHub link and contact CTA.
+- Added a `Tester path` section to the public page explaining the safe first-run flow: Demo Mode, Setup Health, one printer, then read-only screens before queue/hardware actions.
+- Added the same first-tester checklist to `INSTALL.md` so a layman install has a clear route through Demo Mode, Setup Health, printer setup, and cautious control testing.
+- Added a `First Tester Path` section to the in-app Flight Manual so the live app, install docs, and public website all tell the same story.
+- Bumped the app static cache to `app.js?v=224`; no service restart is needed for this static/manual/docs pass.
 
 ## What was polished - Session 28.140 (Setup readiness + spool return polish - 4 June)
 - Expanded Setup Health into a first-run readiness summary covering fleet config, data path, camera workers, optional scale/QL-700, access URL, and backup/vault status.
