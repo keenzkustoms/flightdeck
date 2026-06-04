@@ -1,5 +1,12 @@
 # Flightdeck — next session brief
-_Last updated 4 June 2026 (Session 28.146 Spool catalogue toolbar tidy)_
+_Last updated 4 June 2026 (Session 28.147 Spool toolbar merge + flash fix)_
+
+## What was polished - Session 28.147 (Spool toolbar merge + flash fix - 4 June)
+- Merged the Spools view buttons, quick filter chips, material/brand filters, search box, and Add Spool button into one desktop toolbar above the Spool Intelligence/catalogue area.
+- Kept the toolbar responsive so it can wrap on narrow screens without breaking the spool card/cabinet layout.
+- Fixed the Spools flashing regression by only doing a full Spools rerender when entering Spools or when the Spools hash/sub-view changes, rather than on every app refresh pass.
+- Updated Spools view buttons to keep the hash in step with Cards/Table/Cabinet/Filament catalogue without forcing an unnecessary full repaint.
+- Bumped static cache versions to `app.js?v=228` and `style.css?v=181`; no service restart is needed for this static-only pass.
 
 ## What was polished - Session 28.146 (Spool catalogue toolbar tidy - 4 June)
 - Removed the duplicate blue `Filament catalogue` link from the Spool Intelligence panel so the spool screen has one clean top control row.

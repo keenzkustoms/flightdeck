@@ -201,6 +201,7 @@ let _onSpools = false;          // true while spool inventory is active
 let _onManual = false;          // true while flight manual is active
 let _onDemo = false;            // true while demo mode is active
 let _renderedSpoolDetailId = null;
+let _lastSpoolsRouteKey = '';
 
 // ── Toast notifications ────────────────────────────────────────────────────
 
@@ -2115,6 +2116,7 @@ function router() {
   const wasOnManual = _onManual;
   const wasOnDemo = _onDemo;
   const wasSpoolDetailId = _renderedSpoolDetailId;
+  const spoolsRouteKey = route.view === 'spools' ? (location.hash || '#/spools') : '';
   _onSettings = route.view === 'settings';
   _onFailures = route.view === 'failures';
   _onSpools = route.view === 'spools';
@@ -2173,7 +2175,11 @@ function router() {
   if (route.view === 'queue') renderQueueView();
   if (route.view === 'files' && !_fileDeskRenderInFlight) renderFileDeskView();
   if (route.view === 'failures' && !wasOnFailures) renderFailuresView();
-  if (route.view === 'spools') renderSpoolsView();
+  if (route.view === 'spools' && (!wasOnSpools || _lastSpoolsRouteKey !== spoolsRouteKey)) {
+    _lastSpoolsRouteKey = spoolsRouteKey;
+    renderSpoolsView();
+  }
+  if (route.view !== 'spools') _lastSpoolsRouteKey = '';
   if (route.view === 'settings' && (!wasOnSettings || categoryBeforeRoute !== _settingsCategory)) renderSettingsView();
   if (route.view === 'demo' && !wasOnDemo) renderDemoView();
   if (route.view === 'manual' && !wasOnManual) renderManualView();
@@ -9156,6 +9162,11 @@ function _spoolsCategoryHtml(spools, summary, costs, intelligence = {}) {
           <button class="spool-view-btn${_spoolsViewMode==='cabinet'?' active':''}" data-view="cabinet">Cabinet</button>
           <button class="spool-view-btn${_spoolsViewMode==='catalogue'?' active':''}" data-view="catalogue">Filament catalogue</button>
         </div>
+        <div class="spool-chips spool-toolbar-chips">
+          ${fc('status','active','Active')}${fc('status','archived','Archived')}
+          <span class="spool-chip-sep"></span>
+          ${fc('slotFilter','all','All')}${fc('slotFilter','multiples','Multiples')}${fc('slotFilter','loaded','Loaded')}${fc('slotFilter','storage','Shelved')}${fc('slotFilter','low','Low stock')}
+        </div>
         <select class="spool-filter-sel" data-fkey="material">${matOpts}</select>
         <select class="spool-filter-sel" data-fkey="brand">${brandOpts}</select>
         <input class="spool-search" type="search" placeholder="Search…" value="${_spoolsFilter.search}">
@@ -9185,13 +9196,6 @@ function _spoolsCategoryHtml(spools, summary, costs, intelligence = {}) {
         <span class="spool-stat-value">${summary.low_stock_count||0}</span>
         <span class="spool-stat-label">low stock</span>
         <span class="spool-stat-sub">&lt;${summary.low_stock_pct||20}%</span>
-      </div>
-    </div>
-    <div class="spool-filter-bar">
-      <div class="spool-chips">
-        ${fc('status','active','Active')}${fc('status','archived','Archived')}
-        <span class="spool-chip-sep"></span>
-        ${fc('slotFilter','all','All')}${fc('slotFilter','multiples','Multiples')}${fc('slotFilter','loaded','Loaded')}${fc('slotFilter','storage','Shelved')}${fc('slotFilter','low','Low stock')}
       </div>
     </div>
     <div id="spool-list"></div>`;
@@ -9314,6 +9318,13 @@ function _attachSpoolsEvents(el, costs) {
   el.querySelectorAll('.spool-view-btn[data-view]').forEach(btn => {
     btn.addEventListener('click', async () => {
       _spoolsViewMode = btn.dataset.view;
+      const targetHash = _spoolsViewMode === 'cards'
+        ? '#/spools'
+        : `#/spools?view=${encodeURIComponent(_spoolsViewMode)}`;
+      if (location.hash.startsWith('#/spools') && location.hash !== targetHash) {
+        history.replaceState(null, '', targetHash);
+        _lastSpoolsRouteKey = targetHash;
+      }
       el.querySelectorAll('.spool-view-btn').forEach(b => b.classList.toggle('active', b === btn));
       await fetch('/api/settings/spool_view_mode', {
         method: 'PUT', headers: {'Content-Type':'application/json'},
