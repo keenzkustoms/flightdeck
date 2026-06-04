@@ -9156,6 +9156,12 @@ function _spoolsCategoryHtml(spools, summary, costs, intelligence = {}) {
     <div class="spool-page-header">
       <div class="settings-section-title">Spool Inventory</div>
       <div class="spool-header-actions">
+        <input class="spool-search" type="search" placeholder="Search spools…" value="${_spoolsFilter.search}">
+        <button class="spool-add-btn">+ Add Spool</button>
+      </div>
+    </div>
+    ${_spoolIntelligenceHtml(intelligence)}
+    <div class="spool-filter-bar">
         <div class="spool-view-toggle">
           <button class="spool-view-btn${_spoolsViewMode==='cards'?' active':''}" data-view="cards">Cards</button>
           <button class="spool-view-btn${_spoolsViewMode==='table'?' active':''}" data-view="table">Table</button>
@@ -9169,11 +9175,7 @@ function _spoolsCategoryHtml(spools, summary, costs, intelligence = {}) {
         </div>
         <select class="spool-filter-sel" data-fkey="material">${matOpts}</select>
         <select class="spool-filter-sel" data-fkey="brand">${brandOpts}</select>
-        <input class="spool-search" type="search" placeholder="Search…" value="${_spoolsFilter.search}">
-        <button class="spool-add-btn">+ Add Spool</button>
-      </div>
     </div>
-    ${_spoolIntelligenceHtml(intelligence)}
     <div class="spool-summary-strip">
       <div class="spool-stat">
         <span class="spool-stat-value">${summary.total_remaining_g != null ? (summary.total_remaining_g/1000).toFixed(2)+'kg' : '—'}</span>

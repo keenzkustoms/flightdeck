@@ -7415,6 +7415,12 @@ select.settings-input { cursor: pointer; }
   min-width: 0;
 }
 
+.spool-header-actions .spool-search {
+  flex: 1 1 28rem;
+  max-width: 42rem;
+  width: auto;
+}
+
 @media (max-width: 640px) {
   .spool-page-header { flex-wrap: wrap; }
   .spool-header-actions { flex-wrap: wrap; justify-content: flex-start; }
@@ -8410,9 +8416,9 @@ select.settings-input { cursor: pointer; }
 .spool-filter-bar {
   display: flex;
   align-items: center;
-  gap: 0.6rem;
+  gap: 0.5rem;
   flex-wrap: wrap;
-  margin-bottom: 0.6rem;
+  margin: -0.15rem 0 0.7rem;
 }
 
 .spool-chips {
@@ -8425,7 +8431,7 @@ select.settings-input { cursor: pointer; }
 .spool-toolbar-chips {
   flex: 0 1 auto;
   min-width: 0;
-  justify-content: flex-end;
+  justify-content: flex-start;
 }
 
 .spool-search {

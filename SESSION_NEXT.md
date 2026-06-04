@@ -1,5 +1,11 @@
 # Flightdeck — next session brief
-_Last updated 4 June 2026 (Session 28.147 Spool toolbar merge + flash fix)_
+_Last updated 4 June 2026 (Session 28.148 Spool header/search layout polish)_
+
+## What was polished - Session 28.148 (Spool header/search layout polish - 4 June)
+- Rebalanced the Spools page after the toolbar merge: the top row now keeps `Spool Inventory`, a long search box, and `+ Add Spool`.
+- Moved Cards/Table/Cabinet/Filament catalogue plus quick filters and material/brand selectors below Spool Intelligence so the page reads as overview first, controls second, spools third.
+- Kept the previous Spools flash fix in place.
+- Bumped static cache versions to `app.js?v=229` and `style.css?v=182`; no service restart is needed for this static-only pass.
 
 ## What was polished - Session 28.147 (Spool toolbar merge + flash fix - 4 June)
 - Merged the Spools view buttons, quick filter chips, material/brand filters, search box, and Add Spool button into one desktop toolbar above the Spool Intelligence/catalogue area.
