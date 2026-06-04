@@ -1,5 +1,12 @@
 # Flightdeck — next session brief
-_Last updated 4 June 2026 (Session 28.148 Spool header/search layout polish)_
+_Last updated 4 June 2026 (Session 28.149 Add spool catalogue flow polish)_
+
+## What was polished - Session 28.149 (Add spool catalogue flow polish - 4 June)
+- Added a live spool draft preview inside the Add/Edit Spool modal so catalogue selections, colour, location, and weight are visible before saving.
+- Split the modal form into clearer identity, weight, and location sections so adding a spool feels guided without becoming a wizard.
+- Reworded catalogue confirmation copy to say the match has been applied and remains editable before save.
+- Added a late mobile override for the modal so the new preview and section layout stack cleanly on narrow screens.
+- Bumped static cache versions to `app.js?v=230` and `style.css?v=183`; no service restart is needed for this static-only pass.
 
 ## What was polished - Session 28.148 (Spool header/search layout polish - 4 June)
 - Rebalanced the Spools page after the toolbar merge: the top row now keeps `Spool Inventory`, a long search box, and `+ Add Spool`.

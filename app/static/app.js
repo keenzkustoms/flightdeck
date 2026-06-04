@@ -9394,9 +9394,11 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
             </div>
             <input id="sm-catalogue-search" class="spool-form-input" type="search" placeholder="Search brand, material, colour...">
             <div id="sm-catalogue-picked" class="spool-catalogue-picked hidden"></div>
+            <div id="sm-spool-preview" class="spool-draft-card"></div>
             <div id="sm-catalogue-results" class="spool-catalogue-results hidden"></div>
           </div>
         </div>
+        <div class="spool-form-section">Filament identity</div>
         <div class="spool-form-row">
           <label class="spool-form-label">Material *</label>
           <div class="spool-mat-block">
@@ -9436,6 +9438,7 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
           <label class="spool-form-label">Colour name</label>
           <input id="sm-color-name" class="spool-form-input" type="text" placeholder="e.g. Jade White" value="${p0.color_name||''}">
         </div>
+        <div class="spool-form-section">Spool weight</div>
         <div class="spool-form-row">
           <label class="spool-form-label">Label weight *</label>
           <div class="spool-inline-row">
@@ -9457,6 +9460,7 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
             <span class="spool-form-hint">tare weight</span>
           </div>
         </div>
+        <div class="spool-form-section">Where it lives</div>
         <div class="spool-form-row">
           <label class="spool-form-label">Location</label>
           <div class="spool-location-block">
@@ -9510,6 +9514,7 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
   const catalogueSearch = overlay.querySelector('#sm-catalogue-search');
   const catalogueResults = overlay.querySelector('#sm-catalogue-results');
   const cataloguePicked = overlay.querySelector('#sm-catalogue-picked');
+  const spoolPreview = overlay.querySelector('#sm-spool-preview');
   const catalogueSync = overlay.querySelector('#sm-catalogue-sync');
   const catalogueChips = overlay.querySelector('#sm-catalogue-chips');
 
@@ -9579,6 +9584,7 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
     brandSel.disabled = brands.length === 0;
     applyDefaultTare();
     updatePrevPicks();
+    updateDraftPreview();
   }
   if (p0.material) populateBrands(p0.material);
 
@@ -9621,10 +9627,11 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
     catalogueResults.classList.add('hidden');
     cataloguePicked.innerHTML = `
       <span class="spool-catalogue-swatch" style="background:${item.color_hex || '#808080'}"></span>
-      <span><b>${esc(item.color_name || 'Colour')}</b><small>${esc(brand)} · ${esc(material)}${item.subtype ? ` · ${esc(item.subtype)}` : ''}${item.filament_weight_g ? ` · ${Math.round(item.filament_weight_g)}g` : ''}</small><em>Open Filament Database · editable defaults</em></span>
+      <span><b>${esc(item.color_name || 'Colour')}</b><small>${esc(brand)} · ${esc(material)}${item.subtype ? ` · ${esc(item.subtype)}` : ''}${item.filament_weight_g ? ` · ${Math.round(item.filament_weight_g)}g` : ''}</small><em>Catalogue match applied · editable before saving</em></span>
     `;
     cataloguePicked.classList.remove('hidden');
     catalogueSearch.value = `${brand} ${material} ${item.color_name || ''}`.trim();
+    updateDraftPreview('Catalogue match applied');
   }
 
   let catalogueTimer = null;
@@ -9693,6 +9700,33 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
     return { mat, brand };
   }
 
+  function updateDraftPreview(note = '') {
+    const { mat, brand } = selectedMaterialBrand();
+    const subtype = overlay.querySelector('#sm-subtype')?.value.trim();
+    const colorName = overlay.querySelector('#sm-color-name')?.value.trim();
+    const hex = /^#[0-9a-fA-F]{6}$/.test(hexIn.value.trim()) ? hexIn.value.trim() : '#808080';
+    const label = Math.round(parseFloat(labelG.value) || 0);
+    const remaining = Math.round(parseFloat(remainG.value) || label || 0);
+    const pct = label > 0 ? Math.max(0, Math.min(100, Math.round(remaining * 100 / label))) : 0;
+    const locMode = overlay.querySelector('input[name="sm-loc"]:checked')?.value || 'storage';
+    const locText = locMode === 'loaded'
+      ? `${printerSel.options[printerSel.selectedIndex]?.textContent || 'Printer'} · ${slotSel.options[slotSel.selectedIndex]?.textContent || 'Slot'}`
+      : `${storageSel.options[storageSel.selectedIndex]?.textContent || 'Storage'}`;
+    const titleLine = [colorName || 'Colour', mat || 'Material', subtype].filter(Boolean).join(' · ');
+    const brandLine = [brand || 'Brand', locText].filter(Boolean).join(' · ');
+    spoolPreview.innerHTML = `
+      <div class="spool-draft-swatch" style="background:${hex}"></div>
+      <div class="spool-draft-main">
+        <strong>${esc(titleLine || 'Choose filament')}</strong>
+        <span>${esc(brandLine)}</span>
+        ${note ? `<em>${esc(note)}</em>` : ''}
+      </div>
+      <div class="spool-draft-weight">
+        <strong>${remaining || '—'}g</strong>
+        <span>${label ? `${pct}% of ${label}g` : 'weight pending'}</span>
+      </div>`;
+  }
+
   function applyDefaultTare(force = false) {
     if (isEdit && !force) return;
     if (emptyG.dataset.touched && !force) return;
@@ -9706,9 +9740,9 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
   }
 
   matSel.addEventListener('change', () => populateBrands(matSel.value));
-  brandSel.addEventListener('change', () => { applyDefaultTare(); updatePrevPicks(); });
-  matNewIn.addEventListener('input', updatePrevPicks);
-  brandNewIn.addEventListener('input', updatePrevPicks);
+  brandSel.addEventListener('change', () => { applyDefaultTare(); updatePrevPicks(); updateDraftPreview(); });
+  matNewIn.addEventListener('input', () => { updatePrevPicks(); updateDraftPreview(); });
+  brandNewIn.addEventListener('input', () => { updatePrevPicks(); updateDraftPreview(); });
 
   // New material toggle
   matToggle.addEventListener('click', () => {
@@ -9717,6 +9751,7 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
     matNewIn.classList.toggle('hidden', !matNewMode);
     matToggle.textContent = matNewMode ? '✕' : '+';
     applyDefaultTare();
+    updateDraftPreview();
   });
 
   // New brand toggle
@@ -9726,11 +9761,12 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
     brandNewIn.classList.toggle('hidden', !brandNewMode);
     brandToggle.textContent = brandNewMode ? '✕' : '+';
     applyDefaultTare();
+    updateDraftPreview();
   });
 
-  picker.addEventListener('input', () => syncColor(picker.value));
-  picker.addEventListener('change', () => syncColor(picker.value));
-  hexIn.addEventListener('input', () => syncColor(hexIn.value));
+  picker.addEventListener('input', () => { syncColor(picker.value); updateDraftPreview(); });
+  picker.addEventListener('change', () => { syncColor(picker.value); updateDraftPreview(); });
+  hexIn.addEventListener('input', () => { syncColor(hexIn.value); updateDraftPreview(); });
 
   const _swatchNames = {
     '#1a1a1a':'Black','#ffffff':'White','#c0c0c0':'Silver','#808080':'Grey',
@@ -9746,6 +9782,7 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
       if (!nameEl.value || _knownSwatchNames.has(nameEl.value)) {
         nameEl.value = _swatchNames[sw.dataset.hex] || '';
       }
+      updateDraftPreview();
     });
   });
 
@@ -9753,9 +9790,13 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
 
   labelG.addEventListener('input', () => {
     if (!remainG.dataset.touched) remainG.value = labelG.value;
+    updateDraftPreview();
   });
-  remainG.addEventListener('input', () => { remainG.dataset.touched = '1'; });
+  remainG.addEventListener('input', () => { remainG.dataset.touched = '1'; updateDraftPreview(); });
   emptyG.addEventListener('input', () => { emptyG.dataset.touched = '1'; });
+  ['sm-subtype', 'sm-color-name'].forEach(id => {
+    overlay.querySelector(`#${id}`)?.addEventListener('input', () => updateDraftPreview());
+  });
   weighBtn.addEventListener('click', async () => {
     const old = weighBtn.textContent;
     weighBtn.disabled = true;
@@ -9768,6 +9809,7 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
       remainG.value = Math.max(0, Math.round((reading.grams - empty) * 10) / 10);
       remainG.dataset.touched = '1';
       weighBtn.textContent = 'Done';
+      updateDraftPreview('Scale reading applied');
     } catch (err) {
       showToast('Scale read failed', _scaleFriendlyMessage(err.message || 'Scale read failed'), 'error');
       weighBtn.textContent = old;
@@ -9781,6 +9823,7 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
       const isStorage = overlay.querySelector('input[name="sm-loc"]:checked').value === 'storage';
       locSels.classList.toggle('hidden', isStorage);
       storageSels.classList.toggle('hidden', !isStorage);
+      updateDraftPreview();
     });
   });
 
@@ -9821,8 +9864,11 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
       ).join('');
     }
   }
-  printerSel.addEventListener('change', updateSlots);
+  printerSel.addEventListener('change', () => { updateSlots(); updateDraftPreview(); });
+  slotSel.addEventListener('change', () => updateDraftPreview());
+  storageSel.addEventListener('change', () => updateDraftPreview());
   updateSlots();
+  updateDraftPreview();
 
   overlay.querySelector('.modal-close-btn').addEventListener('click', () => overlay.remove());
   overlay.querySelector('#sm-cancel').addEventListener('click', () => overlay.remove());
