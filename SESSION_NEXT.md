@@ -1,5 +1,20 @@
 # Flightdeck — next session brief
-_Last updated 4 June 2026 (Session 28.152 Flight Tower printer snapshot cache)_
+_Last updated 4 June 2026 (Session 28.154 Bambu Print Bay scoped file loading)_
+
+## What was fixed - Session 28.154 (Bambu Print Bay scoped file loading - 4 June)
+- Diagnosed X1C/H2D Print Bay slowness to printer-specific bay tabs fetching the full fleet `/api/files` payload.
+- Confirmed Bambu FTPS SD listings were fast (~0.17s each); the delay was the offline Voron/Moonraker file source taking about 3s inside the fleet endpoint.
+- Added optional `printer_id` scoping to `/api/files` so printer-specific Print Bay tabs fetch only the relevant printer storage plus Print Vault.
+- Updated printer Print Bay UI to call `/api/files?printer_id={id}` and bumped the app cache to `app.js?v=233`.
+- Parallelized fleet file source reads and tightened Moonraker file-list connect timeout so Global Print Bay is less affected by an offline Voron.
+- Verified live timings: X1C scoped `/api/files` ~0.16-0.18s, H2D scoped ~0.16-0.19s, global `/api/files` ~1.01s instead of ~3.4s.
+
+## What was polished - Session 28.153 (Decision trail repeat folding - 4 June)
+- Collapsed exact repeated print decision trail rows into one API row with `repeat_count`, preserving first/last timestamps so restart/poll noise remains auditable without dominating History.
+- Updated the History decision trail UI to show compact repeat chips such as `x11` and the last repeat time.
+- Escaped decision event/detail text while touching the renderer.
+- Bumped static cache versions to `app.js?v=232` and `style.css?v=185`.
+- Verified live Voron print `#94` (`Cube_ABS_1h14m.gcode`) now returns 6 decision rows instead of the long repeated trail: `calibration_captured x12`, `job_reattached x11`, `spool_missing x11`, plus the real start/cancel rows.
 
 ## What was fixed - Session 28.152 (Flight Tower printer snapshot cache - 4 June)
 - Diagnosed Flight Tower sluggishness to `/api/printers`, which was taking about 3.1s because every request forced a fresh hardware gather even though the background broadcast loop already polls printers every 5s.

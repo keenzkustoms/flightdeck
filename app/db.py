@@ -941,13 +941,32 @@ def log_decision(
 
 
 def get_decisions(print_id: int) -> list[dict]:
-    """Return all decisions for a given print row, ordered by time."""
+    """Return decisions for a given print row, ordered by first occurrence.
+
+    Exact repeated event/detail pairs are folded into one row with a repeat
+    count so restart/poll noise remains auditable without dominating history.
+    """
     with _conn() as conn:
         rows = conn.execute(
             "SELECT id, event, detail, logged_at FROM decisions WHERE print_id = ? ORDER BY logged_at",
             (print_id,),
         ).fetchall()
-    return [dict(r) for r in rows]
+    grouped: list[dict] = []
+    by_key: dict[tuple[str, str], dict] = {}
+    for row in rows:
+        item = dict(row)
+        key = (item.get("event") or "", item.get("detail") or "")
+        existing = by_key.get(key)
+        if existing:
+            existing["repeat_count"] += 1
+            existing["last_logged_at"] = item.get("logged_at")
+            continue
+        item["repeat_count"] = 1
+        item["first_logged_at"] = item.get("logged_at")
+        item["last_logged_at"] = item.get("logged_at")
+        by_key[key] = item
+        grouped.append(item)
+    return grouped
 
 
 # ── ETA calibration ───────────────────────────────────────────────────────

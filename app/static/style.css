@@ -6058,6 +6058,22 @@ button.live-route-node:hover {
 .decision-ts { color: var(--muted); font-variant-numeric: tabular-nums; }
 .decision-event { color: var(--text); font-weight: 500; }
 .decision-detail { color: var(--muted); }
+.decision-detail em {
+  color: var(--muted);
+  font-style: normal;
+  opacity: 0.75;
+}
+.decision-repeat {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 0.35rem;
+  padding: 0.05rem 0.3rem;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.12);
+  color: var(--muted);
+  font-size: 0.68rem;
+  line-height: 1.2;
+}
 .decision-empty { color: var(--muted); font-size: 0.78rem; }
 
 .print-name {

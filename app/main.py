@@ -698,7 +698,8 @@ def _safe_library_path(rel_path: str) -> Path:
 
 
 async def _moonraker_files(base_url: str) -> list[dict]:
-    async with httpx.AsyncClient(timeout=8.0) as client:
+    timeout = httpx.Timeout(4.0, connect=1.0)
+    async with httpx.AsyncClient(timeout=timeout) as client:
         r = await client.get(f"{base_url.rstrip('/')}/server/files/list", params={"root": "gcodes"})
         r.raise_for_status()
         result = r.json().get("result", [])
@@ -805,7 +806,7 @@ def _library_import_path(filename: str) -> Path:
 
 
 @app.get("/api/files")
-async def get_file_desk():
+async def get_file_desk(printer_id: Optional[str] = None):
     library_root = _print_library_path()
     library_files = _local_library_files()
     vault_lookup = {
@@ -822,14 +823,14 @@ async def get_file_desk():
         "actions": {"format_sd": False},
     }]
 
-    for (pid, model_name, custom_name, _icon, url) in _moonraker:
+    async def _moonraker_target(pid: str, model_name: str, custom_name: str, url: str) -> dict:
         try:
             files = await _moonraker_files(url)
             error = None
         except Exception as exc:
             files = []
             error = str(exc)
-        targets.append({
+        return {
             "id": pid,
             "label": custom_name or model_name,
             "model": model_name,
@@ -837,9 +838,9 @@ async def get_file_desk():
             "files": _mark_vaulted_files(files, vault_lookup),
             "error": error,
             "actions": {"format_sd": False},
-        })
+        }
 
-    for p in _bambu:
+    async def _bambu_target(p: BambuPrinter) -> dict:
         try:
             from .printers.bambu_ftp import list_bambu_files
             files = await asyncio.to_thread(list_bambu_files, p._ip, p._access_code)
@@ -847,7 +848,7 @@ async def get_file_desk():
         except Exception as exc:
             files = []
             error = str(exc)
-        targets.append({
+        return {
             "id": p.id,
             "label": p.custom_name or p.model_name,
             "model": p.model_name,
@@ -855,7 +856,17 @@ async def get_file_desk():
             "files": _mark_vaulted_files(files, vault_lookup),
             "error": error,
             "actions": {"format_sd": True, "format_sd_ready": False},
-        })
+        }
+
+    source_tasks = (
+        [_moonraker_target(pid, model_name, custom_name, url)
+         for (pid, model_name, custom_name, _icon, url) in _moonraker
+         if printer_id is None or pid == printer_id] +
+        [_bambu_target(p) for p in _bambu
+         if printer_id is None or p.id == printer_id]
+    )
+    if source_tasks:
+        targets.extend(await asyncio.gather(*source_tasks))
 
     return {"library_path": str(library_root), "targets": targets}
 

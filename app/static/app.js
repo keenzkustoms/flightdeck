@@ -3508,12 +3508,18 @@ function _showPrintDetail(printerId, dateStr, print) {
           list.innerHTML = decisions.map(d => {
             const ts = new Date(d.logged_at.endsWith('Z') ? d.logged_at : d.logged_at + 'Z')
               .toLocaleTimeString([], _clockOpts({ second: '2-digit' }));
+            const repeatCount = Number(d.repeat_count || 1);
+            const repeat = repeatCount > 1 ? `<span class="decision-repeat">x${repeatCount}</span>` : '';
+            const lastTs = d.last_logged_at && repeatCount > 1
+              ? new Date(d.last_logged_at.endsWith('Z') ? d.last_logged_at : d.last_logged_at + 'Z')
+                .toLocaleTimeString([], _clockOpts({ second: '2-digit' }))
+              : '';
             const detail = d.detail
-              ? `<span class="decision-detail">${d.detail}</span>`
+              ? `<span class="decision-detail">${esc(d.detail)}${lastTs ? ` <em>Last repeated ${esc(lastTs)}</em>` : ''}</span>`
               : '';
             return `<div class="decision-item">
               <span class="decision-ts">${ts}</span>
-              <span class="decision-event">${d.event}</span>
+              <span class="decision-event">${esc(d.event)}${repeat}</span>
               ${detail}
             </div>`;
           }).join('');
@@ -4770,7 +4776,7 @@ async function _renderPrinterBayBody(printerId) {
   el.innerHTML = `<div class="detail-placeholder">Loading Print Bay...</div>`;
   try {
     const [filesResp, reprints] = await Promise.all([
-      fetch('/api/files'),
+      fetch(`/api/files?printer_id=${encodeURIComponent(printerId)}`),
       fetch('/api/files/reprints?limit=24')
         .then(r => r.ok ? r.json() : { items: [] })
         .catch(() => ({ items: [] })),
