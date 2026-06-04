@@ -4536,7 +4536,7 @@ async function renderSpoolDetail(spoolId) {
   el.innerHTML = `<div class="spool-detail-page">
     <div class="spool-detail-top">
       <button class="print-detail-back" onclick="history.back()">← Back</button>
-      <a class="print-detail-back" href="#/settings">Spools</a>
+      <a class="print-detail-back" href="#/spools">Spools</a>
     </div>
     <section class="spool-detail-hero">
       <div class="spool-detail-band" style="background:${bandColor};color:${textColor}">

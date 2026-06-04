@@ -1,5 +1,9 @@
 # Flightdeck — next session brief
-_Last updated 5 June 2026 (Session 28.165 Generic AMS profile tolerance)_
+_Last updated 5 June 2026 (Session 28.166 Spool detail breadcrumb)_
+
+## What was fixed - Session 28.166 (Spool detail breadcrumb - 5 June)
+- Fixed the Spool detail page breadcrumb so `Spools` returns to the current inventory route (`#/spools`) instead of the old Settings route.
+- Bumped static cache to `app.js?v=248`; no backend restart required.
 
 ## What was fixed - Session 28.165 (Generic AMS profile tolerance - 5 June)
 - Fixed AMS/Profile Doctor mismatch logic so printer-reported generic profiles such as `Generic PLA` do not count as a mismatch when Flightdeck has a trusted, material/colour-compatible branded spool such as eSun PLA+ Peak Green.
