@@ -1,5 +1,11 @@
 # Flightdeck — next session brief
-_Last updated 4 June 2026 (Session 28.160 Sidebar printer picker)_
+_Last updated 4 June 2026 (Session 28.161 Print Memory v1)_
+
+## What was built - Session 28.161 (Print Memory v1 - 4 June)
+- Added a fleet-level Print Memory page under Operations as the first cross-printer print passport surface.
+- Added `/api/print-memory` and `/api/print-memory/{print_id}` endpoints over existing history, notes, snapshots, spool usage, and estimate/actual print data.
+- Print Memory starts as a searchable/filterable fleet list with clickable rows that open a print passport detail.
+- Bumped static cache to `app.js?v=243` and `style.css?v=192`; backend restart required.
 
 ## What was polished - Session 28.160 (Sidebar printer picker - 4 June)
 - Changed the left sidebar printer section into a compact printer picker instead of expanding every printer into Live/Print Bay/History/Failures/Maintenance links.

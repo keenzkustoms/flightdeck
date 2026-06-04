@@ -1492,6 +1492,36 @@ async def get_history_day(printer_id: str, date: str):
     return db.get_prints_for_day(printer_id, date)
 
 
+@app.get("/api/print-memory")
+async def get_print_memory(
+    limit: int = 120,
+    printer_id: Optional[str] = None,
+    state: Optional[str] = None,
+    material: Optional[str] = None,
+    q: Optional[str] = None,
+    days: Optional[int] = None,
+):
+    return {
+        "items": db.get_print_memory(
+            limit=limit,
+            printer_id=printer_id or None,
+            state=state or None,
+            material=material or None,
+            query=q or None,
+            days=days,
+        ),
+        "facets": db.get_print_memory_facets(),
+    }
+
+
+@app.get("/api/print-memory/{print_id}")
+async def get_print_memory_detail(print_id: int):
+    item = db.get_print_by_id(print_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="print not found")
+    return item
+
+
 @app.get("/api/printers/usage")
 async def get_printer_usage():
     return db.get_printer_usage_summary()

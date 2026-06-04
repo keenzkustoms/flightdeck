@@ -606,6 +606,115 @@ def get_prints_for_day(printer_id: str, date_str: str) -> list[dict]:
     return result
 
 
+def _hydrate_print_rows(rows) -> list[dict]:
+    import json
+    with _conn() as conn:
+        threshold_row = conn.execute(
+            "SELECT value FROM settings WHERE key = 'spool_low_stock_pct'"
+        ).fetchone()
+        low_pct = float(threshold_row["value"]) if threshold_row else 20.0
+        spool_rows = conn.execute(
+            """SELECT id, label_weight_g, remaining_g
+               FROM spools"""
+        ).fetchall()
+    spools = {int(r["id"]): dict(r) for r in spool_rows}
+    result = []
+    for r in rows:
+        item = dict(r)
+        raw_usage = item.pop("spool_usage", None)
+        try:
+            item["spool_usage"] = json.loads(raw_usage) if raw_usage else []
+        except Exception:
+            item["spool_usage"] = []
+        _mark_reconcile_suggestions(item["spool_usage"], spools, low_pct)
+        result.append(item)
+    return result
+
+
+def get_print_memory(
+    *,
+    limit: int = 120,
+    printer_id: Optional[str] = None,
+    state: Optional[str] = None,
+    material: Optional[str] = None,
+    query: Optional[str] = None,
+    days: Optional[int] = None,
+) -> list[dict]:
+    """Fleet-wide print memory rows for the Print Memory surface."""
+    limit = max(1, min(int(limit or 120), 400))
+    where = ["final_state IS NOT NULL"]
+    params: list = []
+    if printer_id:
+        where.append("printer_id = ?")
+        params.append(printer_id)
+    if state:
+        where.append("final_state = ?")
+        params.append(state)
+    if material:
+        where.append("LOWER(COALESCE(material, '')) = LOWER(?)")
+        params.append(material)
+    if query:
+        like = f"%{query.strip().lower()}%"
+        where.append("""(
+            LOWER(COALESCE(filename, '')) LIKE ?
+            OR LOWER(COALESCE(subtask_name, '')) LIKE ?
+            OR LOWER(COALESCE(notes, '')) LIKE ?
+            OR LOWER(COALESCE(error_message, '')) LIKE ?
+        )""")
+        params.extend([like, like, like, like])
+    if days:
+        days = max(1, min(int(days), 3650))
+        where.append("started_at >= datetime('now', ?)")
+        params.append(f"-{days} days")
+    sql = f"""SELECT id, printer_id, filename, subtask_name, started_at, ended_at,
+                     duration_seconds, estimated_duration_seconds, final_state, error_message,
+                     layers_total, layers_completed, filament_grams, material,
+                     snapshot_captured_at IS NOT NULL AS has_snapshot, notes,
+                     spool_usage
+              FROM prints
+              WHERE {' AND '.join(where)}
+              ORDER BY started_at DESC
+              LIMIT ?"""
+    with _conn() as conn:
+        rows = conn.execute(sql, (*params, limit)).fetchall()
+    return _hydrate_print_rows(rows)
+
+
+def get_print_by_id(print_id: int) -> Optional[dict]:
+    with _conn() as conn:
+        rows = conn.execute(
+            """SELECT id, printer_id, filename, subtask_name, started_at, ended_at,
+                      duration_seconds, estimated_duration_seconds, final_state, error_message,
+                      layers_total, layers_completed, filament_grams, material,
+                      snapshot_captured_at IS NOT NULL AS has_snapshot, notes,
+                      spool_usage
+               FROM prints
+               WHERE id = ?""",
+            (print_id,),
+        ).fetchall()
+    items = _hydrate_print_rows(rows)
+    return items[0] if items else None
+
+
+def get_print_memory_facets() -> dict:
+    with _conn() as conn:
+        printers = conn.execute(
+            """SELECT DISTINCT printer_id FROM prints
+               WHERE final_state IS NOT NULL
+               ORDER BY printer_id"""
+        ).fetchall()
+        materials = conn.execute(
+            """SELECT DISTINCT material FROM prints
+               WHERE final_state IS NOT NULL AND material IS NOT NULL AND material != ''
+               ORDER BY material"""
+        ).fetchall()
+    return {
+        "printers": [r["printer_id"] for r in printers],
+        "materials": [r["material"] for r in materials],
+        "states": ["FINISHED", "CANCELLED", "ERROR", "ESTOP"],
+    }
+
+
 def _mark_reconcile_suggestions(usage: list[dict], spools: dict[int, dict], low_pct: float) -> None:
     """Add light-touch weigh-in hints to risky usage rows.
 

@@ -2069,6 +2069,7 @@ function parseRoute() {
   if (hash === '#/stats' || hash.startsWith('#/stats?')) return { view: 'stats' };
   if (hash === '#/queue') return { view: 'queue' };
   if (hash === '#/files') return { view: 'files' };
+  if (hash === '#/memory' || hash.startsWith('#/memory?')) return { view: 'memory' };
   if (hash === '#/failures' || hash.startsWith('#/failures?')) return { view: 'failures' };
   if (hash === '#/spools' || hash.startsWith('#/spools?')) return { view: 'spools' };
   if (hash === '#/demo') return { view: 'demo' };
@@ -2133,6 +2134,7 @@ function router() {
   document.getElementById('view-cameras').hidden   = route.view !== 'cameras';
   document.getElementById('view-queue').hidden     = route.view !== 'queue';
   document.getElementById('view-files').hidden     = route.view !== 'files';
+  document.getElementById('view-memory').hidden    = route.view !== 'memory';
   document.getElementById('view-failures').hidden  = route.view !== 'failures';
   document.getElementById('view-spools').hidden    = route.view !== 'spools';
   document.getElementById('view-settings').hidden  = route.view !== 'settings';
@@ -2150,6 +2152,7 @@ function router() {
       (route.view === 'cameras'  && href === '#/cameras') ||
       (route.view === 'queue'    && href === '#/queue') ||
       (route.view === 'files'    && href === '#/files') ||
+      (route.view === 'memory'   && href === '#/memory') ||
       (route.view === 'failures' && href === '#/failures') ||
       (route.view === 'spools'   && href === '#/spools') ||
       (route.view === 'demo'     && href === '#/demo') ||
@@ -2172,6 +2175,7 @@ function router() {
   if (route.view === 'cameras') renderCamerasView();
   if (route.view === 'queue') renderQueueView();
   if (route.view === 'files' && !_fileDeskRenderInFlight) renderFileDeskView();
+  if (route.view === 'memory') renderPrintMemoryView();
   if (route.view === 'failures' && !wasOnFailures) renderFailuresView();
   if (route.view === 'spools' && (!wasOnSpools || _lastSpoolsRouteKey !== spoolsRouteKey)) {
     _lastSpoolsRouteKey = spoolsRouteKey;
@@ -2206,6 +2210,7 @@ function buildTabs(printers) {
     `<div class="tab-section">Operations</div>`,
     `<a class="tab" href="#/queue">Queue</a>`,
     `<a class="tab" href="#/files">Global Print Bay</a>`,
+    `<a class="tab" href="#/memory">Print Memory</a>`,
     `<a class="tab" href="#/spools">Spools</a>`,
     `<div class="tab-section">System</div>`,
     `<a class="tab" href="#/demo">Demo Mode</a>`,
@@ -3738,6 +3743,177 @@ async function _renderHistoryBody(printerId) {
       if (prints) _showPrintDetail(printerId, row.dataset.date, prints[parseInt(row.dataset.printIdx, 10)]);
     }
   });
+}
+
+// ── Print Memory ─────────────────────────────────────────────────────────
+
+function _memoryPrintName(item) {
+  const raw = item.subtask_name || String(item.filename || '').replace(/.*[/\\]/, '');
+  return raw.replace(/\.gcode(\.3mf|\.gz)?$/i, '').replace(/\.bgcode$/i, '');
+}
+
+function _memoryStateBadge(state) {
+  const { cls, label } = _printBadge(state || 'running');
+  return `<span class="badge badge-${cls} memory-state-badge">${label}</span>`;
+}
+
+function _memoryPrinterLabel(id) {
+  const p = _latestPrinters.find(x => x.id === id);
+  return p ? _printerNavLabel(p) : id;
+}
+
+function _memoryRow(item) {
+  const started = item.started_at ? new Date(item.started_at.endsWith('Z') ? item.started_at : item.started_at + 'Z') : null;
+  const dateLabel = started ? started.toLocaleDateString([], { month: 'short', day: 'numeric' }) : 'No date';
+  const timeLabel = started ? started.toLocaleTimeString([], _clockOpts()) : '';
+  const dur = item.duration_seconds ? formatTime(item.duration_seconds) : '—';
+  const estimate = item.estimated_duration_seconds
+    ? `<span title="Slicer estimate">est ${formatTime(item.estimated_duration_seconds)}</span>`
+    : '';
+  const material = item.material || (item.spool_usage || [])[0]?.material || '';
+  const spoolCount = (item.spool_usage || []).length;
+  const notes = item.notes ? '<span class="memory-pill">note</span>' : '';
+  const snap = item.has_snapshot ? '<span class="memory-pill memory-pill-warn">snapshot</span>' : '';
+  return `<button class="memory-row" type="button" data-print-id="${item.id}" data-printer-id="${esc(item.printer_id)}">
+    <span class="memory-date"><strong>${esc(dateLabel)}</strong><em>${esc(timeLabel)}</em></span>
+    <span class="memory-main">
+      <strong title="${esc(item.filename || '')}">${esc(_memoryPrintName(item))}</strong>
+      <em>${esc(_memoryPrinterLabel(item.printer_id))}${material ? ` · ${esc(material)}` : ''}${spoolCount ? ` · ${spoolCount} spool${spoolCount !== 1 ? 's' : ''}` : ''}</em>
+    </span>
+    <span class="memory-meta">${_memoryStateBadge(item.final_state)}<em>${esc(dur)}</em>${estimate}</span>
+    <span class="memory-flags">${notes}${snap}</span>
+  </button>`;
+}
+
+function _memoryFiltersHtml(data, params) {
+  const facets = data.facets || {};
+  const printerOpts = (facets.printers || []).map(id =>
+    `<option value="${esc(id)}"${params.printer_id === id ? ' selected' : ''}>${esc(_memoryPrinterLabel(id))}</option>`
+  ).join('');
+  const stateOpts = (facets.states || []).map(s =>
+    `<option value="${esc(s)}"${params.state === s ? ' selected' : ''}>${esc(s)}</option>`
+  ).join('');
+  const materialOpts = (facets.materials || []).map(m =>
+    `<option value="${esc(m)}"${params.material === m ? ' selected' : ''}>${esc(m)}</option>`
+  ).join('');
+  return `<div class="memory-toolbar">
+    <input class="memory-search" type="search" placeholder="Search files, notes, errors..." value="${esc(params.q || '')}">
+    <select class="memory-filter" data-memory-filter="printer_id">
+      <option value="">All printers</option>${printerOpts}
+    </select>
+    <select class="memory-filter" data-memory-filter="state">
+      <option value="">All states</option>${stateOpts}
+    </select>
+    <select class="memory-filter" data-memory-filter="material">
+      <option value="">All materials</option>${materialOpts}
+    </select>
+    <select class="memory-filter" data-memory-filter="days">
+      <option value="">All time</option>
+      <option value="7"${params.days === '7' ? ' selected' : ''}>7 days</option>
+      <option value="30"${params.days === '30' ? ' selected' : ''}>30 days</option>
+      <option value="90"${params.days === '90' ? ' selected' : ''}>90 days</option>
+      <option value="365"${params.days === '365' ? ' selected' : ''}>1 year</option>
+    </select>
+  </div>`;
+}
+
+function _memorySummary(items) {
+  const finished = items.filter(i => i.final_state === 'FINISHED').length;
+  const failed = items.filter(i => i.final_state === 'ERROR' || i.final_state === 'ESTOP').length;
+  const cancelled = items.filter(i => i.final_state === 'CANCELLED').length;
+  const hours = items.reduce((sum, i) => sum + Number(i.duration_seconds || 0), 0) / 3600;
+  return `<div class="memory-summary">
+    <span><strong>${items.length}</strong> prints</span>
+    <span><strong>${finished}</strong> finished</span>
+    <span><strong>${cancelled}</strong> cancelled</span>
+    <span><strong>${failed}</strong> failed</span>
+    <span><strong>${hours.toFixed(1)}</strong> h</span>
+  </div>`;
+}
+
+function _memoryParamsFromControls(page) {
+  const params = new URLSearchParams();
+  const q = page.querySelector('.memory-search')?.value.trim();
+  if (q) params.set('q', q);
+  page.querySelectorAll('[data-memory-filter]').forEach(el => {
+    if (el.value) params.set(el.dataset.memoryFilter, el.value);
+  });
+  return params;
+}
+
+function _memorySetHash(page) {
+  const params = _memoryParamsFromControls(page);
+  const qs = params.toString();
+  history.replaceState(null, '', qs ? `#/memory?${qs}` : '#/memory');
+  renderPrintMemoryView();
+}
+
+async function _memoryOpenPassport(printId) {
+  const detail = document.getElementById('memory-passport');
+  if (!detail) return;
+  detail.innerHTML = '<div class="history-day-loading">...</div>';
+  try {
+    const r = await fetch(`/api/print-memory/${printId}`);
+    if (!r.ok) throw new Error('Print not found');
+    const item = await r.json();
+    const dateStr = String(item.started_at || '').slice(0, 10);
+    detail.innerHTML = `<div class="memory-passport-head">
+      <span>Print Passport</span>
+      <a href="#/printer/${item.printer_id}/history" title="Open printer history">Printer history</a>
+    </div>
+    <div id="history-day-detail"></div>`;
+    _showPrintDetail(item.printer_id, dateStr, item);
+    document.querySelectorAll('.memory-row.selected').forEach(row => row.classList.remove('selected'));
+    document.querySelector(`.memory-row[data-print-id="${CSS.escape(String(printId))}"]`)?.classList.add('selected');
+  } catch (err) {
+    detail.innerHTML = `<div class="detail-placeholder">${esc(err.message || 'Unable to load print passport.')}</div>`;
+  }
+}
+
+async function renderPrintMemoryView() {
+  const page = document.getElementById('memory-page');
+  if (!page) return;
+  const params = Object.fromEntries(_routeParams('#/memory').entries());
+  const apiParams = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value) apiParams.set(key, value);
+  }
+  apiParams.set('limit', '160');
+  page.innerHTML = '<div class="detail-placeholder">Loading print memory...</div>';
+  let data = { items: [], facets: {} };
+  try {
+    const r = await fetch(`/api/print-memory?${apiParams.toString()}`);
+    if (r.ok) data = await r.json();
+  } catch {}
+  const rows = (data.items || []).map(_memoryRow).join('');
+  page.innerHTML = `<div class="memory-shell">
+    <section class="memory-list-panel">
+      <div class="memory-head">
+        <div>
+          <span class="memory-eyebrow">Fleet</span>
+          <h2>Print Memory</h2>
+        </div>
+        ${_memorySummary(data.items || [])}
+      </div>
+      ${_memoryFiltersHtml(data, params)}
+      <div class="memory-list">${rows || '<div class="filedesk-empty">No matching prints yet.</div>'}</div>
+    </section>
+    <aside class="memory-passport" id="memory-passport">
+      <div class="detail-placeholder">Select a print to open its passport.</div>
+    </aside>
+  </div>`;
+
+  page.querySelector('.memory-search')?.addEventListener('keydown', e => {
+    if (e.key === 'Enter') _memorySetHash(page);
+  });
+  page.querySelector('.memory-search')?.addEventListener('change', () => _memorySetHash(page));
+  page.querySelectorAll('[data-memory-filter]').forEach(el => {
+    el.addEventListener('change', () => _memorySetHash(page));
+  });
+  page.querySelectorAll('.memory-row').forEach(row => {
+    row.addEventListener('click', () => _memoryOpenPassport(row.dataset.printId));
+  });
+  if (data.items?.[0]) _memoryOpenPassport(data.items[0].id);
 }
 
 // ── Maintenance tab ───────────────────────────────────────────────────────
