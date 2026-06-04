@@ -1,5 +1,11 @@
 # Flightdeck — next session brief
-_Last updated 5 June 2026 (Session 28.166 Spool detail breadcrumb)_
+_Last updated 5 June 2026 (Session 28.167 Tomorrow spool agenda)_
+
+## Next up - Tomorrow morning
+- First pass: add auto-load reconciliation for spools physically inserted into a printer AMS/MMU.
+- Desired behaviour: when a printer reports a newly loaded AMS slot, Flightdeck should find a high-confidence matching stored spool, move it from storage into the selected printer/slot, and keep its home shelf memory for return.
+- Confidence rules should start conservative: auto-move only obvious unique matches, prompt/flag possible matches when colour/material/brand are ambiguous, and never guess between near-identical spools.
+- Validate against the overnight H2D print: final state, spool deduction, AMS generic-profile tolerance, notifications, and Print Memory scoring/exclusion.
 
 ## What was fixed - Session 28.166 (Spool detail breadcrumb - 5 June)
 - Fixed the Spool detail page breadcrumb so `Spools` returns to the current inventory route (`#/spools`) instead of the old Settings route.
