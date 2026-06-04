@@ -1,5 +1,9 @@
 # Flightdeck — next session brief
-_Last updated 4 June 2026 (Session 28.150 Spool card detail navigation)_
+_Last updated 4 June 2026 (Session 28.151 Spool activity exact match fix)_
+
+## What was fixed - Session 28.151 (Spool activity exact match fix - 4 June)
+- Fixed spool detail activity rows so `Spool #1` no longer also matches `Spool #17`, `Spool #18`, `Spool #19`, etc.
+- The AMS / Shelf Activity panel now filters decision rows by exact spool number before returning them to the UI.
 
 ## What was polished - Session 28.150 (Spool card detail navigation - 4 June)
 - Made single-spool cards in Cards view open the spool detail page when the non-control card surface is clicked.

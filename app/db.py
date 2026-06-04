@@ -1685,8 +1685,10 @@ def get_spool_trace(spool_id: int) -> Optional[dict]:
     if not spool:
         return None
     import json
+    import re
     usage = []
     activity = []
+    spool_ref = re.compile(rf"\bSpool #{int(spool_id)}(?!\d)\b")
     with _conn() as conn:
         rows = conn.execute(
             """SELECT id, printer_id, filename, subtask_name, started_at, ended_at,
@@ -1723,7 +1725,9 @@ def get_spool_trace(spool_id: int) -> Optional[dict]:
             item["usage_slot"] = entry.get("slot")
             usage.append(item)
     for row in activity_rows:
-        activity.append(dict(row))
+        item = dict(row)
+        if spool_ref.search(item.get("detail") or ""):
+            activity.append(item)
     spool["usage"] = usage
     spool["usage_count"] = len(usage)
     spool["usage_total_g"] = round(total_used, 2)
