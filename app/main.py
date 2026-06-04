@@ -2797,6 +2797,11 @@ def _looks_like_bambu_profile_code(value: Optional[str]) -> bool:
     return bool(re.fullmatch(r"[A-Z]\d{2}[-_ ]?[A-Z0-9]+", raw))
 
 
+def _is_generic_profile(value: Optional[str]) -> bool:
+    normalised = _norm_material(value or "")
+    return normalised == "generic" or normalised.startswith("generic")
+
+
 def _reported_brand_matches_spool(reported_brand: str, spool: dict) -> bool:
     reported = _norm_material(reported_brand)
     spool_brand = _norm_material(spool.get("brand") or "")
@@ -2989,11 +2994,11 @@ def _reported_slot_mismatch(spool: Optional[dict], slot: Optional[dict]) -> str:
     ]))
     if _looks_like_bambu_profile_code(slot.get("profile_name")):
         return ""
+    if _is_generic_profile(slot.get("brand")) or _is_generic_profile(slot.get("profile_name")):
+        return ""
     if reported_profile and spool_profile and reported_profile != "generic" and reported_profile not in spool_profile and spool_profile not in reported_profile:
         expected = " ".join(str(spool.get(k) or "") for k in ("brand", "material", "subtype")).strip()
         return f"Profile mismatch: printer {slot.get('profile_name')}, Flightdeck {expected}"
-    if reported_brand == "generic" and spool_brand and spool_brand != "generic":
-        return f"Profile review: printer reports Generic, Flightdeck has {spool.get('brand')}"
     return ""
 
 

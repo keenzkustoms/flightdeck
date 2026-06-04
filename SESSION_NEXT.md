@@ -1,5 +1,10 @@
 # Flightdeck — next session brief
-_Last updated 5 June 2026 (Session 28.164 Print Memory scorecard)_
+_Last updated 5 June 2026 (Session 28.165 Generic AMS profile tolerance)_
+
+## What was fixed - Session 28.165 (Generic AMS profile tolerance - 5 June)
+- Fixed AMS/Profile Doctor mismatch logic so printer-reported generic profiles such as `Generic PLA` do not count as a mismatch when Flightdeck has a trusted, material/colour-compatible branded spool such as eSun PLA+ Peak Green.
+- Applied the same tolerance to backend queue/preflight mismatch checks so generic printer profile names do not block a job after the operator trusts Flightdeck.
+- Bumped static cache to `app.js?v=247`; backend restart required.
 
 ## What was built - Session 28.164 (Print Memory scorecard - 5 June)
 - Added the Stage 3 Print Memory score layer with `/api/print-memory-score`.

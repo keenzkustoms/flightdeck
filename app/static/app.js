@@ -8772,6 +8772,11 @@ function _looksLikeBambuProfileCode(value) {
   return /^[A-Z]\d{2}[-_ ]?[A-Z0-9]+$/i.test(String(value || '').trim());
 }
 
+function _isGenericProfile(value) {
+  const normalised = _normMat(value || '');
+  return normalised === 'GENERIC' || normalised.startsWith('GENERIC');
+}
+
 function _reportedBrandMatchesSpool(reportedBrand, spool) {
   const reported = _normMat(reportedBrand);
   const spoolBrand = _normMat(spool?.brand || '');
@@ -8807,11 +8812,11 @@ function _slotMismatch(spool, report) {
   if (_looksLikeBambuProfileCode(report.profile_name)) {
     return '';
   }
+  if (_isGenericProfile(report.brand) || _isGenericProfile(report.profile_name)) {
+    return '';
+  }
   if (reportedProfile && spoolProfile && reportedProfile !== 'generic' && !spoolProfile.includes(reportedProfile) && !reportedProfile.includes(spoolProfile)) {
     return `Profile mismatch: printer ${report.profile_name}, Flightdeck ${[spool.brand, spool.material, spool.subtype].filter(Boolean).join(' ')}`;
-  }
-  if (reportedBrand === 'GENERIC' && spoolBrand && spoolBrand !== 'GENERIC') {
-    return `Profile review: printer reports Generic, Flightdeck has ${spool.brand}`;
   }
   return '';
 }
