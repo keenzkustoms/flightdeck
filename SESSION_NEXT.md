@@ -1,5 +1,11 @@
 # Flightdeck — next session brief
-_Last updated 4 June 2026 (Session 28.145 Telemetry filament trend polish)_
+_Last updated 4 June 2026 (Session 28.146 Spool catalogue toolbar tidy)_
+
+## What was polished - Session 28.146 (Spool catalogue toolbar tidy - 4 June)
+- Removed the duplicate blue `Filament catalogue` link from the Spool Intelligence panel so the spool screen has one clean top control row.
+- Renamed the top spool view control from `Catalogue` to `Filament catalogue`, keeping it alongside Cards/Table/Cabinet, filters, search, and Add Spool.
+- Fixed same-page spool catalogue navigation so links to `#/spools?view=catalogue` rerender the Spools surface even when the user is already on the Spools screen.
+- Bumped the app static cache to `app.js?v=227`; no service restart is needed for this static-only pass.
 
 ## What was polished - Session 28.145 (Telemetry filament trend polish - 4 June)
 - Confirmed live filament telemetry is already recording deductions: `/api/filament/summary` reports 110.4 g total usage, split across ASA and PLA, all currently in one month.

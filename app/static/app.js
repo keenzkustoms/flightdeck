@@ -2173,7 +2173,7 @@ function router() {
   if (route.view === 'queue') renderQueueView();
   if (route.view === 'files' && !_fileDeskRenderInFlight) renderFileDeskView();
   if (route.view === 'failures' && !wasOnFailures) renderFailuresView();
-  if (route.view === 'spools' && !wasOnSpools) renderSpoolsView();
+  if (route.view === 'spools') renderSpoolsView();
   if (route.view === 'settings' && (!wasOnSettings || categoryBeforeRoute !== _settingsCategory)) renderSettingsView();
   if (route.view === 'demo' && !wasOnDemo) renderDemoView();
   if (route.view === 'manual' && !wasOnManual) renderManualView();
@@ -9099,7 +9099,6 @@ function _spoolIntelligenceHtml(intel = {}) {
         <div class="settings-section-title">Spool Intelligence</div>
         <div class="spool-intel-sub">${intel.days || 30} day tracking window</div>
       </div>
-      <a class="spool-intel-link" href="#/spools?view=catalogue">Filament catalogue</a>
     </div>
     <div class="spool-intel-stats">
       <div class="spool-intel-stat"><strong>${fmtKg(s.deducted_g)}</strong><span>auto-deducted</span></div>
@@ -9155,7 +9154,7 @@ function _spoolsCategoryHtml(spools, summary, costs, intelligence = {}) {
           <button class="spool-view-btn${_spoolsViewMode==='cards'?' active':''}" data-view="cards">Cards</button>
           <button class="spool-view-btn${_spoolsViewMode==='table'?' active':''}" data-view="table">Table</button>
           <button class="spool-view-btn${_spoolsViewMode==='cabinet'?' active':''}" data-view="cabinet">Cabinet</button>
-          <button class="spool-view-btn${_spoolsViewMode==='catalogue'?' active':''}" data-view="catalogue">Catalogue</button>
+          <button class="spool-view-btn${_spoolsViewMode==='catalogue'?' active':''}" data-view="catalogue">Filament catalogue</button>
         </div>
         <select class="spool-filter-sel" data-fkey="material">${matOpts}</select>
         <select class="spool-filter-sel" data-fkey="brand">${brandOpts}</select>
@@ -9199,7 +9198,7 @@ function _spoolsCategoryHtml(spools, summary, costs, intelligence = {}) {
 }
 
 function _refreshSpoolsSurface() {
-  return location.hash === '#/spools' ? renderSpoolsView() : _renderSettingsContent('spools');
+  return location.hash.startsWith('#/spools') ? renderSpoolsView() : _renderSettingsContent('spools');
 }
 
 function _attachSpoolListEvents(el, listEl, refresh = _refreshSpoolsSurface) {
