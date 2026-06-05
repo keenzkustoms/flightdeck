@@ -9883,7 +9883,8 @@ function _attachSpoolsEvents(el, costs) {
 
 function _openSpoolModal(costs, onSaved, prefill = null) {
   const isEdit = prefill?.id != null;
-  const title = isEdit ? 'Edit Spool' : 'Add Spool';
+  const p0 = prefill || {};
+  const title = isEdit ? `Edit Spool #${p0.id}` : 'Add Spool';
   const submitLabel = isEdit ? 'Save' : 'Add Spool';
 
   // Build material → brands map
@@ -9897,7 +9898,6 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
   const materials = Object.keys(matBrands).sort();
 
   const defaultLabelWeight = Number(_serverSettings.default_label_weight_g || 1000) || 1000;
-  const p0 = prefill || {};
   const initialLabelWeight = p0.label_weight_g ?? defaultLabelWeight;
   const initialRemainingWeight = p0.remaining_g ?? p0.label_weight_g ?? defaultLabelWeight;
   const initHex = p0.color_hex || '#808080';
@@ -10256,6 +10256,7 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
       : `${storageSel.options[storageSel.selectedIndex]?.textContent || 'Storage'}`;
     const titleLine = [colorName || 'Colour', mat || 'Material', subtype].filter(Boolean).join(' · ');
     const brandLine = [brand || 'Brand', locText].filter(Boolean).join(' · ');
+    const spoolIdLine = isEdit && p0.id ? `<span class="spool-draft-id">Spool #${esc(p0.id)}</span>` : '';
     spoolPreview.innerHTML = `
       <div class="spool-draft-swatch" style="background:${hex}"></div>
       <div class="spool-draft-main">
@@ -10264,6 +10265,7 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
         ${note ? `<em>${esc(note)}</em>` : ''}
       </div>
       <div class="spool-draft-weight">
+        ${spoolIdLine}
         <strong>${remaining || '—'}g</strong>
         <span>${label ? `${pct}% of ${label}g` : 'weight pending'}</span>
       </div>`;

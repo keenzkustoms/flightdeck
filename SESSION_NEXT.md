@@ -1,5 +1,9 @@
 # Flightdeck — next session brief
-_Last updated 5 June 2026 (Session 28.169 Print Memory tag length)_
+_Last updated 5 June 2026 (Session 28.170 Spool edit ID visibility)_
+
+## What was polished - Session 28.170 (Spool edit ID visibility - 5 June)
+- Added the spool ID to the Add/Edit Spool modal title and draft preview so it is clear which spool is being edited.
+- Bumped static cache to `app.js?v=250` and `style.css?v=195`; no backend restart required.
 
 ## What was fixed - Session 28.169 (Print Memory tag length - 5 June)
 - Raised Print Memory custom tag storage from 40 to 96 characters and added a matching browser input limit so long tags are not silently cut off after save.

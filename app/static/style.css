@@ -8764,6 +8764,21 @@ select.settings-input { cursor: pointer; }
   font-size: 1rem;
 }
 
+.spool-draft-id {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 1.2rem;
+  padding: 0 0.45rem;
+  border: 1px solid rgba(147,197,253,0.28);
+  border-radius: 999px;
+  color: #bfdbfe;
+  background: rgba(37,99,235,0.16);
+  font-size: 0.66rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
 .spool-modal .modal-actions {
   border-top: 1px solid var(--border);
   margin-top: 0.4rem;
