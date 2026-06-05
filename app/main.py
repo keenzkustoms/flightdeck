@@ -2313,6 +2313,8 @@ async def get_scale_status():
         "keep_awake": {
             "enabled": _scale_keep_awake_enabled(),
             "interval_s": _scale_keep_awake_interval(),
+            "method": _scale.last_keep_awake_method,
+            "units_gpio": os.getenv("FLIGHTDECK_SCALE_UNITS_GPIO") or None,
             "last_ping_at": datetime.fromtimestamp(_scale.last_keep_awake_at).isoformat() if _scale.last_keep_awake_at else None,
         },
     }
@@ -2324,6 +2326,7 @@ async def keep_scale_awake():
     return {
         "ok": ok,
         "last_error": None if ok else _scale.last_error,
+        "method": _scale.last_keep_awake_method,
         "last_ping_at": datetime.fromtimestamp(_scale.last_keep_awake_at).isoformat() if _scale.last_keep_awake_at else None,
     }
 

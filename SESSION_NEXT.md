@@ -1,5 +1,11 @@
 # Flightdeck — next session brief
-_Last updated 5 June 2026 (Session 28.176 DYMO scale keep-awake)_
+_Last updated 5 June 2026 (Session 28.177 DYMO GPIO keep-awake hook)_
+
+## What was built - Session 28.177 (DYMO GPIO keep-awake hook - 5 June)
+- Confirmed plain USB keep-awake pings do not stop the DYMO M10 from sleeping; USB stays present but weight reports stop.
+- Added an optional GPIO units-button pulse path, enabled by `FLIGHTDECK_SCALE_UNITS_GPIO=<BCM pin>`, to support the Adafruit-style hardware mod.
+- `/api/scale/status` and `/api/scale/keep-awake` now report the keep-awake method (`usb` or `gpioN`) and configured GPIO pin.
+- Backend restart required after setting or changing GPIO env vars.
 
 ## What was built - Session 28.176 (DYMO scale keep-awake - 5 June)
 - Added a background DYMO M10 scale keep-awake loop that pings the USB HID endpoint every 120 seconds by default.

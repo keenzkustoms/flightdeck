@@ -25,6 +25,31 @@ class Scale:
         self.device_path = device_path
         self.last_error: Optional[str] = None
         self.last_keep_awake_at: Optional[float] = None
+        self.last_keep_awake_method: Optional[str] = None
+
+    @staticmethod
+    def _env_bool(name: str, default: bool) -> bool:
+        value = os.getenv(name)
+        if value is None:
+            return default
+        return value.strip().lower() not in {"0", "false", "no", "off"}
+
+    @staticmethod
+    def _env_int(name: str) -> Optional[int]:
+        value = os.getenv(name)
+        if value is None or value.strip() == "":
+            return None
+        try:
+            return int(value)
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _env_float(name: str, default: float) -> float:
+        try:
+            return float(os.getenv(name, str(default)))
+        except ValueError:
+            return default
 
     def _candidate_paths(self) -> list[str]:
         paths = [self.device_path] + [f"/dev/hidraw{i}" for i in range(8)]
@@ -64,6 +89,62 @@ class Scale:
         return None
 
     def keep_awake_ping(self) -> bool:
+        if self.toggle_unit_button():
+            return True
+        if self._env_int("FLIGHTDECK_SCALE_UNITS_GPIO") is not None:
+            return False
+        return self.usb_keep_awake_ping()
+
+    def toggle_unit_button(self) -> bool:
+        """Pulse a GPIO wired to the DYMO units button, if configured.
+
+        Set FLIGHTDECK_SCALE_UNITS_GPIO to a BCM pin number after wiring the
+        button mod. The pulse defaults to active-high for 250ms; override with
+        FLIGHTDECK_SCALE_UNITS_GPIO_ACTIVE_HIGH=false or
+        FLIGHTDECK_SCALE_UNITS_GPIO_PULSE_MS=...
+        """
+        pin = self._env_int("FLIGHTDECK_SCALE_UNITS_GPIO")
+        if pin is None:
+            self.last_error = "Scale units GPIO not configured"
+            return False
+        active_high = self._env_bool("FLIGHTDECK_SCALE_UNITS_GPIO_ACTIVE_HIGH", True)
+        pulse_s = max(0.05, self._env_float("FLIGHTDECK_SCALE_UNITS_GPIO_PULSE_MS", 250) / 1000.0)
+        try:
+            from gpiozero import OutputDevice  # type: ignore
+
+            device = OutputDevice(pin, active_high=active_high, initial_value=False)
+            try:
+                device.on()
+                time.sleep(pulse_s)
+                device.off()
+            finally:
+                device.close()
+            self.last_keep_awake_at = time.time()
+            self.last_keep_awake_method = f"gpio{pin}"
+            self.last_error = None
+            return True
+        except Exception as exc:
+            gpiozero_error = exc
+
+        try:
+            import RPi.GPIO as GPIO  # type: ignore
+
+            GPIO.setmode(GPIO.BCM)
+            inactive = GPIO.LOW if active_high else GPIO.HIGH
+            active = GPIO.HIGH if active_high else GPIO.LOW
+            GPIO.setup(pin, GPIO.OUT, initial=inactive)
+            GPIO.output(pin, active)
+            time.sleep(pulse_s)
+            GPIO.output(pin, inactive)
+            self.last_keep_awake_at = time.time()
+            self.last_keep_awake_method = f"gpio{pin}"
+            self.last_error = None
+            return True
+        except Exception as exc:
+            self.last_error = f"GPIO units-button pulse failed: {exc} (gpiozero: {gpiozero_error})"
+            return False
+
+    def usb_keep_awake_ping(self) -> bool:
         """Touch the USB HID endpoint so an attached scale has regular host activity.
 
         This is intentionally non-blocking. It can keep USB-readable DYMO scales active
@@ -85,6 +166,7 @@ class Scale:
                 except BlockingIOError:
                     pass
                 self.last_keep_awake_at = time.time()
+                self.last_keep_awake_method = "usb"
                 return True
             except PermissionError:
                 self.last_error = f"Permission denied reading {path}"
