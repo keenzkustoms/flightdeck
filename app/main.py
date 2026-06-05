@@ -160,6 +160,15 @@ def _default_spool_location_id() -> Optional[int]:
     return None
 
 
+def _spool_location_label(location_id: Optional[int]) -> str:
+    if location_id is None:
+        return "storage"
+    for loc in db.get_spool_locations():
+        if str(loc.get("id")) == str(location_id):
+            return str(loc.get("name") or f"Shelf #{location_id}")
+    return f"Shelf #{location_id}"
+
+
 def _reconcile_empty_reported_slots(printer_status: dict) -> None:
     """Return stale Flightdeck assignments when Bambu reports the slot empty."""
     printer_id = printer_status.get("id")
@@ -184,10 +193,14 @@ def _reconcile_empty_reported_slots(printer_status: dict) -> None:
         target_location_id = int(home_id) if home_id is not None else _default_spool_location_id()
         result = db.move_spool(int(spool["id"]), None, None, target_location_id)
         if result.get("ok"):
+            returned_to = _spool_location_label(result.get("storage_location_id") or target_location_id)
             db.log_decision(
                 str(printer_id),
                 "spool_auto_returned",
-                f"Spool #{spool['id']} auto-returned from empty {slot.get('label') or flat_slot}",
+                (
+                    f"Spool #{spool['id']} auto-returned to {returned_to} "
+                    f"from empty {slot.get('label') or flat_slot}; printer reported empty"
+                ),
             )
 
 
@@ -359,13 +372,19 @@ def _reconcile_reported_loaded_slots(printer_status: dict) -> None:
         )
         if not result.get("ok"):
             continue
+        source_location = _spool_location_label(spool.get("storage_location_id") or spool.get("home_storage_location_id"))
+        reported = " ".join(
+            str(slot.get(key) or "").strip()
+            for key in ("brand", "type", "profile_name")
+            if str(slot.get(key) or "").strip()
+        ) or "filament"
         db.log_decision(
             str(printer_id),
             "spool_auto_claimed",
             (
-                f"Spool #{spool['id']} auto-claimed for {slot.get('label') or flat_slot} "
-                f"from printer report {slot.get('brand') or slot.get('type') or 'filament'} "
-                f"{slot.get('color') or ''} (score {score:.0f}: {reason})"
+                f"Spool #{spool['id']} auto-claimed from {source_location} "
+                f"to {slot.get('label') or flat_slot}; matched printer report "
+                f"{reported} {slot.get('color') or ''} (score {score:.0f}: {reason})"
             ),
         )
         loaded_by_slot[int(flat_slot)] = spool

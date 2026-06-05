@@ -4486,12 +4486,30 @@ function _spoolActivityClass(event) {
   return 'info';
 }
 
+function _spoolActivityBadges(row) {
+  const detail = row.detail || '';
+  if (row.event === 'spool_auto_claimed') {
+    const score = detail.match(/score\s+(\d+)/i)?.[1];
+    return [
+      'Matched automatically',
+      'Unique stored spool',
+      score ? `Confidence ${score}` : '',
+    ].filter(Boolean);
+  }
+  if (row.event === 'spool_auto_returned') {
+    return ['Home shelf return', 'Printer reported empty', 'No colour guess'];
+  }
+  return [];
+}
+
 function _spoolActivityRow(row) {
   const cls = _spoolActivityClass(row.event);
+  const badges = _spoolActivityBadges(row);
   return `<div class="spool-activity-row spool-activity-${cls}">
     <div class="spool-activity-dot"></div>
     <div class="spool-activity-main">
       <div class="spool-activity-title">${esc(_spoolActivityLabel(row.event))}</div>
+      ${badges.length ? `<div class="spool-activity-badges">${badges.map(badge => `<span>${esc(badge)}</span>`).join('')}</div>` : ''}
       <div class="spool-activity-detail">${esc(row.detail || '')}</div>
       <div class="spool-activity-meta">${esc(_spoolActivityMeta(row))}</div>
     </div>

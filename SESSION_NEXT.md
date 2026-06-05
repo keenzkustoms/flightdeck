@@ -1,5 +1,9 @@
 # Flightdeck — next session brief
-_Last updated 5 June 2026 (Session 28.170 Spool edit ID visibility)_
+_Last updated 5 June 2026 (Session 28.171 Auto-move visibility)_
+
+## What was polished - Session 28.171 (Auto-move visibility - 5 June)
+- Made AMS auto-claim/auto-return decision trails easier to trust: future log rows include shelf/slot wording, and spool activity rows show clear badges such as `Matched automatically`, `Unique stored spool`, and `Home shelf return`.
+- Bumped static cache to `app.js?v=251` and `style.css?v=196`; backend restart required.
 
 ## What was polished - Session 28.170 (Spool edit ID visibility - 5 June)
 - Added the spool ID to the Add/Edit Spool modal title and draft preview so it is clear which spool is being edited.

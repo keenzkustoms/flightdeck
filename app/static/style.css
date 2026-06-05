@@ -9979,6 +9979,26 @@ select.settings-input { cursor: pointer; }
   font-weight: 800;
 }
 
+.spool-activity-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.32rem;
+}
+
+.spool-activity-badges span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.25rem;
+  padding: 0 0.45rem;
+  border: 1px solid rgba(34,197,94,0.25);
+  border-radius: 999px;
+  color: #bbf7d0;
+  background: rgba(22,163,74,0.12);
+  font-size: 0.66rem;
+  font-weight: 800;
+}
+
 .spool-activity-detail {
   margin-top: 0.18rem;
   color: var(--muted);
