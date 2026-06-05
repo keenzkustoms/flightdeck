@@ -8889,6 +8889,24 @@ function _isGenericProfile(value) {
   return normalised === 'GENERIC' || normalised.startsWith('GENERIC');
 }
 
+const _COMPOSITE_PROFILE_TOKENS = ['CF', 'CARBON', 'GF', 'GLASS', 'WOOD', 'METAL', 'SUPPORT'];
+
+function _reportedProfileText(report) {
+  return [report?.brand, report?.type, report?.material, report?.profile_name, report?.profile_id]
+    .filter(Boolean).join(' ');
+}
+
+function _spoolProfileText(spool) {
+  return [spool?.brand, spool?.material, spool?.subtype].filter(Boolean).join(' ');
+}
+
+function _genericProfileRejectsSpool(report, spool) {
+  if (!(_isGenericProfile(report?.brand) || _isGenericProfile(report?.profile_name))) return false;
+  const reported = _normMat(_reportedProfileText(report));
+  const spoolText = _normMat(_spoolProfileText(spool));
+  return _COMPOSITE_PROFILE_TOKENS.some(token => spoolText.includes(token) && !reported.includes(token));
+}
+
 function _reportedBrandMatchesSpool(reportedBrand, spool) {
   const reported = _normMat(reportedBrand);
   const spoolBrand = _normMat(spool?.brand || '');
@@ -8910,6 +8928,9 @@ function _slotMismatch(spool, report) {
   const spoolMat = _normMat(`${spool.material || ''}${spool.subtype ? ' ' + spool.subtype : ''}`);
   if (reportedMat && spoolMat && !spoolMat.includes(reportedMat) && !reportedMat.includes(spoolMat)) {
     return `Material mismatch: printer ${_slotReportedMaterial(report)}, Flightdeck ${spool.material}${spool.subtype ? ' ' + spool.subtype : ''}`;
+  }
+  if (_genericProfileRejectsSpool(report, spool)) {
+    return `Profile mismatch: printer ${_reportedProfileText(report) || 'Generic'}, Flightdeck ${_spoolProfileText(spool)}`;
   }
   if (_hexDistance(report.color, spool.color_hex) > 95) {
     return `Colour mismatch: printer ${report.color}, Flightdeck ${spool.color_hex}`;
@@ -8947,7 +8968,8 @@ function _slotCandidateScore(spool, report) {
   const mat = _normMat(`${spool.material || ''}${spool.subtype ? ' ' + spool.subtype : ''}`);
   const reported = _normMat(_slotReportedMaterial(report));
   const matPenalty = reported && mat && (mat.includes(reported) || reported.includes(mat)) ? 0 : 250;
-  return matPenalty + _hexDistance(report.color, spool.color_hex);
+  const profilePenalty = _genericProfileRejectsSpool(report, spool) ? 500 : 0;
+  return matPenalty + profilePenalty + _hexDistance(report.color, spool.color_hex);
 }
 
 function _slotReport(printer, slotIndex) {

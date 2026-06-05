@@ -2475,6 +2475,33 @@ def get_spool_at_slot(printer_id: str, slot: int) -> Optional[dict]:
     return dict(row) if row else None
 
 
+def get_recent_spool_for_slot(printer_id: str, slot: int, limit: int = 25) -> Optional[int]:
+    """Return the most recent print-start spool id captured for a printer slot."""
+    import json
+    with _conn() as conn:
+        rows = conn.execute(
+            """SELECT ams_slot_snapshot
+               FROM prints
+               WHERE printer_id = ? AND ams_slot_snapshot IS NOT NULL
+               ORDER BY started_at DESC, id DESC
+               LIMIT ?""",
+            (printer_id, int(limit)),
+        ).fetchall()
+    key = str(int(slot))
+    for row in rows:
+        try:
+            snapshot = json.loads(row["ams_slot_snapshot"] or "{}")
+        except Exception:
+            continue
+        entry = snapshot.get(key)
+        if isinstance(entry, dict) and entry.get("spool_id"):
+            try:
+                return int(entry["spool_id"])
+            except (TypeError, ValueError):
+                return None
+    return None
+
+
 def write_slot_snapshot(print_id: int, snapshot: dict) -> None:
     """Persist the enriched slot/gate snapshot (with spool_ids) to the prints row.
 

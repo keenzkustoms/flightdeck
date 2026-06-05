@@ -9,7 +9,8 @@ _Last updated 5 June 2026 (Session 28.181 Multi-colour spool deduction fix)_
 - Corrected known bad tares after repair: Bambu Lab #61 from 230g -> 256g, eSun #76 from 140g -> 224g. Inkstation #48 remains at 128g until a trusted tare is provided.
 - Improved Add/Edit Spool save failures so slot conflicts and server errors show a useful message instead of changing the submit button to plain `Error`.
 - Fixed new spool creation after the multi-colour fields changed the spool insert shape: the insert listed 16 columns but still had only 15 placeholders, causing Add Spool to fail with a generic server error.
-- Bumped static cache to `app.js?v=258`; backend restart required for the structured add-spool conflict response.
+- Tightened AMS auto-claim/Profile Doctor matching so printer-reported Generic PLA no longer silently matches composite/specialty rolls such as PLA CF; added recent printer-slot memory from print-start AMS snapshots so the known prior roll (#48 PLA Silk Red) wins the H2D AMS 1 S1 auto-claim.
+- Bumped static cache to `app.js?v=259`; backend restart required for the structured add-spool conflict response and stricter AMS auto-claim rules.
 
 ## What was fixed - Session 28.180 (Finished job live-detail cleanup - 5 June)
 - Live printer header, camera HUD, print details panel, dashboard active rows, and Flight Tower active-job labels now only treat jobs as active while printer state is `printing` or `paused`.

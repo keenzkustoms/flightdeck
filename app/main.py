@@ -257,6 +257,8 @@ def _spool_reported_profile_score(slot: dict, spool: dict) -> Optional[tuple[flo
     reported_material = _reported_slot_material_text(slot)
     if not _spool_matches_material(spool, str(reported_material)):
         return None
+    if _generic_profile_rejects_spool(slot, spool):
+        return None
 
     color_dist = _hex_dist(slot.get("color"), spool.get("color_hex"))
     if color_dist > 125:
@@ -271,15 +273,16 @@ def _spool_reported_profile_score(slot: dict, spool: dict) -> Optional[tuple[flo
     spool_subtype = _norm_material(spool.get("subtype") or "")
     reported_brand_norm = _norm_material(reported_brand)
     reported_profile_norm = _norm_material(reported_profile)
+    reported_is_generic = _is_generic_profile(reported_brand) or _is_generic_profile(reported_profile)
 
-    if _reported_brand_matches_spool(reported_brand, spool):
+    if not reported_is_generic and _reported_brand_matches_spool(reported_brand, spool):
         score += 30
         reasons.append("profile")
 
     # Bambu RFID reports profile families such as "PLA Basic" with codes like
     # A00-P6/GFA00. Prefer the operator's Bambu Lab Basic spool over older
     # generic catalog entries that only happen to share a nearby colour.
-    if spool_brand == "bambulab":
+    if spool_brand == "bambulab" and not reported_is_generic:
         score += 18
         reasons.append("bambu")
     if spool_subtype and spool_subtype in reported_brand_norm:
@@ -319,13 +322,16 @@ def _spool_reported_profile_score(slot: dict, spool: dict) -> Optional[tuple[flo
     return score, ", ".join(reasons)
 
 
-def _best_spool_for_reported_slot(slot: dict, candidates: list[dict]) -> Optional[tuple[dict, float, str]]:
+def _best_spool_for_reported_slot(slot: dict, candidates: list[dict], preferred_spool_id: Optional[int] = None) -> Optional[tuple[dict, float, str]]:
     scored: list[tuple[float, float, float, dict, str]] = []
     for spool in candidates:
         result = _spool_reported_profile_score(slot, spool)
         if result is None:
             continue
         score, reason = result
+        if preferred_spool_id is not None and int(spool.get("id") or 0) == int(preferred_spool_id):
+            score += 25
+            reason = f"{reason}, recent slot memory"
         scored.append((score, -_hex_dist(slot.get("color"), spool.get("color_hex")), _remaining_g(spool), spool, reason))
 
     if not scored:
@@ -360,7 +366,8 @@ def _reconcile_reported_loaded_slots(printer_status: dict) -> None:
         flat_slot = slot.get("flat_slot")
         if flat_slot is None or loaded_by_slot.get(int(flat_slot)):
             continue
-        best = _best_spool_for_reported_slot(slot, available)
+        preferred_spool_id = db.get_recent_spool_for_slot(str(printer_id), int(flat_slot))
+        best = _best_spool_for_reported_slot(slot, available, preferred_spool_id)
         if not best:
             continue
 
@@ -2913,6 +2920,25 @@ def _spool_matches_material(spool: dict, material: str) -> bool:
     return bool(got) and (wanted in got or got in wanted)
 
 
+_COMPOSITE_PROFILE_TOKENS = ("cf", "carbon", "gf", "glass", "wood", "metal", "support")
+
+
+def _spool_profile_text(spool: dict) -> str:
+    return " ".join([
+        str(spool.get("brand") or ""),
+        str(spool.get("material") or ""),
+        str(spool.get("subtype") or ""),
+    ])
+
+
+def _reported_profile_text(slot: dict) -> str:
+    return " ".join(
+        str(slot.get(key) or "").strip()
+        for key in ("brand", "type", "material", "profile_name", "profile_id")
+        if str(slot.get(key) or "").strip()
+    )
+
+
 def _looks_like_bambu_profile_code(value: Optional[str]) -> bool:
     raw = str(value or "").strip().upper()
     return bool(re.fullmatch(r"[A-Z]\d{2}[-_ ]?[A-Z0-9]+", raw))
@@ -2921,6 +2947,15 @@ def _looks_like_bambu_profile_code(value: Optional[str]) -> bool:
 def _is_generic_profile(value: Optional[str]) -> bool:
     normalised = _norm_material(value or "")
     return normalised == "generic" or normalised.startswith("generic")
+
+
+def _generic_profile_rejects_spool(slot: dict, spool: dict) -> bool:
+    """Generic PLA/PETG/etc. should not auto-match composite/specialty rolls."""
+    if not (_is_generic_profile(slot.get("brand")) or _is_generic_profile(slot.get("profile_name"))):
+        return False
+    reported = _norm_material(_reported_profile_text(slot))
+    spool_text = _norm_material(_spool_profile_text(spool))
+    return any(token in spool_text and token not in reported for token in _COMPOSITE_PROFILE_TOKENS)
 
 
 def _reported_brand_matches_spool(reported_brand: str, spool: dict) -> bool:
@@ -3104,6 +3139,9 @@ def _reported_slot_mismatch(spool: Optional[dict], slot: Optional[dict]) -> str:
     ]))
     if reported_mat and spool_mat and reported_mat not in spool_mat and spool_mat not in reported_mat:
         return f"Material mismatch: printer {reported_material_text or 'unknown'}, Flightdeck {spool.get('material') or 'unknown'}"
+    if _generic_profile_rejects_spool(slot, spool):
+        expected = " ".join(str(spool.get(k) or "") for k in ("brand", "material", "subtype")).strip()
+        return f"Profile mismatch: printer {_reported_profile_text(slot) or 'Generic'}, Flightdeck {expected}"
     if _hex_dist(slot.get("color"), spool.get("color_hex")) > 95:
         return f"Colour mismatch: printer {_colour_label(slot.get('color'))}, Flightdeck {_colour_label(spool.get('color_hex'))}"
 
