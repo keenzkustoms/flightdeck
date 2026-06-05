@@ -1,5 +1,10 @@
 # Flightdeck — next session brief
-_Last updated 5 June 2026 (Session 28.174 Multi-colour spool selection)_
+_Last updated 5 June 2026 (Session 28.175 Spool group card header polish)_
+
+## What was polished - Session 28.175 (Spool group card header polish - 5 June)
+- Shortened grouped spool card header badges from `2 rolls · latest #...` to `2 rolls`, keeping full roll detail in the tooltip and chips below.
+- Adjusted spool card header layout so colour names get first priority and avoid awkward word wrapping on narrow cards.
+- Bumped static cache to `style.css?v=197`; frontend-only refresh required.
 
 ## What was built - Session 28.174 (Multi-colour spool selection - 5 June)
 - Added persisted secondary and tertiary spool colour fields (`color_hex_2`, `color_hex_3`) so Dual, Gradient, Tri-colour, and Mixed schemes can represent the actual filament colours.

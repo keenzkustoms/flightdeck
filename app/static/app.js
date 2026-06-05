@@ -9502,7 +9502,7 @@ function _spoolGroupCardHtml(group) {
   return `<div class="spool-card spool-group-card" data-spool-group="${esc(_spoolGroupKey(first))}">
     <div class="spool-card-band" style="${_spoolColorStyle(first)};color:${textColor}">
       <span class="spool-color-name">${esc(first.color_name || '—')}</span>
-      <span class="spool-id-badge" title="${esc(rollTitle)}">${group.length} rolls · latest #${latestId}</span>
+      <span class="spool-id-badge" title="${esc(`${group.length} rolls · latest #${latestId} · ${rollTitle}`)}">${group.length} rolls</span>
     </div>
     <div class="spool-card-body">
       <div class="spool-card-row">

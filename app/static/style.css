@@ -8239,7 +8239,8 @@ select.settings-input { cursor: pointer; }
 
 .spool-card-band {
   min-height: 48px;
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: flex-start;
   justify-content: space-between;
   gap: 0.4rem;
@@ -8252,7 +8253,10 @@ select.settings-input { cursor: pointer; }
   font-size: 0.78rem;
   opacity: 0.95;
   line-height: 1.15;
-  overflow-wrap: anywhere;
+  min-width: 0;
+  overflow: hidden;
+  overflow-wrap: normal;
+  text-overflow: ellipsis;
 }
 
 .spool-id-badge {
@@ -8260,6 +8264,11 @@ select.settings-input { cursor: pointer; }
   opacity: 0.72;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
+  justify-self: end;
+  max-width: 4.4rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .spool-card-body {
