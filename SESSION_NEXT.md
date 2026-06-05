@@ -8,6 +8,7 @@ _Last updated 5 June 2026 (Session 28.181 Multi-colour spool deduction fix)_
 - Marked 85.31g as unallocated against the slicer total rather than charging it to the wrong roll; likely purge/waste, scale variance, or prior inventory drift.
 - Corrected known bad tares after repair: Bambu Lab #61 from 230g -> 256g, eSun #76 from 140g -> 224g. Inkstation #48 remains at 128g until a trusted tare is provided.
 - Improved Add/Edit Spool save failures so slot conflicts and server errors show a useful message instead of changing the submit button to plain `Error`.
+- Fixed new spool creation after the multi-colour fields changed the spool insert shape: the insert listed 16 columns but still had only 15 placeholders, causing Add Spool to fail with a generic server error.
 - Bumped static cache to `app.js?v=258`; backend restart required for the structured add-spool conflict response.
 
 ## What was fixed - Session 28.180 (Finished job live-detail cleanup - 5 June)

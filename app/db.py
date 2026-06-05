@@ -1841,7 +1841,7 @@ def create_spool(
                 label_weight_g, remaining_g, empty_spool_weight_g,
                 location_printer_id, location_slot, storage_location_id,
                 home_storage_location_id, notes)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (material, brand, subtype, color_hex, color_name, color_hex_2, color_hex_3, color_scheme,
              label_weight_g, remaining_g, empty_spool_weight_g,
              location_printer_id, location_slot, storage_location_id,
