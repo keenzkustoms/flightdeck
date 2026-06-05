@@ -11,7 +11,8 @@ _Last updated 5 June 2026 (Session 28.181 Multi-colour spool deduction fix)_
 - Fixed new spool creation after the multi-colour fields changed the spool insert shape: the insert listed 16 columns but still had only 15 placeholders, causing Add Spool to fail with a generic server error.
 - Tightened AMS auto-claim/Profile Doctor matching so printer-reported Generic PLA no longer silently matches composite/specialty rolls such as PLA CF; added recent printer-slot memory from print-start AMS snapshots so the known prior roll (#48 PLA Silk Red) wins the H2D AMS 1 S1 auto-claim.
 - Fixed Bambu multi-plate preview metadata so active jobs such as `/data/Metadata/plate_6.gcode` use `Metadata/plate_6.png` and the matching slice-info plate instead of always showing plate 1.
-- Bumped static cache to `app.js?v=259`; backend restart required for the structured add-spool conflict response and stricter AMS auto-claim rules.
+- Added explicit AMS profile sync feedback when moving or adding a spool into a Bambu AMS slot: Flightdeck now reports whether the printer confirmed the profile push.
+- Bumped static cache to `app.js?v=260`; backend restart required for the structured add-spool conflict response, stricter AMS auto-claim rules, active Bambu plate metadata, and add/move AMS sync feedback.
 
 ## What was fixed - Session 28.180 (Finished job live-detail cleanup - 5 June)
 - Live printer header, camera HUD, print details panel, dashboard active rows, and Flight Tower active-job labels now only treat jobs as active while printer state is `printing` or `paused`.

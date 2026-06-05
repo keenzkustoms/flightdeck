@@ -9155,6 +9155,7 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
         setTimeout(load, 1200);
         return;
       }
+      _spoolMoveSyncToast(await r.json().catch(() => ({})), printer?.custom_name || printerId, slotLabel);
       await _refreshSpoolsByPrinter();
       load();
       });
@@ -9172,6 +9173,7 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
         body: JSON.stringify({ printer_id: printerId, slot: Number(slotIndex) }),
       });
       if (!r.ok) showToast('AMS sync failed', 'Flightdeck could not push this spool to the printer slot.', 'error');
+      else _spoolMoveSyncToast(await r.json().catch(() => ({})), printer?.custom_name || printerId, slotLabel);
       await refreshPrinters();
       await _refreshSpoolsByPrinter();
       btn.textContent = old;
@@ -10724,6 +10726,7 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
     const btn = overlay.querySelector('#sm-submit');
     btn.disabled = true; btn.textContent = '…';
     try {
+      let savedData = null;
       if (isEdit) {
         const r = await fetch(`/api/spools/${prefill.id}`, {
           method: 'PUT', headers: {'Content-Type':'application/json'},
@@ -10746,6 +10749,7 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
           return;
         }
         if (!mr.ok) throw new Error(await _spoolSaveErrorMessage(mr, 'Unable to move spool'));
+        savedData = await mr.json().catch(() => ({}));
       } else {
         const r = await fetch('/api/spools', {
           method: 'POST', headers: {'Content-Type':'application/json'},
@@ -10758,8 +10762,16 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
           return;
         }
         if (!r.ok) throw new Error(await _spoolSaveErrorMessage(r, 'Unable to add spool'));
+        savedData = await r.json().catch(() => ({}));
       }
       overlay.remove();
+      if (locMode === 'loaded') {
+        _spoolMoveSyncToast(
+          savedData,
+          printerSel.options[printerSel.selectedIndex]?.textContent || printerSel.value,
+          slotSel.options[slotSel.selectedIndex]?.textContent || 'AMS slot',
+        );
+      }
       onSaved();
     } catch (err) {
       btn.textContent = err?.message || 'Error';
@@ -10772,6 +10784,15 @@ function _spoolConflictMessage(err) {
   const detail = err?.detail;
   if (detail && typeof detail === 'object') return detail.message || `Slot occupied (#${detail.conflict_spool_id ?? '?'})`;
   return typeof detail === 'string' ? detail : 'Slot occupied';
+}
+
+function _spoolMoveSyncToast(data, printerLabel = 'Printer', slotLabel = 'AMS slot') {
+  if (!data || data.ams_sync == null) return;
+  if (data.ams_sync) {
+    showToast('AMS profile sent', `${printerLabel} · ${slotLabel}`, 'success');
+  } else {
+    showToast('Spool saved', `Flightdeck updated, but ${printerLabel} did not confirm the AMS profile sync.`, 'warning');
+  }
 }
 
 async function _spoolSaveErrorMessage(response, fallback = 'Unable to save spool') {

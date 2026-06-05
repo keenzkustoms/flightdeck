@@ -2670,10 +2670,11 @@ async def create_spool(body: SpoolCreate):
             message = _label_printer.last_error or "Label printer unavailable"
             db.log_decision("system", "label_print_failed", f"Spool #{spool_id}: {message}")
             _notify("warn", "Label print failed", f"Spool #{spool_id}: {message}", link="#/settings/hardware")
+    ams_sync = None
     if body.location_printer_id and body.location_slot is not None:
         spool = db.get_spool(spool_id)
-        await _sync_bambu_ams_slot(body.location_printer_id, body.location_slot, spool)
-    return {"id": spool_id}
+        ams_sync = await _sync_bambu_ams_slot(body.location_printer_id, body.location_slot, spool)
+    return {"id": spool_id, "ams_sync": ams_sync}
 
 @app.put("/api/spools/{spool_id}")
 async def update_spool(spool_id: int, body: SpoolUpdate):
