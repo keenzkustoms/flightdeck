@@ -1174,6 +1174,11 @@ function _printerProgressBadge(p) {
   return p?.job?.progress != null ? `${Math.round(p.job.progress * 100)}%` : '';
 }
 
+function _activePrinterJob(p) {
+  const state = String(p?.state || '').toLowerCase();
+  return ['printing', 'paused'].includes(state) ? p?.job || null : null;
+}
+
 function _dashboardIssueText(p) {
   if (p.state === 'estop') return 'Emergency stop active';
   if (p.state === 'error') return p.error || 'Printer error';
@@ -1312,8 +1317,9 @@ function _renderDashboardBriefing(printers) {
   sorted
     .filter(p => p.state === 'printing' || p.state === 'paused')
     .forEach(p => {
-      const job = p.job ? jobDisplayName(p.job) : _dashboardIssueText(p);
-      const pct = p.job?.progress != null ? `${Math.round(p.job.progress * 100)}%` : p.state;
+      const activeJob = _activePrinterJob(p);
+      const job = activeJob ? jobDisplayName(activeJob) : _dashboardIssueText(p);
+      const pct = activeJob?.progress != null ? `${Math.round(activeJob.progress * 100)}%` : p.state;
       rows.push({
         tone: p.state === 'paused' ? 'warn' : 'ok',
         kicker: p.state === 'paused' ? 'Hold' : 'In flight',
@@ -2340,7 +2346,7 @@ function _liveStateLabel(state) {
 }
 
 function _liveEtaText(p) {
-  const job = p.job;
+  const job = _activePrinterJob(p);
   if (!job?.eta_seconds) return 'ETA unknown';
   if (p.eta_calibration?.ratio != null) {
     return `Flightdeck ${formatEta(Math.round(job.eta_seconds * p.eta_calibration.ratio))}`;
@@ -2351,7 +2357,7 @@ function _liveEtaText(p) {
 function _detailLiveHeader(p, printerColor, bannerTextColor) {
   const stateLabel = _liveStateLabel(p.state);
   const shop = p.custom_name && p.custom_name !== p.model_name ? p.custom_name : (p.shop_name || p.id);
-  const job = p.job;
+  const job = _activePrinterJob(p);
   const progress = job?.progress != null ? Math.round(job.progress * 100) : null;
   const jobName = job ? jobDisplayName(job) : (p.idle_info?.['Last print'] || 'Ready for the next job');
   const statusMeta = job
@@ -2765,7 +2771,7 @@ function _cameraOfflineContent(p, extraClass = '') {
 }
 
 function _detailCameraHud(p) {
-  const job = p.job;
+  const job = _activePrinterJob(p);
   if (!job) return '';
   const progress = job?.progress != null ? Math.round(job.progress * 100) : 0;
   const status = `<strong>${esc(jobDisplayName(job))}</strong><span>${progress}% · ${esc(_liveEtaText(p))}</span>`;
@@ -2792,8 +2798,9 @@ function _detailLiveStrip(p) {
 
 function _detailPrintPanel(p) {
   const title = `<div class="detail-panel-title">Print Details</div>`;
+  const activeJob = _activePrinterJob(p);
 
-  if (!p.job || (p.state === 'idle' || p.state === 'offline')) {
+  if (!activeJob) {
     const entries = Object.entries(p.idle_info || {});
     if (!entries.length) return title + `<div class="detail-row"><span class="detail-label">—</span></div>`;
     return `<div class="detail-panel-title">Last Print</div>` +
@@ -2804,7 +2811,7 @@ function _detailPrintPanel(p) {
         </div>`).join('');
   }
 
-  const job = p.job;
+  const job = activeJob;
   const name = jobDisplayName(job);
   const pct = (job.progress * 100).toFixed(0);
   const layers = job.layer_current != null && job.layer_total != null
@@ -6390,7 +6397,7 @@ async function renderMissionControl() {
     </div>`;
 
     const lanes = filteredContexts.map(({ p, laneJobs, signals, bucket }) => {
-      const activeJob = p.job ? jobDisplayName(p.job) : '';
+      const activeJob = _activePrinterJob(p) ? jobDisplayName(_activePrinterJob(p)) : '';
       const visibleLaneJobs = laneJobs.slice(0, laneJobLimit);
       const queueBlocks = visibleLaneJobs.map(j => {
         const ready = _missionJobReadiness(j);

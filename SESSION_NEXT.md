@@ -1,5 +1,10 @@
 # Flightdeck — next session brief
-_Last updated 5 June 2026 (Session 28.179 Print Memory passport detail fix)_
+_Last updated 5 June 2026 (Session 28.180 Finished job live-detail cleanup)_
+
+## What was fixed - Session 28.180 (Finished job live-detail cleanup - 5 June)
+- Live printer header, camera HUD, print details panel, dashboard active rows, and Flight Tower active-job labels now only treat jobs as active while printer state is `printing` or `paused`.
+- Finished Bambu printers can still report a retained 100% job payload, but Flightdeck no longer shows it as an active Print Details card with stale thumbnail/detail context.
+- Bumped static cache to `app.js?v=257`; frontend-only refresh required.
 
 ## What was fixed - Session 28.179 (Print Memory passport detail fix - 5 June)
 - Fixed Print Memory passport detail rendering when another hidden printer-history detail container already exists on the page.
