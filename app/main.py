@@ -58,6 +58,7 @@ _latest_printers: dict[str, dict] = {}  # printer_id → most recent gathered st
 _latest_printers_at: datetime | None = None
 _gather_lock: asyncio.Lock | None = None
 _scale_keep_awake_task: asyncio.Task | None = None
+_EMPTY_SLOT_AUTO_RETURN_GRACE_SECONDS = 600
 _scale = Scale()
 _label_printer = LabelPrinter()
 
@@ -170,6 +171,30 @@ def _spool_location_label(location_id: Optional[int]) -> str:
     return f"Shelf #{location_id}"
 
 
+def _recent_spool_move_to_slot(printer_id: str, flat_slot: int, spool_id: int) -> bool:
+    """Avoid auto-returning a slot while Bambu is still catching up to a fresh assignment."""
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            row = conn.execute(
+                """
+                SELECT 1
+                FROM decisions
+                WHERE event = 'spool_moved'
+                  AND detail LIKE ?
+                  AND logged_at >= datetime('now', ?)
+                LIMIT 1
+                """,
+                (
+                    f"Spool #{spool_id} %{printer_id}:{flat_slot}",
+                    f"-{_EMPTY_SLOT_AUTO_RETURN_GRACE_SECONDS} seconds",
+                ),
+            ).fetchone()
+        return row is not None
+    except Exception as exc:
+        log.debug("fresh spool move check failed: %s", exc)
+        return False
+
+
 def _reconcile_empty_reported_slots(printer_status: dict) -> None:
     """Return stale Flightdeck assignments when Bambu reports the slot empty."""
     printer_id = printer_status.get("id")
@@ -187,6 +212,8 @@ def _reconcile_empty_reported_slots(printer_status: dict) -> None:
             continue
         spool = loaded_by_slot.get(int(flat_slot))
         if not spool:
+            continue
+        if _recent_spool_move_to_slot(str(printer_id), int(flat_slot), int(spool["id"])):
             continue
 
         full_spool = db.get_spool(int(spool["id"])) or spool
