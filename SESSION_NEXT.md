@@ -1,5 +1,10 @@
 # Flightdeck — next session brief
-_Last updated 5 June 2026 (Session 28.177 DYMO GPIO keep-awake hook)_
+_Last updated 5 June 2026 (Session 28.178 Stale nav progress badge fix)_
+
+## What was fixed - Session 28.178 (Stale nav progress badge fix - 5 June)
+- Sidebar/top printer progress badges now only render for active `printing` or `paused` states.
+- Finished/idle printers no longer show stale job progress such as H2D `91%` after a completed print.
+- Bumped static cache to `app.js?v=255`; frontend-only refresh required.
 
 ## What was built - Session 28.177 (DYMO GPIO keep-awake hook - 5 June)
 - Confirmed plain USB keep-awake pings do not stop the DYMO M10 from sleeping; USB stays present but weight reports stop.

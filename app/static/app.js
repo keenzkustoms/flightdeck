@@ -1168,6 +1168,12 @@ function _printerNavLabel(p) {
   return p.model_name || p.custom_name || p.id;
 }
 
+function _printerProgressBadge(p) {
+  const state = String(p?.state || '').toLowerCase();
+  if (!['printing', 'paused'].includes(state)) return '';
+  return p?.job?.progress != null ? `${Math.round(p.job.progress * 100)}%` : '';
+}
+
 function _dashboardIssueText(p) {
   if (p.state === 'estop') return 'Emergency stop active';
   if (p.state === 'error') return p.error || 'Printer error';
@@ -2280,7 +2286,7 @@ function buildTabs(printers) {
     const color = _PRINTER_ACCENT_PALETTE[i % _PRINTER_ACCENT_PALETTE.length];
     const label = _printerNavLabel(p);
     const state = p.state || 'unknown';
-    const progress = p.job?.progress != null ? `${Math.round(p.job.progress * 100)}%` : '';
+    const progress = _printerProgressBadge(p);
     return `<a class="tab tab-printer" href="#/printer/${p.id}" style="--tab-accent:${color}" title="${esc(label)} · ${esc(_liveStateLabel(state))}">
       <span class="tab-printer-state tab-printer-state-${esc(state)}"></span>
       <span class="tab-printer-name">${esc(label)}</span>
