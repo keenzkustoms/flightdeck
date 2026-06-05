@@ -2520,8 +2520,9 @@ def deduct_spool_usage(
             active_slot = active_slots[0]
 
     # snapshot: {slot_str: {... "spool_id": int|null}}
-    slots_with = [(int(s), d["spool_id"]) for s, d in snapshot.items() if d.get("spool_id")]
-    slots_without = [int(s) for s, d in snapshot.items() if not d.get("spool_id")]
+    slot_snapshot = {int(s): d for s, d in snapshot.items() if isinstance(d, dict)}
+    slots_with = [(slot, d["spool_id"]) for slot, d in slot_snapshot.items() if d.get("spool_id")]
+    slots_without = [slot for slot, d in slot_snapshot.items() if not d.get("spool_id")]
 
     # Attribute grams: sliced colour/material usage first, then active slot, then equal split.
     slot_grams: dict[int, float] = {}
@@ -2562,7 +2563,6 @@ def deduct_spool_usage(
 
     spool_usage = []
     spool_id_map = {s: sid for s, sid in slots_with}
-    slot_snapshot = {int(s): d for s, d in snapshot.items() if isinstance(d, dict)}
 
     with _conn() as conn:
         decision_logs = []

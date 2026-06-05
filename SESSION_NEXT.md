@@ -1,5 +1,11 @@
 # Flightdeck — next session brief
-_Last updated 5 June 2026 (Session 28.180 Finished job live-detail cleanup)_
+_Last updated 5 June 2026 (Session 28.181 Multi-colour spool deduction fix)_
+
+## What was fixed - Session 28.181 (Multi-colour spool deduction fix - 5 June)
+- Fixed the Bambu multi-colour spool deduction path so it builds the persisted AMS slot snapshot before matching slicer colour/material usage to loaded spools.
+- Root cause for the finished H2D Macaw print not deducting filament: Flightdeck had captured the correct print-start slots (#48 red, #76 green, #61 blue), but the multi-colour attribution branch referenced `slot_snapshot` before it existed and exited before writing `spool_usage`.
+- The affected finished print still needs manual repair/reconciliation using slicer per-colour grams or re-weighed spool remaining values; do not guess the Macaw split unless the operator approves a rough allocation.
+- Backend restart required.
 
 ## What was fixed - Session 28.180 (Finished job live-detail cleanup - 5 June)
 - Live printer header, camera HUD, print details panel, dashboard active rows, and Flight Tower active-job labels now only treat jobs as active while printer state is `printing` or `paused`.
