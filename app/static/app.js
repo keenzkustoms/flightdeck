@@ -2761,12 +2761,13 @@ function _detailFilamentRoute(p) {
       const title = `${slotLabel} feeding ${dest}${spoolLabel ? ' · ' + spoolLabel : ''}`;
       if (FLIGHTDECK_DEMO) {
         routes.push(`<div class="demo-filament-route" style="--route-colour:${colour};--route-text:${textColour}" title="${esc(title)}">
-          <span class="demo-route-fed">Fed now</span>
+          <span class="demo-route-port" aria-hidden="true"></span>
           <span class="demo-route-line" aria-hidden="true"></span>
           <span class="live-route-node live-route-destination">
             <span class="live-route-nozzle" aria-hidden="true"></span>
             <span><strong>${esc(dest)}</strong><em>${esc(slotLabel)} · ${esc(spoolLabel)}</em></span>
           </span>
+          <span class="demo-route-fed">Fed now</span>
         </div>`);
       } else {
         routes.push(`<div class="live-filament-route" style="--route-colour:${colour};--route-text:${textColour}" title="${esc(title)}">
