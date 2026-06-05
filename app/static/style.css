@@ -4305,14 +4305,14 @@ button.live-route-node:hover {
   position: absolute;
   top: -7%;
   bottom: -7%;
-  width: 24%;
+  width: 18%;
   border-radius: inherit;
   border: 1px solid rgba(255,255,255,0.14);
   pointer-events: none;
 }
 
 .ams-loadout-spool::before {
-  left: -5%;
+  left: -2%;
   background:
     radial-gradient(ellipse at 50% 50%, rgba(2,6,23,0.58) 0 32%, transparent 33%),
     linear-gradient(90deg, #020617, #111827 64%, rgba(15,23,42,0.74));
@@ -4320,7 +4320,7 @@ button.live-route-node:hover {
 }
 
 .ams-loadout-spool::after {
-  right: -5%;
+  right: -2%;
   border-color: rgba(255,255,255,0.12);
   background:
     radial-gradient(ellipse at 50% 50%, rgba(2,6,23,0.68) 0 30%, transparent 31%),
