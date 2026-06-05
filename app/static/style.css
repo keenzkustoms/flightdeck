@@ -3873,13 +3873,11 @@ button.briefing-row {
   align-items: center;
   gap: 0.42rem;
   min-width: 0;
-  padding-left: calc(3.1rem + (var(--route-slot, 0) * 6.24rem));
   position: relative;
 }
 
 .demo-filament-route-ht {
-  grid-template-columns: minmax(3.5rem, 14rem) minmax(6.2rem, max-content);
-  padding-left: clamp(3.3rem, 36%, 22rem);
+  grid-template-columns: minmax(6rem, 1fr) minmax(6.2rem, max-content);
 }
 
 .demo-route-fed {
@@ -3894,6 +3892,7 @@ button.briefing-row {
   position: relative;
   display: block;
   min-width: 2rem;
+  margin-left: calc(3.1rem + (var(--route-slot, 0) * 6.24rem));
   height: 0.18rem;
   border-radius: 999px;
   background:
@@ -3902,6 +3901,10 @@ button.briefing-row {
   background-size: 1.48rem 100%, 100% 100%;
   box-shadow: 0 0 12px color-mix(in srgb, var(--route-colour) 38%, transparent);
   animation: live-route-flow 1.15s linear infinite;
+}
+
+.demo-filament-route-ht .demo-route-line {
+  margin-left: clamp(3.3rem, 36%, 22rem);
 }
 
 .demo-route-line::after {
@@ -4535,12 +4538,15 @@ button.live-route-node:hover {
   }
 
   .demo-filament-route-ht {
-    grid-template-columns: minmax(3.5rem, 1fr) minmax(6.2rem, max-content);
-    padding-left: 3.7rem;
+    grid-template-columns: minmax(6rem, 1fr) minmax(6.2rem, max-content);
   }
 
-  .demo-filament-route:not(.demo-filament-route-ht) {
-    padding-left: calc(2.65rem + (var(--route-slot, 0) * 4.28rem));
+  .demo-route-line {
+    margin-left: calc(2.65rem + (var(--route-slot, 0) * 4.28rem));
+  }
+
+  .demo-filament-route-ht .demo-route-line {
+    margin-left: 3.7rem;
   }
 }
 
