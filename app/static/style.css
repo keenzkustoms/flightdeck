@@ -4338,16 +4338,16 @@ button.live-route-node:hover {
 }
 
 .ams-loadout-core {
-  min-width: 1.35rem;
-  height: 1.35rem;
-  padding: 0 0.14rem;
+  min-width: 1.55rem;
+  height: 1.55rem;
+  padding: 0 0.16rem;
   border-radius: 999px;
   background: rgba(15,23,42,0.94);
   border: 1px solid rgba(255,255,255,0.3);
   color: #f8fafc;
   display: grid;
   place-items: center;
-  font-size: 0.55rem;
+  font-size: 0.64rem;
   font-weight: 900;
   line-height: 1;
   z-index: 2;
@@ -4376,7 +4376,7 @@ button.live-route-node:hover {
 .ams-loadout-info {
   min-width: 0;
   position: absolute;
-  inset: auto 0.22rem 0.22rem;
+  inset: auto 0.14rem 0.16rem;
   z-index: 5;
   padding: 0.1rem 0.2rem;
   border-radius: 0.45rem;
@@ -4386,12 +4386,12 @@ button.live-route-node:hover {
 
 .ams-loadout-info strong {
   color: #f8fafc;
-  font-size: 0.52rem;
+  font-size: 0.6rem;
 }
 
 .ams-loadout-info em {
   color: #93a8c8;
-  font-size: 0.48rem;
+  font-size: 0.55rem;
   font-style: normal;
 }
 
