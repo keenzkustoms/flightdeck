@@ -2542,7 +2542,6 @@ function _detailLiveAmsRows(p) {
 
 function _detailLiveAmsLoadoutRows(p) {
   const loaded = _latestSpoolsByPrinter[p.id] || [];
-  const activeRoutes = [];
   const units = p.ams.map(unit => {
     const drying = !!unit.drying;
     const meta = [
@@ -2550,6 +2549,7 @@ function _detailLiveAmsLoadoutRows(p) {
       unit.temperature != null ? `${Math.round(unit.temperature)}°` : '',
       drying ? 'Drying' : '',
     ].filter(Boolean).join(' · ');
+    const unitRoutes = [];
     const slots = (unit.slots || []).map(slot => {
       const flatSlot = unit.unit * 4 + slot.idx;
       const loadedSpool = loaded.find(s => Number(s.location_slot) === flatSlot);
@@ -2565,7 +2565,7 @@ function _detailLiveAmsLoadoutRows(p) {
         ? (routeActive ? 'Feeding' : mismatch ? 'Review' : 'Ready')
         : (slot.empty ? 'Empty' : 'Unassigned');
       if (routeActive) {
-        activeRoutes.push({
+        unitRoutes.push({
           label,
           colour,
           textColour: _spoolTextColor(colour),
@@ -2603,6 +2603,9 @@ function _detailLiveAmsLoadoutRows(p) {
         </span>
       </button>`;
     }).join('');
+    const feedbar = unitRoutes.map(route => `<div class="ams-loadout-feedbar" style="--route-colour:${route.colour};--route-text:${route.textColour}">
+      <span><strong>${esc(route.dest)}</strong><em>${esc(route.label)} · ${esc(route.spoolLabel)}</em></span>
+    </div>`).join('');
     return `<div class="ams-loadout-unit${_isAmsHtUnit(unit) ? ' ams-loadout-unit-ht' : ''}">
       <div class="ams-loadout-head">
         <div>
@@ -2611,20 +2614,12 @@ function _detailLiveAmsLoadoutRows(p) {
         </div>
         <small>${_isAmsHtUnit(unit) ? 'High-temp bay' : `${(unit.slots || []).length} slot loadout`}</small>
       </div>
+      ${feedbar}
       <div class="ams-loadout-slots">${slots}</div>
     </div>`;
   });
-  const routes = activeRoutes.map(route => `<div class="ams-loadout-route-mini" style="--route-colour:${route.colour};--route-text:${route.textColour}">
-    <span><strong>${esc(route.label)}</strong><em>${esc(route.spoolLabel)}</em></span>
-    <b aria-hidden="true"></b>
-    <span><strong>${esc(route.dest)}</strong><em>fed</em></span>
-  </div>`).join('');
   return `<div class="ams-loadout-deck">
     <div class="ams-loadout-units">${units.join('')}</div>
-    ${routes ? `<div class="ams-loadout-nozzles">
-      <small>Nozzle feed</small>
-      ${routes}
-    </div>` : ''}
   </div>`;
 }
 
