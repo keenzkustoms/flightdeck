@@ -2542,7 +2542,8 @@ function _detailLiveAmsRows(p) {
 
 function _detailLiveAmsLoadoutRows(p) {
   const loaded = _latestSpoolsByPrinter[p.id] || [];
-  return p.ams.map(unit => {
+  const activeRoutes = [];
+  const units = p.ams.map(unit => {
     const drying = !!unit.drying;
     const meta = [
       unit.humidity != null ? `${unit.humidity}% RH` : '',
@@ -2563,6 +2564,17 @@ function _detailLiveAmsLoadoutRows(p) {
       const stateLabel = loadedSpool
         ? (routeActive ? 'Feeding' : mismatch ? 'Review' : 'Ready')
         : (slot.empty ? 'Empty' : 'Unassigned');
+      if (routeActive) {
+        activeRoutes.push({
+          label,
+          colour,
+          textColour: _spoolTextColor(colour),
+          spoolLabel: loadedSpool
+            ? `#${loadedSpool.id} ${loadedSpool.color_name || ''}`
+            : (_slotProfileLabel(slot) || slot.type || 'Loaded'),
+          dest: _routeDestinationLabel(p, unit),
+        });
+      }
       const title = [
         label,
         loadedSpool ? `#${loadedSpool.id} ${loadedSpool.color_name || ''} ${loadedSpool.material || ''}` : '',
@@ -2601,7 +2613,19 @@ function _detailLiveAmsLoadoutRows(p) {
       </div>
       <div class="ams-loadout-slots">${slots}</div>
     </div>`;
-  }).join('');
+  });
+  const routes = activeRoutes.map(route => `<div class="ams-loadout-route-mini" style="--route-colour:${route.colour};--route-text:${route.textColour}">
+    <span><strong>${esc(route.label)}</strong><em>${esc(route.spoolLabel)}</em></span>
+    <b aria-hidden="true"></b>
+    <span><strong>${esc(route.dest)}</strong><em>fed</em></span>
+  </div>`).join('');
+  return `<div class="ams-loadout-deck">
+    <div class="ams-loadout-units">${units.join('')}</div>
+    ${routes ? `<div class="ams-loadout-nozzles">
+      <small>Nozzle feed</small>
+      ${routes}
+    </div>` : ''}
+  </div>`;
 }
 
 function _detailLiveMmuRows(p) {
