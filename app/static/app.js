@@ -2489,6 +2489,7 @@ function _detailLiveSpoolChips(p) {
 
 function _detailLiveAmsRows(p) {
   if (!p.ams?.length) return '';
+  if (FLIGHTDECK_DEMO) return _detailLiveAmsLoadoutRows(p);
   const loaded = _latestSpoolsByPrinter[p.id] || [];
   return p.ams.map(unit => {
     const drying = !!unit.drying;
@@ -2535,6 +2536,65 @@ function _detailLiveAmsRows(p) {
         ${dryControl}
       </div>
       <div class="live-ams-slots">${slots}</div>
+    </div>`;
+  }).join('');
+}
+
+function _detailLiveAmsLoadoutRows(p) {
+  const loaded = _latestSpoolsByPrinter[p.id] || [];
+  return p.ams.map(unit => {
+    const drying = !!unit.drying;
+    const meta = [
+      unit.humidity != null ? `${unit.humidity}% RH` : '',
+      unit.temperature != null ? `${Math.round(unit.temperature)}°` : '',
+      drying ? 'Drying' : '',
+    ].filter(Boolean).join(' · ');
+    const slots = (unit.slots || []).map(slot => {
+      const flatSlot = unit.unit * 4 + slot.idx;
+      const loadedSpool = loaded.find(s => Number(s.location_slot) === flatSlot);
+      const mismatch = _slotMismatch(loadedSpool, slot);
+      const routeActive = _slotRouteActive(p, unit, slot);
+      const colour = loadedSpool?.color_hex || slot.color || '#111827';
+      const pct = loadedSpool?.label_weight_g > 0
+        ? Math.round(Number(loadedSpool.remaining_g || 0) * 100 / Number(loadedSpool.label_weight_g || 1))
+        : null;
+      const grams = loadedSpool ? Math.round(Number(loadedSpool.remaining_g || 0)) : null;
+      const label = _amsSlotLabel(p, flatSlot);
+      const stateLabel = loadedSpool
+        ? (routeActive ? 'Feeding' : mismatch ? 'Review' : 'Ready')
+        : (slot.empty ? 'Empty' : 'Unassigned');
+      const title = [
+        label,
+        loadedSpool ? `#${loadedSpool.id} ${loadedSpool.color_name || ''} ${loadedSpool.material || ''}` : '',
+        !slot.empty ? _slotProfileLabel(slot) : '',
+        mismatch,
+      ].filter(Boolean).join(' · ');
+      return `<button class="ams-loadout-slot${slot.empty ? ' is-empty' : ''}${loadedSpool ? ' has-spool' : ''}${routeActive ? ' is-feeding' : ''}${mismatch ? ' has-warning' : ''}"
+          style="--slot-colour:${colour};--slot-text:${_spoolTextColor(colour)}"
+          data-slot-edit data-printer-id="${p.id}" data-slot-index="${flatSlot}" data-slot-label="${esc(label)}"
+          title="${esc(title)}">
+        <span class="ams-loadout-spool">
+          <span class="ams-loadout-core"></span>
+        </span>
+        <span class="ams-loadout-info">
+          <strong>${loadedSpool ? `#${loadedSpool.id}` : (slot.empty ? 'Empty' : 'Loaded')}</strong>
+          <em>${esc(loadedSpool ? `${loadedSpool.color_name || 'Colour'} · ${loadedSpool.material || ''}` : (slot.type || stateLabel))}</em>
+        </span>
+        <span class="ams-loadout-foot">
+          <b>${esc(stateLabel)}</b>
+          ${grams != null ? `<small>${grams}g${pct != null ? ` · ${pct}%` : ''}</small>` : '<small>—</small>'}
+        </span>
+      </button>`;
+    }).join('');
+    return `<div class="ams-loadout-unit${_isAmsHtUnit(unit) ? ' ams-loadout-unit-ht' : ''}">
+      <div class="ams-loadout-head">
+        <div>
+          <strong>${esc(unit.label ?? `AMS ${unit.unit + 1}`)}</strong>
+          ${meta ? `<span>${esc(meta)}</span>` : ''}
+        </div>
+        <small>${_isAmsHtUnit(unit) ? 'High-temp bay' : `${(unit.slots || []).length} slot loadout`}</small>
+      </div>
+      <div class="ams-loadout-slots">${slots}</div>
     </div>`;
   }).join('');
 }

@@ -11,7 +11,7 @@
 
   const demoSpools = [
     spool(3, 'ASA', 'Siddament', 'Normal', '#FFFFFF', 'White', 536, 'h2d', 0, null, null, 88),
-    spool(2, 'ASA', 'Siddament', 'Normal', '#F72323', 'Red', 295, 'h2d', 'HT', null, null, 88),
+    spool(2, 'ASA', 'Siddament', 'Normal', '#F72323', 'Red', 295, 'h2d', 512, null, null, 88),
     spool(31, 'PLA', 'Bambu Lab', 'Matte', '#F7D959', 'Lemon Yellow', 238, 'h2d', 1, null, null, 80),
     spool(20, 'PLA+', '3DFillies', null, '#111111', 'Black', 106, null, null, 1, 'Shelf #1', 75),
     spool(48, 'ABS+', 'eSUN', null, '#EF4444', 'Red', 700, 'x1c', 1, null, null, 90),

@@ -4112,6 +4112,151 @@ button.live-route-node:hover {
   box-shadow: inset 0 -2px 0 rgba(245,158,11,0.85), 0 0 0 1px rgba(245,158,11,0.18);
 }
 
+.ams-loadout-unit {
+  border: 1px solid rgba(96,165,250,0.24);
+  background: linear-gradient(180deg, rgba(15,23,42,0.92), rgba(8,13,26,0.96));
+  border-radius: 8px;
+  padding: 0.7rem;
+}
+
+.ams-loadout-unit + .ams-loadout-unit {
+  margin-top: 0.6rem;
+}
+
+.ams-loadout-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.65rem;
+}
+
+.ams-loadout-head strong {
+  display: block;
+  color: #dbeafe;
+  font-size: 0.86rem;
+}
+
+.ams-loadout-head span,
+.ams-loadout-head small {
+  color: #7f98bc;
+  font-size: 0.72rem;
+}
+
+.ams-loadout-slots {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.ams-loadout-unit-ht .ams-loadout-slots {
+  grid-template-columns: minmax(9rem, 16rem);
+}
+
+.ams-loadout-slot {
+  min-height: 7.2rem;
+  border: 1px solid rgba(59,130,246,0.25);
+  background:
+    radial-gradient(circle at 50% 2.1rem, color-mix(in srgb, var(--slot-colour) 26%, transparent), transparent 3.2rem),
+    rgba(15,23,42,0.78);
+  border-radius: 8px;
+  color: #dbeafe;
+  padding: 0.55rem;
+  display: grid;
+  grid-template-rows: 3.2rem minmax(2rem, auto) auto;
+  gap: 0.35rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ams-loadout-slot:hover {
+  border-color: color-mix(in srgb, var(--slot-colour) 70%, #60a5fa);
+}
+
+.ams-loadout-slot.is-empty {
+  opacity: 0.56;
+  background: rgba(15,23,42,0.45);
+}
+
+.ams-loadout-slot.is-feeding {
+  border-color: #22c55e;
+  box-shadow: 0 0 0 1px rgba(34,197,94,0.32), 0 0 18px color-mix(in srgb, var(--slot-colour) 28%, transparent);
+}
+
+.ams-loadout-slot.has-warning {
+  border-color: #f59e0b;
+}
+
+.ams-loadout-spool {
+  width: 3rem;
+  height: 3rem;
+  border-radius: 999px;
+  background:
+    radial-gradient(circle, rgba(2,6,23,0.78) 0 28%, transparent 29%),
+    conic-gradient(from 24deg, var(--slot-colour), color-mix(in srgb, var(--slot-colour) 62%, #ffffff), var(--slot-colour));
+  border: 1px solid rgba(255,255,255,0.25);
+  display: grid;
+  place-items: center;
+  justify-self: center;
+}
+
+.ams-loadout-core {
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: 999px;
+  background: rgba(15,23,42,0.9);
+  border: 1px solid rgba(255,255,255,0.25);
+}
+
+.ams-loadout-info strong,
+.ams-loadout-info em,
+.ams-loadout-foot b,
+.ams-loadout-foot small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ams-loadout-info strong {
+  color: #f8fafc;
+  font-size: 0.88rem;
+}
+
+.ams-loadout-info em {
+  color: #93a8c8;
+  font-size: 0.72rem;
+  font-style: normal;
+}
+
+.ams-loadout-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.4rem;
+  align-items: center;
+  border-top: 1px solid rgba(148,163,184,0.15);
+  padding-top: 0.35rem;
+}
+
+.ams-loadout-foot b {
+  color: #86efac;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+}
+
+.ams-loadout-slot.has-warning .ams-loadout-foot b {
+  color: #fbbf24;
+}
+
+.ams-loadout-slot.is-empty .ams-loadout-foot b {
+  color: #64748b;
+}
+
+.ams-loadout-foot small {
+  color: #9fb2cf;
+  font-size: 0.68rem;
+}
+
 .live-mmu-row {
   display: grid;
   grid-template-columns: minmax(8rem, 0.34fr) minmax(0, 1fr);
