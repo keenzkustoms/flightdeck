@@ -1,5 +1,11 @@
 # Flightdeck — next session brief
-_Last updated 5 June 2026 (Session 28.171 Auto-move visibility)_
+_Last updated 5 June 2026 (Session 28.172 Brand tare estimates)_
+
+## What was built - Session 28.172 (Brand tare estimates - 5 June)
+- Added a curated brand-level empty-spool/tare estimate table to the Add/Edit Spool modal, seeded from the operator-provided list plus public FilamIQ and Empty Spool Weight Catalog references.
+- Saved material/brand tare values and catalogue-specific tare values still override the estimates; manual edits mark the field as `manual tare`.
+- New material/brand rows created from the spool form persist the best available tare estimate.
+- Bumped static cache to `app.js?v=252`; no backend restart required.
 
 ## What was polished - Session 28.171 (Auto-move visibility - 5 June)
 - Made AMS auto-claim/auto-return decision trails easier to trust: future log rows include shelf/slot wording, and spool activity rows show clear badges such as `Matched automatically`, `Unique stored spool`, and `Home shelf return`.

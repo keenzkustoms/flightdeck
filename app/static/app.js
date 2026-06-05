@@ -8729,6 +8729,78 @@ let _spoolsFilamentCosts = [];
 let _spoolLocations = [];
 let _latestSpoolsByPrinter = {};   // printer_id → [spool, ...]
 let _latestLowStockPct = 20;
+const _BRAND_TARE_ESTIMATES = [
+  { brand: 'Bambu Lab', grams: 256, aliases: ['bambu'] },
+  { brand: '3D Fuel', grams: 264 },
+  { brand: '3D Solutech', grams: 173 },
+  { brand: 'Amolen', grams: 190 },
+  { brand: 'Atomic Filament', grams: 306 },
+  { brand: 'Cookie Cad', grams: 175 },
+  { brand: 'Colorfabb', grams: 236 },
+  { brand: 'Creality', grams: 140 },
+  { brand: 'eSun', grams: 224, aliases: ['esun', 'esun 3d'] },
+  { brand: 'Jessie Cardboard', grams: 276, aliases: ['jessie cardboard', 'printed solid cardboard'] },
+  { brand: 'Jessie Plastic', grams: 297, aliases: ['jessie plastic', 'printed solid plastic'] },
+  { brand: 'Inland Black Plastic', grams: 225, aliases: ['inland black plastic'] },
+  { brand: 'Inland Clear Plastic', grams: 215, aliases: ['inland clear plastic', 'inland rainbow'] },
+  { brand: 'Inland Cardboard', grams: 142, aliases: ['inland cardboard'] },
+  { brand: 'Eryone', grams: 267 },
+  { brand: 'Fillamentum', grams: 230 },
+  { brand: 'Hatchbox', grams: 225 },
+  { brand: 'MatterHackers Build Series', grams: 215, aliases: ['matter hackers build', 'matterhackers build'] },
+  { brand: 'MatterHackers Quantum', grams: 217, aliases: ['matter hackers quantum', 'matterhackers quantum'] },
+  { brand: 'Overture', grams: 237 },
+  { brand: 'Polymaker Cardboard', grams: 145, aliases: ['polymaker', 'polymaker cardboard', 'polymaker polyterra'] },
+  { brand: 'Printerior Cardboard', grams: 113, aliases: ['printerior'] },
+  { brand: 'Prusament', grams: 201 },
+  { brand: 'ProtoPasta Cardboard', grams: 80, aliases: ['protopasta', 'proto pasta'] },
+  { brand: 'Raise3D', grams: 246, aliases: ['raised 3d', 'raise3d'] },
+  { brand: 'StrongHero 3D', grams: 151 },
+  { brand: 'SunLu', grams: 133, aliases: ['sunlu'] },
+  { brand: 'Ziro', grams: 165 },
+  { brand: 'ZYltech', grams: 179, aliases: ['zyltech'] },
+  { brand: 'Elegoo', grams: 155 },
+  { brand: 'Fiberlogy', grams: 245 },
+  { brand: 'FormFutura', grams: 180, aliases: ['form futura'] },
+  { brand: 'HP 3D Printing', grams: 187, aliases: ['hp'] },
+  { brand: '3DE Cardboard', grams: 136, aliases: ['3de cardboard'] },
+  { brand: '3DE Plastic', grams: 181, aliases: ['3de plastic'] },
+  { brand: '3DHOJOR Cardboard', grams: 160, aliases: ['3dhojor'] },
+  { brand: '3D FilaPrint Cardboard', grams: 210, aliases: ['3d filaprint cardboard'] },
+  { brand: '3D FilaPrint Plastic', grams: 238, aliases: ['3d filaprint plastic'] },
+  { brand: '3D Genius', grams: 160 },
+  { brand: '3D Jake Cardboard', grams: 209, aliases: ['3d jake cardboard'] },
+  { brand: '3D Jake Plastic', grams: 229, aliases: ['3d jake plastic'] },
+  { brand: '3D Power', grams: 220 },
+  { brand: '3DXTech', grams: 265 },
+  { brand: 'Acccreate', grams: 181 },
+  { brand: 'AIO Robotics', grams: 120 },
+  { brand: 'Alfawise', grams: 174 },
+];
+
+function _tareKey(value) {
+  return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+}
+
+function _brandTareEstimate(brand, subtype = '') {
+  const brandKey = _tareKey(brand);
+  if (!brandKey) return null;
+  const textKey = _tareKey(`${brand || ''} ${subtype || ''}`);
+  const matches = _BRAND_TARE_ESTIMATES.map(entry => {
+    const keys = [entry.brand, ...(entry.aliases || [])].map(_tareKey).filter(Boolean);
+    const hit = keys.find(key => textKey.includes(key) || key.includes(brandKey));
+    return hit ? { ...entry, rank: hit.length } : null;
+  }).filter(Boolean).sort((a, b) => b.rank - a.rank);
+  return matches[0] || null;
+}
+
+function _tareHintText(source) {
+  if (!source) return 'tare weight';
+  if (source.kind === 'saved') return `saved ${source.brand || 'brand'} tare`;
+  if (source.kind === 'catalogue') return 'catalogue tare';
+  if (source.kind === 'estimate') return `estimated ${source.brand} tare`;
+  return 'tare weight';
+}
 const _SPOOL_ACTIONS = [
   { key: 'detail', label: 'Info', title: 'Details', kind: 'link', cls: 'spool-action-detail' },
   { key: 'label', label: 'Label', title: 'Print label', cls: 'spool-action-label' },
@@ -10017,7 +10089,7 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
           <label class="spool-form-label">Empty spool</label>
           <div class="spool-inline-row">
             <input id="sm-empty-g" class="spool-form-input spool-weight-input" type="number" min="0" value="${p0.empty_spool_weight_g??''}" placeholder="0"> g
-            <span class="spool-form-hint">tare weight</span>
+            <span class="spool-form-hint" id="sm-empty-hint">tare weight</span>
           </div>
         </div>
         <div class="spool-form-section">Where it lives</div>
@@ -10064,6 +10136,7 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
   const labelG    = overlay.querySelector('#sm-label-g');
   const remainG   = overlay.querySelector('#sm-remaining-g');
   const emptyG    = overlay.querySelector('#sm-empty-g');
+  const emptyHint = overlay.querySelector('#sm-empty-hint');
   const weighBtn  = overlay.querySelector('#sm-weigh-btn');
   const locSels   = overlay.querySelector('#sm-location-selects');
   const storageSels = overlay.querySelector('#sm-storage-selects');
@@ -10130,6 +10203,8 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
         overlay.querySelector('#sm-subtype').value    = btn.dataset.subtype;
         labelG.value = btn.dataset.weight;
         if (!remainG.dataset.touched) remainG.value = btn.dataset.weight;
+        applyDefaultTare();
+        updateDraftPreview();
       });
     });
   }
@@ -10167,11 +10242,25 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
     brandSel.value = brand;
   }
 
+  function setEmptySpoolValue(value, source, force = false) {
+    if (value == null || value === '' || (emptyG.dataset.touched && !force)) return false;
+    emptyG.value = Math.round(Number(value));
+    if (emptyHint) emptyHint.textContent = _tareHintText(source);
+    return true;
+  }
+
+  function tareFallbackFor(material, brand, subtype = '') {
+    const saved = costLookup[`${material}|||${brand || ''}`]?.empty_spool_weight_g;
+    if (saved != null) return { value: saved, source: { kind: 'saved', brand } };
+    const estimate = _brandTareEstimate(brand, subtype);
+    if (estimate) return { value: estimate.grams, source: { kind: 'estimate', brand: estimate.brand } };
+    return null;
+  }
+
   function applyCatalogueEntry(item) {
     const material = String(item.material || '').toUpperCase();
     const brand = item.brand || '';
     ensureMaterialBrand(material, brand);
-    const tareFallback = costLookup[`${material}|||${brand || ''}`]?.empty_spool_weight_g;
     overlay.querySelector('#sm-subtype').value = item.subtype || item.product || '';
     syncColor(item.color_hex || '#808080');
     overlay.querySelector('#sm-color-name').value = item.color_name || '';
@@ -10179,10 +10268,11 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
       labelG.value = Math.round(Number(item.filament_weight_g));
       if (!remainG.dataset.touched) remainG.value = labelG.value;
     }
-    if (item.empty_spool_weight_g != null && !emptyG.dataset.touched) {
-      emptyG.value = Math.round(Number(item.empty_spool_weight_g));
-    } else if (tareFallback != null && !emptyG.dataset.touched) {
-      emptyG.value = Math.round(Number(tareFallback));
+    if (item.empty_spool_weight_g != null) {
+      setEmptySpoolValue(item.empty_spool_weight_g, { kind: 'catalogue' });
+    } else {
+      const tareFallback = tareFallbackFor(material, brand, item.subtype || item.product || '');
+      if (tareFallback) setEmptySpoolValue(tareFallback.value, tareFallback.source);
     }
     catalogueResults.classList.add('hidden');
     cataloguePicked.innerHTML = `
@@ -10293,18 +10383,20 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
     if (isEdit && !force) return;
     if (emptyG.dataset.touched && !force) return;
     const { mat, brand } = selectedMaterialBrand();
-    const match = costLookup[`${mat}|||${brand || ''}`];
-    if (match?.empty_spool_weight_g != null) {
-      emptyG.value = Math.round(match.empty_spool_weight_g);
+    const subtype = overlay.querySelector('#sm-subtype')?.value.trim();
+    const tareFallback = tareFallbackFor(mat, brand, subtype);
+    if (tareFallback) {
+      setEmptySpoolValue(tareFallback.value, tareFallback.source, force);
     } else if (!emptyG.dataset.touched && !p0.empty_spool_weight_g) {
       emptyG.value = '';
+      if (emptyHint) emptyHint.textContent = 'tare weight';
     }
   }
 
   matSel.addEventListener('change', () => populateBrands(matSel.value));
   brandSel.addEventListener('change', () => { applyDefaultTare(); updatePrevPicks(); updateDraftPreview(); });
-  matNewIn.addEventListener('input', () => { updatePrevPicks(); updateDraftPreview(); });
-  brandNewIn.addEventListener('input', () => { updatePrevPicks(); updateDraftPreview(); });
+  matNewIn.addEventListener('input', () => { applyDefaultTare(); updatePrevPicks(); updateDraftPreview(); });
+  brandNewIn.addEventListener('input', () => { applyDefaultTare(); updatePrevPicks(); updateDraftPreview(); });
 
   // New material toggle
   matToggle.addEventListener('click', () => {
@@ -10355,10 +10447,15 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
     updateDraftPreview();
   });
   remainG.addEventListener('input', () => { remainG.dataset.touched = '1'; updateDraftPreview(); });
-  emptyG.addEventListener('input', () => { emptyG.dataset.touched = '1'; });
-  ['sm-subtype', 'sm-color-name'].forEach(id => {
-    overlay.querySelector(`#${id}`)?.addEventListener('input', () => updateDraftPreview());
+  emptyG.addEventListener('input', () => {
+    emptyG.dataset.touched = '1';
+    if (emptyHint) emptyHint.textContent = 'manual tare';
   });
+  overlay.querySelector('#sm-subtype')?.addEventListener('input', () => {
+    applyDefaultTare();
+    updateDraftPreview();
+  });
+  overlay.querySelector('#sm-color-name')?.addEventListener('input', () => updateDraftPreview());
   weighBtn.addEventListener('click', async () => {
     const old = weighBtn.textContent;
     weighBtn.disabled = true;
@@ -10463,9 +10560,14 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
 
     // Auto-create new brand in catalogue if needed
     if ((matNewMode || brandNewMode) && !isNaN(labelW)) {
+      const tareFallback = tareFallbackFor(material, brand, body.subtype || '');
       await fetch(`/api/filament/costs/${encodeURIComponent(material)}/${encodeURIComponent(brand)}`, {
         method: 'PUT', headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({cost_per_gram: 0, comment: 'Added via spool form'}),
+        body: JSON.stringify({
+          cost_per_gram: 0,
+          comment: 'Added via spool form',
+          empty_spool_weight_g: emptyW ?? tareFallback?.value ?? null,
+        }),
       }).catch(() => {});
     }
 
