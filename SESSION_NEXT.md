@@ -10,6 +10,7 @@ _Last updated 5 June 2026 (Session 28.181 Multi-colour spool deduction fix)_
 - Improved Add/Edit Spool save failures so slot conflicts and server errors show a useful message instead of changing the submit button to plain `Error`.
 - Fixed new spool creation after the multi-colour fields changed the spool insert shape: the insert listed 16 columns but still had only 15 placeholders, causing Add Spool to fail with a generic server error.
 - Tightened AMS auto-claim/Profile Doctor matching so printer-reported Generic PLA no longer silently matches composite/specialty rolls such as PLA CF; added recent printer-slot memory from print-start AMS snapshots so the known prior roll (#48 PLA Silk Red) wins the H2D AMS 1 S1 auto-claim.
+- Fixed Bambu multi-plate preview metadata so active jobs such as `/data/Metadata/plate_6.gcode` use `Metadata/plate_6.png` and the matching slice-info plate instead of always showing plate 1.
 - Bumped static cache to `app.js?v=259`; backend restart required for the structured add-spool conflict response and stricter AMS auto-claim rules.
 
 ## What was fixed - Session 28.180 (Finished job live-detail cleanup - 5 June)

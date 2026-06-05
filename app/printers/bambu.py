@@ -818,21 +818,23 @@ class BambuPrinter:
             return None
         subtask = self._printer.subtask_name()
         filename = self._printer.get_file_name()
+        plate_number = _plate_number(filename)
         if _is_plate_gcode(filename) and not subtask:
             subtask = _active_queue_subtask(self.id)
         if not subtask:
             return None
-        if self._preview_cache and self._preview_cache[0] == subtask:
+        cache_key = f"{subtask}|plate:{plate_number or 1}"
+        if self._preview_cache and self._preview_cache[0] == cache_key:
             val = self._preview_cache[1]
             return None if val is _BAMBU_PREVIEW_FAILED else val
         try:
             from .bambu_ftp import fetch_bambu_preview
-            preview = fetch_bambu_preview(self._ip, self._access_code, subtask)
-            self._preview_cache = (subtask, preview)
+            preview = fetch_bambu_preview(self._ip, self._access_code, subtask, plate_number=plate_number)
+            self._preview_cache = (cache_key, preview)
             return preview
         except Exception as exc:
             log.warning("FTP preview failed for %s: %s", self.model_name, exc)
-            self._preview_cache = (subtask, _BAMBU_PREVIEW_FAILED)
+            self._preview_cache = (cache_key, _BAMBU_PREVIEW_FAILED)
             return None
 
     def get_objects(self) -> dict:
@@ -987,6 +989,16 @@ def _build_bambu_ams_mappings(ams_mapping: list[int] | None) -> tuple[list[int],
 
 def _is_plate_gcode(filename: Optional[str]) -> bool:
     return bool(re.search(r"(?:^|[/\\])plate_\d+\.gcode$", str(filename or ""), re.IGNORECASE))
+
+
+def _plate_number(filename: Optional[str]) -> Optional[int]:
+    match = re.search(r"(?:^|[/\\])plate_(\d+)\.gcode$", str(filename or ""), re.IGNORECASE)
+    if not match:
+        return None
+    try:
+        return int(match.group(1))
+    except ValueError:
+        return None
 
 
 def _active_queue_subtask(printer_id: str) -> Optional[str]:

@@ -48,13 +48,17 @@ class _ImplicitFTP_TLS(ftplib.FTP_TLS):
         return conn, size
 
 
-def _parse_3mf(buf: io.BytesIO) -> BambuPreview:
+def _parse_3mf(buf: io.BytesIO, plate_number: Optional[int] = None) -> BambuPreview:
     """Extract thumbnail and metadata from an in-memory .gcode.3mf zip."""
+    plate_number = int(plate_number or 1)
     with zipfile.ZipFile(buf) as z:
         try:
-            image_png: Optional[bytes] = z.read("Metadata/plate_1.png")
+            image_png: Optional[bytes] = z.read(f"Metadata/plate_{plate_number}.png")
         except KeyError:
-            image_png = None
+            try:
+                image_png = z.read("Metadata/plate_1.png")
+            except KeyError:
+                image_png = None
         try:
             slice_xml = z.read("Metadata/slice_info.config").decode()
         except KeyError:
@@ -63,7 +67,15 @@ def _parse_3mf(buf: io.BytesIO) -> BambuPreview:
                                 objects=None)
 
     root_el = ET.fromstring(slice_xml)
-    plate = root_el.find("plate")
+    plates = root_el.findall("plate")
+    plate = None
+    if plates:
+        # Bambu plate filenames are 1-based: Metadata/plate_6.gcode maps to
+        # the sixth <plate> entry in slice_info.config.
+        if 1 <= plate_number <= len(plates):
+            plate = plates[plate_number - 1]
+        else:
+            plate = plates[0]
 
     def meta(key: str) -> Optional[str]:
         el = plate.find(f"metadata[@key='{key}']") if plate is not None else None
@@ -113,7 +125,7 @@ def _parse_3mf(buf: io.BytesIO) -> BambuPreview:
     )
 
 
-def fetch_bambu_preview(ip: str, access_code: str, subtask_name: str) -> Optional[BambuPreview]:
+def fetch_bambu_preview(ip: str, access_code: str, subtask_name: str, plate_number: Optional[int] = None) -> Optional[BambuPreview]:
     """Download the .3mf for the current job and extract thumbnail + metadata."""
     ftp = _ImplicitFTP_TLS()
     try:
@@ -131,7 +143,7 @@ def fetch_bambu_preview(ip: str, access_code: str, subtask_name: str) -> Optiona
         except Exception:
             pass
 
-    return _parse_3mf(buf)
+    return _parse_3mf(buf, plate_number=plate_number)
 
 
 def download_bambu_file(ip: str, access_code: str, path: str) -> bytes:
