@@ -1376,6 +1376,7 @@ def _parse_ams(dump: dict) -> list[dict]:
                 "brand": brand,
                 "profile_id": profile_id,
                 "profile_name": profile_name,
+                "tray_state": tray_data.get("state"),
                 "active": active,
                 "empty": empty,
             })

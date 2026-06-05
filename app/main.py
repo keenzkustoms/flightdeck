@@ -99,6 +99,7 @@ async def _gather_all_locked() -> list[dict]:
         d = asdict(status)
         _reconcile_empty_reported_slots(d)
         _reconcile_reported_loaded_slots(d)
+        _replay_assigned_bambu_profiles(d)
         cal = db.get_calibration(p.id)
         if cal:
             d["eta_calibration"] = cal
@@ -195,6 +196,26 @@ def _recent_spool_move_to_slot(printer_id: str, flat_slot: int, spool_id: int) -
         return False
 
 
+def _recent_profile_replay(printer_id: str, flat_slot: int, spool_id: int, seconds: int = 60) -> bool:
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            row = conn.execute(
+                """
+                SELECT 1
+                FROM decisions
+                WHERE event = 'ams_slot_profile_replayed'
+                  AND detail LIKE ?
+                  AND logged_at >= datetime('now', ?)
+                LIMIT 1
+                """,
+                (f"{printer_id}:{flat_slot} spool #{spool_id}%", f"-{seconds} seconds"),
+            ).fetchone()
+        return row is not None
+    except Exception as exc:
+        log.debug("recent AMS profile replay check failed: %s", exc)
+        return False
+
+
 def _reconcile_empty_reported_slots(printer_status: dict) -> None:
     """Return stale Flightdeck assignments when Bambu reports the slot empty."""
     printer_id = printer_status.get("id")
@@ -230,6 +251,62 @@ def _reconcile_empty_reported_slots(printer_status: dict) -> None:
                     f"from empty {slot.get('label') or flat_slot}; printer reported empty"
                 ),
             )
+
+
+def _reported_slot_is_stale_empty(slot: dict) -> bool:
+    """Bambu can keep old tray profile fields after a physical unload."""
+    state = slot.get("tray_state")
+    try:
+        state_int = int(state)
+    except (TypeError, ValueError):
+        state_int = None
+    return bool(slot.get("empty")) or state_int in (9, 10)
+
+
+def _reported_slot_is_generic(slot: dict) -> bool:
+    text = " ".join(
+        str(slot.get(key) or "")
+        for key in ("brand", "profile_name", "profile_id")
+    ).lower()
+    return "generic" in text or str(slot.get("profile_id") or "").upper().endswith("99")
+
+
+def _assigned_spool_matches_report(spool: dict, slot: dict) -> bool:
+    if _reported_slot_is_stale_empty(slot):
+        return False
+    if not _spool_matches_material(spool, str(slot.get("type") or "")):
+        return False
+    return _hex_dist(spool.get("color_hex"), slot.get("color")) <= 35
+
+
+def _replay_assigned_bambu_profiles(printer_status: dict) -> None:
+    """Keep Flightdeck-assigned AMS slots authoritative over stale Bambu profiles."""
+    printer_id = printer_status.get("id")
+    if not printer_id:
+        return
+    loaded_by_slot = db.get_spools_by_printer(str(printer_id))
+    if not loaded_by_slot:
+        return
+    for slot in _flatten_reported_ams_slots(printer_status, include_empty=True):
+        flat_slot = slot.get("flat_slot")
+        if flat_slot is None:
+            continue
+        spool = loaded_by_slot.get(int(flat_slot))
+        if not spool:
+            continue
+        if _reported_slot_is_stale_empty(slot):
+            continue
+        if _assigned_spool_matches_report(spool, slot):
+            continue
+        if _recent_profile_replay(str(printer_id), int(flat_slot), int(spool["id"])):
+            continue
+        full_spool = db.get_spool(int(spool["id"])) or spool
+        asyncio.create_task(_sync_bambu_ams_slot(str(printer_id), int(flat_slot), full_spool))
+        db.log_decision(
+            str(printer_id),
+            "ams_slot_profile_replayed",
+            f"{printer_id}:{flat_slot} spool #{spool['id']} overwrote stale printer profile",
+        )
 
 
 def _remaining_g(spool: dict) -> float:
@@ -394,6 +471,8 @@ def _reconcile_reported_loaded_slots(printer_status: dict) -> None:
         if flat_slot is None or loaded_by_slot.get(int(flat_slot)):
             continue
         preferred_spool_id = db.get_recent_spool_for_slot(str(printer_id), int(flat_slot))
+        if _reported_slot_is_generic(slot) and preferred_spool_id is None:
+            continue
         best = _best_spool_for_reported_slot(slot, available, preferred_spool_id)
         if not best:
             continue
