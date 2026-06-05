@@ -2632,22 +2632,28 @@ async def get_spool_trace(spool_id: int):
 async def create_spool(body: SpoolCreate):
     remaining = body.remaining_g if body.remaining_g is not None else body.label_weight_g
     if body.location_printer_id and body.location_slot is not None:
-        result = db.move_spool(-1, body.location_printer_id, body.location_slot)
-        if not result["ok"]:
+        conflict = db.get_spool_at_slot(body.location_printer_id, body.location_slot)
+        if conflict:
             raise HTTPException(status_code=409,
-                detail=f"Slot occupied by spool #{result['conflict_spool_id']}")
-    spool_id = db.create_spool(
-        material=body.material, brand=body.brand, color_hex=body.color_hex,
-        label_weight_g=body.label_weight_g, remaining_g=remaining,
-        subtype=body.subtype, color_name=body.color_name,
-        color_hex_2=body.color_hex_2, color_hex_3=body.color_hex_3,
-        color_scheme=body.color_scheme or "solid",
-        location_printer_id=body.location_printer_id,
-        location_slot=body.location_slot,
-        storage_location_id=None if body.location_printer_id else body.storage_location_id,
-        notes=body.notes,
-        empty_spool_weight_g=body.empty_spool_weight_g,
-    )
+                detail={"message": f"Slot occupied by spool #{conflict['id']}", "conflict_spool_id": conflict["id"]})
+    try:
+        spool_id = db.create_spool(
+            material=body.material, brand=body.brand, color_hex=body.color_hex,
+            label_weight_g=body.label_weight_g, remaining_g=remaining,
+            subtype=body.subtype, color_name=body.color_name,
+            color_hex_2=body.color_hex_2, color_hex_3=body.color_hex_3,
+            color_scheme=body.color_scheme or "solid",
+            location_printer_id=body.location_printer_id,
+            location_slot=body.location_slot,
+            storage_location_id=None if body.location_printer_id else body.storage_location_id,
+            notes=body.notes,
+            empty_spool_weight_g=body.empty_spool_weight_g,
+        )
+    except sqlite3.IntegrityError as exc:
+        if body.location_printer_id and body.location_slot is not None:
+            raise HTTPException(status_code=409,
+                detail={"message": "Slot is already occupied", "conflict_spool_id": None}) from exc
+        raise
     if db.get_all_settings().get("label_auto_print") == "true":
         spool = db.get_spool(spool_id)
         ok = await asyncio.to_thread(_label_printer.print_spool_label, _label_spool(spool), _label_base_url())

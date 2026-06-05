@@ -10707,7 +10707,7 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
           method: 'PUT', headers: {'Content-Type':'application/json'},
           body: JSON.stringify(body),
         });
-        if (!r.ok) throw new Error();
+        if (!r.ok) throw new Error(await _spoolSaveErrorMessage(r, 'Unable to save spool'));
         // Always update location on edit — handles loaded→storage clearing too
         const mr = await fetch(`/api/spools/${prefill.id}/move`, {
           method: 'POST', headers: {'Content-Type':'application/json'},
@@ -10719,10 +10719,11 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
         });
         if (mr.status === 409) {
           const err = await mr.json();
-          btn.textContent = `Slot occupied (#${err.detail?.conflict_spool_id ?? '?'})`;
+          btn.textContent = _spoolConflictMessage(err);
           setTimeout(() => { btn.textContent = submitLabel; btn.disabled = false; }, 3000);
           return;
         }
+        if (!mr.ok) throw new Error(await _spoolSaveErrorMessage(mr, 'Unable to move spool'));
       } else {
         const r = await fetch('/api/spools', {
           method: 'POST', headers: {'Content-Type':'application/json'},
@@ -10730,19 +10731,39 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
         });
         if (r.status === 409) {
           const err = await r.json();
-          btn.textContent = `Slot occupied (#${err.detail?.conflict_spool_id ?? '?'})`;
+          btn.textContent = _spoolConflictMessage(err);
           setTimeout(() => { btn.textContent = submitLabel; btn.disabled = false; }, 3000);
           return;
         }
-        if (!r.ok) throw new Error();
+        if (!r.ok) throw new Error(await _spoolSaveErrorMessage(r, 'Unable to add spool'));
       }
       overlay.remove();
       onSaved();
-    } catch {
-      btn.textContent = 'Error';
-      setTimeout(() => { btn.textContent = submitLabel; btn.disabled = false; }, 2000);
+    } catch (err) {
+      btn.textContent = err?.message || 'Error';
+      setTimeout(() => { btn.textContent = submitLabel; btn.disabled = false; }, 3500);
     }
   });
+}
+
+function _spoolConflictMessage(err) {
+  const detail = err?.detail;
+  if (detail && typeof detail === 'object') return detail.message || `Slot occupied (#${detail.conflict_spool_id ?? '?'})`;
+  return typeof detail === 'string' ? detail : 'Slot occupied';
+}
+
+async function _spoolSaveErrorMessage(response, fallback = 'Unable to save spool') {
+  try {
+    const data = await response.json();
+    const detail = data?.detail;
+    if (detail && typeof detail === 'object') return detail.message || fallback;
+    if (typeof detail === 'string') return detail;
+  } catch {}
+  try {
+    const text = await response.text();
+    if (text) return text.slice(0, 80);
+  } catch {}
+  return fallback;
 }
 
 function _locationsCategoryHtml(locations) {
