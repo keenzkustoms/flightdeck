@@ -1,5 +1,10 @@
 # Flightdeck — next session brief
-_Last updated 5 June 2026 (Session 28.172 Brand tare estimates)_
+_Last updated 5 June 2026 (Session 28.173 Spool colour schemes)_
+
+## What was built - Session 28.173 (Spool colour schemes - 5 June)
+- Added spool `color_scheme` metadata with Add/Edit support for Solid, Dual, Tri-colour, Rainbow, Gradient, and Mixed.
+- Spool cards, cabinet/table swatches, live loaded spool chips, location rows, detail headers, and the draft preview now render split/gradient/rainbow backgrounds from the saved scheme.
+- Bumped static cache to `app.js?v=253`; backend restart required.
 
 ## What was built - Session 28.172 (Brand tare estimates - 5 June)
 - Added a curated brand-level empty-spool/tare estimate table to the Add/Edit Spool modal, seeded from the operator-provided list plus public FilamIQ and Empty Spool Weight Catalog references.

@@ -2465,6 +2465,7 @@ class SpoolCreate(BaseModel):
     remaining_g: Optional[float] = None
     subtype: Optional[str] = None
     color_name: Optional[str] = None
+    color_scheme: Optional[str] = "solid"
     location_printer_id: Optional[str] = None
     location_slot: Optional[int] = None
     storage_location_id: Optional[int] = None
@@ -2477,6 +2478,7 @@ class SpoolUpdate(BaseModel):
     subtype: Optional[str] = None
     color_hex: Optional[str] = None
     color_name: Optional[str] = None
+    color_scheme: Optional[str] = None
     label_weight_g: Optional[float] = None
     remaining_g: Optional[float] = None
     empty_spool_weight_g: Optional[float] = None
@@ -2583,6 +2585,7 @@ async def create_spool(body: SpoolCreate):
         material=body.material, brand=body.brand, color_hex=body.color_hex,
         label_weight_g=body.label_weight_g, remaining_g=remaining,
         subtype=body.subtype, color_name=body.color_name,
+        color_scheme=body.color_scheme or "solid",
         location_printer_id=body.location_printer_id,
         location_slot=body.location_slot,
         storage_location_id=None if body.location_printer_id else body.storage_location_id,

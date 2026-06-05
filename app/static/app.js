@@ -1515,7 +1515,7 @@ function renderCard(p) {
         const cls   = low ? ' spool-low' : amber ? ' spool-amber' : '';
         const tc    = _spoolTextColor(s.color_hex || '#808080');
         return `<div class="spool-loaded-row">
-          <span class="spool-loaded-swatch" style="background:${s.color_hex||'#808080'};color:${tc}" title="${s.color_name||s.color_hex||''}"></span>
+          <span class="spool-loaded-swatch" style="${_spoolColorStyle(s)};color:${tc}" title="${s.color_name||s.color_hex||''}"></span>
           <span class="spool-loaded-name">${s.material}${s.brand ? ' · ' + s.brand : ''}</span>
           <span class="spool-loaded-pct${cls}">${pct}%</span>
         </div>`;
@@ -2464,7 +2464,7 @@ function _detailLiveSpoolChips(p) {
     const total = Math.round(Number(s.label_weight_g || 0));
     const slot = s.location_slot != null ? _amsSlotLabel(p, Number(s.location_slot)) : (s.storage_location_name || 'Loaded');
     return `<a class="live-spool-row${cls}" href="#/spool/${s.id}">
-      <span class="live-spool-swatch" style="background:${s.color_hex || '#808080'}"></span>
+      <span class="live-spool-swatch" style="${_spoolColorStyle(s)}"></span>
       <span class="live-spool-main">
         <strong>${esc(title)}</strong>
         <em>#${s.id} · ${esc(slot)} · ${grams}g${total ? ` of ${total}g` : ''}</em>
@@ -4558,7 +4558,7 @@ async function renderSpoolDetail(spoolId) {
       <a class="print-detail-back" href="#/spools">Spools</a>
     </div>
     <section class="spool-detail-hero">
-      <div class="spool-detail-band" style="background:${bandColor};color:${textColor}">
+      <div class="spool-detail-band" style="${_spoolColorStyle(data)};color:${textColor}">
         <span class="spool-detail-colour">${esc(data.color_name || data.color_hex || 'Colour')}</span>
         <span class="spool-detail-id">#${data.id}</span>
       </div>
@@ -8729,6 +8729,14 @@ let _spoolsFilamentCosts = [];
 let _spoolLocations = [];
 let _latestSpoolsByPrinter = {};   // printer_id → [spool, ...]
 let _latestLowStockPct = 20;
+const _COLOR_SCHEMES = [
+  { value: 'solid', label: 'Solid' },
+  { value: 'dual', label: 'Dual' },
+  { value: 'tri', label: 'Tri-colour' },
+  { value: 'rainbow', label: 'Rainbow' },
+  { value: 'gradient', label: 'Gradient' },
+  { value: 'mixed', label: 'Mixed' },
+];
 const _BRAND_TARE_ESTIMATES = [
   { brand: 'Bambu Lab', grams: 256, aliases: ['bambu'] },
   { brand: '3D Fuel', grams: 264 },
@@ -9007,7 +9015,7 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
       : '<div class="slot-empty-state">No printer slot report available.</div>';
     const currentHtml = current ? `
       <div class="slot-current-card">
-        <span class="location-spool-swatch" style="background:${current.color_hex || '#808080'}"></span>
+        <span class="location-spool-swatch" style="${_spoolColorStyle(current)}"></span>
         <div class="location-spool-main">
           <div class="location-spool-title">${esc(current.color_name || current.color_hex || 'Colour')} · ${esc(current.material)}${current.subtype ? ` ${esc(current.subtype)}` : ''}</div>
           <div class="location-spool-sub">${esc(current.brand || 'Unknown brand')} · #${current.id} · ${Math.round(current.remaining_g || 0)}g</div>
@@ -9031,7 +9039,7 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
       const suggested = score < 96;
       const searchable = `${loc} ${s.material || ''} ${s.subtype || ''} ${s.brand || ''} ${s.color_name || ''} ${s.color_hex || ''} #${s.id}`.toLowerCase();
       return `<button type="button" class="slot-spool-option" data-slot-spool-id="${s.id}" data-search="${esc(searchable)}">
-        <span class="location-spool-swatch" style="background:${s.color_hex || '#808080'}"></span>
+        <span class="location-spool-swatch" style="${_spoolColorStyle(s)}"></span>
         <span class="slot-spool-option-main">
           <strong>${esc(s.color_name || s.color_hex || 'Colour')} · ${esc(s.material)}${s.subtype ? ` ${esc(s.subtype)}` : ''}${suggested ? ' <em>Suggested</em>' : ''}</strong>
           <small>${esc(s.brand || 'Unknown brand')} · #${s.id} · ${Math.round(s.remaining_g || 0)}g (${pct}%)</small>
@@ -9299,6 +9307,35 @@ function _spoolTextColor(hex) {
   return lum > 0.55 ? '#1a1a1a' : '#ffffff';
 }
 
+function _spoolColorScheme(value) {
+  const scheme = String(value || 'solid').toLowerCase();
+  return _COLOR_SCHEMES.some(item => item.value === scheme) ? scheme : 'solid';
+}
+
+function _spoolColorBackground(hex, scheme = 'solid') {
+  const color = _normHex(hex) || '#808080';
+  switch (_spoolColorScheme(scheme)) {
+    case 'dual':
+      return `linear-gradient(90deg, ${color} 0 50%, #f8fafc 50% 100%)`;
+    case 'tri':
+      return `linear-gradient(90deg, ${color} 0 33%, #f8fafc 33% 66%, #111827 66% 100%)`;
+    case 'rainbow':
+      return 'linear-gradient(90deg, #ef4444, #f97316, #eab308, #22c55e, #06b6d4, #3b82f6, #a855f7, #ec4899)';
+    case 'gradient':
+      return `linear-gradient(135deg, ${color}, #f8fafc)`;
+    case 'mixed':
+      return `repeating-linear-gradient(135deg, ${color} 0 8px, #111827 8px 16px, #f8fafc 16px 24px)`;
+    default:
+      return color;
+  }
+}
+
+function _spoolColorStyle(spoolOrHex, scheme = undefined) {
+  const hex = typeof spoolOrHex === 'object' ? spoolOrHex?.color_hex : spoolOrHex;
+  const value = typeof spoolOrHex === 'object' ? spoolOrHex?.color_scheme : scheme;
+  return `background:${_spoolColorBackground(hex, value)}`;
+}
+
 function _spoolProgressColor(pct) {
   if (pct >= 50) return 'var(--printing)';
   if (pct >= 20) return '#f59e0b';
@@ -9459,7 +9496,7 @@ function _spoolGroupCardHtml(group) {
     </div>`;
   }).join('');
   return `<div class="spool-card spool-group-card" data-spool-group="${esc(_spoolGroupKey(first))}">
-    <div class="spool-card-band" style="background:${bandColor};color:${textColor}">
+    <div class="spool-card-band" style="${_spoolColorStyle(first)};color:${textColor}">
       <span class="spool-color-name">${esc(first.color_name || '—')}</span>
       <span class="spool-id-badge" title="${esc(rollTitle)}">${group.length} rolls · latest #${latestId}</span>
     </div>
@@ -9501,7 +9538,7 @@ function _spoolCardHtml(s) {
     ? `<span class="spool-location-badge" title="${(p?.custom_name ?? s.location_printer_id)} ${_amsSlotLabel(p, s.location_slot)}">${p?.custom_name ?? s.location_printer_id}</span>`
     : `<span class="spool-location-badge spool-location-storage" title="${esc(_spoolStorageLocationName(s.storage_location_id))}">${esc(_spoolStorageLocationName(s.storage_location_id))}</span>`;
   return `<div class="spool-card" data-spool-id="${s.id}">
-    <div class="spool-card-band" style="background:${bandColor};color:${textColor}">
+    <div class="spool-card-band" style="${_spoolColorStyle(s)};color:${textColor}">
       <span class="spool-color-name">${s.color_name || '—'}</span>
       <span class="spool-id-badge">#${s.id}</span>
     </div>
@@ -9543,7 +9580,7 @@ function _spoolTableHtml(spools) {
     return `<tr class="spool-tr" data-spool-id="${s.id}">
       <td class="spool-td">#${s.id}</td>
       <td class="spool-td">${added}</td>
-      <td class="spool-td"><span class="spool-table-swatch" style="background:${s.color_hex || '#404040'}"></span></td>
+      <td class="spool-td"><span class="spool-table-swatch" style="${_spoolColorStyle(s)}"></span></td>
       <td class="spool-td">${s.material}</td>
       <td class="spool-td spool-td-muted">${s.subtype || '—'}</td>
       <td class="spool-td">${s.brand}</td>
@@ -9583,7 +9620,7 @@ function _spoolCabinetTileHtml(s) {
   const textColor = _spoolTextColor(bandColor);
   const pctCls = pct < 20 ? ' spool-low' : pct < 50 ? ' spool-amber' : '';
   return `<div class="spool-cabinet-tile" data-spool-id="${s.id}">
-    <a class="spool-cabinet-swatch" href="#/spool/${s.id}" style="background:${bandColor};color:${textColor}" title="#${s.id} ${esc(s.color_name || '')}">
+    <a class="spool-cabinet-swatch" href="#/spool/${s.id}" style="${_spoolColorStyle(s)};color:${textColor}" title="#${s.id} ${esc(s.color_name || '')}">
       <span>${esc(s.color_name || bandColor)}</span>
       <b>#${s.id}</b>
     </a>
@@ -9991,6 +10028,7 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
   const initialLabelWeight = p0.label_weight_g ?? defaultLabelWeight;
   const initialRemainingWeight = p0.remaining_g ?? p0.label_weight_g ?? defaultLabelWeight;
   const initHex = p0.color_hex || '#808080';
+  const initScheme = _spoolColorScheme(p0.color_scheme);
   const printerOpts = _latestPrinters.map(p =>
     `<option value="${p.id}" data-kind="${p.kind}"${p0.location_printer_id===p.id?' selected':''}>${p.custom_name}</option>`
   ).join('');
@@ -10004,6 +10042,9 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
 
   const swatches = _SWATCH_COLORS.map(c =>
     `<button type="button" class="spool-swatch" style="background:${c}" data-hex="${c}" title="${c}" aria-label="${c}"></button>`
+  ).join('');
+  const schemeOpts = _COLOR_SCHEMES.map(item =>
+    `<option value="${item.value}"${initScheme === item.value ? ' selected' : ''}>${item.label}</option>`
   ).join('');
 
   const overlay = document.createElement('div');
@@ -10070,6 +10111,10 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
           <label class="spool-form-label">Colour name</label>
           <input id="sm-color-name" class="spool-form-input" type="text" placeholder="e.g. Jade White" value="${p0.color_name||''}">
         </div>
+        <div class="spool-form-row">
+          <label class="spool-form-label">Colour scheme</label>
+          <select id="sm-color-scheme" class="spool-form-input">${schemeOpts}</select>
+        </div>
         <div class="spool-form-section">Spool weight</div>
         <div class="spool-form-row">
           <label class="spool-form-label">Label weight *</label>
@@ -10132,6 +10177,7 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
   const brandToggle=overlay.querySelector('#sm-brand-toggle');
   const picker    = overlay.querySelector('#sm-color-picker');
   const hexIn     = overlay.querySelector('#sm-color-hex');
+  const schemeSel = overlay.querySelector('#sm-color-scheme');
   const preview   = overlay.querySelector('#sm-color-preview');
   const labelG    = overlay.querySelector('#sm-label-g');
   const remainG   = overlay.querySelector('#sm-remaining-g');
@@ -10158,7 +10204,7 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
     if (_colorLock) return;
     _colorLock = true;
     const valid = /^#[0-9a-fA-F]{6}$/.test(hex);
-    preview.style.background = valid ? hex : '#808080';
+    preview.style.background = _spoolColorBackground(valid ? hex : '#808080', schemeSel?.value || 'solid');
     if (valid) {
       picker.value = hex;
       hexIn.value = hex;
@@ -10355,6 +10401,7 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
     const subtype = overlay.querySelector('#sm-subtype')?.value.trim();
     const colorName = overlay.querySelector('#sm-color-name')?.value.trim();
     const hex = /^#[0-9a-fA-F]{6}$/.test(hexIn.value.trim()) ? hexIn.value.trim() : '#808080';
+    const scheme = schemeSel?.value || 'solid';
     const label = Math.round(parseFloat(labelG.value) || 0);
     const remaining = Math.round(parseFloat(remainG.value) || label || 0);
     const pct = label > 0 ? Math.max(0, Math.min(100, Math.round(remaining * 100 / label))) : 0;
@@ -10366,7 +10413,7 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
     const brandLine = [brand || 'Brand', locText].filter(Boolean).join(' · ');
     const spoolIdLine = isEdit && p0.id ? `<span class="spool-draft-id">Spool #${esc(p0.id)}</span>` : '';
     spoolPreview.innerHTML = `
-      <div class="spool-draft-swatch" style="background:${hex}"></div>
+      <div class="spool-draft-swatch" style="${_spoolColorStyle(hex, scheme)}"></div>
       <div class="spool-draft-main">
         <strong>${esc(titleLine || 'Choose filament')}</strong>
         <span>${esc(brandLine)}</span>
@@ -10421,6 +10468,7 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
   picker.addEventListener('input', () => { syncColor(picker.value); updateDraftPreview(); });
   picker.addEventListener('change', () => { syncColor(picker.value); updateDraftPreview(); });
   hexIn.addEventListener('input', () => { syncColor(hexIn.value); updateDraftPreview(); });
+  schemeSel.addEventListener('change', () => { syncColor(hexIn.value); updateDraftPreview(); });
 
   const _swatchNames = {
     '#1a1a1a':'Black','#ffffff':'White','#c0c0c0':'Silver','#808080':'Grey',
@@ -10552,6 +10600,7 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
       empty_spool_weight_g: emptyW,
       subtype:        overlay.querySelector('#sm-subtype').value.trim()    || null,
       color_name:     overlay.querySelector('#sm-color-name').value.trim() || null,
+      color_scheme:   schemeSel.value || 'solid',
       notes:          overlay.querySelector('#sm-notes').value.trim()      || null,
       location_printer_id: locMode === 'loaded' ? printerSel.value : null,
       location_slot:       locMode === 'loaded' ? parseInt(slotSel.value) : null,
@@ -10627,7 +10676,7 @@ function _locationsCategoryHtml(locations) {
       const pctCls = pct < 20 ? ' spool-low' : pct < 50 ? ' spool-amber' : '';
       const color = s.color_hex || '#808080';
       return `<div class="location-spool-row" data-spool-id="${s.id}">
-        <span class="location-spool-swatch" style="background:${color}"></span>
+        <span class="location-spool-swatch" style="${_spoolColorStyle(s)}"></span>
         <div class="location-spool-main">
           <div class="location-spool-title">${esc(s.color_name || color)} · ${esc(s.material)}${s.subtype ? ` ${esc(s.subtype)}` : ''}</div>
           <div class="location-spool-sub">${esc(s.brand || 'Unknown brand')} · #${s.id}</div>
@@ -10670,7 +10719,7 @@ function _locationsCategoryHtml(locations) {
     </div>
     <div class="location-spool-list">
       ${unassigned.map(s => `<div class="location-spool-row" data-spool-id="${s.id}">
-        <span class="location-spool-swatch" style="background:${s.color_hex || '#808080'}"></span>
+        <span class="location-spool-swatch" style="${_spoolColorStyle(s)}"></span>
         <div class="location-spool-main">
           <div class="location-spool-title">${esc(s.color_name || s.color_hex || 'Colour')} · ${esc(s.material)}</div>
           <div class="location-spool-sub">${esc(s.brand || 'Unknown brand')} · #${s.id}</div>
