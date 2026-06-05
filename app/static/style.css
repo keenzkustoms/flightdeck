@@ -4150,36 +4150,41 @@ button.live-route-node:hover {
 
 .ams-loadout-slots {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(5.7rem, 1fr));
-  gap: 0.42rem;
-  padding: 0.4rem;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.5rem;
+  padding: 0.52rem;
   border: 1px solid rgba(148,163,184,0.12);
   border-radius: 8px;
   background:
-    linear-gradient(180deg, rgba(2,6,23,0.25), rgba(15,23,42,0.72)),
+    linear-gradient(180deg, rgba(30,41,59,0.34), rgba(2,6,23,0.7)),
     rgba(2,6,23,0.45);
 }
 
 .ams-loadout-unit-ht .ams-loadout-slots {
-  grid-template-columns: minmax(5.7rem, 8rem);
+  grid-template-columns: minmax(4.2rem, 5.5rem);
 }
 
 .ams-loadout-slot {
-  min-height: 6.65rem;
+  min-width: 0;
+  aspect-ratio: 1;
+  min-height: 0;
   border: 1px solid rgba(59,130,246,0.18);
   background:
-    radial-gradient(circle at 50% 2.65rem, color-mix(in srgb, var(--slot-colour) 20%, transparent), transparent 3.25rem),
-    linear-gradient(180deg, rgba(148,163,184,0.08) 0 1.05rem, rgba(15,23,42,0.62) 1.05rem),
+    radial-gradient(circle at 50% 50%, rgba(15,23,42,0.98) 0 39%, transparent 40%),
+    radial-gradient(circle at 50% 50%, color-mix(in srgb, var(--slot-colour) 34%, transparent), transparent 70%),
     rgba(2,6,23,0.78);
-  border-radius: 8px;
+  border-radius: 999px;
   color: #dbeafe;
   padding: 0;
-  display: grid;
-  grid-template-rows: 1.1rem minmax(3.55rem, 1fr) auto;
+  display: block;
   overflow: hidden;
   text-align: center;
   cursor: pointer;
   position: relative;
+  box-shadow:
+    inset 0 0 0 0.35rem rgba(15,23,42,0.9),
+    inset 0 0 1.2rem rgba(0,0,0,0.72),
+    0 0.35rem 0.8rem rgba(0,0,0,0.22);
 }
 
 .ams-loadout-slot:hover {
@@ -4190,7 +4195,7 @@ button.live-route-node:hover {
 .ams-loadout-slot.is-empty {
   opacity: 0.56;
   background:
-    linear-gradient(180deg, rgba(148,163,184,0.06) 0 1.05rem, rgba(15,23,42,0.5) 1.05rem),
+    radial-gradient(circle at 50% 50%, rgba(2,6,23,0.95) 0 42%, transparent 43%),
     rgba(2,6,23,0.65);
 }
 
@@ -4205,13 +4210,17 @@ button.live-route-node:hover {
 
 .ams-loadout-lip {
   min-width: 0;
-  padding: 0.18rem 0.32rem;
-  border-bottom: 1px solid rgba(148,163,184,0.14);
+  position: absolute;
+  inset: 0.22rem 0.22rem auto;
+  z-index: 5;
+  padding: 0;
+  border-bottom: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.35rem;
-  background: rgba(2,6,23,0.38);
+  gap: 0.22rem;
+  background: transparent;
+  pointer-events: none;
 }
 
 .ams-loadout-lip b,
@@ -4222,17 +4231,19 @@ button.live-route-node:hover {
 }
 
 .ams-loadout-lip b {
-  color: #dbeafe;
-  font-size: 0.62rem;
-  letter-spacing: 0.04em;
+  color: #e2e8f0;
+  font-size: 0.55rem;
+  letter-spacing: 0.02em;
   text-transform: uppercase;
+  text-shadow: 0 1px 2px #020617;
 }
 
 .ams-loadout-lip small {
   color: #86efac;
-  font-size: 0.55rem;
+  font-size: 0.48rem;
   font-weight: 800;
   text-transform: uppercase;
+  text-shadow: 0 1px 2px #020617;
 }
 
 .ams-loadout-slot.has-warning .ams-loadout-lip small {
@@ -4244,7 +4255,7 @@ button.live-route-node:hover {
 }
 
 .ams-loadout-spool {
-  width: min(3.9rem, 74%);
+  width: 76%;
   aspect-ratio: 1;
   border-radius: 999px;
   background:
@@ -4254,13 +4265,12 @@ button.live-route-node:hover {
   border: 2px solid rgba(226,232,240,0.22);
   display: grid;
   place-items: center;
-  justify-self: center;
-  align-self: center;
-  position: relative;
+  position: absolute;
+  inset: 12%;
   box-shadow:
     inset 0 0 0 0.35rem rgba(2,6,23,0.12),
     inset 0 -0.35rem 0.8rem rgba(2,6,23,0.35),
-    0 0.45rem 0.75rem rgba(0,0,0,0.28);
+    0 0.24rem 0.52rem rgba(0,0,0,0.28);
 }
 
 .ams-loadout-spool::before,
@@ -4332,17 +4342,23 @@ button.live-route-node:hover {
 
 .ams-loadout-info {
   min-width: 0;
-  padding: 0 0.36rem;
+  position: absolute;
+  inset: auto 0.22rem 0.22rem;
+  z-index: 5;
+  padding: 0.1rem 0.2rem;
+  border-radius: 999px;
+  background: rgba(2,6,23,0.64);
+  pointer-events: none;
 }
 
 .ams-loadout-info strong {
   color: #f8fafc;
-  font-size: 0.66rem;
+  font-size: 0.52rem;
 }
 
 .ams-loadout-info em {
   color: #93a8c8;
-  font-size: 0.58rem;
+  font-size: 0.48rem;
   font-style: normal;
 }
 
@@ -4357,15 +4373,22 @@ button.live-route-node:hover {
 
 @media (max-width: 760px) {
   .ams-loadout-slots {
-    grid-template-columns: repeat(auto-fit, minmax(5.2rem, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.38rem;
+    padding: 0.42rem;
   }
 
   .ams-loadout-slot {
-    min-height: 6.25rem;
+    aspect-ratio: 1;
   }
 
   .ams-loadout-spool {
-    width: min(3.55rem, 74%);
+    width: 74%;
+  }
+
+  .ams-loadout-lip small,
+  .ams-loadout-info em {
+    display: none;
   }
 }
 
