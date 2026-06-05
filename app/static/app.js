@@ -2760,7 +2760,7 @@ function _detailFilamentRoute(p) {
       const dest = _routeDestinationLabel(p, unit);
       const title = `${slotLabel} feeding ${dest}${spoolLabel ? ' · ' + spoolLabel : ''}`;
       if (FLIGHTDECK_DEMO) {
-        routes.push(`<div class="demo-filament-route" style="--route-colour:${colour};--route-text:${textColour}" title="${esc(title)}">
+        routes.push(`<div class="demo-filament-route${_isAmsHtUnit(unit) ? ' demo-filament-route-ht' : ''}" style="--route-colour:${colour};--route-text:${textColour}" title="${esc(title)}">
           <span class="demo-route-port" aria-hidden="true"></span>
           <span class="demo-route-line" aria-hidden="true"></span>
           <span class="live-route-node live-route-destination">
