@@ -4151,7 +4151,7 @@ button.live-route-node:hover {
 .ams-loadout-slots {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 0.5rem;
+  gap: 0.44rem;
   padding: 0.52rem;
   border: 1px solid rgba(148,163,184,0.12);
   border-radius: 8px;
@@ -4166,14 +4166,14 @@ button.live-route-node:hover {
 
 .ams-loadout-slot {
   min-width: 0;
-  aspect-ratio: 1;
+  aspect-ratio: 1.55;
   min-height: 0;
   border: 1px solid rgba(59,130,246,0.18);
   background:
-    radial-gradient(circle at 50% 50%, rgba(15,23,42,0.98) 0 39%, transparent 40%),
-    radial-gradient(circle at 50% 50%, color-mix(in srgb, var(--slot-colour) 34%, transparent), transparent 70%),
+    radial-gradient(ellipse at 50% 50%, color-mix(in srgb, var(--slot-colour) 22%, transparent), transparent 72%),
+    linear-gradient(180deg, rgba(148,163,184,0.08), rgba(2,6,23,0.42)),
     rgba(2,6,23,0.78);
-  border-radius: 999px;
+  border-radius: 8px;
   color: #dbeafe;
   padding: 0;
   display: block;
@@ -4182,8 +4182,8 @@ button.live-route-node:hover {
   cursor: pointer;
   position: relative;
   box-shadow:
-    inset 0 0 0 0.35rem rgba(15,23,42,0.9),
-    inset 0 0 1.2rem rgba(0,0,0,0.72),
+    inset 0 0 0 1px rgba(15,23,42,0.75),
+    inset 0 0 1rem rgba(0,0,0,0.64),
     0 0.35rem 0.8rem rgba(0,0,0,0.22);
 }
 
@@ -4195,7 +4195,7 @@ button.live-route-node:hover {
 .ams-loadout-slot.is-empty {
   opacity: 0.56;
   background:
-    radial-gradient(circle at 50% 50%, rgba(2,6,23,0.95) 0 42%, transparent 43%),
+    radial-gradient(ellipse at 50% 50%, rgba(15,23,42,0.9), transparent 68%),
     rgba(2,6,23,0.65);
 }
 
@@ -4211,14 +4211,11 @@ button.live-route-node:hover {
 .ams-loadout-lip {
   min-width: 0;
   position: absolute;
-  inset: 0.22rem 0.22rem auto;
+  inset: 0.24rem auto auto 0.3rem;
   z-index: 5;
   padding: 0;
   border-bottom: 0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.22rem;
+  display: block;
   background: transparent;
   pointer-events: none;
 }
@@ -4232,18 +4229,14 @@ button.live-route-node:hover {
 
 .ams-loadout-lip b {
   color: #e2e8f0;
-  font-size: 0.55rem;
+  font-size: 0.5rem;
   letter-spacing: 0.02em;
   text-transform: uppercase;
   text-shadow: 0 1px 2px #020617;
 }
 
 .ams-loadout-lip small {
-  color: #86efac;
-  font-size: 0.48rem;
-  font-weight: 800;
-  text-transform: uppercase;
-  text-shadow: 0 1px 2px #020617;
+  display: none;
 }
 
 .ams-loadout-slot.has-warning .ams-loadout-lip small {
@@ -4255,21 +4248,27 @@ button.live-route-node:hover {
 }
 
 .ams-loadout-spool {
-  width: 76%;
-  aspect-ratio: 1;
+  width: 78%;
+  height: 46%;
   border-radius: 999px;
   background:
-    radial-gradient(circle at 50% 50%, rgba(2,6,23,0.9) 0 18%, transparent 18.5% 31%, rgba(2,6,23,0.72) 31.5% 35%, transparent 35.5%),
-    repeating-conic-gradient(from -18deg, color-mix(in srgb, var(--slot-colour) 88%, #000) 0 12deg, var(--slot-colour) 12deg 26deg, color-mix(in srgb, var(--slot-colour) 72%, #fff) 26deg 32deg),
+    radial-gradient(ellipse at 12% 50%, rgba(2,6,23,0.9) 0 17%, transparent 18%),
+    radial-gradient(ellipse at 88% 50%, rgba(2,6,23,0.9) 0 17%, transparent 18%),
+    linear-gradient(90deg,
+      color-mix(in srgb, var(--slot-colour) 55%, #020617),
+      color-mix(in srgb, var(--slot-colour) 85%, #ffffff) 18%,
+      var(--slot-colour) 50%,
+      color-mix(in srgb, var(--slot-colour) 85%, #ffffff) 82%,
+      color-mix(in srgb, var(--slot-colour) 55%, #020617)),
     var(--slot-colour);
   border: 2px solid rgba(226,232,240,0.22);
   display: grid;
   place-items: center;
   position: absolute;
-  inset: 12%;
+  inset: 27% 11% auto;
   box-shadow:
-    inset 0 0 0 0.35rem rgba(2,6,23,0.12),
-    inset 0 -0.35rem 0.8rem rgba(2,6,23,0.35),
+    inset 0 0.35rem 0.45rem rgba(255,255,255,0.16),
+    inset 0 -0.45rem 0.7rem rgba(2,6,23,0.4),
     0 0.24rem 0.52rem rgba(0,0,0,0.28);
 }
 
@@ -4277,24 +4276,30 @@ button.live-route-node:hover {
 .ams-loadout-spool::after {
   content: '';
   position: absolute;
-  inset: 18%;
+  top: 14%;
+  bottom: 14%;
+  width: 18%;
   border-radius: inherit;
   border: 1px solid rgba(255,255,255,0.16);
   pointer-events: none;
 }
 
+.ams-loadout-spool::before {
+  left: 6%;
+}
+
 .ams-loadout-spool::after {
-  inset: 35%;
+  right: 6%;
   border-color: rgba(15,23,42,0.8);
   background: rgba(2,6,23,0.72);
 }
 
 .ams-loadout-rim {
   position: absolute;
-  inset: -0.16rem;
+  inset: -0.12rem;
   border-radius: inherit;
-  border: 1px solid rgba(148,163,184,0.22);
-  background: radial-gradient(circle, transparent 62%, rgba(15,23,42,0.82) 63% 100%);
+  border: 1px solid rgba(148,163,184,0.2);
+  background: linear-gradient(180deg, rgba(255,255,255,0.08), transparent 45%, rgba(2,6,23,0.24));
   pointer-events: none;
 }
 
@@ -4315,20 +4320,14 @@ button.live-route-node:hover {
 }
 
 .ams-loadout-hub {
-  position: absolute;
-  width: 0.24rem;
-  height: 0.24rem;
-  border-radius: 999px;
-  background: rgba(226,232,240,0.72);
-  z-index: 3;
-  transform: translate(0.55rem, -0.55rem);
+  display: none;
 }
 
 .ams-loadout-slot.is-empty .ams-loadout-spool {
   background:
-    radial-gradient(circle, rgba(2,6,23,0.82) 0 32%, transparent 33%),
+    linear-gradient(90deg, rgba(15,23,42,0.9), rgba(30,41,59,0.45), rgba(15,23,42,0.9)),
     rgba(15,23,42,0.55);
-  box-shadow: inset 0 0 0 0.5rem rgba(15,23,42,0.72);
+  box-shadow: inset 0 0 0 0.18rem rgba(15,23,42,0.72);
 }
 
 .ams-loadout-info strong,
@@ -4346,7 +4345,7 @@ button.live-route-node:hover {
   inset: auto 0.22rem 0.22rem;
   z-index: 5;
   padding: 0.1rem 0.2rem;
-  border-radius: 999px;
+  border-radius: 0.45rem;
   background: rgba(2,6,23,0.64);
   pointer-events: none;
 }
@@ -4379,14 +4378,13 @@ button.live-route-node:hover {
   }
 
   .ams-loadout-slot {
-    aspect-ratio: 1;
+    aspect-ratio: 1.55;
   }
 
   .ams-loadout-spool {
-    width: 74%;
+    width: 78%;
   }
 
-  .ams-loadout-lip small,
   .ams-loadout-info em {
     display: none;
   }
