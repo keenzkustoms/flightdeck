@@ -1,5 +1,10 @@
 # Flightdeck — next session brief
-_Last updated 5 June 2026 (Session 28.178 Stale nav progress badge fix)_
+_Last updated 5 June 2026 (Session 28.179 Print Memory passport detail fix)_
+
+## What was fixed - Session 28.179 (Print Memory passport detail fix - 5 June)
+- Fixed Print Memory passport detail rendering when another hidden printer-history detail container already exists on the page.
+- Print Memory now renders into its own explicit detail target instead of relying on a duplicate `history-day-detail` id lookup.
+- Bumped static cache to `app.js?v=256`; frontend-only refresh required.
 
 ## What was fixed - Session 28.178 (Stale nav progress badge fix - 5 June)
 - Sidebar/top printer progress badges now only render for active `printing` or `paused` states.

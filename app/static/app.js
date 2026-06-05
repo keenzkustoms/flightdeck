@@ -3527,8 +3527,8 @@ function _printRowHtml(print, idx, dateStr) {
   </div>`;
 }
 
-function _showPrintDetail(printerId, dateStr, print) {
-  const el = document.getElementById('history-day-detail');
+function _showPrintDetail(printerId, dateStr, print, targetEl = null) {
+  const el = targetEl || document.getElementById('history-day-detail');
   if (!el) return;
 
   const raw = print.subtask_name || print.filename.replace(/.*[/\\]/, '');
@@ -4045,8 +4045,8 @@ async function _memoryOpenPassport(printId) {
       <span>Print Passport</span>
       <a href="#/printer/${item.printer_id}/history" title="Open printer history">Printer history</a>
     </div>
-    <div id="history-day-detail"></div>`;
-    _showPrintDetail(item.printer_id, dateStr, item);
+    <div class="history-day-detail"></div>`;
+    _showPrintDetail(item.printer_id, dateStr, item, detail.querySelector('.history-day-detail'));
     document.querySelectorAll('.memory-row.selected').forEach(row => row.classList.remove('selected'));
     document.querySelector(`.memory-row[data-print-id="${CSS.escape(String(printId))}"]`)?.classList.add('selected');
   } catch (err) {
