@@ -2893,10 +2893,35 @@ async def _sync_bambu_ams_slot(printer_id: str, slot: int, spool: Optional[dict]
         if p.id != printer_id:
             continue
         try:
+            clear_first = False
+            if spool:
+                status = _latest_printers.get(printer_id)
+                reported = next(
+                    (
+                        s for s in _flatten_reported_ams_slots(status, include_empty=True)
+                        if int(s.get("flat_slot", -1)) == int(slot)
+                    ),
+                    None,
+                )
+                if reported and not reported.get("empty"):
+                    reported_material = _norm_material(reported.get("type"))
+                    spool_material = _norm_material(spool.get("material"))
+                    colour_mismatch = _hex_dist(reported.get("color"), spool.get("color_hex")) > 35
+                    material_mismatch = (
+                        reported_material
+                        and spool_material
+                        and not _spool_matches_material(spool, reported.get("type"))
+                    )
+                    clear_first = bool(colour_mismatch or material_mismatch)
+            if clear_first:
+                await asyncio.to_thread(p.set_ams_slot_filament, slot, None)
+                await asyncio.sleep(3)
             ok = await asyncio.to_thread(p.set_ams_slot_filament, slot, spool)
             action = "ams_slot_synced" if spool else "ams_slot_cleared"
             target = f"{printer_id}:{slot}"
             detail = f"{target} {'spool #' + str(spool['id']) if spool else 'empty'}"
+            if clear_first:
+                detail += " after clearing stale printer profile"
             db.log_decision(printer_id, action, detail)
             return bool(ok)
         except Exception as exc:
