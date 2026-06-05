@@ -9211,10 +9211,11 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
 
     body.querySelector('#slot-spool-filter')?.addEventListener('input', e => {
       const q = e.target.value.trim().toLowerCase();
+      const terms = q.split(/\s+/).filter(Boolean);
       body.querySelectorAll('[data-slot-spool-id]').forEach(row => {
         const search = row.dataset.search || '';
         if (!search) return;
-        row.classList.toggle('hidden', q && !search.includes(q));
+        row.classList.toggle('hidden', terms.length && !terms.every(term => search.includes(term)));
       });
     });
 
