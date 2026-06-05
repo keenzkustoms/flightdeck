@@ -57,6 +57,7 @@ _last_seen_cache: dict[str, datetime] = {}  # printer_id → last successful con
 _latest_printers: dict[str, dict] = {}  # printer_id → most recent gathered status
 _latest_printers_at: datetime | None = None
 _gather_lock: asyncio.Lock | None = None
+_scale_keep_awake_task: asyncio.Task | None = None
 _scale = Scale()
 _label_printer = LabelPrinter()
 
@@ -555,9 +556,34 @@ async def _broadcast_loop():
             log.warning("broadcast loop error: %s", exc)
 
 
+def _scale_keep_awake_enabled() -> bool:
+    return os.getenv("FLIGHTDECK_SCALE_KEEP_AWAKE", "true").strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _scale_keep_awake_interval() -> float:
+    try:
+        return max(30.0, float(os.getenv("FLIGHTDECK_SCALE_KEEP_AWAKE_INTERVAL", "120")))
+    except ValueError:
+        return 120.0
+
+
+async def _scale_keep_awake_loop():
+    if not _scale_keep_awake_enabled():
+        return
+    interval = _scale_keep_awake_interval()
+    while True:
+        try:
+            await asyncio.sleep(interval)
+            await asyncio.to_thread(_scale.keep_awake_ping)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            log.debug("scale keep-awake ping failed: %s", exc)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _broadcast_task, _ntfy
+    global _broadcast_task, _scale_keep_awake_task, _ntfy
     db.init()
     _last_seen_cache.update(db.get_all_last_seen())
     cfg = load()
@@ -606,11 +632,14 @@ async def lifespan(app: FastAPI):
         pass
 
     _broadcast_task = asyncio.create_task(_broadcast_loop())
+    _scale_keep_awake_task = asyncio.create_task(_scale_keep_awake_loop())
 
     yield
 
     if _broadcast_task:
         _broadcast_task.cancel()
+    if _scale_keep_awake_task:
+        _scale_keep_awake_task.cancel()
     for proxy in _cam_proxies.values():
         await proxy.stop()
     _cam_proxies.clear()
@@ -2277,7 +2306,26 @@ async def setup_health():
 @app.get("/api/scale/status")
 async def get_scale_status():
     available = _scale.is_available()
-    return {"available": available, "model": "Dymo M10", "last_error": None if available else _scale.last_error}
+    return {
+        "available": available,
+        "model": "Dymo M10",
+        "last_error": None if available else _scale.last_error,
+        "keep_awake": {
+            "enabled": _scale_keep_awake_enabled(),
+            "interval_s": _scale_keep_awake_interval(),
+            "last_ping_at": datetime.fromtimestamp(_scale.last_keep_awake_at).isoformat() if _scale.last_keep_awake_at else None,
+        },
+    }
+
+
+@app.post("/api/scale/keep-awake")
+async def keep_scale_awake():
+    ok = await asyncio.to_thread(_scale.keep_awake_ping)
+    return {
+        "ok": ok,
+        "last_error": None if ok else _scale.last_error,
+        "last_ping_at": datetime.fromtimestamp(_scale.last_keep_awake_at).isoformat() if _scale.last_keep_awake_at else None,
+    }
 
 
 @app.get("/api/scale/read")

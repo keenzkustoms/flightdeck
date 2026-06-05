@@ -1,5 +1,11 @@
 # Flightdeck — next session brief
-_Last updated 5 June 2026 (Session 28.175 Spool group card header polish)_
+_Last updated 5 June 2026 (Session 28.176 DYMO scale keep-awake)_
+
+## What was built - Session 28.176 (DYMO scale keep-awake - 5 June)
+- Added a background DYMO M10 scale keep-awake loop that pings the USB HID endpoint every 120 seconds by default.
+- Added `POST /api/scale/keep-awake` for an immediate manual ping and extended `/api/scale/status` with keep-awake state.
+- Kept this USB-only and non-blocking; a true units-button toggle still requires the DYMO hardware GPIO/button mod.
+- Backend restart required.
 
 ## What was polished - Session 28.175 (Spool group card header polish - 5 June)
 - Shortened grouped spool card header badges from `2 rolls · latest #...` to `2 rolls`, keeping full roll detail in the tooltip and chips below.

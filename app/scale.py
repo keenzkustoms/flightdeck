@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import errno
 import struct
 import subprocess
 import time
@@ -23,14 +24,19 @@ class Scale:
     def __init__(self, device_path: str = "/dev/usb/hiddev0"):
         self.device_path = device_path
         self.last_error: Optional[str] = None
+        self.last_keep_awake_at: Optional[float] = None
+
+    def _candidate_paths(self) -> list[str]:
+        paths = [self.device_path] + [f"/dev/hidraw{i}" for i in range(8)]
+        seen: set[str] = set()
+        return [p for p in paths if not (p in seen or seen.add(p))]
 
     def is_available(self) -> bool:
         self.last_error = None
         if not self._usb_present():
             self.last_error = "Dymo M10 USB scale not detected"
             return False
-        candidates = [self.device_path, "/dev/hidraw0", "/dev/hidraw1", "/dev/hidraw2"]
-        if any(Path(p).exists() for p in candidates):
+        if any(Path(p).exists() for p in self._candidate_paths()):
             return True
         self.last_error = "Scale device path not found"
         return False
@@ -40,8 +46,7 @@ class Scale:
         if not self._usb_present():
             self.last_error = "Dymo M10 USB scale not detected"
             return None
-        paths = [self.device_path] + [f"/dev/hidraw{i}" for i in range(8)]
-        for path in paths:
+        for path in self._candidate_paths():
             if not Path(path).exists():
                 continue
             try:
@@ -57,6 +62,41 @@ class Scale:
                 self.last_error = str(exc)
         self.last_error = self.last_error or "No non-zero scale reading"
         return None
+
+    def keep_awake_ping(self) -> bool:
+        """Touch the USB HID endpoint so an attached scale has regular host activity.
+
+        This is intentionally non-blocking. It can keep USB-readable DYMO scales active
+        without stalling Flightdeck if the scale is asleep or not producing reports.
+        A true units-button toggle still needs a wired GPIO/button mod.
+        """
+        self.last_error = None
+        if not self._usb_present():
+            self.last_error = "Dymo M10 USB scale not detected"
+            return False
+        for path in self._candidate_paths():
+            if not Path(path).exists():
+                continue
+            fd: Optional[int] = None
+            try:
+                fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+                try:
+                    os.read(fd, 16)
+                except BlockingIOError:
+                    pass
+                self.last_keep_awake_at = time.time()
+                return True
+            except PermissionError:
+                self.last_error = f"Permission denied reading {path}"
+                return False
+            except OSError as exc:
+                if exc.errno not in (errno.EAGAIN, errno.EWOULDBLOCK):
+                    self.last_error = str(exc)
+            finally:
+                if fd is not None:
+                    os.close(fd)
+        self.last_error = self.last_error or "Scale device path not found"
+        return False
 
     def _usb_present(self) -> bool:
         try:
