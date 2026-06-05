@@ -9312,28 +9312,32 @@ function _spoolColorScheme(value) {
   return _COLOR_SCHEMES.some(item => item.value === scheme) ? scheme : 'solid';
 }
 
-function _spoolColorBackground(hex, scheme = 'solid') {
+function _spoolColorBackground(hex, scheme = 'solid', color2 = null, color3 = null) {
   const color = _normHex(hex) || '#808080';
+  const second = _normHex(color2) || '#f8fafc';
+  const third = _normHex(color3) || '#111827';
   switch (_spoolColorScheme(scheme)) {
     case 'dual':
-      return `linear-gradient(90deg, ${color} 0 50%, #f8fafc 50% 100%)`;
+      return `linear-gradient(90deg, ${color} 0 50%, ${second} 50% 100%)`;
     case 'tri':
-      return `linear-gradient(90deg, ${color} 0 33%, #f8fafc 33% 66%, #111827 66% 100%)`;
+      return `linear-gradient(90deg, ${color} 0 33%, ${second} 33% 66%, ${third} 66% 100%)`;
     case 'rainbow':
       return 'linear-gradient(90deg, #ef4444, #f97316, #eab308, #22c55e, #06b6d4, #3b82f6, #a855f7, #ec4899)';
     case 'gradient':
-      return `linear-gradient(135deg, ${color}, #f8fafc)`;
+      return `linear-gradient(135deg, ${color}, ${second})`;
     case 'mixed':
-      return `repeating-linear-gradient(135deg, ${color} 0 8px, #111827 8px 16px, #f8fafc 16px 24px)`;
+      return `repeating-linear-gradient(135deg, ${color} 0 8px, ${second} 8px 16px, ${third} 16px 24px)`;
     default:
       return color;
   }
 }
 
-function _spoolColorStyle(spoolOrHex, scheme = undefined) {
+function _spoolColorStyle(spoolOrHex, scheme = undefined, color2 = null, color3 = null) {
   const hex = typeof spoolOrHex === 'object' ? spoolOrHex?.color_hex : spoolOrHex;
   const value = typeof spoolOrHex === 'object' ? spoolOrHex?.color_scheme : scheme;
-  return `background:${_spoolColorBackground(hex, value)}`;
+  const second = typeof spoolOrHex === 'object' ? spoolOrHex?.color_hex_2 : color2;
+  const third = typeof spoolOrHex === 'object' ? spoolOrHex?.color_hex_3 : color3;
+  return `background:${_spoolColorBackground(hex, value, second, third)}`;
 }
 
 function _spoolProgressColor(pct) {
@@ -10028,6 +10032,8 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
   const initialLabelWeight = p0.label_weight_g ?? defaultLabelWeight;
   const initialRemainingWeight = p0.remaining_g ?? p0.label_weight_g ?? defaultLabelWeight;
   const initHex = p0.color_hex || '#808080';
+  const initHex2 = p0.color_hex_2 || '#f8fafc';
+  const initHex3 = p0.color_hex_3 || '#111827';
   const initScheme = _spoolColorScheme(p0.color_scheme);
   const printerOpts = _latestPrinters.map(p =>
     `<option value="${p.id}" data-kind="${p.kind}"${p0.location_printer_id===p.id?' selected':''}>${p.custom_name}</option>`
@@ -10107,6 +10113,22 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
             </div>
           </div>
         </div>
+        <div class="spool-form-row spool-extra-colour-row hidden" id="sm-color-2-row">
+          <label class="spool-form-label">Second colour</label>
+          <div class="spool-color-row">
+            <input id="sm-color-2-picker" type="color" value="${initHex2}" class="spool-color-picker">
+            <input id="sm-color-2-hex" class="spool-form-input spool-color-hex" type="text" value="${initHex2}" maxlength="7">
+            <div id="sm-color-2-preview" class="spool-color-preview" style="background:${initHex2}"></div>
+          </div>
+        </div>
+        <div class="spool-form-row spool-extra-colour-row hidden" id="sm-color-3-row">
+          <label class="spool-form-label">Third colour</label>
+          <div class="spool-color-row">
+            <input id="sm-color-3-picker" type="color" value="${initHex3}" class="spool-color-picker">
+            <input id="sm-color-3-hex" class="spool-form-input spool-color-hex" type="text" value="${initHex3}" maxlength="7">
+            <div id="sm-color-3-preview" class="spool-color-preview" style="background:${initHex3}"></div>
+          </div>
+        </div>
         <div class="spool-form-row">
           <label class="spool-form-label">Colour name</label>
           <input id="sm-color-name" class="spool-form-input" type="text" placeholder="e.g. Jade White" value="${p0.color_name||''}">
@@ -10177,6 +10199,14 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
   const brandToggle=overlay.querySelector('#sm-brand-toggle');
   const picker    = overlay.querySelector('#sm-color-picker');
   const hexIn     = overlay.querySelector('#sm-color-hex');
+  const picker2   = overlay.querySelector('#sm-color-2-picker');
+  const hexIn2    = overlay.querySelector('#sm-color-2-hex');
+  const preview2  = overlay.querySelector('#sm-color-2-preview');
+  const picker3   = overlay.querySelector('#sm-color-3-picker');
+  const hexIn3    = overlay.querySelector('#sm-color-3-hex');
+  const preview3  = overlay.querySelector('#sm-color-3-preview');
+  const color2Row = overlay.querySelector('#sm-color-2-row');
+  const color3Row = overlay.querySelector('#sm-color-3-row');
   const schemeSel = overlay.querySelector('#sm-color-scheme');
   const preview   = overlay.querySelector('#sm-color-preview');
   const labelG    = overlay.querySelector('#sm-label-g');
@@ -10204,7 +10234,7 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
     if (_colorLock) return;
     _colorLock = true;
     const valid = /^#[0-9a-fA-F]{6}$/.test(hex);
-    preview.style.background = _spoolColorBackground(valid ? hex : '#808080', schemeSel?.value || 'solid');
+    preview.style.background = _spoolColorBackground(valid ? hex : '#808080', schemeSel?.value || 'solid', hexIn2?.value, hexIn3?.value);
     if (valid) {
       picker.value = hex;
       hexIn.value = hex;
@@ -10213,6 +10243,24 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
       );
     }
     _colorLock = false;
+  }
+
+  function syncExtraColor(input, pickerEl, previewEl, fallback) {
+    const hex = input.value.trim();
+    const valid = /^#[0-9a-fA-F]{6}$/.test(hex);
+    const color = valid ? hex : fallback;
+    previewEl.style.background = color;
+    if (valid) pickerEl.value = hex;
+    syncColor(hexIn.value);
+    updateDraftPreview();
+  }
+
+  function updateSchemeColourRows() {
+    const scheme = _spoolColorScheme(schemeSel.value);
+    const needsSecond = ['dual', 'tri', 'gradient', 'mixed'].includes(scheme);
+    const needsThird = ['tri', 'mixed'].includes(scheme);
+    color2Row.classList.toggle('hidden', !needsSecond);
+    color3Row.classList.toggle('hidden', !needsThird);
   }
 
   function updatePrevPicks() {
@@ -10401,6 +10449,8 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
     const subtype = overlay.querySelector('#sm-subtype')?.value.trim();
     const colorName = overlay.querySelector('#sm-color-name')?.value.trim();
     const hex = /^#[0-9a-fA-F]{6}$/.test(hexIn.value.trim()) ? hexIn.value.trim() : '#808080';
+    const hex2 = /^#[0-9a-fA-F]{6}$/.test(hexIn2.value.trim()) ? hexIn2.value.trim() : null;
+    const hex3 = /^#[0-9a-fA-F]{6}$/.test(hexIn3.value.trim()) ? hexIn3.value.trim() : null;
     const scheme = schemeSel?.value || 'solid';
     const label = Math.round(parseFloat(labelG.value) || 0);
     const remaining = Math.round(parseFloat(remainG.value) || label || 0);
@@ -10413,7 +10463,7 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
     const brandLine = [brand || 'Brand', locText].filter(Boolean).join(' · ');
     const spoolIdLine = isEdit && p0.id ? `<span class="spool-draft-id">Spool #${esc(p0.id)}</span>` : '';
     spoolPreview.innerHTML = `
-      <div class="spool-draft-swatch" style="${_spoolColorStyle(hex, scheme)}"></div>
+      <div class="spool-draft-swatch" style="${_spoolColorStyle(hex, scheme, hex2, hex3)}"></div>
       <div class="spool-draft-main">
         <strong>${esc(titleLine || 'Choose filament')}</strong>
         <span>${esc(brandLine)}</span>
@@ -10468,7 +10518,13 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
   picker.addEventListener('input', () => { syncColor(picker.value); updateDraftPreview(); });
   picker.addEventListener('change', () => { syncColor(picker.value); updateDraftPreview(); });
   hexIn.addEventListener('input', () => { syncColor(hexIn.value); updateDraftPreview(); });
-  schemeSel.addEventListener('change', () => { syncColor(hexIn.value); updateDraftPreview(); });
+  picker2.addEventListener('input', () => { hexIn2.value = picker2.value; syncExtraColor(hexIn2, picker2, preview2, '#f8fafc'); });
+  picker2.addEventListener('change', () => { hexIn2.value = picker2.value; syncExtraColor(hexIn2, picker2, preview2, '#f8fafc'); });
+  hexIn2.addEventListener('input', () => syncExtraColor(hexIn2, picker2, preview2, '#f8fafc'));
+  picker3.addEventListener('input', () => { hexIn3.value = picker3.value; syncExtraColor(hexIn3, picker3, preview3, '#111827'); });
+  picker3.addEventListener('change', () => { hexIn3.value = picker3.value; syncExtraColor(hexIn3, picker3, preview3, '#111827'); });
+  hexIn3.addEventListener('input', () => syncExtraColor(hexIn3, picker3, preview3, '#111827'));
+  schemeSel.addEventListener('change', () => { updateSchemeColourRows(); syncColor(hexIn.value); updateDraftPreview(); });
 
   const _swatchNames = {
     '#1a1a1a':'Black','#ffffff':'White','#c0c0c0':'Silver','#808080':'Grey',
@@ -10488,6 +10544,9 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
     });
   });
 
+  updateSchemeColourRows();
+  syncExtraColor(hexIn2, picker2, preview2, '#f8fafc');
+  syncExtraColor(hexIn3, picker3, preview3, '#111827');
   syncColor(initHex);
 
   labelG.addEventListener('input', () => {
@@ -10594,13 +10653,20 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
     if (emptyW !== null && (isNaN(emptyW) || emptyW < 0)) { emptyG.focus(); return; }
 
     const locMode = overlay.querySelector('input[name="sm-loc"]:checked').value;
+    const scheme = _spoolColorScheme(schemeSel.value);
+    const needsSecond = ['dual', 'tri', 'gradient', 'mixed'].includes(scheme);
+    const needsThird = ['tri', 'mixed'].includes(scheme);
+    if (needsSecond && !/^#[0-9a-fA-F]{6}$/.test(hexIn2.value.trim())) { hexIn2.focus(); return; }
+    if (needsThird && !/^#[0-9a-fA-F]{6}$/.test(hexIn3.value.trim())) { hexIn3.focus(); return; }
     const body = {
       material, brand, color_hex: hex, label_weight_g: labelW,
       remaining_g:    parseFloat(remainG.value) || labelW,
       empty_spool_weight_g: emptyW,
       subtype:        overlay.querySelector('#sm-subtype').value.trim()    || null,
       color_name:     overlay.querySelector('#sm-color-name').value.trim() || null,
-      color_scheme:   schemeSel.value || 'solid',
+      color_hex_2:    needsSecond ? hexIn2.value.trim() : null,
+      color_hex_3:    needsThird ? hexIn3.value.trim() : null,
+      color_scheme:   scheme,
       notes:          overlay.querySelector('#sm-notes').value.trim()      || null,
       location_printer_id: locMode === 'loaded' ? printerSel.value : null,
       location_slot:       locMode === 'loaded' ? parseInt(slotSel.value) : null,

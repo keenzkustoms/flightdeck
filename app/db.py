@@ -100,6 +100,8 @@ def init() -> None:
                 subtype             TEXT,
                 color_hex           TEXT NOT NULL,
                 color_name          TEXT,
+                color_hex_2         TEXT,
+                color_hex_3         TEXT,
                 color_scheme        TEXT NOT NULL DEFAULT 'solid',
                 -- REAL so partial-spool additions and gram-precision deductions don't lose precision
                 label_weight_g      REAL NOT NULL,
@@ -230,6 +232,8 @@ def init() -> None:
             "ALTER TABLE spools ADD COLUMN storage_location_id INTEGER",
             "ALTER TABLE spools ADD COLUMN home_storage_location_id INTEGER",
             "ALTER TABLE spools ADD COLUMN color_scheme TEXT NOT NULL DEFAULT 'solid'",
+            "ALTER TABLE spools ADD COLUMN color_hex_2 TEXT",
+            "ALTER TABLE spools ADD COLUMN color_hex_3 TEXT",
             "ALTER TABLE print_queue ADD COLUMN filament_colors TEXT",
         ):
             try:
@@ -1588,7 +1592,7 @@ def replace_filament_catalog(rows: list[dict], source: str = "open_filament_data
                (source, source_variant_id, source_filament_id, brand, material, product,
                 subtype, color_name, color_hex, filament_weight_g, empty_spool_weight_g,
                 diameter, traits, discontinued, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             [
                 (
                     source,
@@ -1796,6 +1800,19 @@ def _clean_spool_color_scheme(value: Optional[str]) -> str:
     return scheme if scheme in _SPOOL_COLOR_SCHEMES else "solid"
 
 
+def _clean_optional_hex(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    hex_value = value.strip()
+    if len(hex_value) == 7 and hex_value.startswith("#"):
+        try:
+            int(hex_value[1:], 16)
+            return hex_value.upper()
+        except ValueError:
+            return None
+    return None
+
+
 def create_spool(
     material: str,
     brand: str,
@@ -1805,6 +1822,8 @@ def create_spool(
     *,
     subtype: Optional[str] = None,
     color_name: Optional[str] = None,
+    color_hex_2: Optional[str] = None,
+    color_hex_3: Optional[str] = None,
     color_scheme: str = "solid",
     location_printer_id: Optional[str] = None,
     location_slot: Optional[int] = None,
@@ -1813,15 +1832,17 @@ def create_spool(
     empty_spool_weight_g: Optional[float] = None,
 ) -> int:
     color_scheme = _clean_spool_color_scheme(color_scheme)
+    color_hex_2 = _clean_optional_hex(color_hex_2)
+    color_hex_3 = _clean_optional_hex(color_hex_3)
     with _conn() as conn:
         cursor = conn.execute(
             """INSERT INTO spools
-               (material, brand, subtype, color_hex, color_name, color_scheme,
+               (material, brand, subtype, color_hex, color_name, color_hex_2, color_hex_3, color_scheme,
                 label_weight_g, remaining_g, empty_spool_weight_g,
                 location_printer_id, location_slot, storage_location_id,
                 home_storage_location_id, notes)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (material, brand, subtype, color_hex, color_name, color_scheme,
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (material, brand, subtype, color_hex, color_name, color_hex_2, color_hex_3, color_scheme,
              label_weight_g, remaining_g, empty_spool_weight_g,
              location_printer_id, location_slot, storage_location_id,
              storage_location_id, notes),
@@ -1837,7 +1858,7 @@ def get_spools(include_archived: bool = False) -> list:
     with _conn() as conn:
         where = "" if include_archived else "WHERE archived_at IS NULL"
         rows = conn.execute(
-            f"""SELECT id, material, brand, subtype, color_hex, color_name, color_scheme,
+            f"""SELECT id, material, brand, subtype, color_hex, color_name, color_hex_2, color_hex_3, color_scheme,
                        label_weight_g, remaining_g, empty_spool_weight_g,
                        location_printer_id, location_slot, storage_location_id,
                        home_storage_location_id,
@@ -1855,7 +1876,7 @@ def get_spools(include_archived: bool = False) -> list:
 def get_spool(spool_id: int) -> Optional[dict]:
     with _conn() as conn:
         row = conn.execute(
-            """SELECT id, material, brand, subtype, color_hex, color_name, color_scheme,
+            """SELECT id, material, brand, subtype, color_hex, color_name, color_hex_2, color_hex_3, color_scheme,
                       label_weight_g, remaining_g, empty_spool_weight_g,
                       location_printer_id, location_slot, storage_location_id,
                       home_storage_location_id,
@@ -2052,11 +2073,14 @@ def get_spool_trace(spool_id: int) -> Optional[dict]:
 
 
 def update_spool(spool_id: int, **fields) -> bool:
-    allowed = {"material", "brand", "subtype", "color_hex", "color_name", "color_scheme",
+    allowed = {"material", "brand", "subtype", "color_hex", "color_name", "color_hex_2", "color_hex_3", "color_scheme",
                "label_weight_g", "remaining_g", "empty_spool_weight_g", "notes"}
     updates = {k: v for k, v in fields.items() if k in allowed}
     if "color_scheme" in updates:
         updates["color_scheme"] = _clean_spool_color_scheme(updates.get("color_scheme"))
+    for key in ("color_hex_2", "color_hex_3"):
+        if key in updates:
+            updates[key] = _clean_optional_hex(updates.get(key))
     if not updates:
         return False
     cols = ", ".join(f"{k} = ?" for k in updates)
@@ -2279,7 +2303,7 @@ def get_spool_intelligence(days: int = 30) -> dict:
         low_pct = float(threshold_row["value"]) if threshold_row else 20.0
 
         loaded_rows = conn.execute(
-            """SELECT id, material, brand, subtype, color_hex, color_name, color_scheme,
+            """SELECT id, material, brand, subtype, color_hex, color_name, color_hex_2, color_hex_3, color_scheme,
                       label_weight_g, remaining_g, location_printer_id, location_slot
                FROM spools
                WHERE archived_at IS NULL AND location_printer_id IS NOT NULL
@@ -2309,7 +2333,7 @@ def get_spool_intelligence(days: int = 30) -> dict:
         ).fetchall()
 
         spool_rows = conn.execute(
-            """SELECT id, material, brand, subtype, color_hex, color_name, color_scheme,
+            """SELECT id, material, brand, subtype, color_hex, color_name, color_hex_2, color_hex_3, color_scheme,
                       remaining_g, label_weight_g
                FROM spools"""
         ).fetchall()
@@ -2431,7 +2455,7 @@ def get_spools_by_printer(printer_id: str) -> dict:
     """Returns {slot_index: spool_dict} for active spools loaded on this printer."""
     with _conn() as conn:
         rows = conn.execute(
-            """SELECT id, material, brand, subtype, color_hex, color_name, color_scheme,
+            """SELECT id, material, brand, subtype, color_hex, color_name, color_hex_2, color_hex_3, color_scheme,
                       label_weight_g, remaining_g, location_slot, notes
                FROM spools
                WHERE location_printer_id = ? AND archived_at IS NULL""",
@@ -2443,7 +2467,7 @@ def get_spools_by_printer(printer_id: str) -> dict:
 def get_spool_at_slot(printer_id: str, slot: int) -> Optional[dict]:
     with _conn() as conn:
         row = conn.execute(
-            """SELECT id, material, brand, color_hex, color_name, color_scheme, remaining_g, label_weight_g
+            """SELECT id, material, brand, color_hex, color_name, color_hex_2, color_hex_3, color_scheme, remaining_g, label_weight_g
                FROM spools
                WHERE location_printer_id = ? AND location_slot = ? AND archived_at IS NULL""",
             (printer_id, slot),

@@ -1,5 +1,11 @@
 # Flightdeck — next session brief
-_Last updated 5 June 2026 (Session 28.173 Spool colour schemes)_
+_Last updated 5 June 2026 (Session 28.174 Multi-colour spool selection)_
+
+## What was built - Session 28.174 (Multi-colour spool selection - 5 June)
+- Added persisted secondary and tertiary spool colour fields (`color_hex_2`, `color_hex_3`) so Dual, Gradient, Tri-colour, and Mixed schemes can represent the actual filament colours.
+- The Add/Edit Spool modal now reveals second/third colour pickers only when the selected colour scheme needs them.
+- Spool cards, cabinet/table swatches, live chips, detail bands, location rows, and draft previews render saved multi-colour schemes from the extra colour fields.
+- Bumped static cache to `app.js?v=254`; backend restart required.
 
 ## What was built - Session 28.173 (Spool colour schemes - 5 June)
 - Added spool `color_scheme` metadata with Add/Edit support for Solid, Dual, Tri-colour, Rainbow, Gradient, and Mixed.
