@@ -9215,7 +9215,7 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
       body.querySelectorAll('[data-slot-spool-id]').forEach(row => {
         const search = row.dataset.search || '';
         if (!search) return;
-        row.classList.toggle('hidden', terms.length && !terms.every(term => search.includes(term)));
+        row.hidden = !!(terms.length && !terms.every(term => search.includes(term)));
       });
     });
 
