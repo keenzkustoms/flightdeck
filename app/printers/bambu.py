@@ -1355,7 +1355,12 @@ def _parse_ams(dump: dict) -> list[dict]:
         for tray_data in unit_data.get("tray", []):
             tray_id = int(tray_data.get("id", 0))
             tray_type = tray_data.get("tray_type", "")
-            empty = not tray_type
+            tray_state = tray_data.get("state")
+            try:
+                tray_state_int = int(tray_state)
+            except (TypeError, ValueError):
+                tray_state_int = None
+            empty = (not tray_type) and tray_state_int != 11
             profile_id = str(tray_data.get("tray_info_idx") or "")
             profile = _bambu_profile_for_idx(profile_id)
             brand = tray_data.get("tray_sub_brands", "") or profile.get("brand", "")
@@ -1376,7 +1381,7 @@ def _parse_ams(dump: dict) -> list[dict]:
                 "brand": brand,
                 "profile_id": profile_id,
                 "profile_name": profile_name,
-                "tray_state": tray_data.get("state"),
+                "tray_state": tray_state,
                 "active": active,
                 "empty": empty,
             })

@@ -260,7 +260,11 @@ def _reported_slot_is_stale_empty(slot: dict) -> bool:
         state_int = int(state)
     except (TypeError, ValueError):
         state_int = None
-    return bool(slot.get("empty")) or state_int in (9, 10)
+    if state_int == 11:
+        return False
+    if state_int in (9, 10):
+        return True
+    return bool(slot.get("empty"))
 
 
 def _reported_slot_is_generic(slot: dict) -> bool:
