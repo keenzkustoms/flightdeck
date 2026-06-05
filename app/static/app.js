@@ -2573,15 +2573,20 @@ function _detailLiveAmsLoadoutRows(p) {
           style="--slot-colour:${colour};--slot-text:${_spoolTextColor(colour)}"
           data-slot-edit data-printer-id="${p.id}" data-slot-index="${flatSlot}" data-slot-label="${esc(label)}"
           title="${esc(title)}">
-        <span class="ams-loadout-spool">
-          <span class="ams-loadout-core"></span>
+        <span class="ams-loadout-lip">
+          <b>${esc(label.split(' · ').pop() || label)}</b>
+          <small>${esc(stateLabel)}</small>
+        </span>
+        <span class="ams-loadout-spool" aria-hidden="true">
+          <span class="ams-loadout-rim"></span>
+          <span class="ams-loadout-core">${loadedSpool ? `#${loadedSpool.id}` : ''}</span>
+          <span class="ams-loadout-hub"></span>
         </span>
         <span class="ams-loadout-info">
-          <strong>${loadedSpool ? `#${loadedSpool.id}` : (slot.empty ? 'Empty' : 'Loaded')}</strong>
-          <em>${esc(loadedSpool ? `${loadedSpool.color_name || 'Colour'} · ${loadedSpool.material || ''}` : (slot.type || stateLabel))}</em>
+          <strong>${esc(loadedSpool ? (loadedSpool.color_name || 'Colour') : (slot.empty ? 'Empty' : 'Loaded'))}</strong>
+          <em>${esc(loadedSpool ? (loadedSpool.material || '') : (slot.type || stateLabel))}</em>
         </span>
         <span class="ams-loadout-foot">
-          <b>${esc(stateLabel)}</b>
           ${grams != null ? `<small>${grams}g${pct != null ? ` · ${pct}%` : ''}</small>` : '<small>—</small>'}
         </span>
       </button>`;
