@@ -2759,18 +2759,29 @@ function _detailFilamentRoute(p) {
         : _slotProfileLabel(slot) || slot.type || 'Loaded filament';
       const dest = _routeDestinationLabel(p, unit);
       const title = `${slotLabel} feeding ${dest}${spoolLabel ? ' · ' + spoolLabel : ''}`;
-      routes.push(`<div class="live-filament-route" style="--route-colour:${colour};--route-text:${textColour}" title="${esc(title)}">
-        <button class="live-route-node live-route-source" data-slot-edit data-printer-id="${p.id}" data-slot-index="${flatSlot}" data-slot-label="${esc(slotLabel)}">
-          <span class="live-route-swatch"></span>
-          <span><strong>${esc(slotLabel)}</strong><em>${esc(spoolLabel)}</em></span>
-          <b class="live-route-fed">Fed now</b>
-        </button>
-        <span class="live-route-line" aria-hidden="true"></span>
-        <span class="live-route-node live-route-destination">
-          <span class="live-route-nozzle" aria-hidden="true"></span>
-          <span><strong>${esc(dest)}</strong><em>Filament fed</em></span>
-        </span>
-      </div>`);
+      if (FLIGHTDECK_DEMO) {
+        routes.push(`<div class="demo-filament-route" style="--route-colour:${colour};--route-text:${textColour}" title="${esc(title)}">
+          <span class="demo-route-fed">Fed now</span>
+          <span class="demo-route-line" aria-hidden="true"></span>
+          <span class="live-route-node live-route-destination">
+            <span class="live-route-nozzle" aria-hidden="true"></span>
+            <span><strong>${esc(dest)}</strong><em>${esc(slotLabel)} · ${esc(spoolLabel)}</em></span>
+          </span>
+        </div>`);
+      } else {
+        routes.push(`<div class="live-filament-route" style="--route-colour:${colour};--route-text:${textColour}" title="${esc(title)}">
+          <button class="live-route-node live-route-source" data-slot-edit data-printer-id="${p.id}" data-slot-index="${flatSlot}" data-slot-label="${esc(slotLabel)}">
+            <span class="live-route-swatch"></span>
+            <span><strong>${esc(slotLabel)}</strong><em>${esc(spoolLabel)}</em></span>
+            <b class="live-route-fed">Fed now</b>
+          </button>
+          <span class="live-route-line" aria-hidden="true"></span>
+          <span class="live-route-node live-route-destination">
+            <span class="live-route-nozzle" aria-hidden="true"></span>
+            <span><strong>${esc(dest)}</strong><em>Filament fed</em></span>
+          </span>
+        </div>`);
+      }
     }
   }
 
@@ -2803,7 +2814,7 @@ function _detailFilamentRoute(p) {
 
   if (!routes.length) return '';
   return `<div class="live-environment-section live-route-section">
-    <span class="live-strip-label">Filament route</span>
+    ${FLIGHTDECK_DEMO ? '' : '<span class="live-strip-label">Filament route</span>'}
     <div class="live-route-list">${routes.join('')}</div>
   </div>`;
 }
