@@ -294,6 +294,7 @@ const _PRINT_MEMORY_TAGS = [
   'Maintenance',
   'First layer',
 ];
+const _PRINT_MEMORY_TAG_MAX = 96;
 
 function _normalisePrintTags(tags) {
   const seen = new Set();
@@ -328,7 +329,7 @@ function _showPrintMemoryMetadataEditor(print, onSaved) {
           </label>`).join('')}
       </div>
       <label class="memory-custom-label">Custom tags</label>
-      <input class="memory-custom-tags" type="text" placeholder="Comma separated" value="${esc(customTags)}">
+      <input class="memory-custom-tags" type="text" maxlength="${_PRINT_MEMORY_TAG_MAX}" placeholder="Comma separated" value="${esc(customTags)}">
       <label class="memory-exclude-choice">
         <input type="checkbox" class="memory-exclude-input"${print.exclude_from_stats ? ' checked' : ''}>
         <span>Exclude from reliability stats</span>

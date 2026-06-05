@@ -1173,7 +1173,7 @@ def update_print_memory_metadata(
             key = value.lower()
             if key in seen:
                 continue
-            clean_tags.append(value[:40])
+            clean_tags.append(value[:96])
             seen.add(key)
             if len(clean_tags) >= 12:
                 break

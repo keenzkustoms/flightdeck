@@ -1,5 +1,9 @@
 # Flightdeck — next session brief
-_Last updated 5 June 2026 (Session 28.168 AMS auto-load reconciliation)_
+_Last updated 5 June 2026 (Session 28.169 Print Memory tag length)_
+
+## What was fixed - Session 28.169 (Print Memory tag length - 5 June)
+- Raised Print Memory custom tag storage from 40 to 96 characters and added a matching browser input limit so long tags are not silently cut off after save.
+- Bumped static cache to `app.js?v=249`; backend restart required.
 
 ## What was built - Session 28.168 (AMS auto-load reconciliation - 5 June)
 - Tightened the existing AMS auto-claim path so printer-reported slots can infer material from profile names such as `Generic PLA` when the direct material field is missing.
