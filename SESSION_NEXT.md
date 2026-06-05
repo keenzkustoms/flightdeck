@@ -4,7 +4,9 @@ _Last updated 5 June 2026 (Session 28.181 Multi-colour spool deduction fix)_
 ## What was fixed - Session 28.181 (Multi-colour spool deduction fix - 5 June)
 - Fixed the Bambu multi-colour spool deduction path so it builds the persisted AMS slot snapshot before matching slicer colour/material usage to loaded spools.
 - Root cause for the finished H2D Macaw print not deducting filament: Flightdeck had captured the correct print-start slots (#48 red, #76 green, #61 blue), but the multi-colour attribution branch referenced `slot_snapshot` before it existed and exited before writing `spool_usage`.
-- The affected finished print still needs manual repair/reconciliation using slicer per-colour grams or re-weighed spool remaining values; do not guess the Macaw split unless the operator approves a rough allocation.
+- Repaired H2D print #121 from scale readings: #48 red 348g -> 220g, #76 green 378g -> 304g, and #61 blue corrected upward from 38g -> 64g because its captured start value was bad tare/inventory data.
+- Marked 85.31g as unallocated against the slicer total rather than charging it to the wrong roll; likely purge/waste, scale variance, or prior inventory drift.
+- Corrected known bad tares after repair: Bambu Lab #61 from 230g -> 256g, eSun #76 from 140g -> 224g. Inkstation #48 remains at 128g until a trusted tare is provided.
 - Backend restart required.
 
 ## What was fixed - Session 28.180 (Finished job live-detail cleanup - 5 June)
