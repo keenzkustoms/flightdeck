@@ -4187,6 +4187,19 @@ button.live-route-node:hover {
     0 0.35rem 0.8rem rgba(0,0,0,0.22);
 }
 
+.ams-loadout-slot::before {
+  content: '';
+  position: absolute;
+  right: 0.34rem;
+  top: 0.34rem;
+  z-index: 6;
+  width: 0.38rem;
+  height: 0.38rem;
+  border-radius: 999px;
+  background: #3b82f6;
+  box-shadow: 0 0 0 1px rgba(2,6,23,0.85), 0 0 0.55rem rgba(59,130,246,0.55);
+}
+
 .ams-loadout-slot:hover {
   border-color: color-mix(in srgb, var(--slot-colour) 70%, #60a5fa);
   transform: translateY(-1px);
@@ -4199,13 +4212,28 @@ button.live-route-node:hover {
     rgba(2,6,23,0.65);
 }
 
+.ams-loadout-slot.is-empty::before {
+  background: #334155;
+  box-shadow: 0 0 0 1px rgba(2,6,23,0.85);
+}
+
 .ams-loadout-slot.is-feeding {
   border-color: #22c55e;
   box-shadow: 0 0 0 1px rgba(34,197,94,0.32), 0 0 18px color-mix(in srgb, var(--slot-colour) 28%, transparent);
 }
 
+.ams-loadout-slot.is-feeding::before {
+  background: #22c55e;
+  box-shadow: 0 0 0 1px rgba(2,6,23,0.85), 0 0 0.75rem rgba(34,197,94,0.8);
+}
+
 .ams-loadout-slot.has-warning {
   border-color: #f59e0b;
+}
+
+.ams-loadout-slot.has-warning::before {
+  background: #f59e0b;
+  box-shadow: 0 0 0 1px rgba(2,6,23,0.85), 0 0 0.7rem rgba(245,158,11,0.75);
 }
 
 .ams-loadout-lip {
@@ -4248,8 +4276,8 @@ button.live-route-node:hover {
 }
 
 .ams-loadout-spool {
-  width: 44%;
-  height: 72%;
+  width: 38%;
+  height: 68%;
   border-radius: 999px;
   background:
     radial-gradient(ellipse at 50% 12%, rgba(2,6,23,0.9) 0 17%, transparent 18%),
@@ -4265,7 +4293,7 @@ button.live-route-node:hover {
   display: grid;
   place-items: center;
   position: absolute;
-  inset: 14% auto auto 28%;
+  inset: 16% auto auto 31%;
   box-shadow:
     inset 0 0.35rem 0.45rem rgba(255,255,255,0.16),
     inset 0 -0.45rem 0.7rem rgba(2,6,23,0.4),
@@ -4382,7 +4410,7 @@ button.live-route-node:hover {
   }
 
   .ams-loadout-spool {
-    width: 44%;
+    width: 38%;
   }
 
   .ams-loadout-info em {
