@@ -1786,6 +1786,40 @@ function _detailTransportControls(id, p) {
   </div>`;
 }
 
+function _preheatPresets(p) {
+  const presets = p.temperature_presets || {};
+  const hotend = Object.fromEntries((presets.hotend || []).map(row => [row.label, row.value]));
+  const bed = Object.fromEntries((presets.bed || []).map(row => [row.label, row.value]));
+  return Object.keys(hotend)
+    .filter(label => bed[label] != null)
+    .slice(0, 5)
+    .map(label => ({ label, hotend: Number(hotend[label]), bed: Number(bed[label]) }))
+    .filter(row => Number.isFinite(row.hotend) && Number.isFinite(row.bed));
+}
+
+function _detailLiveOps(p) {
+  const canPreheat = !['offline', 'printing', 'error', 'estop'].includes(p.state || '');
+  const presets = _preheatPresets(p);
+  const preheatButtons = presets.map(row => `<button class="live-op-btn" type="button"
+      data-preheat data-printer-id="${esc(p.id)}" data-material="${esc(row.label)}"
+      data-hotend="${row.hotend}" data-bed="${row.bed}" ${canPreheat ? '' : 'disabled'}>
+      <span>${esc(row.label)}</span><small>${row.hotend}/${row.bed}°</small>
+    </button>`).join('');
+  const cooldown = `<button class="live-op-btn live-op-muted" type="button"
+      data-preheat data-printer-id="${esc(p.id)}" data-material="Cooldown"
+      data-hotend="0" data-bed="0" ${canPreheat ? '' : 'disabled'}>
+      <span>Cool</span><small>0/0°</small>
+    </button>`;
+  const klipper = p.kind === 'moonraker' && p.klipper_ui_url
+    ? `<a class="live-op-btn live-op-link" href="${esc(p.klipper_ui_url)}" target="_blank" rel="noreferrer">
+        <span>Klipper</span><small>Mainsail / Fluidd</small>
+      </a>`
+    : '';
+  const controls = [preheatButtons, presets.length ? cooldown : '', klipper].filter(Boolean).join('');
+  if (!controls) return '';
+  return `<div class="live-op-row" aria-label="Live printer shortcuts">${controls}</div>`;
+}
+
 function _updateControlsWidget(id) {
   const p = _latestPrinters.find(x => x.id === id);
   const el = document.querySelector('.detail-controls-wrap');
@@ -1924,7 +1958,31 @@ document.getElementById('view-printer').addEventListener('click', e => {
   if (tempBtn) {
     const { tempAction, heater, printerId: id, target } = tempBtn.dataset;
     const current = parseInt(target, 10) || 0;
-    sendTempSet(id, heater, tempAction === 'dec' ? Math.max(0, current - 5) : current + 5);
+    sendTempSet(id, heater, tempAction === 'dec' ? Math.max(0, current - 5) : current + 5)
+      .catch(err => showToast('Temperature command failed', err.message || '', 'error'));
+    return;
+  }
+
+  const preheatBtn = e.target.closest('[data-preheat]');
+  if (preheatBtn && !preheatBtn.disabled) {
+    const id = preheatBtn.dataset.printerId;
+    const material = preheatBtn.dataset.material || 'Preheat';
+    const hotend = Number(preheatBtn.dataset.hotend || 0);
+    const bed = Number(preheatBtn.dataset.bed || 0);
+    const old = preheatBtn.innerHTML;
+    preheatBtn.disabled = true;
+    preheatBtn.innerHTML = `<span>Sending</span><small>${hotend}/${bed}°</small>`;
+    Promise.all([
+      sendTempSet(id, 'hotend', hotend),
+      sendTempSet(id, 'bed', bed),
+    ]).then(() => {
+      showToast(material === 'Cooldown' ? 'Cooldown sent' : `${material} preheat sent`, `Hotend ${hotend}° · Bed ${bed}°`, 'success');
+    }).catch(err => {
+      showToast('Preheat failed', err.message || '', 'error');
+    }).finally(() => {
+      preheatBtn.disabled = false;
+      preheatBtn.innerHTML = old;
+    });
     return;
   }
 
@@ -2470,6 +2528,7 @@ function _detailLiveHeader(p, printerColor, bannerTextColor) {
       </label>
     </div>
     ${_detailTransportControls(p.id, p)}
+    ${_detailLiveOps(p)}
     ${disabledNote ? `<div class="live-lockout-note">
       <strong>Dispatch locked</strong>
       <span>${esc(disabledNote)}</span>
@@ -3046,13 +3105,18 @@ async function sendTempSet(id, heater, target) {
   if (tempsEl && p) tempsEl.innerHTML = _detailTempsPanel(p);
 
   try {
-    await fetch(`/api/printers/${id}/set-temp`, {
+    const resp = await fetch(`/api/printers/${id}/set-temp`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ heater, target: clampedTarget }),
     });
-  } catch {
+    if (!resp.ok) {
+      const data = await resp.json().catch(() => ({}));
+      throw new Error(data.detail || 'Temperature command failed');
+    }
+  } catch (err) {
     delete _tempOptimistic[`${id}:${heater}`];
+    throw err instanceof Error ? err : new Error('Temperature command failed');
   }
 }
 

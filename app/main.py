@@ -103,6 +103,8 @@ async def _gather_all_locked() -> list[dict]:
             d["eta_calibration"] = cal
         d["health"] = db.get_printer_health(id)
         d["_error_print_id"] = moonraker._error_print_id.get(id)
+        parsed = urllib.parse.urlparse(url)
+        d["klipper_ui_url"] = f"{parsed.scheme or 'http'}://{parsed.hostname}" if parsed.hostname else url
         return d
 
     async def _fetch_bambu(p):
