@@ -30,8 +30,8 @@ if (-not (Test-Path (Join-Path $VenvDir "Scripts\python.exe"))) {
 
 $VenvPython = Join-Path $VenvDir "Scripts\python.exe"
 $VenvPythonw = Join-Path $VenvDir "Scripts\pythonw.exe"
-& $VenvPython -m pip install --upgrade pip
-& $VenvPython -m pip install -r (Join-Path $AppDir "requirements-windows.txt")
+& $VenvPython -m pip install --no-cache-dir --upgrade pip
+& $VenvPython -m pip install --no-cache-dir -r (Join-Path $AppDir "requirements-windows.txt")
 
 $EnvPath = Join-Path $AppDir ".env"
 $envLines = @(
