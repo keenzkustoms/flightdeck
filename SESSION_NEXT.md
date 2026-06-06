@@ -1,5 +1,11 @@
 # Flightdeck — next session brief
-_Last updated 6 June 2026 (Session 28.197 Colour name aliases)_
+_Last updated 6 June 2026 (Session 28.198 Live AMS visual loadout)_
+
+## What was added - Session 28.198 (Live AMS visual loadout - 6 June)
+- Real Bambu live pages now use the graphical AMS loadout deck from the demo instead of the compact AMS pill rows.
+- AMS slot editing still works by clicking a visual slot card.
+- AMS drying controls were preserved inside the new visual AMS header.
+- Bumped static cache to `app.js?v=301` and `style.css?v=237`; frontend refresh required.
 
 ## What was added - Session 28.197 (Colour name aliases - 6 June)
 - Colour name entry now includes browser autocomplete suggestions for common colour names.

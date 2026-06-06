@@ -4419,6 +4419,14 @@ button.live-route-node:hover {
   font-size: 0.66rem;
 }
 
+.ams-loadout-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
 .ams-loadout-slots {
   position: relative;
   display: grid;

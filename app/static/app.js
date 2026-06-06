@@ -2586,9 +2586,12 @@ function _detailLiveSpoolChips(p) {
 
 function _detailLiveAmsRows(p) {
   if (!p.ams?.length) return '';
-  if (FLIGHTDECK_DEMO) return _detailLiveAmsLoadoutRows(p);
+  return _detailLiveAmsLoadoutRows(p);
+}
+
+function _detailLiveAmsLoadoutRows(p) {
   const loaded = _latestSpoolsByPrinter[p.id] || [];
-  return p.ams.map(unit => {
+  const units = p.ams.map(unit => {
     const drying = !!unit.drying;
     const preset = unit.dry_setting || {};
     const dryTime = unit.dry_time ? formatEta(unit.dry_time * 60) : '';
@@ -2596,56 +2599,13 @@ function _detailLiveAmsRows(p) {
       unit.humidity != null ? `${unit.humidity}% RH` : '',
       unit.temperature != null ? `${Math.round(unit.temperature)}°` : '',
       preset.filament && preset.temperature > 0 ? `${preset.filament} ${preset.temperature}°` : '',
-      drying && dryTime ? `${dryTime} left` : '',
+      drying && dryTime ? `${dryTime} left` : drying ? 'Drying' : '',
     ].filter(Boolean).join(' · ');
     const dryControl = unit.dry_capable
       ? `<button class="live-ams-dry${drying ? ' live-ams-dry-active' : ''}"
           data-ams-dry data-printer-id="${p.id}" data-ams-id="${unit.unit}" data-enabled="${drying ? 'false' : 'true'}"
           title="${drying ? 'Stop AMS drying' : 'Start AMS drying'}">${drying ? 'Stop' : 'Dry'}</button>`
       : '';
-    const slots = (unit.slots || []).map(slot => {
-      const flatSlot = unit.unit * 4 + slot.idx;
-      const loadedSpool = loaded.find(s => Number(s.location_slot) === flatSlot);
-      const mismatch = _slotMismatch(loadedSpool, slot);
-      const style = (!slot.empty && slot.color) ? `style="background:${slot.color}"` : '';
-      const slotLabel = _amsSlotLabel(p, flatSlot);
-      const slotText = loadedSpool
-        ? `#${loadedSpool.id}`
-        : (slot.empty ? 'Empty' : (slot.type || slotLabel));
-      const printerReport = _slotProfileLabel(slot);
-      const title = [
-        slotLabel,
-        loadedSpool ? [loadedSpool.color_name, loadedSpool.material, loadedSpool.brand, `${Math.round(Number(loadedSpool.remaining_g || 0))}g`].filter(Boolean).join(' · ') : '',
-        !slot.empty ? printerReport : '',
-        _slotRouteActive(p, unit, slot) ? 'Fed now' : '',
-        mismatch,
-      ].filter(Boolean).join(' · ');
-      return `<button class="live-ams-slot${slot.empty ? ' live-ams-slot-empty' : ''}${loadedSpool ? ' live-ams-slot-loaded' : ''}${_slotRouteActive(p, unit, slot) ? ' live-ams-slot-active' : ''}${mismatch ? ' live-ams-slot-warning' : ''}"
-        ${style} data-slot-edit data-printer-id="${p.id}" data-slot-index="${flatSlot}" data-slot-label="${esc(slotLabel)}"
-        title="${esc(title)}">
-        <span>${esc(slotText)}</span>
-      </button>`;
-    }).join('');
-    return `<div class="live-ams-row">
-      <div class="live-ams-head">
-        <strong>${esc(unit.label ?? `AMS ${unit.unit + 1}`)}</strong>
-        ${meta ? `<span>${esc(meta)}</span>` : ''}
-        ${dryControl}
-      </div>
-      <div class="live-ams-slots">${slots}</div>
-    </div>`;
-  }).join('');
-}
-
-function _detailLiveAmsLoadoutRows(p) {
-  const loaded = _latestSpoolsByPrinter[p.id] || [];
-  const units = p.ams.map(unit => {
-    const drying = !!unit.drying;
-    const meta = [
-      unit.humidity != null ? `${unit.humidity}% RH` : '',
-      unit.temperature != null ? `${Math.round(unit.temperature)}°` : '',
-      drying ? 'Drying' : '',
-    ].filter(Boolean).join(' · ');
     const slots = (unit.slots || []).map(slot => {
       const flatSlot = unit.unit * 4 + slot.idx;
       const loadedSpool = loaded.find(s => Number(s.location_slot) === flatSlot);
@@ -2694,7 +2654,10 @@ function _detailLiveAmsLoadoutRows(p) {
           <strong>${esc(unit.label ?? `AMS ${unit.unit + 1}`)}</strong>
           ${meta ? `<span>${esc(meta)}</span>` : ''}
         </div>
-        <small>${_isAmsHtUnit(unit) ? 'High-temp bay' : `${(unit.slots || []).length} slot loadout`}</small>
+        <div class="ams-loadout-actions">
+          <small>${_isAmsHtUnit(unit) ? 'High-temp bay' : `${(unit.slots || []).length} slot loadout`}</small>
+          ${dryControl}
+        </div>
       </div>
       <div class="ams-loadout-slots">${slots}</div>
     </div>`;
