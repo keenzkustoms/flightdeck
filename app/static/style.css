@@ -7983,12 +7983,14 @@ button.live-route-node:hover {
 
 .settings-content {
   flex: 1;
-  overflow-y: visible;
+  min-height: 0;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
-  padding-bottom: 2rem;
+  padding: 0 0.15rem 2rem 0;
   min-width: 0;
+  overscroll-behavior: contain;
 }
 
 .settings-content.settings-content-spools {
@@ -9527,9 +9529,10 @@ select.settings-input { cursor: pointer; }
 .spool-modal {
   max-width: min(94vw, 980px);
   width: min(94vw, 980px);
-  max-height: 90vh;
+  max-height: min(92dvh, 900px);
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .spool-modal .hidden {
@@ -9539,8 +9542,9 @@ select.settings-input { cursor: pointer; }
 .spool-modal-form {
   flex: 1;
   min-height: 0;
-  overflow: hidden;
-  padding: 0.25rem 0 0.5rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0.25rem 0.35rem 0.5rem 0;
   display: grid;
   grid-template-columns: minmax(22rem, 1.2fr) minmax(23rem, 0.9fr);
   align-items: start;
@@ -9560,13 +9564,13 @@ select.settings-input { cursor: pointer; }
   display: block;
   position: sticky;
   top: 0;
-  max-height: calc(90vh - 8.8rem);
+  max-height: calc(min(92dvh, 900px) - 8.8rem);
   min-height: 0;
   overflow: hidden;
 }
 
 .spool-catalogue-row .spool-catalogue-block {
-  max-height: calc(90vh - 8.8rem);
+  max-height: calc(min(92dvh, 900px) - 8.8rem);
   grid-template-rows: auto auto auto auto minmax(0, 1fr);
 }
 
