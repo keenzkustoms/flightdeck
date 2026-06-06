@@ -1,6 +1,7 @@
 param(
     [string]$DataDir = "$env:LOCALAPPDATA\Flightdeck",
     [int]$Port = 8000,
+    [string]$PythonCommand = "python",
     [switch]$NoStartup,
     [switch]$NoDesktopShortcut
 )
@@ -9,7 +10,12 @@ $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $AppDir = (Resolve-Path (Join-Path $ScriptDir "..\..")).Path
 $VenvDir = Join-Path $AppDir ".venv"
-$Python = "python"
+$PythonArgs = $PythonCommand -split "\s+"
+$Python = $PythonArgs[0]
+$PythonExtraArgs = @()
+if ($PythonArgs.Length -gt 1) {
+    $PythonExtraArgs = $PythonArgs[1..($PythonArgs.Length - 1)]
+}
 
 Write-Host "== Flightdeck Windows install =="
 Write-Host "App dir:  $AppDir"
@@ -19,7 +25,7 @@ Write-Host "Port:     $Port"
 New-Item -ItemType Directory -Force -Path $DataDir, (Join-Path $DataDir "uploads"), (Join-Path $DataDir "print_library"), (Join-Path $DataDir "logs") | Out-Null
 
 if (-not (Test-Path (Join-Path $VenvDir "Scripts\python.exe"))) {
-    & $Python -m venv $VenvDir
+    & $Python @PythonExtraArgs -m venv $VenvDir
 }
 
 $VenvPython = Join-Path $VenvDir "Scripts\python.exe"

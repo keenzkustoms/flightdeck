@@ -1,5 +1,11 @@
 # Flightdeck — next session brief
-_Last updated 6 June 2026 (Session 28.198 Live AMS visual loadout)_
+_Last updated 6 June 2026 (Session 28.199 Windows bootstrap installer)_
+
+## What was added - Session 28.199 (Windows bootstrap installer - 6 June)
+- Added `Install-Flightdeck-Windows.cmd` at the repo root as the double-click Windows installer entry point.
+- Added `scripts/windows/bootstrap-install.ps1` to unblock downloaded files, check Python/Git, install missing dependencies through `winget` when available, run the real installer, and start the tray app.
+- Updated `install-windows.ps1` so the bootstrap can pass a discovered Python command such as `py -3`.
+- Updated README and INSTALL with the double-click Windows install flow.
 
 ## What was added - Session 28.198 (Live AMS visual loadout - 6 June)
 - Real Bambu live pages now use the graphical AMS loadout deck from the demo instead of the compact AMS pill rows.

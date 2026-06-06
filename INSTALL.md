@@ -58,14 +58,20 @@ Flightdeck can also run on Windows as a quiet per-user tray app. It starts at lo
 Requirements:
 
 - Windows 10 or 11.
-- Python 3.11 or newer installed and available as `python`.
-- Git, or a downloaded copy of this repository.
+- A downloaded copy of this repository, or a Git clone.
 
-From PowerShell inside the Flightdeck checkout:
+Easy install:
+
+1. Download or clone Flightdeck.
+2. Open the Flightdeck folder.
+3. Double-click `Install-Flightdeck-Windows.cmd`.
+
+The bootstrap checks for Python and Git. If either is missing and `winget` is available, it asks Windows to install them. If Windows SmartScreen warns because the installer is not digitally signed yet, choose **More info -> Run anyway**.
+
+PowerShell install, if you prefer running it manually:
 
 ```powershell
-Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
-.\scripts\windows\install-windows.ps1
+.\scripts\windows\bootstrap-install.ps1
 ```
 
 The installer creates:
