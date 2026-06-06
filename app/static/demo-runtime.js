@@ -400,6 +400,14 @@
     if (path === '/api/files') return jsonResponse(filesDemo());
     if (path === '/api/files/reprints') return jsonResponse([]);
     if (path === '/api/files/queue' || path === '/api/files/library/copy') return jsonResponse({ ok: true, demo: true });
+    if (path === '/api/slicer/plan') return jsonResponse({
+      ok: true,
+      ready: false,
+      message: 'Set the OrcaSlicer Docker URL in Settings -> Slicer before Flightdeck can slice this model.',
+      source: { filename: 'HULA_H2D_feet.stl', kind: 'stl', size: 2400000 },
+      target: { id: 'h2d', kind: 'bambu', model_name: 'H2D', custom_name: 'BigBoy' },
+      output: { filename: 'HULA_H2D_feet_h2d.gcode.3mf', kind: 'gcode.3mf' },
+    });
     if (path.match(/^\/api\/files\/bambu\/[^/]+\/clear$/)) return jsonResponse({ ok: true, demo: true });
     if (path === '/api/queue') return jsonResponse(clone(demoQueue));
     if (path === '/api/queue/summary') return jsonResponse({ h2d: 1, x1c: 1 });
@@ -463,7 +471,7 @@
     return {
       library_path: '/demo/print-vault',
       targets: [
-        fileTarget('library', 'Print Vault', '', 'library', [file('can_openerV2.3mf', '3mf', 14200000), file('orca_cube_abs.gcode', 'gcode', 420000)]),
+        fileTarget('library', 'Print Vault', '', 'library', [file('HULA_H2D_feet.stl', 'stl', 2400000), file('can_openerV2.3mf', '3mf', 14200000), file('orca_cube_abs.gcode', 'gcode', 420000)]),
         fileTarget('greyhound', 'Greyhound Elite V2', 'Voron 2.4 350', 'moonraker', [file('orca_cube_abs.gcode', 'gcode', 420000), file('voron_panel_clip.gcode', 'gcode', 2100000)]),
         fileTarget('x1c', 'Greyhound Ludicrous', 'X1C', 'bambu', [file('tabby_cat_3d_model.gcode.3mf'), file('build-tower-2x4.gcode.3mf')]),
         fileTarget('h2d', 'BigBoy', 'H2D', 'bambu', [file('can_openerV2.gcode.3mf'), file('bed_scraper_multi_8h1m.gcode.3mf'), file('abbys_dog.gcode.3mf')]),

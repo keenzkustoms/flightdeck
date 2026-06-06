@@ -5192,31 +5192,56 @@ function _fileKindClass(kind) {
   return String(kind || 'file').replace(/[^a-z0-9_-]/gi, '-').toLowerCase();
 }
 
-function _fileCompatiblePrinters(file) {
+function _fileIsSourceModel(file) {
   const name = String(file?.name || file?.path || '').toLowerCase();
-  const isBambu = name.endsWith('.3mf') || name.endsWith('.gcode.3mf');
+  return name.endsWith('.stl') || name.endsWith('.obj') || name.endsWith('.step') || name.endsWith('.stp') ||
+    (name.endsWith('.3mf') && !name.endsWith('.gcode.3mf'));
+}
+
+function _fileIsSlicedJob(file) {
+  const name = String(file?.name || file?.path || '').toLowerCase();
+  return name.endsWith('.gcode.3mf') || name.endsWith('.gcode') || name.endsWith('.gcode.gz') || name.endsWith('.ufp');
+}
+
+function _fileCompatiblePrinters(file, sourceTarget = null) {
+  if (_fileIsSourceModel(file)) return _latestPrinters.slice();
+  const name = String(file?.name || file?.path || '').toLowerCase();
+  const isBambu = name.endsWith('.gcode.3mf') || name.endsWith('.3mf');
   const isMoonraker = name.endsWith('.gcode') || name.endsWith('.gcode.gz') || name.endsWith('.ufp');
-  return _latestPrinters.filter(p =>
+  let printers = _latestPrinters.filter(p =>
     (p.kind === 'bambu' && isBambu) || (p.kind === 'moonraker' && isMoonraker)
   );
+  if (sourceTarget && sourceTarget.id !== 'library') {
+    printers = printers.filter(p => p.id === sourceTarget.id);
+  }
+  return printers;
+}
+
+function _filePrintablePrinters(file, sourceTarget = null) {
+  if (_fileIsSourceModel(file)) return [];
+  return _fileCompatiblePrinters(file, sourceTarget);
+}
+
+function _fileSliceTargets(file) {
+  return _fileIsSourceModel(file) ? _latestPrinters.slice() : [];
 }
 
 function _printBaySourceSummary(target, files) {
   const totalBytes = files.reduce((sum, f) => sum + (Number(f.size) || 0), 0);
   const compatible = new Set();
-  files.forEach(f => _fileCompatiblePrinters(f).forEach(p => compatible.add(p.id)));
+  files.forEach(f => _fileCompatiblePrinters(f, target).forEach(p => compatible.add(p.id)));
   return {
     count: files.length,
     size: totalBytes,
     compatible: compatible.size,
     vaulted: files.filter(f => f.in_vault).length,
-    ready: files.filter(f => _fileCompatiblePrinters(f).some(p => p.state === 'idle' || p.state === 'finished')).length,
+    ready: files.filter(f => _fileCompatiblePrinters(f, target).some(p => p.state === 'idle' || p.state === 'finished')).length,
   };
 }
 
 function _printBayOverview(targets) {
   const sourceSummaries = (targets || []).map(t => {
-    const files = (t.files || []).filter(f => f.kind !== 'dir' && _fileCompatiblePrinters(f).length);
+    const files = (t.files || []).filter(f => f.kind !== 'dir' && _fileCompatiblePrinters(f, t).length);
     return { target: t, files, summary: _printBaySourceSummary(t, files) };
   });
   const allFiles = sourceSummaries.reduce((sum, s) => sum + s.summary.count, 0);
@@ -5265,7 +5290,7 @@ function _printBayFindMatch(print, targets) {
     for (const file of target.files || []) {
       if (file.kind === 'dir') continue;
       if (!keys.has(_printBayFileKey(file.path || file.name))) continue;
-      if (!_fileCompatiblePrinters(file).length) continue;
+      if (!_filePrintablePrinters(file, target).length) continue;
       return { target, file, path: file.path || file.name };
     }
   }
@@ -5351,13 +5376,15 @@ function _fileDeskTargetHtml(target, options = {}) {
   const directQueue = !!options.directQueue && !!targetPrinterId;
   const files = (target.files || []).filter(f => {
     if (f.kind === 'dir') return false;
-    const printers = _fileCompatiblePrinters(f);
+    const printers = _fileCompatiblePrinters(f, target);
     return targetPrinterId ? printers.some(p => p.id === targetPrinterId) : printers.length;
   });
   const summary = _printBaySourceSummary(target, files);
   const rows = files.length ? files.map(f => {
     const path = esc(f.path || f.name);
-    const printers = _fileCompatiblePrinters(f);
+    const printers = _fileCompatiblePrinters(f, target);
+    const printable = _filePrintablePrinters(f, target);
+    const isSource = _fileIsSourceModel(f);
     const ready = printers.filter(p => p.state === 'idle' || p.state === 'finished');
     const printerChips = printers.slice(0, 4).map(p => `<span class="filedesk-printer-chip${ready.some(r => r.id === p.id) ? ' filedesk-printer-ready' : ''}">${esc(p.model_name || p.custom_name || p.id)}</span>`).join('');
     const more = printers.length > 4 ? `<span class="filedesk-printer-chip">+${printers.length - 4}</span>` : '';
@@ -5381,7 +5408,9 @@ function _fileDeskTargetHtml(target, options = {}) {
       <div class="filedesk-compat">
         ${printerChips}${more}
       </div>
-      <button class="filedesk-action-btn filedesk-queue-primary" data-file-action="queue" data-source-id="${esc(target.id)}" data-path="${path}" ${directQueue ? `data-target-printer="${esc(targetPrinterId)}"` : ''}>Queue</button>
+      ${isSource
+        ? `<button class="filedesk-action-btn filedesk-slice-primary" data-file-action="slice" data-source-id="${esc(target.id)}" data-path="${path}" ${targetPrinterId ? `data-target-printer="${esc(targetPrinterId)}"` : ''}>Slice</button>`
+        : `<button class="filedesk-action-btn filedesk-queue-primary" data-file-action="queue" data-source-id="${esc(target.id)}" data-path="${path}" ${directQueue ? `data-target-printer="${esc(targetPrinterId)}"` : ''} ${printable.length ? '' : 'disabled'}>Queue</button>`}
     </article>`;
   }).join('') : `<div class="filedesk-empty">${target.error ? esc(target.error) : 'No printable files found.'}</div>`;
   const formatNote = target.actions?.format_sd
@@ -5447,7 +5476,7 @@ async function renderFileDeskView() {
     _fileDeskTargets = data.targets || [];
     const vaultTargets = _fileDeskTargets.filter(t => t.id === 'library');
     const printerTargets = _fileDeskTargets.filter(t => t.id !== 'library');
-    const vaultCount = vaultTargets.reduce((sum, t) => sum + (t.files || []).filter(f => f.kind !== 'dir' && _fileCompatiblePrinters(f).length).length, 0);
+    const vaultCount = vaultTargets.reduce((sum, t) => sum + (t.files || []).filter(f => f.kind !== 'dir' && _fileCompatiblePrinters(f, t).length).length, 0);
     const html = `<div class="filedesk-shell">
       <section class="filedesk-hero">
         <div>
@@ -5508,10 +5537,10 @@ async function _renderPrinterBayBody(printerId) {
     const vaultTargets = _fileDeskTargets.filter(t => t.id === 'library');
     const recent = (reprints.items || []).filter(p => p.printer_id === printerId);
     const vaultFiles = vaultTargets.reduce((sum, t) => sum + (t.files || []).filter(f =>
-      f.kind !== 'dir' && _fileCompatiblePrinters(f).some(p => p.id === printerId)
+      f.kind !== 'dir' && _fileCompatiblePrinters(f, t).some(p => p.id === printerId)
     ).length, 0);
     const printerFileCount = printerTarget
-      ? (printerTarget.files || []).filter(f => f.kind !== 'dir' && _fileCompatiblePrinters(f).some(p => p.id === printerId)).length
+      ? (printerTarget.files || []).filter(f => f.kind !== 'dir' && _fileCompatiblePrinters(f, printerTarget).some(p => p.id === printerId)).length
       : 0;
     el.innerHTML = `<div class="printer-bay-shell">
       <section class="printer-bay-hero">
@@ -5566,6 +5595,20 @@ function _attachFileDeskEvents(el) {
       const printers = _fileCompatiblePrinters(file);
       if (!printers.length) return;
       _openFileQueueDialog({ sourceId, path, file, printers });
+    });
+  });
+  el.querySelectorAll('[data-file-action="slice"]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const sourceId = btn.dataset.sourceId;
+      const path = btn.dataset.path;
+      const targetPrinter = btn.dataset.targetPrinter;
+      const target = _fileDeskTargets.find(t => t.id === sourceId);
+      const file = (target?.files || []).find(f => (f.path || f.name) === path);
+      const printers = targetPrinter
+        ? _latestPrinters.filter(p => p.id === targetPrinter)
+        : _fileSliceTargets(file);
+      if (!printers.length) return;
+      _openSliceModelDialog({ sourceId, path, file, printers });
     });
   });
   el.querySelectorAll('[data-file-action="clear-sd"]').forEach(btn => {
@@ -8801,6 +8844,79 @@ function _setupReadinessTile(label, value, detail, cls = 'ok') {
     <strong>${esc(value)}</strong>
     <small>${esc(detail)}</small>
   </div>`;
+}
+
+function _openSliceModelDialog({ sourceId, path, file, printers }) {
+  document.querySelector('.filedesk-slice-dialog')?.remove();
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay filedesk-slice-dialog';
+  overlay.innerHTML = `
+    <div class="modal-box filedesk-queue-box filedesk-slice-box" role="dialog" aria-modal="true" aria-label="Slice model">
+      <div class="filedesk-queue-head">
+        <div>
+          <div class="mission-eyebrow">Slice Model</div>
+          <h3>${esc(file?.name || path || 'Model')}</h3>
+          <span>${esc(path || '')}</span>
+        </div>
+        <button class="filedesk-dialog-close" data-dialog-close aria-label="Close">x</button>
+      </div>
+      <div class="filedesk-queue-options">
+        ${printers.map(p => `<button class="filedesk-printer-choice" data-printer-id="${esc(p.id)}">
+          <strong>${esc(p.custom_name || p.model_name || p.id)}</strong>
+          <span>${esc([p.model_name, p.kind].filter(Boolean).join(' · '))}</span>
+        </button>`).join('')}
+      </div>
+      <label class="filedesk-slice-toggle">
+        <input type="checkbox" id="slice-all-plates">
+        Slice all plates
+      </label>
+      <div class="filedesk-dialog-error" id="slice-plan-result" hidden></div>
+      <div class="settings-hint">Source models are portable. Flightdeck will create a printer-specific sliced job before queueing or sending it.</div>
+      <div class="modal-actions">
+        <button class="modal-btn" data-dialog-close>Close</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  overlay.addEventListener('click', async e => {
+    if (e.target === overlay || e.target.closest('[data-dialog-close]')) {
+      close();
+      return;
+    }
+    const choice = e.target.closest('[data-printer-id]');
+    if (!choice) return;
+    const errEl = overlay.querySelector('#slice-plan-result');
+    overlay.querySelectorAll('.filedesk-printer-choice').forEach(b => { b.disabled = true; });
+    choice.classList.add('is-working');
+    choice.querySelector('span').textContent = 'Preparing slice plan...';
+    try {
+      const r = await fetch('/api/slicer/plan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          source_id: sourceId,
+          path,
+          printer_id: choice.dataset.printerId,
+          plate: 'auto',
+          all_plates: !!overlay.querySelector('#slice-all-plates')?.checked,
+        }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.detail || 'Unable to prepare slice');
+      errEl.hidden = false;
+      errEl.textContent = data.ready
+        ? `${data.output?.filename || 'Sliced output'} will be created by the slicer sidecar.`
+        : data.message || 'Set the OrcaSlicer Docker URL in Settings -> Slicer first.';
+      errEl.classList.toggle('filedesk-dialog-ok', !!data.ready);
+      showToast(data.ready ? 'Slice plan ready' : 'Slicer not configured', data.message || '', data.ready ? 'success' : 'warning');
+    } catch (err) {
+      errEl.textContent = err.message || 'Unable to prepare slice';
+      errEl.hidden = false;
+    } finally {
+      choice.classList.remove('is-working');
+      overlay.querySelectorAll('.filedesk-printer-choice').forEach(b => { b.disabled = false; });
+    }
+  });
 }
 
 function _setupVersionHtml(version) {

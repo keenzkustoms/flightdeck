@@ -831,6 +831,14 @@ class FileDeskDeleteRequest(FileDeskPathRequest):
     confirm: str = ""
 
 
+class SlicePlanRequest(BaseModel):
+    source_id: str
+    path: str
+    printer_id: str
+    plate: str = "auto"
+    all_plates: bool = False
+
+
 class BambuSdClearRequest(BaseModel):
     confirm: str = ""
 
@@ -869,8 +877,16 @@ def healthz():
 
 def _file_kind(name: str) -> str:
     lower = name.lower()
-    if lower.endswith(".gcode.3mf") or lower.endswith(".3mf"):
+    if lower.endswith(".gcode.3mf"):
+        return "gcode.3mf"
+    if lower.endswith(".3mf"):
         return "3mf"
+    if lower.endswith(".stl"):
+        return "stl"
+    if lower.endswith(".step") or lower.endswith(".stp"):
+        return "step"
+    if lower.endswith(".obj"):
+        return "obj"
     if lower.endswith(".gcode.gz"):
         return "gcode.gz"
     if lower.endswith(".gcode"):
@@ -1000,13 +1016,17 @@ async def _delete_moonraker_file(base_url: str, path: str) -> None:
 
 
 def _queue_file_extension(filename: str) -> str:
-    if filename.endswith(".gcode.3mf"):
+    name = filename.lower()
+    if name.endswith(".gcode.3mf"):
         return ".3mf"
-    if filename.endswith(".gcode.gz"):
+    if name.endswith(".gcode.gz"):
         return ".gcode.gz"
-    if "." in filename:
-        return "." + filename.rsplit(".", 1)[-1]
+    if "." in name:
+        return "." + name.rsplit(".", 1)[-1]
     return ""
+
+
+_SOURCE_MODEL_EXT = {".stl", ".3mf", ".obj", ".step", ".stp"}
 
 
 _GCODE_METADATA_LINES = 5000
@@ -1125,7 +1145,7 @@ async def _read_file_desk_source(source_id: str, source_path: str) -> tuple[str,
         raise HTTPException(status_code=422, detail="File path required")
     filename = source_path.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
     ext = _queue_file_extension(filename)
-    if ext not in (_ALLOWED_BAMBU_EXT | _ALLOWED_MOONRAKER_EXT):
+    if ext not in (_ALLOWED_BAMBU_EXT | _ALLOWED_MOONRAKER_EXT | _SOURCE_MODEL_EXT):
         raise HTTPException(status_code=422, detail="Unsupported file type")
 
     if source_id == "library":
@@ -1324,6 +1344,56 @@ async def copy_file_to_library(body: FileDeskPathRequest):
     }
 
 
+@app.post("/api/slicer/plan")
+async def plan_slice_from_file_desk(body: SlicePlanRequest):
+    printer_id = body.printer_id.strip()
+    source_id = body.source_id.strip()
+    source_path = body.path.strip().lstrip("/")
+    target_kind = _printer_kind(printer_id)
+    if target_kind is None:
+        raise HTTPException(status_code=404, detail="Target printer not found")
+
+    filename, data = await _read_file_desk_source(source_id, source_path)
+    ext = _queue_file_extension(filename)
+    if filename.lower().endswith(".gcode.3mf") or ext not in _SOURCE_MODEL_EXT:
+        raise HTTPException(status_code=422, detail="Only source model files can be sliced")
+
+    settings = db.get_all_settings()
+    sidecar_url = (settings.get("orcaslicer_docker_url") or "").strip().rstrip("/")
+    output_ext = ".gcode.3mf" if target_kind == "bambu" else ".gcode"
+    base_name = _file_archive_key(filename) or "sliced_model"
+    target = next((p for p in await _gather_all() if p.get("id") == printer_id), None)
+    return {
+        "ok": True,
+        "ready": bool(sidecar_url),
+        "sidecar_url": sidecar_url,
+        "source": {
+            "source_id": source_id,
+            "path": source_path,
+            "filename": filename,
+            "kind": _file_kind(filename),
+            "size": len(data),
+        },
+        "target": {
+            "id": printer_id,
+            "kind": target_kind,
+            "model_name": target.get("model_name") if target else printer_id,
+            "custom_name": target.get("custom_name") if target else printer_id,
+        },
+        "output": {
+            "filename": f"{base_name}_{printer_id}{output_ext}",
+            "kind": "gcode.3mf" if target_kind == "bambu" else "gcode",
+        },
+        "plate": body.plate or "auto",
+        "all_plates": bool(body.all_plates),
+        "message": (
+            "Slicer sidecar configured. Full slicing handoff is ready for the next stage."
+            if sidecar_url else
+            "Set the OrcaSlicer Docker URL in Settings -> Slicer before Flightdeck can slice this model."
+        ),
+    }
+
+
 @app.delete("/api/files")
 async def delete_file_from_file_desk(body: FileDeskDeleteRequest):
     source_id = body.source_id.strip()
@@ -1334,7 +1404,7 @@ async def delete_file_from_file_desk(body: FileDeskDeleteRequest):
         raise HTTPException(status_code=422, detail="File path required")
     filename = source_path.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
     ext = _queue_file_extension(filename)
-    if ext not in (_ALLOWED_BAMBU_EXT | _ALLOWED_MOONRAKER_EXT):
+    if ext not in (_ALLOWED_BAMBU_EXT | _ALLOWED_MOONRAKER_EXT | _SOURCE_MODEL_EXT):
         raise HTTPException(status_code=422, detail="Unsupported file type")
 
     if source_id == "library":

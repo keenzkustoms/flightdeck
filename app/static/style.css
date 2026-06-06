@@ -11892,6 +11892,12 @@ select.settings-input { cursor: pointer; }
   color: #86efac;
 }
 .filedesk-queue-primary:hover:not(:disabled) { background: rgba(34,197,94,0.16); }
+.filedesk-slice-primary {
+  border-color: #3b82f6;
+  background: rgba(59,130,246,0.08);
+  color: #93c5fd;
+}
+.filedesk-slice-primary:hover:not(:disabled) { background: rgba(59,130,246,0.16); }
 .filedesk-copy-btn { border-color: #22c55e; background: rgba(34,197,94,0.08); color: #4ade80; }
 .filedesk-copy-btn:hover:not(:disabled) { background: rgba(34,197,94,0.16); color: white; }
 .filedesk-delete-btn { border-color: #ef4444; background: rgba(239,68,68,0.08); color: #fca5a5; }
@@ -11933,6 +11939,7 @@ select.settings-input { cursor: pointer; }
   padding: 0.7rem;
 }
 .filedesk-queue-box { max-width: 520px; padding: 1rem; }
+.filedesk-slice-box { max-width: 560px; }
 .filedesk-queue-head { display: flex; justify-content: space-between; gap: 0.8rem; margin-bottom: 0.9rem; }
 .filedesk-queue-head h3 { margin: 0.18rem 0 0; color: var(--text); font-size: 1rem; line-height: 1.25; word-break: break-word; }
 .filedesk-queue-head span { display: block; margin-top: 0.25rem; color: var(--muted); font-size: 0.72rem; word-break: break-word; }
@@ -11947,6 +11954,19 @@ select.settings-input { cursor: pointer; }
 }
 .filedesk-dialog-close:hover { color: var(--text); border-color: var(--accent); }
 .filedesk-queue-options { display: grid; gap: 0.5rem; margin-bottom: 0.9rem; }
+.filedesk-slice-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-bottom: 0.75rem;
+  color: var(--text);
+  font-size: 0.82rem;
+}
+.filedesk-dialog-ok {
+  border-color: rgba(34,197,94,0.45);
+  color: #86efac;
+  background: rgba(34,197,94,0.1);
+}
 .filedesk-printer-choice {
   display: flex;
   justify-content: space-between;
