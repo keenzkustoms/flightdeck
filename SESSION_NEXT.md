@@ -1,5 +1,12 @@
 # Flightdeck — next session brief
-_Last updated 6 June 2026 (Session 28.186 Bambu object map)_
+_Last updated 6 June 2026 (Session 28.187 Dashboard lockout visibility)_
+
+## What was updated - Session 28.187 (Dashboard lockout visibility - 6 June)
+- Dashboard now treats printers with `Print enabled` unticked as attention items instead of ordinary idle printers.
+- Printer cards show an amber `Dispatch locked` strip with the saved downtime reason, so H2D-style lockouts are visible from the fleet overview.
+- Flight Briefing, Needs Attention, the top status warning, and Flight Tower all use the saved lockout note when explaining why the printer is down.
+- Flight Tower dispatch scoring blocks locked printers from being recommended until the operator ticks `Print enabled` again.
+- Bumped static cache to `app.js?v=291` and `style.css?v=226`; frontend refresh required.
 
 ## What was added - Session 28.186 (Bambu object map - 6 June)
 - Bambu 3MF parsing now tries to pull object bounding boxes from `Metadata/plate_N.json` alongside the object IDs/names from `slice_info.config`.
