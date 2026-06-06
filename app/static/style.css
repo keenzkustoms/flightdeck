@@ -9660,6 +9660,11 @@ select.settings-input { cursor: pointer; }
   background: rgba(15,23,42,0.5);
 }
 
+.spool-scan-body {
+  display: grid;
+  gap: 0.55rem;
+}
+
 .spool-scan-head {
   display: flex;
   align-items: center;
@@ -9681,6 +9686,10 @@ select.settings-input { cursor: pointer; }
 .spool-scan-head span {
   color: var(--muted);
   font-size: 0.68rem;
+}
+
+.spool-scan-toggle {
+  display: none;
 }
 
 .spool-scan-actions,
@@ -9889,13 +9898,37 @@ select.settings-input { cursor: pointer; }
   }
 
   .spool-scan-head {
-    align-items: flex-start;
-    flex-direction: column;
+    align-items: center;
+    flex-direction: row;
   }
 
   .spool-scan-actions,
   .spool-scan-controls {
     justify-content: flex-start;
+  }
+
+  .spool-scan-toggle {
+    display: inline-flex;
+  }
+
+  .spool-scan-panel {
+    padding: 0.55rem;
+  }
+
+  .spool-scan-panel.spool-scan-collapsed {
+    gap: 0;
+  }
+
+  .spool-scan-panel.spool-scan-collapsed .spool-scan-head span {
+    display: none;
+  }
+
+  .spool-scan-stage {
+    max-height: 14rem;
+  }
+
+  .spool-scan-result {
+    font-size: 0.68rem;
   }
 }
 

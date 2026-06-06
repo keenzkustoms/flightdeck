@@ -1,5 +1,12 @@
 # Flightdeck — next session brief
-_Last updated 6 June 2026 (Session 28.193 Spool scan stage 1)_
+_Last updated 6 June 2026 (Session 28.194 Spool scan OCR stage 2)_
+
+## What was added - Session 28.194 (Spool scan OCR stage 2 - 6 June)
+- Spool scan now has a `Read label` step using browser-side OCR loaded on demand.
+- OCR text is parsed into editable spool suggestions for common brand, material, subtype, and colour names.
+- Camera/photo scans now attempt barcode first, then fall back to OCR when no barcode is detected.
+- On phone-width layouts, the scan panel starts collapsed with an `Open` button so the Add Spool form stays usable.
+- Bumped static cache to `app.js?v=297` and `style.css?v=233`; frontend refresh required.
 
 ## What was added - Session 28.193 (Spool scan stage 1 - 6 June)
 - Add Spool now has a `Spool scan` panel inside the filament catalogue area.

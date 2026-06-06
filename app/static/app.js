@@ -10604,21 +10604,25 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
                   <span>Camera or label photo</span>
                 </div>
                 <div class="spool-scan-actions">
+                  <button type="button" class="spool-inline-btn spool-scan-toggle" id="sm-scan-toggle">Open</button>
                   <button type="button" class="spool-inline-btn" id="sm-scan-start">Camera</button>
                   <label class="spool-inline-btn spool-file-btn" for="sm-scan-file">Photo</label>
                   <input id="sm-scan-file" type="file" accept="image/*" hidden>
                 </div>
               </div>
-              <div class="spool-scan-stage hidden" id="sm-scan-stage">
-                <video id="sm-scan-video" playsinline muted></video>
-                <canvas id="sm-scan-canvas" hidden></canvas>
-                <img id="sm-scan-photo" alt="">
+              <div class="spool-scan-body" id="sm-scan-body">
+                <div class="spool-scan-stage hidden" id="sm-scan-stage">
+                  <video id="sm-scan-video" playsinline muted></video>
+                  <canvas id="sm-scan-canvas" hidden></canvas>
+                  <img id="sm-scan-photo" alt="">
+                </div>
+                <div class="spool-scan-controls hidden" id="sm-scan-controls">
+                  <button type="button" class="spool-inline-btn" id="sm-scan-capture">Capture</button>
+                  <button type="button" class="spool-inline-btn" id="sm-scan-read">Read label</button>
+                  <button type="button" class="spool-inline-btn" id="sm-scan-stop">Stop</button>
+                </div>
+                <div class="spool-scan-result" id="sm-scan-result">Stage 2: capture the label, then Flightdeck will try to read brand, material, and colour.</div>
               </div>
-              <div class="spool-scan-controls hidden" id="sm-scan-controls">
-                <button type="button" class="spool-inline-btn" id="sm-scan-capture">Capture</button>
-                <button type="button" class="spool-inline-btn" id="sm-scan-stop">Stop</button>
-              </div>
-              <div class="spool-scan-result" id="sm-scan-result">Stage 1: capture the label, then use barcode/catalogue hints before saving.</div>
             </div>
             <div id="sm-spool-preview" class="spool-draft-card"></div>
             <div id="sm-catalogue-results" class="spool-catalogue-results hidden"></div>
@@ -10773,6 +10777,9 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
   const spoolPreview = overlay.querySelector('#sm-spool-preview');
   const catalogueSync = overlay.querySelector('#sm-catalogue-sync');
   const catalogueChips = overlay.querySelector('#sm-catalogue-chips');
+  const scanPanel = overlay.querySelector('#sm-spool-scan');
+  const scanToggle = overlay.querySelector('#sm-scan-toggle');
+  const scanBody = overlay.querySelector('#sm-scan-body');
   const scanStart = overlay.querySelector('#sm-scan-start');
   const scanFile = overlay.querySelector('#sm-scan-file');
   const scanStage = overlay.querySelector('#sm-scan-stage');
@@ -10781,10 +10788,14 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
   const scanPhoto = overlay.querySelector('#sm-scan-photo');
   const scanControls = overlay.querySelector('#sm-scan-controls');
   const scanCapture = overlay.querySelector('#sm-scan-capture');
+  const scanRead = overlay.querySelector('#sm-scan-read');
   const scanStop = overlay.querySelector('#sm-scan-stop');
   const scanResult = overlay.querySelector('#sm-scan-result');
   let scanStream = null;
   let scanObjectUrl = null;
+  let scanLastImageSource = '';
+  let scanOcrLoading = null;
+  let scanExpanded = window.matchMedia?.('(min-width: 721px)').matches ?? true;
 
   let matNewMode = false;
   let brandNewMode = false;
@@ -10974,17 +10985,88 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
     const text = String(words || '').replace(/\s+/g, ' ').trim();
     if (!text) return;
     const upper = text.toUpperCase();
-    const material = ['PLA+', 'PLA', 'PETG', 'ASA', 'ABS', 'TPU', 'PA', 'PC'].find(v => upper.includes(v));
-    const brand = materials.flatMap(m => matBrands[m] || []).find(b => b && upper.includes(String(b).toUpperCase()));
-    const colourWords = ['BLACK', 'WHITE', 'RED', 'BLUE', 'GREEN', 'YELLOW', 'ORANGE', 'PURPLE', 'PINK', 'SILVER', 'GREY', 'GRAY', 'BROWN', 'RAINBOW'];
-    const colour = colourWords.find(c => upper.includes(c));
-    setCatalogueSearch([brand, material, colour].filter(Boolean).join(' ') || text);
+    const material = [
+      ['PLA+', /\bPLA\s*\+|\bPLA\s*PLUS\b/],
+      ['PLA', /\bPLA\b/],
+      ['PETG', /\bPETG\b|\bPET-G\b/],
+      ['ASA', /\bASA\b/],
+      ['ABS', /\bABS\b/],
+      ['TPU', /\bTPU\b/],
+      ['PA', /\bPA\b|\bNYLON\b/],
+      ['PC', /\bPC\b|\bPOLYCARBONATE\b/],
+    ].find(([, rx]) => rx.test(upper))?.[0] || '';
+    const brandAliases = [
+      ['Bambu', /\bBAMBU(?:\s+LAB)?\b/],
+      ['eSun', /\bESUN\b|\bE-SUN\b/],
+      ['Polymaker', /\bPOLYMAKER\b/],
+      ['Overture', /\bOVERTURE\b/],
+      ['SunLu', /\bSUNLU\b/],
+      ['Creality', /\bCREALITY\b/],
+      ['Prusament', /\bPRUSAMENT\b/],
+      ['Hatchbox', /\bHATCHBOX\b/],
+      ['Inland', /\bINLAND\b/],
+      ['Colorfabb', /\bCOLORFABB\b/],
+    ];
+    const knownBrand = materials.flatMap(m => matBrands[m] || []).find(b => b && upper.includes(String(b).toUpperCase()));
+    const brand = knownBrand || brandAliases.find(([, rx]) => rx.test(upper))?.[0] || '';
+    const subtype = [
+      ['Basic', /\bBASIC\b/],
+      ['Matte', /\bMATTE\b/],
+      ['Silk', /\bSILK\b/],
+      ['Plus', /\bPLUS\b/],
+      ['Pro', /\bPRO\b/],
+      ['Tough', /\bTOUGH\b/],
+      ['Carbon Fiber', /\bCARBON\b|\bCF\b/],
+      ['High Speed', /\bHIGH\s*SPEED\b|\bHS\b/],
+    ].find(([, rx]) => rx.test(upper))?.[0] || '';
+    const colourMap = [
+      ['Black', '#1a1a1a', /\bBLACK\b/],
+      ['White', '#ffffff', /\bWHITE\b/],
+      ['Red', '#ef4444', /\bRED\b/],
+      ['Blue', '#3b82f6', /\bBLUE\b/],
+      ['Green', '#22c55e', /\bGREEN\b/],
+      ['Yellow', '#eab308', /\bYELLOW\b/],
+      ['Orange', '#f97316', /\bORANGE\b/],
+      ['Purple', '#a855f7', /\bPURPLE\b/],
+      ['Pink', '#ec4899', /\bPINK\b/],
+      ['Magenta', '#ec4899', /\bMAGENTA\b/],
+      ['Silver', '#c0c0c0', /\bSILVER\b/],
+      ['Grey', '#808080', /\bGREY\b|\bGRAY\b/],
+      ['Brown', '#7c3f20', /\bBROWN\b/],
+      ['Rainbow', '#ec4899', /\bRAINBOW\b/],
+    ].find(([, , rx]) => rx.test(upper));
+    if (material || brand) {
+      ensureMaterialBrand(material || 'PLA', brand || 'Unknown');
+    }
+    if (subtype && !overlay.querySelector('#sm-subtype').value.trim()) {
+      overlay.querySelector('#sm-subtype').value = subtype;
+    }
+    if (colourMap) {
+      overlay.querySelector('#sm-color-name').value = colourMap[0];
+      syncColor(colourMap[1]);
+      if (colourMap[0] === 'Rainbow') {
+        schemeSel.value = 'mixed';
+        updateSchemeColourRows();
+      }
+    }
+    const query = [brand, material, colourMap?.[0], subtype].filter(Boolean).join(' ') || text;
+    setCatalogueSearch(query, 'Label text applied');
+    applyDefaultTare();
+    updatePrevPicks();
+    updateDraftPreview('Label text applied');
   }
 
   function setScanMessage(message, kind = '') {
     scanResult.textContent = message;
     scanResult.classList.toggle('spool-scan-warn', kind === 'warn');
     scanResult.classList.toggle('spool-scan-good', kind === 'good');
+  }
+
+  function setScanExpanded(expanded) {
+    scanExpanded = !!expanded;
+    scanPanel.classList.toggle('spool-scan-collapsed', !scanExpanded);
+    scanBody.classList.toggle('hidden', !scanExpanded);
+    scanToggle.textContent = scanExpanded ? 'Hide' : 'Open';
   }
 
   function stopScanStream() {
@@ -11008,6 +11090,55 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
     }
   }
 
+  async function ensureOcrEngine() {
+    if (window.Tesseract?.recognize) return window.Tesseract;
+    if (!scanOcrLoading) {
+      scanOcrLoading = new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+        script.async = true;
+        script.onload = () => window.Tesseract?.recognize ? resolve(window.Tesseract) : reject(new Error('OCR engine did not load'));
+        script.onerror = () => reject(new Error('OCR engine download failed'));
+        document.head.appendChild(script);
+      });
+    }
+    return scanOcrLoading;
+  }
+
+  async function runScanOcr(source = scanLastImageSource) {
+    if (!source) {
+      setScanMessage('Capture or choose a photo first, then read the label.', 'warn');
+      return;
+    }
+    const oldText = scanRead.textContent;
+    scanRead.disabled = true;
+    scanRead.textContent = 'Reading';
+    setScanMessage('Reading label text...');
+    try {
+      const tesseract = await ensureOcrEngine();
+      const result = await tesseract.recognize(source, 'eng', {
+        logger: info => {
+          if (info?.status) {
+            const pct = Number.isFinite(info.progress) ? ` ${Math.round(info.progress * 100)}%` : '';
+            setScanMessage(`Reading label: ${info.status}${pct}`);
+          }
+        },
+      });
+      const text = result?.data?.text?.trim() || '';
+      if (!text) {
+        setScanMessage('No readable label text found. Try a closer, brighter photo.', 'warn');
+        return;
+      }
+      applyScanWords(text);
+      setScanMessage(`Read label: ${text.replace(/\s+/g, ' ').slice(0, 120)}`, 'good');
+    } catch (err) {
+      setScanMessage(`${err?.message || 'OCR failed'}. You can still type the visible brand/material into search.`, 'warn');
+    } finally {
+      scanRead.disabled = false;
+      scanRead.textContent = oldText;
+    }
+  }
+
   async function captureScanFrame() {
     if (!scanVideo.videoWidth || !scanVideo.videoHeight) {
       setScanMessage('Camera is still warming up. Try capture again.', 'warn');
@@ -11018,6 +11149,7 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
     const ctx = scanCanvas.getContext('2d');
     ctx.drawImage(scanVideo, 0, 0, scanCanvas.width, scanCanvas.height);
     const dataUrl = scanCanvas.toDataURL('image/jpeg', 0.86);
+    scanLastImageSource = dataUrl;
     scanPhoto.src = dataUrl;
     scanPhoto.hidden = false;
     const barcode = await detectBarcodeFromImage(scanCanvas);
@@ -11025,11 +11157,13 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
       setScanMessage(`Barcode found: ${barcode}. Searching catalogue.`, 'good');
       setCatalogueSearch(barcode, 'Barcode scan applied');
     } else {
-      setScanMessage('Photo captured. No browser barcode found, so type any visible brand/material into the catalogue search.', 'warn');
+      setScanMessage('Photo captured. No barcode found, reading label text...');
+      runScanOcr(dataUrl);
     }
   }
 
   scanStart.addEventListener('click', async () => {
+    setScanExpanded(true);
     if (!navigator.mediaDevices?.getUserMedia) {
       setScanMessage('Camera capture is not available in this browser. Use Photo instead.', 'warn');
       return;
@@ -11054,14 +11188,18 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
     }
   });
 
+  scanToggle.addEventListener('click', () => setScanExpanded(!scanExpanded));
   scanCapture.addEventListener('click', () => captureScanFrame());
+  scanRead.addEventListener('click', () => runScanOcr());
   scanStop.addEventListener('click', () => stopScanStream());
   scanFile.addEventListener('change', async () => {
     const file = scanFile.files?.[0];
     if (!file) return;
+    setScanExpanded(true);
     stopScanStream();
     if (scanObjectUrl) URL.revokeObjectURL(scanObjectUrl);
     scanObjectUrl = URL.createObjectURL(file);
+    scanLastImageSource = scanObjectUrl;
     scanPhoto.src = scanObjectUrl;
     scanPhoto.hidden = false;
     scanVideo.hidden = true;
@@ -11077,7 +11215,8 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
       setCatalogueSearch(barcode, 'Barcode photo applied');
     } else {
       applyScanWords(file.name.replace(/\.[^.]+$/, ' '));
-      setScanMessage('Photo loaded. No browser barcode found; catalogue search can still use the file name or typed label text.', 'warn');
+      setScanMessage('Photo loaded. No barcode found, reading label text...');
+      runScanOcr(scanObjectUrl);
     }
   });
 
@@ -11313,6 +11452,7 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
   storageSel.addEventListener('change', () => updateDraftPreview());
   updateSlots();
   updateDraftPreview();
+  setScanExpanded(scanExpanded);
 
   function closeSpoolModal() {
     stopScanStream();
