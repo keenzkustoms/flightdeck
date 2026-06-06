@@ -2107,8 +2107,45 @@ async def add_printer(entry: PrinterEntry):
     return {"ok": True}
 
 
+@app.put("/api/config/printers/{printer_id}")
+async def update_printer(printer_id: str, entry: PrinterEntry):
+    if entry.id != printer_id:
+        raise HTTPException(status_code=422, detail="printer id cannot be changed; add a new printer if this is a different machine")
+
+    cfg = load()
+    old_entry = next((p for p in cfg.printers if p.id == printer_id), None)
+    if old_entry is None:
+        raise HTTPException(status_code=404, detail="printer not found")
+
+    await _detach_runtime_printer(printer_id)
+    await _attach_runtime_printer(entry)
+
+    cfg.printers = [entry if p.id == printer_id else p for p in cfg.printers]
+    save(cfg)
+    _latest_printers.pop(printer_id, None)
+
+    db.log_decision(printer_id, "printer_config_updated", "Printer connection/details edited")
+    return {"ok": True}
+
+
 @app.delete("/api/config/printers/{printer_id}")
 async def remove_printer(printer_id: str):
+    found = await _detach_runtime_printer(printer_id)
+
+    if not found:
+        raise HTTPException(status_code=404, detail="printer not found")
+
+    _prev_states.pop(printer_id, None)
+    _latest_printers.pop(printer_id, None)
+
+    cfg = load()
+    cfg.printers = [e for e in cfg.printers if e.id != printer_id]
+    save(cfg)
+
+    return {"ok": True}
+
+
+async def _detach_runtime_printer(printer_id: str) -> bool:
     found = False
 
     for item in list(_moonraker):
@@ -2116,7 +2153,6 @@ async def remove_printer(printer_id: str):
             _moonraker.remove(item)
             found = True
             break
-
     for p in list(_bambu):
         if p.id == printer_id:
             _bambu.remove(p)
@@ -2129,25 +2165,49 @@ async def remove_printer(printer_id: str):
                 await proxy.stop()
             found = True
             break
-
     for item in list(_simulated):
         if item[0] == printer_id:
             _simulated.remove(item)
             found = True
             break
 
-    if not found:
-        raise HTTPException(status_code=404, detail="printer not found")
-
     _cameras.pop(printer_id, None)
     _presets.pop(printer_id, None)
-    _prev_states.pop(printer_id, None)
+    _cam_proxies.pop(printer_id, None)
+    return found
 
-    cfg = load()
-    cfg.printers = [e for e in cfg.printers if e.id != printer_id]
-    save(cfg)
 
-    return {"ok": True}
+async def _attach_runtime_printer(entry: PrinterEntry) -> None:
+    conn = entry.connection
+    _cameras[entry.id] = entry.camera
+    _presets[entry.id] = entry.temperature_presets or {}
+
+    if isinstance(conn, MoonrakerConnection):
+        _moonraker.append((entry.id, entry.model_name, entry.custom_name, entry.icon_key(), conn.url))
+    elif isinstance(conn, BambuConnection):
+        p = BambuPrinter(
+            id=entry.id,
+            model_name=entry.model_name,
+            custom_name=entry.custom_name,
+            icon=entry.icon_key(),
+            ip=conn.host,
+            access_code=conn.access_code,
+            serial=conn.serial,
+        )
+        await asyncio.to_thread(p.start)
+        _bambu.append(p)
+        if isinstance(entry.camera, BambuRtspCamera):
+            rtsp_url = f"rtsps://bblp:{conn.access_code}@{conn.host}:322/streaming/live/1"
+            _cam_proxies[entry.id] = BambuCameraProxy(rtsp_url, entry.id)
+    elif isinstance(conn, SimulatedConnection):
+        _simulated.append((
+            entry.id,
+            entry.model_name,
+            entry.custom_name,
+            entry.icon_key(),
+            conn.profile,
+            conn.scenario,
+        ))
 
 
 class PrinterPrintEnabledRequest(BaseModel):

@@ -1,5 +1,11 @@
 # Flightdeck — next session brief
-_Last updated 6 June 2026 (Session 28.190 Windows tray install)_
+_Last updated 6 June 2026 (Session 28.191 Printer edit in settings)_
+
+## What was added - Session 28.191 (Printer edit in settings - 6 June)
+- Added a Settings -> Printers `Edit` action so connection details can change without changing the printer ID.
+- Editing locks the printer ID field to preserve print history, metrics, maintenance, spool links, and queue identity.
+- Added `PUT /api/config/printers/{printer_id}` to update runtime printer connections and persist the edited config.
+- Bumped static cache to `app.js?v=294` and `style.css?v=229`; backend restart required for the edit endpoint.
 
 ## What was added - Session 28.190 (Windows tray install - 6 June)
 - Added a per-user Windows install path with `scripts/windows/install-windows.ps1`.

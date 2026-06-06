@@ -7761,6 +7761,7 @@ function connectWS() {
 // ── Settings view ─────────────────────────────────────────────────────────
 
 let _settingsCategory = 'printers';
+let _settingsPrinterEntries = [];
 
 const _SETTINGS_CATEGORIES = [
   { id: 'setup',      label: 'Setup'      },
@@ -7818,9 +7819,11 @@ function _printersCategoryHtml(printers) {
               Print enabled
             </label>
             ${!(p.print_enabled ?? true) && p.print_enabled_note ? `<span class="settings-printer-lock-note">${esc(p.print_enabled_note)}</span>` : ''}
+            <button class="settings-edit-btn"
+              data-edit-id="${esc(p.id)}">Edit</button>
             <button class="settings-delete-btn"
-              data-delete-id="${p.id}"
-              data-delete-name="${p.custom_name}">Remove</button>
+              data-delete-id="${esc(p.id)}"
+              data-delete-name="${esc(p.custom_name)}">Remove</button>
           </div>
         </div>`;
       }).join('')
@@ -7842,8 +7845,9 @@ function _printersCategoryHtml(printers) {
     </div>
 
     <div class="settings-section">
-      <div class="settings-section-title">Add Printer</div>
+      <div class="settings-section-title" id="settings-printer-form-title">Add Printer</div>
       <form id="settings-add-form" class="settings-form" novalidate>
+        <input type="hidden" id="p-editing-id" value="">
 
         <div class="settings-form-row">
           <label class="settings-label">Connection Type</label>
@@ -7986,6 +7990,7 @@ function _printersCategoryHtml(printers) {
 
         <div class="settings-form-row settings-form-actions">
           <span class="settings-error" id="settings-form-error" hidden></span>
+          <button type="button" class="ctrl-btn settings-cancel-edit-btn" id="settings-cancel-edit" hidden>Cancel Edit</button>
           <button type="submit" class="ctrl-btn">Add Printer</button>
         </div>
 
@@ -7996,21 +8001,23 @@ function _printersCategoryHtml(printers) {
 function _attachPrintersEvents(el) {
   let connType = 'moonraker';
 
+  const setConnType = type => {
+    connType = type;
+    el.querySelectorAll('[data-conn-type]').forEach(b =>
+      b.classList.toggle('type-btn-active', b.dataset.connType === connType)
+    );
+    el.querySelector('#moonraker-fields').hidden = connType !== 'moonraker';
+    el.querySelector('#bambu-fields').hidden     = connType !== 'bambu';
+    el.querySelector('#simulated-fields').hidden = connType !== 'simulated';
+    if (connType === 'bambu') {
+      el.querySelector('input[name="icon"][value="bambu"]').checked = true;
+    } else if (connType === 'simulated') {
+      el.querySelector('input[name="icon"][value="generic"]').checked = true;
+    }
+  };
+
   el.querySelectorAll('[data-conn-type]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      connType = btn.dataset.connType;
-      el.querySelectorAll('[data-conn-type]').forEach(b =>
-        b.classList.toggle('type-btn-active', b === btn)
-      );
-      el.querySelector('#moonraker-fields').hidden = connType !== 'moonraker';
-      el.querySelector('#bambu-fields').hidden     = connType !== 'bambu';
-      el.querySelector('#simulated-fields').hidden = connType !== 'simulated';
-      if (connType === 'bambu') {
-        el.querySelector('input[name="icon"][value="bambu"]').checked = true;
-      } else if (connType === 'simulated') {
-        el.querySelector('input[name="icon"][value="generic"]').checked = true;
-      }
-    });
+    btn.addEventListener('click', () => setConnType(btn.dataset.connType));
   });
 
   el.querySelector('#p-cam-type')?.addEventListener('change', e => {
@@ -8026,6 +8033,17 @@ function _attachPrintersEvents(el) {
         () => _deletePrinter(id)
       );
     });
+  });
+
+  el.querySelectorAll('[data-edit-id]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const printer = _settingsPrinterEntries.find(p => p.id === btn.dataset.editId);
+      if (printer) _populatePrinterForm(el, printer, setConnType);
+    });
+  });
+
+  el.querySelector('#settings-cancel-edit')?.addEventListener('click', () => {
+    _resetPrinterForm(el, setConnType);
   });
 
   el.querySelectorAll('.settings-printer-enable-input').forEach(input => {
@@ -8088,6 +8106,69 @@ function _collectFormData(el, connType) {
   return { ...base, connection: { type: 'simulated', profile, scenario } };
 }
 
+function _populatePrinterForm(el, printer, setConnType) {
+  const form = el.querySelector('#settings-add-form');
+  if (!form) return;
+  const set = (id, value = '') => {
+    const field = el.querySelector(`#${id}`);
+    if (field) field.value = value ?? '';
+  };
+  const conn = printer.connection || { type: 'moonraker' };
+  setConnType(conn.type || 'moonraker');
+  set('p-editing-id', printer.id);
+  set('p-id', printer.id);
+  set('p-model', printer.model_name || '');
+  set('p-custom', printer.custom_name || '');
+  const icon = el.querySelector(`input[name="icon"][value="${printer.icon || 'generic'}"]`);
+  if (icon) icon.checked = true;
+  el.querySelector('#p-id').disabled = true;
+  el.querySelector('#settings-printer-form-title').textContent = `Edit Printer · ${printer.id}`;
+  el.querySelector('#settings-cancel-edit')?.removeAttribute('hidden');
+  form.querySelector('button[type="submit"]').textContent = 'Save Changes';
+
+  set('p-host', conn.type === 'moonraker' ? conn.host : '');
+  set('p-port', conn.type === 'moonraker' ? (conn.port ?? 7125) : 7125);
+  set('p-bambu-host', conn.type === 'bambu' ? conn.host : '');
+  set('p-access-code', conn.type === 'bambu' ? conn.access_code : '');
+  set('p-serial', conn.type === 'bambu' ? conn.serial : '');
+  set('p-sim-profile', conn.type === 'simulated' ? conn.profile : 'prusalink');
+  set('p-sim-scenario', conn.type === 'simulated' ? conn.scenario : 'mixed');
+
+  const camera = printer.camera || null;
+  const camType = camera?.type === 'mjpeg_direct' ? 'mjpeg_direct' : 'none';
+  set('p-cam-type', camType);
+  el.querySelector('#mjpeg-fields').hidden = camType !== 'mjpeg_direct';
+  set('p-stream-url', camera?.stream_url || '');
+  set('p-snap-url', camera?.snapshot_url || '');
+  const bambuCam = el.querySelector('#p-bambu-cam');
+  if (bambuCam) bambuCam.checked = camera?.type === 'bambu_rtsp' || conn.type === 'bambu';
+
+  const presets = printer.temperature_presets || {};
+  const byHotend = Object.fromEntries((presets.hotend || []).map(p => [p.label, p.value]));
+  const byBed = Object.fromEntries((presets.bed || []).map(p => [p.label, p.value]));
+  el.querySelectorAll('.preset-row').forEach(row => {
+    const mat = row.querySelector('.preset-hotend').dataset.material;
+    if (byHotend[mat] != null) row.querySelector('.preset-hotend').value = byHotend[mat];
+    if (byBed[mat] != null) row.querySelector('.preset-bed').value = byBed[mat];
+  });
+  el.querySelector('#settings-form-error')?.setAttribute('hidden', '');
+  form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function _resetPrinterForm(el, setConnType) {
+  const form = el.querySelector('#settings-add-form');
+  if (!form) return;
+  form.reset();
+  el.querySelector('#p-editing-id').value = '';
+  el.querySelector('#p-id').disabled = false;
+  el.querySelector('#settings-printer-form-title').textContent = 'Add Printer';
+  el.querySelector('#settings-cancel-edit')?.setAttribute('hidden', '');
+  form.querySelector('button[type="submit"]').textContent = 'Add Printer';
+  el.querySelector('#settings-form-error')?.setAttribute('hidden', '');
+  setConnType('moonraker');
+  el.querySelector('#mjpeg-fields').hidden = true;
+}
+
 function _validateFormData(data, connType, errorEl) {
   const fail = msg => { errorEl.textContent = msg; errorEl.removeAttribute('hidden'); return false; };
   errorEl.setAttribute('hidden', '');
@@ -8113,29 +8194,31 @@ function _validateFormData(data, connType, errorEl) {
 async function _submitAddPrinter(el, connType) {
   const errorEl   = el.querySelector('#settings-form-error');
   const submitBtn = el.querySelector('#settings-add-form button[type="submit"]');
+  const editingId = el.querySelector('#p-editing-id')?.value || '';
   const data      = _collectFormData(el, connType);
+  if (editingId) data.id = editingId;
 
   if (!_validateFormData(data, connType, errorEl)) return;
 
-  const dup = await _checkDuplicateConnection(data, connType);
+  const dup = await _checkDuplicateConnection(data, connType, editingId);
   if (dup) {
     const choice = await _showDuplicateModal(dup.custom_name, dup.id);
     if (choice !== 'continue') return;
   }
 
   const origText = submitBtn.textContent;
-  submitBtn.textContent = 'Adding…';
+  submitBtn.textContent = editingId ? 'Saving…' : 'Adding…';
   submitBtn.disabled = true;
 
   try {
-    const r    = await fetch('/api/config/printers', {
-      method: 'POST',
+    const r    = await fetch(editingId ? `/api/config/printers/${encodeURIComponent(editingId)}` : '/api/config/printers', {
+      method: editingId ? 'PUT' : 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     });
     const body = await r.json();
     if (r.ok) {
-      showToast('Printer added', data.custom_name, 'success');
+      showToast(editingId ? 'Printer updated' : 'Printer added', data.custom_name, 'success');
       await refreshPrinters();
       _renderSettingsContent('printers');
     } else {
@@ -8151,12 +8234,13 @@ async function _submitAddPrinter(el, connType) {
   function fail(msg) { errorEl.textContent = msg; errorEl.removeAttribute('hidden'); }
 }
 
-async function _checkDuplicateConnection(data, connType) {
+async function _checkDuplicateConnection(data, connType, ignoreId = '') {
   try {
     const r = await fetch('/api/config/printers');
     if (!r.ok) return null;
     const existing = await r.json();
     for (const p of existing) {
+      if (ignoreId && p.id === ignoreId) continue;
       const conn = p.connection;
       if (connType === 'moonraker' && conn.type === 'moonraker') {
         if (conn.host === data.connection.host && conn.port === data.connection.port) return p;
@@ -11391,6 +11475,7 @@ async function _renderSettingsContent(category) {
       const r = await fetch('/api/config/printers');
       if (r.ok) printers = await r.json();
     } catch {}
+    _settingsPrinterEntries = printers;
     el.innerHTML = _printersCategoryHtml(printers);
     _attachPrintersEvents(el);
   } else if (category === 'hardware') {
