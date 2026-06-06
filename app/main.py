@@ -1344,6 +1344,36 @@ async def copy_file_to_library(body: FileDeskPathRequest):
     }
 
 
+@app.post("/api/files/library/upload", status_code=201)
+async def upload_file_to_library(file: UploadFile = File(...)):
+    raw_name = (file.filename or "model").rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+    ext = _queue_file_extension(raw_name)
+    if raw_name.lower().endswith(".gcode.3mf"):
+        allowed = _ALLOWED_BAMBU_EXT
+    else:
+        allowed = _ALLOWED_BAMBU_EXT | _ALLOWED_MOONRAKER_EXT | _SOURCE_MODEL_EXT
+    if ext not in allowed:
+        raise HTTPException(status_code=422, detail="Unsupported file type")
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=422, detail="Empty file")
+    library_root = _print_library_path()
+    library_root.mkdir(parents=True, exist_ok=True)
+    dest = _library_import_path(raw_name)
+    if dest.exists():
+        stem = dest.stem
+        suffix = "".join(dest.suffixes) or ext
+        dest = _library_import_path(f"{stem}_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}{suffix}")
+    dest.write_bytes(data)
+    return {
+        "ok": True,
+        "name": dest.name,
+        "path": dest.relative_to(library_root).as_posix(),
+        "kind": _file_kind(dest.name),
+        "size": len(data),
+    }
+
+
 @app.post("/api/slicer/plan")
 async def plan_slice_from_file_desk(body: SlicePlanRequest):
     printer_id = body.printer_id.strip()

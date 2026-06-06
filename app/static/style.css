@@ -11562,6 +11562,30 @@ select.settings-input { cursor: pointer; }
 .filedesk-hero p, .filedesk-library-path { color: var(--muted); font-size: 0.82rem; }
 .filedesk-hero p { margin: 0.35rem 0 0; }
 .filedesk-library-path { border: 1px solid var(--border); border-radius: 0.45rem; background: var(--surface); padding: 0.45rem 0.62rem; max-width: 34rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.filedesk-hero-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.6rem;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+.filedesk-upload-source {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.1rem;
+  border: 1px solid rgba(59,130,246,0.45);
+  border-radius: 0.45rem;
+  background: rgba(59,130,246,0.08);
+  color: #bfdbfe;
+  padding: 0.45rem 0.75rem;
+  font-size: 0.75rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+.filedesk-upload-source:hover { background: rgba(59,130,246,0.16); color: white; }
+.filedesk-upload-source input { display: none; }
 .filedesk-overview {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

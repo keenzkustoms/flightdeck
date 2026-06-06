@@ -5484,7 +5484,13 @@ async function renderFileDeskView() {
           <h1>Run-ready library</h1>
           <p>Launch from printer bays, keep the deep archive in the vault, and queue compatible jobs without starting them.</p>
         </div>
-        <div class="filedesk-library-path">${esc(data.library_path || '')}</div>
+        <div class="filedesk-hero-actions">
+          <label class="filedesk-upload-source">
+            <input type="file" id="filedesk-source-upload" accept=".stl,.obj,.step,.stp,.3mf,.gcode,.gcode.gz,.ufp">
+            Upload Source
+          </label>
+          <div class="filedesk-library-path">${esc(data.library_path || '')}</div>
+        </div>
       </section>
       ${_printBayOverview(data.targets || [])}
       ${_printBayReprintHtml(reprints.items || [], data.targets || [])}
@@ -5596,6 +5602,11 @@ function _attachFileDeskEvents(el) {
       if (!printers.length) return;
       _openFileQueueDialog({ sourceId, path, file, printers });
     });
+  });
+  el.querySelector('#filedesk-source-upload')?.addEventListener('change', e => {
+    const file = e.currentTarget.files?.[0];
+    if (file) _uploadSourceModel(file);
+    e.currentTarget.value = '';
   });
   el.querySelectorAll('[data-file-action="slice"]').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -8844,6 +8855,24 @@ function _setupReadinessTile(label, value, detail, cls = 'ok') {
     <strong>${esc(value)}</strong>
     <small>${esc(detail)}</small>
   </div>`;
+}
+
+async function _uploadSourceModel(file) {
+  const form = new FormData();
+  form.append('file', file);
+  try {
+    const r = await fetch('/api/files/library/upload', {
+      method: 'POST',
+      body: form,
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.detail || 'Upload failed');
+    showToast('Uploaded to Print Vault', data.name || file.name, 'success');
+    _fileDeskLastHtml = '';
+    renderFileDeskView();
+  } catch (err) {
+    showToast('Upload failed', err.message || '', 'error');
+  }
 }
 
 function _openSliceModelDialog({ sourceId, path, file, printers }) {
