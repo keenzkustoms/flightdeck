@@ -27,6 +27,7 @@ DEFAULT_SETTINGS = {
     "print_vault_path": "",
     "orcaslicer_docker_url": "",
     "orcaslicer_worker_url": "",
+    "orcaslicer_api_url": "",
 }
 
 _PRINTER_PRINTING_ENABLED_PREFIX = "printer_print_enabled_"

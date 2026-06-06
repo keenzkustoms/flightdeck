@@ -164,6 +164,19 @@ def _cached_printers(max_age_seconds: float = 8.0) -> Optional[list[dict]]:
     return list(_latest_printers.values())
 
 
+def _printer_meta(printer_id: str) -> Optional[dict]:
+    for pid, model_name, custom_name, _icon, _url in _moonraker:
+        if pid == printer_id:
+            return {"id": pid, "model_name": model_name, "custom_name": custom_name, "kind": "moonraker"}
+    for p in _bambu:
+        if p.id == printer_id:
+            return {"id": p.id, "model_name": p.model_name, "custom_name": p.custom_name, "kind": "bambu"}
+    for pid, model_name, custom_name, _icon, profile, _scenario in _simulated:
+        if pid == printer_id:
+            return {"id": pid, "model_name": model_name, "custom_name": custom_name, "kind": profile}
+    return None
+
+
 def _update_last_seen(status) -> None:
     if status.last_seen is not None:
         _last_seen_cache[status.id] = status.last_seen
@@ -1415,7 +1428,9 @@ async def plan_slice_from_file_desk(body: SlicePlanRequest):
         raise HTTPException(status_code=422, detail="Only source model files can be sliced")
 
     settings = db.get_all_settings()
-    sidecar_url = (settings.get("orcaslicer_docker_url") or "").strip().rstrip("/")
+    browser_url = (settings.get("orcaslicer_docker_url") or "").strip().rstrip("/")
+    worker_url = (settings.get("orcaslicer_worker_url") or "").strip().rstrip("/")
+    api_url = (settings.get("orcaslicer_api_url") or "").strip().rstrip("/")
     output_ext = ".gcode.3mf" if target_kind == "bambu" else ".gcode"
     base_name = _file_archive_key(filename) or "sliced_model"
     target = next((p for p in await _gather_all() if p.get("id") == printer_id), None)
@@ -1425,10 +1440,14 @@ async def plan_slice_from_file_desk(body: SlicePlanRequest):
         "filament": settings.get(_slicer_profile_key(printer_id, "filament"), ""),
     }
     missing_profiles = [label for label, value in profiles.items() if not str(value or "").strip()]
+    can_slice = bool(worker_url or api_url or _orca_executable()) and not missing_profiles
     return {
         "ok": True,
-        "ready": bool(sidecar_url) and not missing_profiles,
-        "sidecar_url": sidecar_url,
+        "ready": can_slice,
+        "sidecar_url": browser_url,
+        "browser_url": browser_url,
+        "api_url": api_url,
+        "worker_url": worker_url,
         "source": {
             "source_id": source_id,
             "path": source_path,
@@ -1455,11 +1474,15 @@ async def plan_slice_from_file_desk(body: SlicePlanRequest):
         "plate": body.plate or "auto",
         "all_plates": bool(body.all_plates),
         "message": (
-            "Slicer sidecar configured. Use these profiles in Orca, then export the printer-specific job back to the Print Vault."
-            if sidecar_url and not missing_profiles else
+            "Slicer API configured. Flightdeck can slice this in the background."
+            if api_url and can_slice else
+            "Slicer worker configured. Flightdeck can slice this in the background."
+            if worker_url and can_slice else
+            "Use the profiles below in Orca, then export the printer-specific job back to the Print Vault."
+            if browser_url and not missing_profiles else
             f"Set slicer defaults for {', '.join(missing_profiles)} in Settings -> Slicer before slicing this model."
-            if sidecar_url else
-            "Set the OrcaSlicer Docker URL in Settings -> Slicer before Flightdeck can slice this model."
+            if missing_profiles else
+            "Set a Slicer API URL or Worker URL in Settings -> Slicer before Flightdeck can slice this model."
         ),
     }
 
@@ -1510,22 +1533,42 @@ async def slicer_worker_slice(
     output_filename: str = Form("flightdeck-sliced.gcode.3mf"),
     plate: str = Form("1"),
     all_plates: bool = Form(False),
+    sidecar_url: str = Form(""),
+    arrange: bool = Form(False),
 ):
     output_kind = "gcode.3mf" if output_kind == "gcode.3mf" else "gcode"
-    name, data, _log = await asyncio.to_thread(
-        _run_orca_slice_local,
-        filename=file.filename or "flightdeck-model.stl",
-        data=await file.read(),
-        profiles={
-            "printer": printer_profile,
-            "process": process_profile,
-            "filament": filament_profile,
-        },
-        output_kind=output_kind,
-        output_filename=output_filename,
-        plate=plate,
-        all_plates=all_plates,
-    )
+    source_name = file.filename or "flightdeck-model.stl"
+    source_data = await file.read()
+    profiles = {
+        "printer": printer_profile,
+        "process": process_profile,
+        "filament": filament_profile,
+    }
+    sidecar_url = (sidecar_url or "").strip().rstrip("/")
+    if sidecar_url:
+        name, data, _log = await asyncio.to_thread(
+            _run_orca_slice_sidecar,
+            sidecar_url=sidecar_url,
+            filename=source_name,
+            data=source_data,
+            profiles=profiles,
+            output_kind=output_kind,
+            output_filename=output_filename,
+            plate=plate,
+            all_plates=all_plates,
+            arrange=arrange,
+        )
+    else:
+        name, data, _log = await asyncio.to_thread(
+            _run_orca_slice_local,
+            filename=source_name,
+            data=source_data,
+            profiles=profiles,
+            output_kind=output_kind,
+            output_filename=output_filename,
+            plate=plate,
+            all_plates=all_plates,
+        )
     media = "application/octet-stream"
     return Response(
         content=data,
@@ -1565,6 +1608,10 @@ async def run_slice_from_file_desk(body: SliceRunRequest):
     base_name = _file_archive_key(filename) or "sliced_model"
     output_filename = (body.output_filename or f"{base_name}_{printer_id}{output_ext}").strip()
     worker_url = (settings.get("orcaslicer_worker_url") or "").strip().rstrip("/")
+    sidecar_url = (settings.get("orcaslicer_api_url") or "").strip().rstrip("/")
+    target = _printer_meta(printer_id) or {}
+    target_name = " ".join(str(v or "") for v in ((target or {}).get("model_name"), (target or {}).get("custom_name"), profiles["printer"]))
+    arrange = target_kind == "bambu" and ("h2d" in target_name.lower() or filename.lower().endswith(".3mf"))
 
     if worker_url:
         form = {
@@ -1575,6 +1622,8 @@ async def run_slice_from_file_desk(body: SliceRunRequest):
             "output_filename": output_filename,
             "plate": body.plate or "1",
             "all_plates": str(bool(body.all_plates)).lower(),
+            "sidecar_url": sidecar_url,
+            "arrange": str(bool(arrange)).lower(),
         }
         files = {"file": (filename, data, "application/octet-stream")}
         try:
@@ -1590,6 +1639,19 @@ async def run_slice_from_file_desk(body: SliceRunRequest):
             raise HTTPException(status_code=resp.status_code, detail=detail or "Slicer worker failed")
         sliced_name = resp.headers.get("X-Flightdeck-Sliced-Filename") or output_filename
         sliced_data = resp.content
+    elif sidecar_url:
+        sliced_name, sliced_data, _log = await asyncio.to_thread(
+            _run_orca_slice_sidecar,
+            sidecar_url=sidecar_url,
+            filename=filename,
+            data=data,
+            profiles=profiles,
+            output_kind=output_kind,
+            output_filename=output_filename,
+            plate=body.plate or "1",
+            all_plates=bool(body.all_plates),
+            arrange=arrange,
+        )
     else:
         sliced_name, sliced_data, _log = await asyncio.to_thread(
             _run_orca_slice_local,
@@ -2868,6 +2930,128 @@ def _orca_profile_file(profile_name: str, category: str, exe: Path | None = None
     raise HTTPException(status_code=422, detail=f"Orca {category} profile not found on worker: {name}")
 
 
+def _content_disposition_filename(value: str) -> str:
+    for part in (value or "").split(";"):
+        key, _, raw = part.strip().partition("=")
+        if key.lower() == "filename":
+            return raw.strip().strip('"')
+    return ""
+
+
+def _friendly_slicer_error(detail: str) -> str:
+    text = (detail or "").strip()
+    if not text:
+        return "Slicer failed without returning an error"
+    lowered = text.lower()
+    if "some filaments can not be mapped" in lowered:
+        return (
+            "Slicer could not map the selected filament to the target printer. "
+            "Try the slicer API sidecar, or choose matching printer/process/filament profiles."
+        )
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    important = [
+        line for line in lines
+        if "[error]" in line.lower() or "error" in line.lower() or "failed" in line.lower()
+    ]
+    picked = important[-3:] if important else lines[-4:]
+    summary = " ".join(picked).strip()
+    return summary[-500:] if summary else text[-500:]
+
+
+def _slicer_model_mime(filename: str) -> str:
+    lower = (filename or "").lower()
+    if lower.endswith(".stl"):
+        return "model/stl"
+    if lower.endswith((".step", ".stp")):
+        return "model/step"
+    if lower.endswith(".3mf"):
+        return "model/3mf"
+    return "application/octet-stream"
+
+
+def _run_orca_slice_sidecar(
+    *,
+    sidecar_url: str,
+    filename: str,
+    data: bytes,
+    profiles: dict,
+    output_kind: str,
+    output_filename: str,
+    plate: str = "1",
+    all_plates: bool = False,
+    arrange: bool = False,
+) -> tuple[str, bytes, str]:
+    exe = _orca_executable()
+    if not exe:
+        raise HTTPException(status_code=503, detail="OrcaSlicer executable not found on this worker")
+    machine = _orca_profile_file(str(profiles.get("printer") or ""), "machine", exe)
+    process = _orca_profile_file(str(profiles.get("process") or ""), "process", exe)
+    filament = _orca_profile_file(str(profiles.get("filament") or ""), "filament", exe)
+
+    safe_source = (filename or "flightdeck-model.stl").rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+    requested = output_filename.rsplit("/", 1)[-1].rsplit("\\", 1)[-1] or f"{_file_archive_key(safe_source)}.gcode.3mf"
+    sidecar_url = sidecar_url.strip().rstrip("/")
+    if not sidecar_url:
+        raise HTTPException(status_code=422, detail="Slicer API URL is not set")
+
+    files = [
+        ("file", (safe_source, data, _slicer_model_mime(safe_source))),
+        ("printerProfile", (machine.name, machine.read_bytes(), "application/json")),
+        ("presetProfile", (process.name, process.read_bytes(), "application/json")),
+        ("filamentProfile", (filament.name, filament.read_bytes(), "application/json")),
+    ]
+    form = {
+        "plate": "0" if all_plates else str(plate or "1"),
+        "exportType": "3mf" if output_kind == "gcode.3mf" else "gcode",
+        "arrange": "true" if arrange else "false",
+        "bedType": "Textured PEI Plate",
+        "requestId": f"flightdeck-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S%f')}",
+    }
+    try:
+        with httpx.Client(timeout=httpx.Timeout(connect=10.0, read=900.0, write=60.0, pool=10.0)) as client:
+            response = client.post(f"{sidecar_url}/slice", data=form, files=files)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Slicer API unreachable: {exc}") from exc
+
+    if response.status_code >= 400:
+        try:
+            payload = response.json()
+            detail = (
+                payload.get("details")
+                or payload.get("detail")
+                or payload.get("error")
+                or payload.get("message")
+                or json.dumps(payload)
+            )
+        except Exception:
+            detail = response.text
+        raise HTTPException(status_code=response.status_code, detail=_friendly_slicer_error(str(detail)))
+
+    content_type = response.headers.get("content-type", "")
+    if "application/json" in content_type:
+        payload = response.json()
+        encoded = payload.get("data") or payload.get("content") or payload.get("file")
+        if isinstance(encoded, str):
+            import base64
+            try:
+                decoded = base64.b64decode(encoded)
+                name = payload.get("filename") or payload.get("name") or requested
+                return str(name), decoded, json.dumps({k: v for k, v in payload.items() if k not in {"data", "content", "file"}})
+            except Exception:
+                pass
+        raise HTTPException(status_code=502, detail=_friendly_slicer_error(payload.get("details") or payload.get("error") or payload.get("message") or "Slicer API did not return a file"))
+
+    name = (
+        response.headers.get("X-Flightdeck-Sliced-Filename")
+        or response.headers.get("X-Sliced-Filename")
+        or _content_disposition_filename(response.headers.get("content-disposition", ""))
+        or requested
+    )
+    if not response.content:
+        raise HTTPException(status_code=502, detail="Slicer API returned an empty file")
+    return name, response.content, f"Slicer API {response.status_code}"
+
+
 def _run_orca_slice_local(
     *,
     filename: str,
@@ -2918,14 +3102,14 @@ def _run_orca_slice_local(
         proc = subprocess.run(args, text=True, capture_output=True, timeout=900)
         if proc.returncode not in (0, None):
             detail = (proc.stderr or proc.stdout or f"OrcaSlicer exited {proc.returncode}").strip()
-            raise HTTPException(status_code=502, detail=detail[-1200:])
+            raise HTTPException(status_code=502, detail=_friendly_slicer_error(detail))
         if output_kind != "gcode.3mf" and not output_path.exists():
             generated = sorted(tmp.glob("*.gcode"), key=lambda p: p.stat().st_mtime, reverse=True)
             if generated:
                 output_path = generated[0]
         if not output_path.exists():
             detail = (proc.stderr or proc.stdout or "OrcaSlicer finished without creating an output file").strip()
-            raise HTTPException(status_code=502, detail=detail[-1200:])
+            raise HTTPException(status_code=502, detail=_friendly_slicer_error(detail))
         return output_path.name, output_path.read_bytes(), (proc.stdout or proc.stderr or "").strip()[-2000:]
 
 

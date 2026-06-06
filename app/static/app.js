@@ -8597,6 +8597,7 @@ function _slicerCategoryHtml(profileData = null, printers = []) {
   const detected = _serverSettings.slicer_detected_version ?? '';
   const dockerUrl = (_serverSettings.orcaslicer_docker_url || '').trim();
   const workerUrl = (_serverSettings.orcaslicer_worker_url || '').trim();
+  const apiUrl = (_serverSettings.orcaslicer_api_url || '').trim();
   const dockerLaunchUrl = _slicerDockerLaunchUrl(dockerUrl);
   const dockerReady = !!dockerUrl;
 
@@ -8629,7 +8630,7 @@ function _slicerCategoryHtml(profileData = null, printers = []) {
       <div class="slicer-grid">${cards}</div>
     </div>
     <div class="settings-section">
-      <div class="settings-section-title">OrcaSlicer Docker</div>
+      <div class="settings-section-title">OrcaSlicer Integration</div>
       <div class="slicer-docker-panel">
         <div>
           <strong>Browser-based OrcaSlicer</strong>
@@ -8640,12 +8641,14 @@ function _slicerCategoryHtml(profileData = null, printers = []) {
           : `<span class="slicer-launch-btn slicer-launch-disabled">Set URL first</span>`}
       </div>
       <div class="settings-form-row">
-        <label class="settings-label">Docker URL</label>
+        <label class="settings-label">Browser Orca URL</label>
         <input class="settings-input slicer-docker-input" data-pref-key="orcaslicer_docker_url" type="url" value="${esc(dockerUrl)}" placeholder="${esc(_slicerDockerDefaultUrl())}">
+        <label class="settings-label">Slicer API URL</label>
+        <input class="settings-input pref-input" data-pref-key="orcaslicer_api_url" type="url" value="${esc(apiUrl)}" placeholder="${esc(_slicerApiDefaultUrl())}">
         <label class="settings-label">Worker URL</label>
         <input class="settings-input pref-input" data-pref-key="orcaslicer_worker_url" type="url" value="${esc(workerUrl)}" placeholder="http://100.x.x.x:8000">
       </div>
-      <div class="settings-hint">Docker URL opens the browser-based Orca screen. Worker URL points to a Windows Flightdeck instance with native Orca installed, so the Pi can slice in the background over Tailscale.</div>
+      <div class="settings-hint">Browser Orca URL opens the web slicer. Slicer API URL points to the background /slice service, usually port 3003. Worker URL points to a Windows Flightdeck instance with native Orca profiles installed.</div>
     </div>
     ${_slicerProfilesHtml(profileData, printers)}`;
 }
@@ -8653,6 +8656,10 @@ function _slicerCategoryHtml(profileData = null, printers = []) {
 function _slicerDockerDefaultUrl() {
   const proto = location.protocol === 'https:' ? 'https:' : location.protocol;
   return `${proto}//${location.hostname}:3011`;
+}
+
+function _slicerApiDefaultUrl() {
+  return `http://${location.hostname}:3003`;
 }
 
 function _slicerDockerLaunchUrl(value = '') {
@@ -8708,21 +8715,22 @@ function _attachSlicerEvents(el) {
         const saved = await _saveSetting(key, value);
         input.value = saved;
         _updateSlicerDockerLaunch(el);
-        showToast('Orca Docker URL saved', saved || 'Using current host on port 3011', 'success');
+        showToast('Browser Orca URL saved', saved || 'Using current host on port 3011', 'success');
       } catch (err) {
         showToast('Setting save failed', err.message || '', 'error');
         input.value = input.defaultValue;
       }
     });
   });
-  el.querySelectorAll('.pref-input[data-pref-key="orcaslicer_worker_url"]').forEach(input => {
+  el.querySelectorAll('.pref-input[data-pref-key="orcaslicer_worker_url"], .pref-input[data-pref-key="orcaslicer_api_url"]').forEach(input => {
     input.addEventListener('change', async () => {
       const value = input.value.trim().replace(/\/+$/, '');
       try {
         const saved = await _saveSetting(input.dataset.prefKey, value);
         input.value = saved || '';
-        _serverSettings.orcaslicer_worker_url = input.value;
-        showToast('Slicer worker URL saved', input.value || 'Using local worker', 'success');
+        _serverSettings[input.dataset.prefKey] = input.value;
+        const label = input.dataset.prefKey === 'orcaslicer_api_url' ? 'Slicer API URL' : 'Slicer worker URL';
+        showToast(`${label} saved`, input.value || 'Cleared', 'success');
       } catch (err) {
         showToast('Setting save failed', err.message || '', 'error');
         input.value = input.defaultValue;
@@ -9230,11 +9238,11 @@ function _openSliceModelDialog({ sourceId, path, file, printers }) {
       errEl.hidden = false;
       errEl.textContent = data.ready
         ? `Prepare ${data.output?.filename || 'a printer-specific sliced job'} for ${data.target?.custom_name || data.target?.model_name || choice.dataset.printerId}.`
-        : data.message || 'Set the OrcaSlicer Docker URL in Settings -> Slicer first.';
+        : data.message || 'Set the slicer settings in Settings -> Slicer first.';
       errEl.classList.toggle('filedesk-dialog-ok', !!data.ready);
       if (data.ready && actionsEl) {
         const sourceUrl = data.source?.download_url || `/api/files/source/download?${new URLSearchParams({ source_id: sourceId, path }).toString()}`;
-        const sidecarUrl = data.sidecar_url || '';
+        const browserUrl = data.browser_url || data.sidecar_url || '';
         const outputName = data.output?.filename || 'sliced-output';
         const profiles = data.profiles || {};
         const profileRows = [
@@ -9252,7 +9260,7 @@ function _openSliceModelDialog({ sourceId, path, file, printers }) {
           <div class="filedesk-slice-buttons">
             <button class="filedesk-slice-link filedesk-slice-run" type="button" data-run-slice="${esc(outputName)}" data-printer-id="${esc(data.target?.id || choice.dataset.printerId)}">Slice in Flightdeck</button>
             ${sourceUrl ? `<a class="filedesk-slice-link" href="${esc(sourceUrl)}" download>Download model</a>` : ''}
-            <a class="filedesk-slice-link" href="${esc(sidecarUrl)}" target="_blank" rel="noreferrer">Open Orca</a>
+            ${browserUrl ? `<a class="filedesk-slice-link" href="${esc(browserUrl)}" target="_blank" rel="noreferrer">Open Orca</a>` : ''}
             <button class="filedesk-slice-link" type="button" data-copy-slice-name="${esc(outputName)}">Copy output name</button>
             <button class="filedesk-slice-link" type="button" data-check-slice-output="${esc(outputName)}">Check vault</button>
           </div>`;
