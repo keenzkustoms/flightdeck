@@ -8596,6 +8596,7 @@ function _slicerCategoryHtml(profileData = null, printers = []) {
   const selected = _serverSettings.preferred_slicer ?? '';
   const detected = _serverSettings.slicer_detected_version ?? '';
   const dockerUrl = (_serverSettings.orcaslicer_docker_url || '').trim();
+  const workerUrl = (_serverSettings.orcaslicer_worker_url || '').trim();
   const dockerLaunchUrl = _slicerDockerLaunchUrl(dockerUrl);
   const dockerReady = !!dockerUrl;
 
@@ -8641,8 +8642,10 @@ function _slicerCategoryHtml(profileData = null, printers = []) {
       <div class="settings-form-row">
         <label class="settings-label">Docker URL</label>
         <input class="settings-input slicer-docker-input" data-pref-key="orcaslicer_docker_url" type="url" value="${esc(dockerUrl)}" placeholder="${esc(_slicerDockerDefaultUrl())}">
+        <label class="settings-label">Worker URL</label>
+        <input class="settings-input pref-input" data-pref-key="orcaslicer_worker_url" type="url" value="${esc(workerUrl)}" placeholder="http://100.x.x.x:8000">
       </div>
-      <div class="settings-hint">Start the Orca sidecar on the NAS/PC, then paste its URL here. The suggested port is HTTPS 3011. The LinuxServer Orca image is x86-64 only, so it will not run on the Pi.</div>
+      <div class="settings-hint">Docker URL opens the browser-based Orca screen. Worker URL points to a Windows Flightdeck instance with native Orca installed, so the Pi can slice in the background over Tailscale.</div>
     </div>
     ${_slicerProfilesHtml(profileData, printers)}`;
 }
@@ -8706,6 +8709,20 @@ function _attachSlicerEvents(el) {
         input.value = saved;
         _updateSlicerDockerLaunch(el);
         showToast('Orca Docker URL saved', saved || 'Using current host on port 3011', 'success');
+      } catch (err) {
+        showToast('Setting save failed', err.message || '', 'error');
+        input.value = input.defaultValue;
+      }
+    });
+  });
+  el.querySelectorAll('.pref-input[data-pref-key="orcaslicer_worker_url"]').forEach(input => {
+    input.addEventListener('change', async () => {
+      const value = input.value.trim().replace(/\/+$/, '');
+      try {
+        const saved = await _saveSetting(input.dataset.prefKey, value);
+        input.value = saved || '';
+        _serverSettings.orcaslicer_worker_url = input.value;
+        showToast('Slicer worker URL saved', input.value || 'Using local worker', 'success');
       } catch (err) {
         showToast('Setting save failed', err.message || '', 'error');
         input.value = input.defaultValue;
@@ -9233,6 +9250,7 @@ function _openSliceModelDialog({ sourceId, path, file, printers }) {
           </div>
           <div class="filedesk-slice-profiles">${profileRows}</div>
           <div class="filedesk-slice-buttons">
+            <button class="filedesk-slice-link filedesk-slice-run" type="button" data-run-slice="${esc(outputName)}" data-printer-id="${esc(data.target?.id || choice.dataset.printerId)}">Slice in Flightdeck</button>
             ${sourceUrl ? `<a class="filedesk-slice-link" href="${esc(sourceUrl)}" download>Download model</a>` : ''}
             <a class="filedesk-slice-link" href="${esc(sidecarUrl)}" target="_blank" rel="noreferrer">Open Orca</a>
             <button class="filedesk-slice-link" type="button" data-copy-slice-name="${esc(outputName)}">Copy output name</button>
@@ -9286,6 +9304,41 @@ function _openSliceModelDialog({ sourceId, path, file, printers }) {
     } finally {
       checkBtn.disabled = false;
       checkBtn.textContent = old;
+    }
+  });
+  overlay.addEventListener('click', async e => {
+    const runBtn = e.target.closest('[data-run-slice]');
+    if (!runBtn) return;
+    const old = runBtn.textContent;
+    runBtn.disabled = true;
+    runBtn.textContent = 'Slicing...';
+    try {
+      const r = await fetch('/api/slicer/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          source_id: sourceId,
+          path,
+          printer_id: runBtn.dataset.printerId,
+          output_filename: runBtn.dataset.runSlice || '',
+          plate: '1',
+          all_plates: !!overlay.querySelector('#slice-all-plates')?.checked,
+        }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(typeof data.detail === 'string' ? data.detail : data.detail?.message || 'Slice failed');
+      showToast('Sliced job ready', `${data.filename} · ${_fmtBytes(data.size)}`, 'success');
+      close();
+      _fileDeskLastHtml = '';
+      _printerBayLastHtml = '';
+      const route = parseRoute();
+      if (route.view === 'printer' && route.subtab === 'bay') _renderPrinterBayBody(route.id);
+      else renderFileDeskView();
+    } catch (err) {
+      showToast('Slice failed', err.message || '', 'error');
+    } finally {
+      runBtn.disabled = false;
+      runBtn.textContent = old;
     }
   });
 

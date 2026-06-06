@@ -40,7 +40,7 @@ $envLines = @(
     "FLIGHTDECK_INSTANCE_NAME=Windows",
     "FLIGHTDECK_DATA_DIR=$DataDir",
     "FLIGHTDECK_PRINT_LIBRARY=$(Join-Path $DataDir "print_library")",
-    "FLIGHTDECK_HOST=127.0.0.1",
+    "FLIGHTDECK_HOST=0.0.0.0",
     "FLIGHTDECK_PORT=$Port",
     "FLIGHTDECK_URL=http://127.0.0.1:$Port"
 )
