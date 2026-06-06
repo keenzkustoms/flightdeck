@@ -1,5 +1,11 @@
 # Flightdeck — next session brief
-_Last updated 5 June 2026 (Session 28.181 Multi-colour spool deduction fix)_
+_Last updated 6 June 2026 (Session 28.183 Printer lockout reasons)_
+
+## What was added - Session 28.183 (Printer lockout reasons - 6 June)
+- Unticking a printer's `Print enabled` checkbox now opens a reason note prompt.
+- Disabled printers stay visible, but Queue/relay dispatch blocks include the saved reason so operators know why the printer is out of service.
+- Live printer headers show an amber `Dispatch locked` note while the printer is disabled; ticking the printer back on clears the active lockout note.
+- Bumped static cache to `app.js?v=288` and `style.css?v=223`; backend restart required for the new note field.
 
 ## What was fixed - Session 28.181 (Multi-colour spool deduction fix - 5 June)
 - Fixed the Bambu multi-colour spool deduction path so it builds the persisted AMS slot snapshot before matching slicer colour/material usage to loaded spools.

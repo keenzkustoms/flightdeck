@@ -27,6 +27,7 @@ DEFAULT_SETTINGS = {
 }
 
 _PRINTER_PRINTING_ENABLED_PREFIX = "printer_print_enabled_"
+_PRINTER_PRINTING_NOTE_PREFIX = "printer_print_note_"
 
 
 def init() -> None:
@@ -1327,6 +1328,10 @@ def _print_enabled_key(printer_id: str) -> str:
     return f"{_PRINTER_PRINTING_ENABLED_PREFIX}{printer_id}"
 
 
+def _print_note_key(printer_id: str) -> str:
+    return f"{_PRINTER_PRINTING_NOTE_PREFIX}{printer_id}"
+
+
 def _parse_bool(value: Optional[str]) -> bool:
     return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
 
@@ -1342,6 +1347,25 @@ def is_printer_printing_enabled(printer_id: str) -> bool:
 
 def set_printer_printing_enabled(printer_id: str, enabled: bool) -> None:
     set_setting(_print_enabled_key(printer_id), "true" if enabled else "false")
+
+
+def get_printer_printing_note(printer_id: str) -> Optional[str]:
+    key = _print_note_key(printer_id)
+    with _conn() as conn:
+        row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+    if row is None:
+        return None
+    note = str(row["value"] or "").strip()
+    return note or None
+
+
+def set_printer_printing_note(printer_id: str, note: Optional[str]) -> None:
+    cleaned = (note or "").strip()
+    if cleaned:
+        set_setting(_print_note_key(printer_id), cleaned[:500])
+        return
+    with _conn() as conn:
+        conn.execute("DELETE FROM settings WHERE key = ?", (_print_note_key(printer_id),))
 
 
 def set_setting(key: str, value: str) -> None:

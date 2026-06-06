@@ -136,6 +136,7 @@ async def _gather_all_locked() -> list[dict]:
             out.append(r)
     for entry in out:
         entry["print_enabled"] = db.is_printer_printing_enabled(entry["id"])
+        entry["print_enabled_note"] = db.get_printer_printing_note(entry["id"])
     _latest_printers.clear()
     _latest_printers.update({p["id"]: p for p in out})
     _latest_printers_at = datetime.utcnow()
@@ -2048,6 +2049,7 @@ async def remove_printer(printer_id: str):
 
 class PrinterPrintEnabledRequest(BaseModel):
     enabled: bool
+    note: Optional[str] = None
 
 
 @app.get("/api/printers/{printer_id}/print-enabled")
@@ -2058,6 +2060,7 @@ async def get_printer_print_enabled(printer_id: str):
     return {
         "printer_id": printer_id,
         "print_enabled": db.is_printer_printing_enabled(printer_id),
+        "print_enabled_note": db.get_printer_printing_note(printer_id),
     }
 
 
@@ -2066,10 +2069,19 @@ async def set_printer_print_enabled(printer_id: str, body: PrinterPrintEnabledRe
     cfg = load()
     if not any(p.id == printer_id for p in cfg.printers):
         raise HTTPException(status_code=404, detail="printer not found")
-    db.set_printer_printing_enabled(printer_id, bool(body.enabled))
+    enabled = bool(body.enabled)
+    note = None if enabled else (body.note or "").strip()
+    db.set_printer_printing_enabled(printer_id, enabled)
+    db.set_printer_printing_note(printer_id, None if enabled else note)
+    db.log_decision(
+        printer_id,
+        "print_enabled_changed",
+        "enabled" if enabled else f"disabled: {note or 'No reason entered'}",
+    )
     if printer_id in _latest_printers:
-        _latest_printers[printer_id]["print_enabled"] = bool(body.enabled)
-    return {"ok": True}
+        _latest_printers[printer_id]["print_enabled"] = enabled
+        _latest_printers[printer_id]["print_enabled_note"] = None if enabled else note
+    return {"ok": True, "print_enabled": enabled, "print_enabled_note": None if enabled else note}
 
 
 @app.post("/api/printers/{printer_id}/exclude-object")
@@ -3504,7 +3516,9 @@ def _queue_preflight(job: dict, printer_status: Optional[dict]) -> dict:
     strict_colour = settings.get("queue_strict_colour", "true") == "true"
 
     if not (printer_status or {}).get("print_enabled", db.is_printer_printing_enabled(job["printer_id"])):
-        issues.append({"level": "block", "message": "Printer disabled in Flightdeck. Tick 'Print enabled' to dispatch."})
+        note = (printer_status or {}).get("print_enabled_note") or db.get_printer_printing_note(job["printer_id"])
+        suffix = f" Reason: {note}" if note else ""
+        issues.append({"level": "block", "message": f"Printer disabled in Flightdeck.{suffix} Tick 'Print enabled' to dispatch."})
 
     if not printer_status:
         issues.append({"level": "wait", "message": "Waiting for printer telemetry"})
@@ -3883,12 +3897,14 @@ async def relay_print_start(printer_id: str, request: Request):
         raise HTTPException(status_code=422, detail="filename required")
 
     if not db.is_printer_printing_enabled(printer_id):
+        note = db.get_printer_printing_note(printer_id)
         db.log_decision(
             printer_id,
             "relay_start_blocked",
-            f"file={filename} source={source_ip} printer_disabled",
+            f"file={filename} source={source_ip} printer_disabled{f' note={note}' if note else ''}",
         )
-        raise HTTPException(status_code=409, detail="Printer is currently disabled")
+        detail = f"Printer is currently disabled: {note}" if note else "Printer is currently disabled"
+        raise HTTPException(status_code=409, detail=detail)
 
     if not _latest_printers:
         await _gather_all()

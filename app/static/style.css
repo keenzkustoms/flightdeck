@@ -3343,6 +3343,33 @@ button.briefing-row {
   height: 0.9rem;
 }
 
+.live-lockout-note {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid rgba(245,158,11,0.34);
+  border-radius: 0.45rem;
+  background: rgba(245,158,11,0.08);
+  color: #fcd34d;
+  font-size: 0.72rem;
+}
+
+.live-lockout-note strong {
+  flex-shrink: 0;
+  color: #fbbf24;
+}
+
+.live-lockout-note span {
+  min-width: 0;
+  overflow: hidden;
+  color: #fde68a;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .live-transport {
   justify-self: end;
   display: flex;
@@ -7779,6 +7806,19 @@ button.live-route-node:hover {
 .settings-printer-enable-input {
   width: 0.95rem;
   height: 0.95rem;
+}
+
+.settings-printer-lock-note {
+  max-width: 15rem;
+  overflow: hidden;
+  padding: 0.16rem 0.45rem;
+  border: 1px solid rgba(245,158,11,0.28);
+  border-radius: 999px;
+  background: rgba(245,158,11,0.08);
+  color: #fcd34d;
+  font-size: 0.66rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .settings-printer-type {

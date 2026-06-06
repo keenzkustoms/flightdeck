@@ -569,6 +569,35 @@ function _inputModal({ title, message = '', value = '', placeholder = '', inputT
   });
 }
 
+function _textareaModal({ title, message = '', value = '', placeholder = '', okLabel = 'Save' }) {
+  return new Promise(resolve => {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `
+      <div class="modal-box input-modal">
+        <div class="modal-message">${esc(title)}</div>
+        ${message ? `<div class="modal-submessage">${esc(message)}</div>` : ''}
+        <textarea class="note-textarea" rows="5" placeholder="${esc(placeholder)}">${esc(value ?? '')}</textarea>
+        <div class="modal-actions">
+          <button class="modal-btn" data-input-cancel>Cancel</button>
+          <button class="modal-btn modal-btn-danger" data-input-ok>${esc(okLabel)}</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    const input = overlay.querySelector('.note-textarea');
+    const close = result => { overlay.remove(); resolve(result); };
+    overlay.addEventListener('click', e => { if (e.target === overlay) close(null); });
+    overlay.querySelector('[data-input-cancel]').addEventListener('click', () => close(null));
+    overlay.querySelector('[data-input-ok]').addEventListener('click', () => close(input.value));
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Escape') close(null);
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) close(input.value);
+    });
+    input.focus();
+    input.select();
+  });
+}
+
 // ── Command palette ───────────────────────────────────────────────────────
 
 let _commandPalette = null;
@@ -1801,10 +1830,7 @@ document.getElementById('view-printer').addEventListener('click', e => {
 document.getElementById('view-printer').addEventListener('change', async e => {
   const liveToggle = e.target.closest('[data-live-print-enabled]');
   if (!liveToggle) return;
-  const id = liveToggle.dataset.printerId;
-  const enabled = liveToggle.checked;
-  const ok = await setPrinterPrintEnabled(id, enabled);
-  if (!ok) liveToggle.checked = !enabled;
+  await _handlePrinterPrintEnabledToggle(liveToggle);
 });
 
 document.addEventListener('click', e => {
@@ -2373,6 +2399,7 @@ function _detailLiveHeader(p, printerColor, bannerTextColor) {
     ? [progress != null ? `${progress}%` : '', _liveEtaText(p)].filter(Boolean).join(' · ')
     : _dashboardIssueText(p);
   const signals = _detailLiveSignals(p);
+  const disabledNote = (p.print_enabled ?? true) ? '' : (p.print_enabled_note || 'No reason entered');
   return `<div class="live-command-header" style="--tab-accent:${printerColor}">
     <div class="live-printer-mark" style="color:${bannerTextColor}">
       <span class="live-printer-name">${esc(p.model_name || p.custom_name || p.id)}</span>
@@ -2389,11 +2416,17 @@ function _detailLiveHeader(p, printerColor, bannerTextColor) {
         <input type="checkbox"
           data-live-print-enabled
           data-printer-id="${p.id}"
+          data-printer-name="${esc(shop)}"
+          data-print-note="${esc(p.print_enabled_note || '')}"
           ${p.print_enabled ?? true ? 'checked' : ''}>
         Print enabled
       </label>
     </div>
     ${_detailTransportControls(p.id, p)}
+    ${disabledNote ? `<div class="live-lockout-note">
+      <strong>Dispatch locked</strong>
+      <span>${esc(disabledNote)}</span>
+    </div>` : ''}
     ${signals ? `<div class="live-signal-row">${signals}</div>` : ''}
   </div>`;
 }
@@ -7687,9 +7720,12 @@ function _printersCategoryHtml(printers) {
             <span class="settings-printer-type">${connInfo}</span>
             <label class="settings-printer-enable">
               <input type="checkbox" class="settings-printer-enable-input" data-printer-id="${p.id}"
+                data-printer-name="${esc(p.custom_name || p.model_name || p.id)}"
+                data-print-note="${esc(p.print_enabled_note || '')}"
                 ${p.print_enabled ?? true ? 'checked' : ''}>
               Print enabled
             </label>
+            ${!(p.print_enabled ?? true) && p.print_enabled_note ? `<span class="settings-printer-lock-note">${esc(p.print_enabled_note)}</span>` : ''}
             <button class="settings-delete-btn"
               data-delete-id="${p.id}"
               data-delete-name="${p.custom_name}">Remove</button>
@@ -7901,15 +7937,7 @@ function _attachPrintersEvents(el) {
   });
 
   el.querySelectorAll('.settings-printer-enable-input').forEach(input => {
-    input.addEventListener('change', async e => {
-      const target = e.currentTarget;
-      const id = target.dataset.printerId;
-      const enabled = target.checked;
-      const ok = await setPrinterPrintEnabled(id, enabled);
-      if (!ok) {
-        target.checked = !enabled;
-      }
-    });
+    input.addEventListener('change', e => _handlePrinterPrintEnabledToggle(e.currentTarget));
   });
 
   el.querySelector('#settings-add-form')?.addEventListener('submit', async e => {
@@ -8074,12 +8102,33 @@ function _showDuplicateModal(name, id) {
   });
 }
 
-async function setPrinterPrintEnabled(printerId, enabled) {
+async function _handlePrinterPrintEnabledToggle(target) {
+  const id = target.dataset.printerId;
+  const enabled = target.checked;
+  let note = null;
+  if (!enabled) {
+    note = await _textareaModal({
+      title: 'Why is this printer down?',
+      message: `${target.dataset.printerName || id} will stay visible, but Flightdeck will not dispatch jobs to it.`,
+      value: target.dataset.printNote || '',
+      placeholder: 'e.g. blocked nozzle, needs bed clean, AMS jam, waiting on part',
+      okLabel: 'Disable printing',
+    });
+    if (note === null) {
+      target.checked = true;
+      return;
+    }
+  }
+  const ok = await setPrinterPrintEnabled(id, enabled, note);
+  if (!ok) target.checked = !enabled;
+}
+
+async function setPrinterPrintEnabled(printerId, enabled, note = null) {
   try {
     const r = await fetch(`/api/printers/${printerId}/print-enabled`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ enabled }),
+      body: JSON.stringify({ enabled, note }),
     });
     if (!r.ok) {
       const body = await r.json().catch(() => ({}));
