@@ -6,7 +6,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$AppDir = Resolve-Path (Join-Path $ScriptDir "..\..")
+$AppDir = (Resolve-Path (Join-Path $ScriptDir "..\..")).Path
 $VenvDir = Join-Path $AppDir ".venv"
 $Python = "python"
 

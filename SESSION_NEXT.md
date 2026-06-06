@@ -8,6 +8,7 @@ _Last updated 6 June 2026 (Session 28.190 Windows tray install)_
 - Added `requirements-windows.txt` for the tray dependency and `scripts/windows/uninstall-windows.ps1` for removing the Startup shortcut/data.
 - Setup Health now treats `FLIGHTDECK_RUNTIME=windows` / `Windows tray` as a managed runtime instead of expecting systemd.
 - Updated README and INSTALL with the Windows tray install flow.
+- Fixed the Windows shortcut creation path so PowerShell passes a plain string working directory to the `.lnk` writer.
 
 ## What was fixed - Session 28.189 (OrcaSlicer launcher guard - 6 June)
 - Settings -> Slicer no longer opens a guessed `:3011` URL when no Orca Docker URL has been configured.
