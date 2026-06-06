@@ -1,5 +1,13 @@
 # Flightdeck — next session brief
-_Last updated 6 June 2026 (Session 28.199 Windows bootstrap installer)_
+_Last updated 7 June 2026 (Session 28.203 Klipper live controls)_
+
+## What was added - Session 28.203 (Klipper live controls - 7 June)
+- Added Moonraker/Klipper live fan controls on the printer live page: Off, 50%, and 100%.
+- Added small Bed/Z jog controls on Moonraker/Klipper live pages: `Z -1` and `Z +1`.
+- Live Moonraker status now includes reported part-cooling fan speed and toolhead position so the controls show current fan/Z context.
+- Fan commands are blocked for offline/error/estop states; Z jog is additionally disabled during printing, paused, finished, error, estop, and offline states.
+- Backend endpoints added: `POST /api/printers/{printer_id}/fan` and `POST /api/printers/{printer_id}/jog-z`.
+- Bumped static cache to `app.js?v=320` and `style.css?v=248`; backend restart required.
 
 ## What was added - Session 28.199 (Windows bootstrap installer - 6 June)
 - Added `Install-Flightdeck-Windows.cmd` at the repo root as the double-click Windows installer entry point.
