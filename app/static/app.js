@@ -3350,6 +3350,7 @@ function _detailObjectsPanel(id, data) {
   const detail = data?.detail || 'Select one object to exclude it from the active print.';
   const title = `<div class="detail-panel-title">Objects</div>
     <div class="obj-panel-subtitle"><strong>${esc(modeLabel)}</strong><span>${esc(detail)}</span></div>`;
+  const mapHtml = _objectMapHtml(id, data);
   const rows = objects.map(obj => {
     const isExcluded = obj.state === 'excluded';
     const isCurrent = obj.state === 'current';
@@ -3376,7 +3377,47 @@ function _detailObjectsPanel(id, data) {
       </div>
     </div>`;
   }).join('');
-  return `<div class="detail-panel">${title}<div class="obj-list">${rows}</div></div>`;
+  return `<div class="detail-panel">${title}${mapHtml}<div class="obj-list">${rows}</div></div>`;
+}
+
+function _objectMapHtml(id, data) {
+  const objects = data?.objects || [];
+  const bounds = data?.plate_bounds;
+  const hasGeometry = bounds && bounds.w > 0 && bounds.h > 0 && objects.some(o => o.bbox);
+  const mapButtons = objects.map(obj => {
+    const isExcluded = obj.state === 'excluded';
+    const rawName = obj.name || `Object ${obj.id ?? ''}`;
+    const safeName = rawName.replace(/"/g, '&quot;');
+    const safeId = obj.id ?? '';
+    const shortName = (obj.label || rawName).replace(/.*[/\\]/, '');
+    if (hasGeometry && obj.bbox) {
+      const left = ((obj.bbox.x - bounds.x) / bounds.w) * 100;
+      const top = ((obj.bbox.y - bounds.y) / bounds.h) * 100;
+      const width = (obj.bbox.w / bounds.w) * 100;
+      const height = (obj.bbox.h / bounds.h) * 100;
+      return `<button type="button" class="obj-map-region obj-exclude-btn${isExcluded ? ' is-excluded' : ''}"
+        style="left:${left.toFixed(2)}%;top:${top.toFixed(2)}%;width:${Math.max(width, 5).toFixed(2)}%;height:${Math.max(height, 5).toFixed(2)}%"
+        data-obj-name="${safeName}" data-printer-id="${id}" data-obj-id="${safeId}" ${isExcluded ? 'disabled' : ''}
+        title="${esc(shortName)}">${esc(safeId || shortName)}</button>`;
+    }
+    return `<button type="button" class="obj-map-chip obj-exclude-btn${isExcluded ? ' is-excluded' : ''}"
+      data-obj-name="${safeName}" data-printer-id="${id}" data-obj-id="${safeId}" ${isExcluded ? 'disabled' : ''}
+      title="${esc(shortName)}">${safeId !== '' ? `#${esc(safeId)}` : esc(shortName)}</button>`;
+  }).join('');
+  const image = data?.plate_image_url
+    ? `<img src="${esc(data.plate_image_url)}?map=${Date.now()}" alt="Plate object map" loading="lazy">`
+    : '';
+  const classes = `obj-map${hasGeometry ? ' obj-map-has-geometry' : ' obj-map-no-geometry'}`;
+  const helper = hasGeometry
+    ? 'Tap the failed part on the plate map.'
+    : 'No object positions in this 3MF; match the object ID shown on the printer screen.';
+  return `<div class="${classes}">
+    <div class="obj-map-stage">
+      ${image}
+      <div class="obj-map-overlay">${mapButtons}</div>
+    </div>
+    <div class="obj-map-helper">${esc(helper)}</div>
+  </div>`;
 }
 
 async function refreshObjectsPanel(id) {

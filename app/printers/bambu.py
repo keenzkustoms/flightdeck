@@ -868,6 +868,8 @@ class BambuPrinter:
             "label": "Bambu skip objects",
             "objects": objects,
             "excluded_ids": sorted(skipped),
+            "plate_bounds": preview.plate_bounds,
+            "plate_image_url": f"/api/printers/{self.id}/thumbnail",
             "detail": "Bambu object exclusion uses the printer skip-object list.",
         }
 

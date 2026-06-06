@@ -1,5 +1,11 @@
 # Flightdeck — next session brief
-_Last updated 6 June 2026 (Session 28.185 Unified object exclusion)_
+_Last updated 6 June 2026 (Session 28.186 Bambu object map)_
+
+## What was added - Session 28.186 (Bambu object map - 6 June)
+- Bambu 3MF parsing now tries to pull object bounding boxes from `Metadata/plate_N.json` alongside the object IDs/names from `slice_info.config`.
+- The live Objects panel now includes a Bambu-style plate map: tap an object overlay when geometry is available, or use large object-ID chips when the 3MF does not expose positions.
+- The map uses the active plate thumbnail as visual context and keeps the same guarded exclude confirmation flow.
+- Bumped static cache to `app.js?v=290` and `style.css?v=225`; backend restart required.
 
 ## What was updated - Session 28.185 (Unified object exclusion - 6 June)
 - Bambu object skipping now presents like the Klipper exclude-object flow: one live Objects panel, object status, and a clear Exclude action per object.

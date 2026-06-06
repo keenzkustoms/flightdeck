@@ -21,6 +21,7 @@ class BambuPreview:
     filament_type: Optional[str]
     filament_colors: Optional[str] = None
     objects: Optional[list[dict]] = None
+    plate_bounds: Optional[dict] = None
 
 
 class _ImplicitFTP_TLS(ftplib.FTP_TLS):
@@ -65,6 +66,10 @@ def _parse_3mf(buf: io.BytesIO, plate_number: Optional[int] = None) -> BambuPrev
             return BambuPreview(image_png=image_png, estimated_total_seconds=None,
                                 filament_weight_g=None, filament_type=None, filament_colors=None,
                                 objects=None)
+        try:
+            plate_json = json.loads(z.read(f"Metadata/plate_{plate_number}.json").decode())
+        except Exception:
+            plate_json = None
 
     root_el = ET.fromstring(slice_xml)
     plates = root_el.findall("plate")
@@ -87,6 +92,7 @@ def _parse_3mf(buf: io.BytesIO, plate_number: Optional[int] = None) -> BambuPrev
     filament_type = filament_el.get("type") if filament_el is not None else None
     filaments = []
     objects = []
+    object_boxes, plate_bounds = _extract_plate_object_boxes(plate_json)
     if plate is not None:
         name_counts: dict[str, int] = {}
         for el in plate.findall("filament"):
@@ -113,7 +119,11 @@ def _parse_3mf(buf: io.BytesIO, plate_number: Optional[int] = None) -> BambuPrev
                 "name": base,
                 "label": f"{base} #{name_counts[base]}" if name_counts[base] > 1 else base,
                 "state": "excluded" if el.get("skipped", "false").lower() == "true" else "available",
+                **({"bbox": object_boxes[identify_id]} if identify_id in object_boxes else {}),
             })
+
+    if not plate_bounds and object_boxes:
+        plate_bounds = _bounds_for_boxes(object_boxes.values())
 
     return BambuPreview(
         image_png=image_png,
@@ -122,7 +132,94 @@ def _parse_3mf(buf: io.BytesIO, plate_number: Optional[int] = None) -> BambuPrev
         filament_type=filament_type,
         filament_colors=json.dumps(filaments) if filaments else None,
         objects=objects or None,
+        plate_bounds=plate_bounds,
     )
+
+
+def _numbers(value) -> list[float]:
+    if isinstance(value, str):
+        value = value.replace("[", " ").replace("]", " ").replace(",", " ").split()
+    if isinstance(value, (list, tuple)):
+        out = []
+        for item in value:
+            try:
+                out.append(float(item))
+            except (TypeError, ValueError):
+                continue
+        return out
+    return []
+
+
+def _bbox_from_value(value) -> Optional[dict]:
+    if isinstance(value, dict):
+        if all(k in value for k in ("x", "y", "w", "h")):
+            return {"x": float(value["x"]), "y": float(value["y"]), "w": float(value["w"]), "h": float(value["h"])}
+        if all(k in value for k in ("min_x", "min_y", "max_x", "max_y")):
+            x = float(value["min_x"])
+            y = float(value["min_y"])
+            return {"x": x, "y": y, "w": float(value["max_x"]) - x, "h": float(value["max_y"]) - y}
+        if all(k in value for k in ("x_min", "y_min", "x_max", "y_max")):
+            x = float(value["x_min"])
+            y = float(value["y_min"])
+            return {"x": x, "y": y, "w": float(value["x_max"]) - x, "h": float(value["y_max"]) - y}
+    nums = _numbers(value)
+    if len(nums) < 4:
+        return None
+    x, y, a, b = nums[:4]
+    if a > x and b > y:
+        w, h = a - x, b - y
+    else:
+        w, h = a, b
+    if w <= 0 or h <= 0:
+        return None
+    return {"x": x, "y": y, "w": w, "h": h}
+
+
+def _bounds_for_boxes(boxes) -> Optional[dict]:
+    vals = [b for b in boxes if b and b.get("w", 0) > 0 and b.get("h", 0) > 0]
+    if not vals:
+        return None
+    min_x = min(b["x"] for b in vals)
+    min_y = min(b["y"] for b in vals)
+    max_x = max(b["x"] + b["w"] for b in vals)
+    max_y = max(b["y"] + b["h"] for b in vals)
+    return {"x": min_x, "y": min_y, "w": max_x - min_x, "h": max_y - min_y}
+
+
+def _extract_plate_object_boxes(data) -> tuple[dict[int, dict], Optional[dict]]:
+    boxes: dict[int, dict] = {}
+    plate_bounds = None
+
+    def walk(node):
+        nonlocal plate_bounds
+        if isinstance(node, dict):
+            if plate_bounds is None:
+                for key in ("bbox_all", "plate_bbox", "build_plate_bbox"):
+                    if key in node:
+                        plate_bounds = _bbox_from_value(node.get(key))
+                        if plate_bounds:
+                            break
+            raw_id = node.get("identify_id", node.get("object_id", node.get("id")))
+            bbox = None
+            for key in ("bbox", "bbox_all", "bounding_box", "bounds"):
+                if key in node:
+                    bbox = _bbox_from_value(node.get(key))
+                    if bbox:
+                        break
+            try:
+                obj_id = int(raw_id) if raw_id is not None else None
+            except (TypeError, ValueError):
+                obj_id = None
+            if obj_id is not None and bbox:
+                boxes[obj_id] = bbox
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+
+    walk(data)
+    return boxes, plate_bounds
 
 
 def fetch_bambu_preview(ip: str, access_code: str, subtask_name: str, plate_number: Optional[int] = None) -> Optional[BambuPreview]:
