@@ -7,6 +7,7 @@ import threading
 import time
 import urllib.request
 import webbrowser
+from datetime import datetime
 from pathlib import Path
 
 import pystray
@@ -104,6 +105,64 @@ class FlightdeckTray:
         self.stop_server()
         self.start_server()
 
+    def update_from_github(self, _icon=None, _item=None) -> None:
+        threading.Thread(target=self._update_from_github_worker, daemon=True).start()
+
+    def _update_from_github_worker(self) -> None:
+        self.status = "Updating"
+        self._refresh_icon()
+        LOG_DIR.mkdir(parents=True, exist_ok=True)
+        log_path = LOG_DIR / "flightdeck-update.log"
+        try:
+            dirty = subprocess.run(
+                ["git", "status", "--porcelain"],
+                cwd=str(APP_DIR),
+                text=True,
+                capture_output=True,
+                timeout=10,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            )
+            if dirty.returncode != 0:
+                raise RuntimeError((dirty.stderr or dirty.stdout or "git status failed").strip())
+            if dirty.stdout.strip():
+                raise RuntimeError("Local changes are present. Update skipped.")
+
+            branch = subprocess.run(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                cwd=str(APP_DIR),
+                text=True,
+                capture_output=True,
+                timeout=10,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            )
+            branch_name = (branch.stdout or "").strip()
+            if branch.returncode != 0 or not branch_name or branch_name == "HEAD":
+                raise RuntimeError((branch.stderr or "Flightdeck is not on a named Git branch.").strip())
+
+            pull = subprocess.run(
+                ["git", "pull", "--ff-only", "origin", branch_name],
+                cwd=str(APP_DIR),
+                text=True,
+                capture_output=True,
+                timeout=120,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            )
+            output = (pull.stdout or pull.stderr or "").strip()
+            if pull.returncode != 0:
+                raise RuntimeError(output or "git pull failed")
+
+            with log_path.open("a", encoding="utf-8") as log:
+                log.write(f"\n[{datetime.now().isoformat(timespec='seconds')}] Update OK\n{output}\n")
+            self.restart_server()
+            self.status = "Updated"
+            self._refresh_icon()
+            webbrowser.open(URL)
+        except Exception as exc:
+            with log_path.open("a", encoding="utf-8") as log:
+                log.write(f"\n[{datetime.now().isoformat(timespec='seconds')}] Update failed\n{exc}\n")
+            self.status = "Update failed"
+            self._refresh_icon()
+
     def open_dashboard(self, _icon=None, _item=None) -> None:
         webbrowser.open(URL)
 
@@ -147,6 +206,7 @@ class FlightdeckTray:
         return pystray.Menu(
             pystray.MenuItem(lambda _item: f"Flightdeck - {self.status}", None, enabled=False),
             pystray.MenuItem("Open Dashboard", self.open_dashboard, default=True),
+            pystray.MenuItem("Update from GitHub", self.update_from_github),
             pystray.MenuItem("Restart", self.restart_server),
             pystray.MenuItem("Open Logs", self.open_logs),
             pystray.MenuItem("Stop", lambda icon, item: self.stop_server()),
