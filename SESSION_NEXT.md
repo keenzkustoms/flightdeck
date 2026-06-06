@@ -1,5 +1,10 @@
 # Flightdeck — next session brief
-_Last updated 7 June 2026 (Session 28.206 Printer Print Bay scroll)_
+_Last updated 7 June 2026 (Session 28.207 Printer Print Bay scroll fix)_
+
+## What was fixed - Session 28.207 (Printer Print Bay scroll fix - 7 June)
+- Corrected the per-printer Print Bay scroll container so `.printer-bay-body` scrolls directly inside the printer detail flex layout.
+- Removed the nested shell scroll attempt that could still be clipped by the parent view.
+- Bumped static cache to `style.css?v=252`; frontend refresh only.
 
 ## What was fixed - Session 28.206 (Printer Print Bay scroll - 7 June)
 - Per-printer Print Bay pages now keep their content inside a scrollable bay shell, so tall BigBoy/H2D storage and vault lists do not push the page layout out of view.
