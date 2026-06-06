@@ -1,5 +1,10 @@
 # Flightdeck — next session brief
-_Last updated 6 June 2026 (Session 28.188 OrcaSlicer Docker sidecar)_
+_Last updated 6 June 2026 (Session 28.189 OrcaSlicer launcher guard)_
+
+## What was fixed - Session 28.189 (OrcaSlicer launcher guard - 6 June)
+- Settings -> Slicer no longer opens a guessed `:3011` URL when no Orca Docker URL has been configured.
+- The Orca launcher now stays disabled with `Set URL first` until the NAS/PC sidecar is actually running and its URL is saved.
+- Bumped static cache to `app.js?v=293` and `style.css?v=228`; frontend refresh required.
 
 ## What was added - Session 28.188 (OrcaSlicer Docker sidecar - 6 June)
 - Added an OrcaSlicer sidecar service to `docker-compose.nas.yml` using `lscr.io/linuxserver/orcaslicer:latest`.

@@ -8296,6 +8296,7 @@ function _slicerCategoryHtml() {
   const detected = _serverSettings.slicer_detected_version ?? '';
   const dockerUrl = (_serverSettings.orcaslicer_docker_url || '').trim();
   const dockerLaunchUrl = _slicerDockerLaunchUrl(dockerUrl);
+  const dockerReady = !!dockerUrl;
 
   const cards = _SLICER_DEFINITIONS.map(s => {
     const isSelected = s.id === selected;
@@ -8332,13 +8333,15 @@ function _slicerCategoryHtml() {
           <strong>Browser-based OrcaSlicer</strong>
           <span>NAS/PC Docker sidecar. Uses the shared Print Vault at <code>/prints</code>.</span>
         </div>
-        <a class="slicer-launch-btn" href="${esc(dockerLaunchUrl)}" target="_blank" rel="noreferrer">Open Orca</a>
+        ${dockerReady
+          ? `<a class="slicer-launch-btn" href="${esc(dockerLaunchUrl)}" target="_blank" rel="noreferrer">Open Orca</a>`
+          : `<span class="slicer-launch-btn slicer-launch-disabled">Set URL first</span>`}
       </div>
       <div class="settings-form-row">
         <label class="settings-label">Docker URL</label>
         <input class="settings-input slicer-docker-input" data-pref-key="orcaslicer_docker_url" type="url" value="${esc(dockerUrl)}" placeholder="${esc(_slicerDockerDefaultUrl())}">
       </div>
-      <div class="settings-hint">Leave blank to use this host on HTTPS port 3011. The LinuxServer Orca image is x86-64 only, so run this sidecar on the NAS or a PC, not the Pi.</div>
+      <div class="settings-hint">Start the Orca sidecar on the NAS/PC, then paste its URL here. The suggested port is HTTPS 3011. The LinuxServer Orca image is x86-64 only, so it will not run on the Pi.</div>
     </div>`;
 }
 
@@ -8348,14 +8351,32 @@ function _slicerDockerDefaultUrl() {
 }
 
 function _slicerDockerLaunchUrl(value = '') {
-  return (value || '').trim().replace(/\/+$/, '') || _slicerDockerDefaultUrl();
+  return (value || '').trim().replace(/\/+$/, '');
 }
 
 function _updateSlicerDockerLaunch(el) {
   const input = el.querySelector('.slicer-docker-input');
   const btn = el.querySelector('.slicer-launch-btn');
   if (!input || !btn) return;
-  btn.href = _slicerDockerLaunchUrl(input.value);
+  const url = _slicerDockerLaunchUrl(input.value);
+  if (!url) {
+    const replacement = document.createElement('span');
+    replacement.className = 'slicer-launch-btn slicer-launch-disabled';
+    replacement.textContent = 'Set URL first';
+    btn.replaceWith(replacement);
+    return;
+  }
+  if (btn.tagName !== 'A') {
+    const replacement = document.createElement('a');
+    replacement.className = 'slicer-launch-btn';
+    replacement.target = '_blank';
+    replacement.rel = 'noreferrer';
+    replacement.textContent = 'Open Orca';
+    replacement.href = url;
+    btn.replaceWith(replacement);
+    return;
+  }
+  btn.href = url;
 }
 
 function _attachSlicerEvents(el) {
