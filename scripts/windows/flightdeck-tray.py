@@ -161,6 +161,10 @@ class FlightdeckTray:
 
 
 def _tray_image() -> Image.Image:
+    icon_path = APP_DIR / "app" / "static" / "icon-192.png"
+    if icon_path.exists():
+        return Image.open(icon_path).convert("RGBA").resize((64, 64), Image.LANCZOS)
+
     image = Image.new("RGBA", (64, 64), (10, 10, 15, 0))
     draw = ImageDraw.Draw(image)
     draw.rounded_rectangle((8, 14, 56, 50), radius=8, fill=(17, 24, 39, 255), outline=(59, 130, 246, 255), width=3)
