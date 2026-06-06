@@ -1,6 +1,7 @@
 from __future__ import annotations
 import sqlite3
 import logging
+import json
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -214,6 +215,12 @@ def init() -> None:
 
             CREATE INDEX IF NOT EXISTS idx_notifications_active
                 ON notifications(cleared_at, created_at DESC);
+
+            CREATE TABLE IF NOT EXISTS slicer_profile_catalog (
+                vendor      TEXT PRIMARY KEY,
+                payload     TEXT NOT NULL,
+                synced_at   TEXT NOT NULL
+            );
         """)
     # Migrate existing DB: add columns if missing
     with _conn() as conn:
@@ -1378,6 +1385,36 @@ def set_setting(key: str, value: str) -> None:
                SET value = excluded.value, updated_at = excluded.updated_at""",
             (key, value),
         )
+
+
+# ── slicer profiles ───────────────────────────────────────────────────────
+
+def save_slicer_profile_vendor(vendor: str, payload: dict) -> None:
+    with _conn() as conn:
+        conn.execute(
+            """INSERT INTO slicer_profile_catalog (vendor, payload, synced_at)
+               VALUES (?, ?, CURRENT_TIMESTAMP)
+               ON CONFLICT(vendor) DO UPDATE
+               SET payload = excluded.payload, synced_at = excluded.synced_at""",
+            (vendor, json.dumps(payload)),
+        )
+
+
+def get_slicer_profile_vendors() -> list[dict]:
+    with _conn() as conn:
+        rows = conn.execute(
+            "SELECT vendor, payload, synced_at FROM slicer_profile_catalog ORDER BY vendor"
+        ).fetchall()
+    out = []
+    for row in rows:
+        try:
+            payload = json.loads(row["payload"] or "{}")
+        except Exception:
+            payload = {}
+        payload["vendor"] = row["vendor"]
+        payload["synced_at"] = row["synced_at"]
+        out.append(payload)
+    return out
 
 
 # ── notifications ─────────────────────────────────────────────────────────

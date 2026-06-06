@@ -8431,10 +8431,69 @@ select.settings-input { cursor: pointer; }
   cursor: default;
 }
 
+.slicer-profiles-panel {
+  gap: 0.85rem;
+}
+
+.slicer-profile-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.slicer-profile-pill {
+  border: 1px solid rgba(59,130,246,0.35);
+  border-radius: 999px;
+  background: rgba(59,130,246,0.09);
+  color: #bfdbfe;
+  font-size: 0.7rem;
+  font-weight: 750;
+  padding: 0.22rem 0.55rem;
+}
+
+.slicer-profile-table {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.slicer-profile-row {
+  display: grid;
+  grid-template-columns: minmax(10rem, 0.8fr) minmax(9rem, 1fr) minmax(9rem, 1fr) minmax(9rem, 1fr) auto;
+  gap: 0.45rem;
+  align-items: center;
+  padding: 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: rgba(255,255,255,0.025);
+}
+
+.slicer-profile-printer {
+  display: grid;
+  gap: 0.12rem;
+  min-width: 0;
+}
+
+.slicer-profile-printer strong {
+  color: var(--text);
+  font-size: 0.86rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.slicer-profile-printer span {
+  color: var(--muted);
+  font-size: 0.68rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 @media (max-width: 640px) {
   .slicer-grid { grid-template-columns: 1fr; }
   .slicer-docker-panel { grid-template-columns: 1fr; }
   .slicer-launch-btn { width: 100%; }
+  .slicer-profile-row { grid-template-columns: 1fr; }
 }
 
 /* ── Filament tracking ───────────────────────────────────────────────────── */

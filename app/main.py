@@ -2446,6 +2446,16 @@ class SettingUpdate(BaseModel):
     value: str
 
 
+class SlicerProfileSyncRequest(BaseModel):
+    vendors: list[str] = []
+
+
+class SlicerProfileDefaultsRequest(BaseModel):
+    printer_profile: str = ""
+    process_profile: str = ""
+    filament_profile: str = ""
+
+
 @app.get("/api/settings")
 async def get_settings():
     return db.get_all_settings()
@@ -2458,6 +2468,114 @@ async def put_setting(key: str, body: SettingUpdate):
         value = "" if not value.strip() else str(_validate_print_library_path(value))
     db.set_setting(key, value)
     return {"ok": True, "value": value}
+
+
+_ORCA_PROFILE_VENDORS = ["BBL", "Sovol", "Voron", "Prusa", "Anycubic", "Creality"]
+_ORCA_PROFILE_BASE = "https://raw.githubusercontent.com/OrcaSlicer/OrcaSlicer/main/resources/profiles"
+
+
+def _slicer_profile_key(printer_id: str, slot: str) -> str:
+    clean = re.sub(r"[^A-Za-z0-9_.:-]+", "_", printer_id.strip())
+    return f"slicer_default_{clean}_{slot}"
+
+
+def _profile_item_list(payload: dict, key: str) -> list[dict]:
+    rows = payload.get(key) or []
+    out = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        name = str(row.get("name") or "").strip()
+        sub_path = str(row.get("sub_path") or "").strip()
+        if not name or name.startswith("fdm_"):
+            continue
+        out.append({"name": name, "path": sub_path})
+    return out
+
+
+def _normalise_orca_profile_vendor(vendor: str, payload: dict) -> dict:
+    return {
+        "vendor": vendor,
+        "name": payload.get("name") or vendor,
+        "version": payload.get("version"),
+        "source": "OrcaSlicer standard profiles",
+        "source_url": f"{_ORCA_PROFILE_BASE}/{urllib.parse.quote(vendor)}.json",
+        "machines": _profile_item_list(payload, "machine_list"),
+        "machine_models": _profile_item_list(payload, "machine_model_list"),
+        "processes": _profile_item_list(payload, "process_list"),
+        "filaments": _profile_item_list(payload, "filament_list"),
+    }
+
+
+def _fetch_orca_profile_vendor(vendor: str) -> dict:
+    url = f"{_ORCA_PROFILE_BASE}/{urllib.parse.quote(vendor)}.json"
+    req = urllib.request.Request(
+        url,
+        headers={"User-Agent": "Flightdeck/1.0 slicer-profile-sync", "Accept": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=45) as resp:
+        payload = json.loads(resp.read().decode("utf-8-sig"))
+    return _normalise_orca_profile_vendor(vendor, payload)
+
+
+def _slicer_profile_defaults(settings: dict, printers: list[dict]) -> dict:
+    return {
+        p.get("id"): {
+            "printer_profile": settings.get(_slicer_profile_key(p.get("id", ""), "printer"), ""),
+            "process_profile": settings.get(_slicer_profile_key(p.get("id", ""), "process"), ""),
+            "filament_profile": settings.get(_slicer_profile_key(p.get("id", ""), "filament"), ""),
+        }
+        for p in printers
+        if p.get("id")
+    }
+
+
+@app.get("/api/slicer/profiles")
+async def get_slicer_profiles():
+    settings = db.get_all_settings()
+    printers = await _gather_all()
+    return {
+        "vendors": db.get_slicer_profile_vendors(),
+        "defaults": _slicer_profile_defaults(settings, printers),
+        "available_vendors": _ORCA_PROFILE_VENDORS,
+        "attribution": {
+            "name": "OrcaSlicer standard profiles",
+            "url": "https://github.com/OrcaSlicer/OrcaSlicer/tree/main/resources/profiles",
+            "license": "AGPL-3.0",
+        },
+    }
+
+
+@app.post("/api/slicer/profiles/sync")
+async def sync_slicer_profiles(body: SlicerProfileSyncRequest):
+    vendors = [v.strip() for v in (body.vendors or []) if v.strip()] or ["BBL", "Sovol", "Voron", "Prusa", "Anycubic"]
+    vendors = [v for v in vendors if v in _ORCA_PROFILE_VENDORS]
+    if not vendors:
+        raise HTTPException(status_code=422, detail="No supported profile vendors selected")
+    synced = []
+    errors = []
+    for vendor in vendors:
+        try:
+            payload = await asyncio.to_thread(_fetch_orca_profile_vendor, vendor)
+            db.save_slicer_profile_vendor(vendor, payload)
+            synced.append(vendor)
+        except Exception as exc:
+            errors.append({"vendor": vendor, "error": str(exc)})
+    if errors and not synced:
+        raise HTTPException(status_code=502, detail={"message": "Profile sync failed", "errors": errors})
+    return {"ok": True, "synced": synced, "errors": errors, "vendors": db.get_slicer_profile_vendors()}
+
+
+@app.put("/api/slicer/profiles/defaults/{printer_id}")
+async def put_slicer_profile_defaults(printer_id: str, body: SlicerProfileDefaultsRequest):
+    printers = await _gather_all()
+    if not any(p.get("id") == printer_id for p in printers):
+        raise HTTPException(status_code=404, detail="Printer not found")
+    db.set_setting(_slicer_profile_key(printer_id, "printer"), body.printer_profile.strip())
+    db.set_setting(_slicer_profile_key(printer_id, "process"), body.process_profile.strip())
+    db.set_setting(_slicer_profile_key(printer_id, "filament"), body.filament_profile.strip())
+    settings = db.get_all_settings()
+    return {"ok": True, "defaults": _slicer_profile_defaults(settings, printers).get(printer_id, {})}
 
 
 @app.get("/api/notifications")

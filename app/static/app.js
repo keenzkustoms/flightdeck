@@ -8424,7 +8424,73 @@ const _SLICER_DEFINITIONS = [
   },
 ];
 
-function _slicerCategoryHtml() {
+function _slicerProfileOptions(profileData, slot) {
+  const key = slot === 'printer' ? 'machines' : slot === 'process' ? 'processes' : 'filaments';
+  const seen = new Set();
+  const rows = [];
+  (profileData?.vendors || []).forEach(vendor => {
+    (vendor[key] || []).forEach(item => {
+      const name = item.name || '';
+      if (!name || seen.has(name)) return;
+      seen.add(name);
+      rows.push({ name, vendor: vendor.vendor || vendor.name || '' });
+    });
+  });
+  rows.sort((a, b) => a.name.localeCompare(b.name));
+  return rows;
+}
+
+function _slicerDatalist(id, rows) {
+  return `<datalist id="${id}">
+    ${rows.map(row => `<option value="${esc(row.name)}">${esc(row.vendor)}</option>`).join('')}
+  </datalist>`;
+}
+
+function _slicerProfilesHtml(profileData, printers) {
+  const vendors = profileData?.vendors || [];
+  const defaults = profileData?.defaults || {};
+  const printerProfiles = _slicerProfileOptions(profileData, 'printer');
+  const processProfiles = _slicerProfileOptions(profileData, 'process');
+  const filamentProfiles = _slicerProfileOptions(profileData, 'filament');
+  const vendorStats = vendors.length
+    ? vendors.map(v => `<span class="slicer-profile-pill">${esc(v.vendor || v.name)} · ${(v.machines || []).length} printers · ${(v.processes || []).length} processes · ${(v.filaments || []).length} filaments</span>`).join('')
+    : '<span class="settings-empty">No standard profiles synced yet.</span>';
+  const rows = (printers || []).map(p => {
+    const d = defaults[p.id] || {};
+    return `<div class="slicer-profile-row" data-printer-id="${esc(p.id)}">
+      <div class="slicer-profile-printer">
+        <strong>${esc(p.custom_name || p.model_name || p.id)}</strong>
+        <span>${esc([p.model_name, p.kind].filter(Boolean).join(' · '))}</span>
+      </div>
+      <input class="settings-input slicer-profile-input" data-profile-slot="printer" list="slicer-printer-profiles" value="${esc(d.printer_profile || '')}" placeholder="Printer profile">
+      <input class="settings-input slicer-profile-input" data-profile-slot="process" list="slicer-process-profiles" value="${esc(d.process_profile || '')}" placeholder="Process profile">
+      <input class="settings-input slicer-profile-input" data-profile-slot="filament" list="slicer-filament-profiles" value="${esc(d.filament_profile || '')}" placeholder="Filament profile">
+      <button type="button" class="settings-save-btn slicer-profile-save">Save</button>
+    </div>`;
+  }).join('') || '<div class="settings-empty">Add a printer before assigning slicer profiles.</div>';
+  return `
+    <div class="settings-section slicer-profiles-panel">
+      <div class="setup-version-main">
+        <div>
+          <div class="settings-section-title">Standard Profiles</div>
+          <div class="settings-hint">Synced from OrcaSlicer standard profiles. Used to make source-model slicing printer-specific.</div>
+        </div>
+        <button type="button" class="settings-save-btn" id="slicer-sync-profiles">Sync profiles</button>
+      </div>
+      <div class="slicer-profile-pills">${vendorStats}</div>
+      <div class="settings-hint">Credit: <a href="${esc(profileData?.attribution?.url || 'https://github.com/OrcaSlicer/OrcaSlicer')}" target="_blank" rel="noreferrer">OrcaSlicer standard profiles</a> (${esc(profileData?.attribution?.license || 'AGPL-3.0')}).</div>
+    </div>
+    <div class="settings-section slicer-profiles-panel">
+      <div class="settings-section-title">Printer Defaults</div>
+      <div class="settings-hint">Choose the default profile triplet Flightdeck should use when slicing for each printer.</div>
+      ${_slicerDatalist('slicer-printer-profiles', printerProfiles)}
+      ${_slicerDatalist('slicer-process-profiles', processProfiles)}
+      ${_slicerDatalist('slicer-filament-profiles', filamentProfiles)}
+      <div class="slicer-profile-table">${rows}</div>
+    </div>`;
+}
+
+function _slicerCategoryHtml(profileData = null, printers = []) {
   const selected = _serverSettings.preferred_slicer ?? '';
   const detected = _serverSettings.slicer_detected_version ?? '';
   const dockerUrl = (_serverSettings.orcaslicer_docker_url || '').trim();
@@ -8475,7 +8541,8 @@ function _slicerCategoryHtml() {
         <input class="settings-input slicer-docker-input" data-pref-key="orcaslicer_docker_url" type="url" value="${esc(dockerUrl)}" placeholder="${esc(_slicerDockerDefaultUrl())}">
       </div>
       <div class="settings-hint">Start the Orca sidecar on the NAS/PC, then paste its URL here. The suggested port is HTTPS 3011. The LinuxServer Orca image is x86-64 only, so it will not run on the Pi.</div>
-    </div>`;
+    </div>
+    ${_slicerProfilesHtml(profileData, printers)}`;
 }
 
 function _slicerDockerDefaultUrl() {
@@ -8540,6 +8607,64 @@ function _attachSlicerEvents(el) {
       } catch (err) {
         showToast('Setting save failed', err.message || '', 'error');
         input.value = input.defaultValue;
+      }
+    });
+  });
+
+  el.querySelector('#slicer-sync-profiles')?.addEventListener('click', async btnEvent => {
+    const btn = btnEvent.currentTarget;
+    const old = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Syncing...';
+    try {
+      const r = await fetch('/api/slicer/profiles/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vendors: ['BBL', 'Sovol', 'Voron', 'Prusa', 'Anycubic'] }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        const detail = data.detail;
+        throw new Error(typeof detail === 'string' ? detail : detail?.message || 'Profile sync failed');
+      }
+      showToast('Profiles synced', `${data.synced?.length || 0} vendors`, 'success');
+      await _renderSettingsContent('slicer');
+    } catch (err) {
+      showToast('Profile sync failed', err.message || '', 'error');
+      btn.disabled = false;
+      btn.textContent = old;
+    }
+  });
+
+  el.querySelectorAll('.slicer-profile-save').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const row = btn.closest('[data-printer-id]');
+      const printerId = row?.dataset.printerId || '';
+      if (!printerId) return;
+      const body = {};
+      row.querySelectorAll('.slicer-profile-input').forEach(input => {
+        const slot = input.dataset.profileSlot;
+        if (slot === 'printer') body.printer_profile = input.value.trim();
+        if (slot === 'process') body.process_profile = input.value.trim();
+        if (slot === 'filament') body.filament_profile = input.value.trim();
+      });
+      const old = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = 'Saving';
+      try {
+        const r = await fetch(`/api/slicer/profiles/defaults/${encodeURIComponent(printerId)}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(data.detail || 'Unable to save profiles');
+        showToast('Slicer defaults saved', printerId, 'success');
+      } catch (err) {
+        showToast('Profile save failed', err.message || '', 'error');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = old;
       }
     });
   });
@@ -8989,6 +9114,7 @@ function _openSliceModelDialog({ sourceId, path, file, printers }) {
       showToast('Copy failed', name, 'warning');
     });
   });
+
 }
 
 function _setupVersionHtml(version) {
@@ -12240,7 +12366,12 @@ async function _renderSettingsContent(category) {
     el.innerHTML = _appearanceCategoryHtml();
     _attachAppearanceEvents(el);
   } else if (category === 'slicer') {
-    el.innerHTML = _slicerCategoryHtml();
+    el.innerHTML = `<div class="detail-placeholder" style="min-height:10rem">Loading…</div>`;
+    const [profileData, printers] = await Promise.all([
+      fetch('/api/slicer/profiles').then(r => r.json()).catch(() => null),
+      fetch('/api/printers').then(r => r.json()).catch(() => (_latestPrinters || [])),
+    ]);
+    el.innerHTML = _slicerCategoryHtml(profileData, printers);
     _attachSlicerEvents(el);
   } else if (category === 'filament') {
     el.innerHTML = `<div class="detail-placeholder" style="min-height:10rem">Loading…</div>`;
