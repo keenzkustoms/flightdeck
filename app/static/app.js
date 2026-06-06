@@ -5460,6 +5460,20 @@ let _fileDeskRenderInFlight = false;
 let _fileDeskLastHtml = '';
 let _fileDeskTargets = [];
 let _printBayVaultOpen = false;
+let _printerBayLastHtml = '';
+let _printerBayLastPrinterId = '';
+
+function _pollPrintBayIfVisible() {
+  if (document.hidden) return;
+  const route = parseRoute();
+  if (route.view === 'files') {
+    renderFileDeskView();
+  } else if (route.view === 'printer' && route.subtab === 'bay' && route.id) {
+    _renderPrinterBayBody(route.id);
+  }
+}
+
+setInterval(_pollPrintBayIfVisible, 5000);
 
 async function renderFileDeskView() {
   const el = document.getElementById('filedesk-page');
@@ -5528,7 +5542,9 @@ async function renderFileDeskView() {
 async function _renderPrinterBayBody(printerId) {
   const el = document.getElementById('printer-bay-body');
   if (!el) return;
-  el.innerHTML = `<div class="detail-placeholder">Loading Print Bay...</div>`;
+  if (!_printerBayLastHtml || _printerBayLastPrinterId !== printerId) {
+    el.innerHTML = `<div class="detail-placeholder">Loading Print Bay...</div>`;
+  }
   try {
     const [filesResp, reprints] = await Promise.all([
       fetch(`/api/files?printer_id=${encodeURIComponent(printerId)}`),
@@ -5549,7 +5565,7 @@ async function _renderPrinterBayBody(printerId) {
     const printerFileCount = printerTarget
       ? (printerTarget.files || []).filter(f => f.kind !== 'dir' && _fileCompatiblePrinters(f, printerTarget).some(p => p.id === printerId)).length
       : 0;
-    el.innerHTML = `<div class="printer-bay-shell">
+    const html = `<div class="printer-bay-shell">
       <section class="printer-bay-hero">
         <div>
           <div class="mission-eyebrow">Print Bay</div>
@@ -5587,9 +5603,16 @@ async function _renderPrinterBayBody(printerId) {
         <div class="filedesk-grid printbay-vault-grid">${vaultTargets.map(t => _fileDeskTargetHtml(t, { printerId, directQueue: true })).join('')}</div>
       </details>
     </div>`;
-    _attachFileDeskEvents(el);
+    if (html !== _printerBayLastHtml || _printerBayLastPrinterId !== printerId) {
+      el.innerHTML = html;
+      _printerBayLastHtml = html;
+      _printerBayLastPrinterId = printerId;
+      _attachFileDeskEvents(el);
+    }
   } catch (err) {
-    el.innerHTML = `<div class="detail-placeholder">Print Bay unavailable.</div>`;
+    if (!_printerBayLastHtml || _printerBayLastPrinterId !== printerId) {
+      el.innerHTML = `<div class="detail-placeholder">Print Bay unavailable.</div>`;
+    }
   }
 }
 
