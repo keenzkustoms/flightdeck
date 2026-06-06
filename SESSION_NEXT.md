@@ -1,5 +1,12 @@
 # Flightdeck — next session brief
-_Last updated 7 June 2026 (Session 28.203 Klipper live controls)_
+_Last updated 7 June 2026 (Session 28.204 Klipper live control polish)_
+
+## What was added - Session 28.204 (Klipper live control polish - 7 June)
+- Added a fine fan slider beside the Moonraker/Klipper fan quick buttons; the command is sent when the slider change is committed.
+- Added guarded homing buttons on Moonraker/Klipper live pages: `XY`, `Z`, and `All`.
+- Homing opens a confirmation prompt and is disabled during printing, paused, finished, offline, error, and estop states.
+- Added `POST /api/printers/{printer_id}/home` for Moonraker homing commands.
+- Bumped static cache to `app.js?v=321` and `style.css?v=249`; backend restart required.
 
 ## What was added - Session 28.203 (Klipper live controls - 7 June)
 - Added Moonraker/Klipper live fan controls on the printer live page: Off, 50%, and 100%.

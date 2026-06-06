@@ -3650,6 +3650,24 @@ button.briefing-row {
   text-align: center;
 }
 
+.live-op-slider {
+  display: inline-flex;
+  align-items: center;
+  width: 5.8rem;
+  min-height: 2.1rem;
+  padding: 0 0.35rem;
+}
+
+.live-op-slider input {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.live-op-slider input:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .live-op-btn:hover:not(:disabled) {
   border-color: rgba(96,165,250,0.62);
   background: rgba(59,130,246,0.18);

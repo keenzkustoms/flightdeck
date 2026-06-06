@@ -1917,6 +1917,10 @@ class JogZRequest(BaseModel):
     distance: float
 
 
+class HomeRequest(BaseModel):
+    axes: str
+
+
 class AmsDryRequest(BaseModel):
     enabled: bool
     filament: str = "PLA"
@@ -1998,6 +2002,31 @@ async def jog_printer_z(printer_id: str, req: JogZRequest):
     for p in _bambu:
         if p.id == printer_id:
             raise HTTPException(status_code=422, detail="Z jog is only available for Klipper/Moonraker printers")
+
+    for (id, *_) in _simulated:
+        if id == printer_id:
+            raise HTTPException(status_code=422, detail="simulated printer does not accept hardware movement commands")
+
+    raise HTTPException(status_code=404, detail="printer not found")
+
+
+@app.post("/api/printers/{printer_id}/home")
+async def home_printer_axes(printer_id: str, req: HomeRequest):
+    axes = req.axes.lower().strip()
+    if axes not in ("xy", "z", "all"):
+        raise HTTPException(status_code=400, detail="invalid home axes")
+
+    for (id, model_name, custom_name, icon, url) in _moonraker:
+        if id == printer_id:
+            try:
+                await moonraker.home_axes(url, axes)
+            except Exception as exc:
+                raise HTTPException(status_code=502, detail=str(exc))
+            return {"ok": True}
+
+    for p in _bambu:
+        if p.id == printer_id:
+            raise HTTPException(status_code=422, detail="homing is only available for Klipper/Moonraker printers")
 
     for (id, *_) in _simulated:
         if id == printer_id:

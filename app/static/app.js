@@ -1802,6 +1802,7 @@ function _detailLiveOps(p) {
   const isMoonraker = p.kind === 'moonraker';
   const canFan = isMoonraker && !['offline', 'error', 'estop'].includes(p.state || '');
   const canJog = isMoonraker && !['offline', 'printing', 'paused', 'finished', 'error', 'estop'].includes(p.state || '');
+  const canHome = canJog;
   const presets = _preheatPresets(p);
   const preheatButtons = presets.map(row => `<button class="live-op-btn" type="button"
       data-preheat data-printer-id="${esc(p.id)}" data-material="${esc(row.label)}"
@@ -1819,6 +1820,7 @@ function _detailLiveOps(p) {
       </a>`
     : '';
   const fanPct = Number.isFinite(Number(p.fan_speed)) ? Math.round(Number(p.fan_speed) * 100) : null;
+  const fanValue = fanPct == null ? 0 : Math.max(0, Math.min(100, fanPct));
   const fan = isMoonraker
     ? `<div class="live-op-group" aria-label="Part cooling fan">
         <span class="live-op-group-label">Fan ${fanPct == null ? '--' : fanPct}%</span>
@@ -1826,6 +1828,9 @@ function _detailLiveOps(p) {
           data-fan-speed="${speed}" data-printer-id="${esc(p.id)}" ${canFan ? '' : 'disabled'}>
           <span>${speed === 0 ? 'Off' : speed}</span><small>${speed === 0 ? 'fan' : '%'}</small>
         </button>`).join('')}
+        <label class="live-op-slider" title="Fine fan control">
+          <input type="range" min="0" max="100" step="5" value="${fanValue}" data-fan-slider data-printer-id="${esc(p.id)}" ${canFan ? '' : 'disabled'}>
+        </label>
       </div>`
     : '';
   const pos = Array.isArray(p.toolhead_position) ? Number(p.toolhead_position[2]) : NaN;
@@ -1841,7 +1846,16 @@ function _detailLiveOps(p) {
         </button>
       </div>`
     : '';
-  const controls = [preheatButtons, presets.length ? cooldown : '', fan, jog, klipper].filter(Boolean).join('');
+  const home = isMoonraker
+    ? `<div class="live-op-group" aria-label="Homing controls">
+        <span class="live-op-group-label">Home</span>
+        ${[['xy', 'XY'], ['z', 'Z'], ['all', 'All']].map(([axes, label]) => `<button class="live-op-btn live-op-mini" type="button"
+          data-home-axes="${axes}" data-printer-id="${esc(p.id)}" ${canHome ? '' : 'disabled'}>
+          <span>${label}</span><small>G28</small>
+        </button>`).join('')}
+      </div>`
+    : '';
+  const controls = [preheatButtons, presets.length ? cooldown : '', fan, jog, home, klipper].filter(Boolean).join('');
   if (!controls) return '';
   return `<div class="live-op-row" aria-label="Live printer shortcuts">${controls}</div>`;
 }
@@ -2046,6 +2060,26 @@ document.getElementById('view-printer').addEventListener('click', e => {
     return;
   }
 
+  const homeBtn = e.target.closest('[data-home-axes]');
+  if (homeBtn && !homeBtn.disabled) {
+    const id = homeBtn.dataset.printerId;
+    const axes = homeBtn.dataset.homeAxes || 'all';
+    const label = axes === 'all' ? 'all axes' : axes.toUpperCase();
+    _modal.show(`Home ${label}? The printer will move to its endstops.`, () => {
+      const old = homeBtn.innerHTML;
+      homeBtn.disabled = true;
+      homeBtn.innerHTML = `<span>Homing</span><small>${esc(label)}</small>`;
+      sendHomeAxes(id, axes)
+        .then(() => showToast('Home command sent', label, 'success'))
+        .catch(err => showToast('Home failed', err.message || '', 'error'))
+        .finally(() => {
+          homeBtn.disabled = false;
+          homeBtn.innerHTML = old;
+        });
+    });
+    return;
+  }
+
   // Click target value → temp modal
   const targetSpan = e.target.closest('[data-temp-edit]');
   if (targetSpan) {
@@ -2065,6 +2099,16 @@ document.getElementById('view-printer').addEventListener('click', e => {
       max: 300,
     });
   }
+});
+
+document.getElementById('view-printer').addEventListener('change', e => {
+  const slider = e.target.closest('[data-fan-slider]');
+  if (!slider || slider.disabled) return;
+  const id = slider.dataset.printerId;
+  const speed = Number(slider.value || 0);
+  sendFanSet(id, speed)
+    .then(() => showToast('Fan command sent', `${speed}% part cooling`, 'success'))
+    .catch(err => showToast('Fan command failed', err.message || '', 'error'));
 });
 
 document.getElementById('view-printer').addEventListener('click', e => {
@@ -3203,6 +3247,18 @@ async function sendJogZ(id, distance) {
   if (!resp.ok) {
     const data = await resp.json().catch(() => ({}));
     throw new Error(data.detail || 'Z jog failed');
+  }
+}
+
+async function sendHomeAxes(id, axes) {
+  const resp = await fetch(`/api/printers/${id}/home`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ axes }),
+  });
+  if (!resp.ok) {
+    const data = await resp.json().catch(() => ({}));
+    throw new Error(data.detail || 'Home command failed');
   }
 }
 

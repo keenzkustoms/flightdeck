@@ -427,6 +427,19 @@ async def jog_z(base_url: str, distance: float) -> None:
     await run_gcode(base_url, f"G91\nG1 Z{dz:.2f} F600\nG90")
 
 
+async def home_axes(base_url: str, axes: str) -> None:
+    axes_key = axes.lower()
+    axis_map = {
+        "xy": "X Y",
+        "z": "Z",
+        "all": "",
+    }
+    if axes_key not in axis_map:
+        raise ValueError("invalid axes")
+    suffix = axis_map[axes_key]
+    await run_gcode(base_url, f"G28 {suffix}".strip())
+
+
 async def control(base_url: str, action: str) -> None:
     if action in _CONTROL_GCODE:
         await run_gcode(base_url, _CONTROL_GCODE[action])
