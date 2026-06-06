@@ -9196,16 +9196,24 @@ function _openSliceModelDialog({ sourceId, path, file, printers }) {
         const sourceUrl = data.source?.download_url || `/api/files/source/download?${new URLSearchParams({ source_id: sourceId, path }).toString()}`;
         const sidecarUrl = data.sidecar_url || '';
         const outputName = data.output?.filename || 'sliced-output';
+        const profiles = data.profiles || {};
+        const profileRows = [
+          ['Printer', profiles.printer],
+          ['Process', profiles.process],
+          ['Filament', profiles.filament],
+        ].map(([label, value]) => `<div><span>${esc(label)}</span><strong>${esc(value || 'Not set')}</strong></div>`).join('');
         actionsEl.hidden = false;
         actionsEl.innerHTML = `
           <div class="filedesk-slice-steps">
             <strong>Slice handoff</strong>
-            <span>Download the model, open Orca, import it, then export as ${esc(outputName)} back into the Print Vault.</span>
+            <span>Download the model, open Orca, import it, use the profiles below, then export as ${esc(outputName)} back into the Print Vault.</span>
           </div>
+          <div class="filedesk-slice-profiles">${profileRows}</div>
           <div class="filedesk-slice-buttons">
             ${sourceUrl ? `<a class="filedesk-slice-link" href="${esc(sourceUrl)}" download>Download model</a>` : ''}
             <a class="filedesk-slice-link" href="${esc(sidecarUrl)}" target="_blank" rel="noreferrer">Open Orca</a>
             <button class="filedesk-slice-link" type="button" data-copy-slice-name="${esc(outputName)}">Copy output name</button>
+            <button class="filedesk-slice-link" type="button" data-check-slice-output="${esc(outputName)}">Check vault</button>
           </div>`;
       }
       showToast(data.ready ? 'Slice plan ready' : 'Slicer not configured', data.message || '', data.ready ? 'success' : 'warning');
@@ -9226,6 +9234,36 @@ function _openSliceModelDialog({ sourceId, path, file, printers }) {
     }).catch(() => {
       showToast('Copy failed', name, 'warning');
     });
+  });
+  overlay.addEventListener('click', async e => {
+    const checkBtn = e.target.closest('[data-check-slice-output]');
+    if (!checkBtn) return;
+    const name = checkBtn.dataset.checkSliceOutput || '';
+    const old = checkBtn.textContent;
+    checkBtn.disabled = true;
+    checkBtn.textContent = 'Checking...';
+    try {
+      const r = await fetch('/api/slicer/output-status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename: name }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.detail || 'Unable to check vault');
+      if (data.exists) {
+        showToast('Sliced job ready', `${data.filename} · ${_fmtBytes(data.size)}`, 'success');
+        close();
+        _fileDeskLastHtml = '';
+        renderFileDeskView();
+      } else {
+        showToast('Still waiting for export', name, 'warning');
+      }
+    } catch (err) {
+      showToast('Vault check failed', err.message || '', 'error');
+    } finally {
+      checkBtn.disabled = false;
+      checkBtn.textContent = old;
+    }
   });
 
 }

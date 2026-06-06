@@ -12083,6 +12083,33 @@ select.settings-input { cursor: pointer; }
   font-size: 0.76rem;
   line-height: 1.35;
 }
+.filedesk-slice-profiles {
+  display: grid;
+  gap: 0.45rem;
+  margin-top: 0.65rem;
+  padding: 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.7);
+}
+.filedesk-slice-profiles div {
+  display: grid;
+  grid-template-columns: 5.5rem 1fr;
+  gap: 0.6rem;
+  align-items: center;
+}
+.filedesk-slice-profiles span {
+  color: var(--muted);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.filedesk-slice-profiles strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--text);
+  font-size: 0.82rem;
+}
 .filedesk-slice-buttons {
   display: flex;
   flex-wrap: wrap;

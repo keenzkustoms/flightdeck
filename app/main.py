@@ -841,6 +841,10 @@ class SlicePlanRequest(BaseModel):
     all_plates: bool = False
 
 
+class SliceOutputStatusRequest(BaseModel):
+    filename: str
+
+
 class BambuSdClearRequest(BaseModel):
     confirm: str = ""
 
@@ -1410,9 +1414,15 @@ async def plan_slice_from_file_desk(body: SlicePlanRequest):
     output_ext = ".gcode.3mf" if target_kind == "bambu" else ".gcode"
     base_name = _file_archive_key(filename) or "sliced_model"
     target = next((p for p in await _gather_all() if p.get("id") == printer_id), None)
+    profiles = {
+        "printer": settings.get(_slicer_profile_key(printer_id, "printer"), ""),
+        "process": settings.get(_slicer_profile_key(printer_id, "process"), ""),
+        "filament": settings.get(_slicer_profile_key(printer_id, "filament"), ""),
+    }
+    missing_profiles = [label for label, value in profiles.items() if not str(value or "").strip()]
     return {
         "ok": True,
-        "ready": bool(sidecar_url),
+        "ready": bool(sidecar_url) and not missing_profiles,
         "sidecar_url": sidecar_url,
         "source": {
             "source_id": source_id,
@@ -1435,13 +1445,41 @@ async def plan_slice_from_file_desk(body: SlicePlanRequest):
             "filename": f"{base_name}_{printer_id}{output_ext}",
             "kind": "gcode.3mf" if target_kind == "bambu" else "gcode",
         },
+        "profiles": profiles,
+        "missing_profiles": missing_profiles,
         "plate": body.plate or "auto",
         "all_plates": bool(body.all_plates),
         "message": (
-            "Slicer sidecar configured. Download the model, open Orca, then export the printer-specific job back to the Print Vault."
+            "Slicer sidecar configured. Use these profiles in Orca, then export the printer-specific job back to the Print Vault."
+            if sidecar_url and not missing_profiles else
+            f"Set slicer defaults for {', '.join(missing_profiles)} in Settings -> Slicer before slicing this model."
             if sidecar_url else
             "Set the OrcaSlicer Docker URL in Settings -> Slicer before Flightdeck can slice this model."
         ),
+    }
+
+
+@app.post("/api/slicer/output-status")
+async def slicer_output_status(body: SliceOutputStatusRequest):
+    filename = (body.filename or "").rsplit("/", 1)[-1].rsplit("\\", 1)[-1].strip()
+    if not filename:
+        raise HTTPException(status_code=422, detail="Output filename required")
+    library_root = _print_library_path().resolve()
+    path = (library_root / filename).resolve()
+    try:
+        path.relative_to(library_root)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid output filename")
+    if not path.exists():
+        return {"exists": False, "filename": filename, "path": filename}
+    stat = path.stat()
+    return {
+        "exists": True,
+        "filename": filename,
+        "path": filename,
+        "kind": _file_kind(filename),
+        "size": stat.st_size,
+        "modified": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
     }
 
 
