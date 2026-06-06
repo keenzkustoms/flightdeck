@@ -1,7 +1,8 @@
 param(
     [string]$DataDir = "$env:LOCALAPPDATA\Flightdeck",
     [int]$Port = 8000,
-    [switch]$NoStartup
+    [switch]$NoStartup,
+    [switch]$NoDesktopShortcut
 )
 
 $ErrorActionPreference = "Stop"
@@ -49,17 +50,34 @@ $env:FLIGHTDECK_PRINT_LIBRARY = Join-Path $DataDir "print_library"
 & $VenvPython -c "from app import db; db.init()"
 
 $Launcher = Join-Path $ScriptDir "flightdeck-tray.py"
-if (-not $NoStartup) {
-    $Startup = [Environment]::GetFolderPath("Startup")
-    $ShortcutPath = Join-Path $Startup "Flightdeck Tray.lnk"
+$IconPath = Join-Path $AppDir "app\static\icon-192.png"
+
+function New-FlightdeckShortcut {
+    param(
+        [string]$ShortcutPath
+    )
     $Shell = New-Object -ComObject WScript.Shell
     $Shortcut = $Shell.CreateShortcut($ShortcutPath)
     $Shortcut.TargetPath = $VenvPythonw
     $Shortcut.Arguments = "`"$Launcher`""
     $Shortcut.WorkingDirectory = $AppDir
-    $Shortcut.IconLocation = Join-Path $AppDir "app\static\icon-192.png"
+    $Shortcut.IconLocation = $IconPath
+    $Shortcut.Description = "Start Flightdeck tray"
     $Shortcut.Save()
+}
+
+if (-not $NoStartup) {
+    $Startup = [Environment]::GetFolderPath("Startup")
+    $ShortcutPath = Join-Path $Startup "Flightdeck Tray.lnk"
+    New-FlightdeckShortcut -ShortcutPath $ShortcutPath
     Write-Host "Startup shortcut: $ShortcutPath"
+}
+
+if (-not $NoDesktopShortcut) {
+    $Desktop = [Environment]::GetFolderPath("Desktop")
+    $DesktopShortcut = Join-Path $Desktop "Flightdeck.lnk"
+    New-FlightdeckShortcut -ShortcutPath $DesktopShortcut
+    Write-Host "Desktop shortcut: $DesktopShortcut"
 }
 
 Write-Host ""
