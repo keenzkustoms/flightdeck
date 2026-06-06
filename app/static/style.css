@@ -12129,6 +12129,56 @@ select.settings-input { cursor: pointer; }
   background: rgba(245,158,11,0.07);
 }
 
+.setup-version-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.setup-version-main {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+}
+.setup-version-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+.setup-version-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+.setup-version-meta strong {
+  color: var(--text);
+  font-size: 0.92rem;
+}
+.setup-version-flag {
+  border: 1px solid rgba(245,158,11,0.38);
+  border-radius: 999px;
+  padding: 0.18rem 0.5rem;
+  color: #fcd34d;
+  background: rgba(245,158,11,0.1);
+  font-weight: 800;
+  text-transform: uppercase;
+  font-size: 0.66rem;
+}
+.setup-version-notes {
+  margin: 0;
+  padding-left: 1.1rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+#setup-update-message[data-tone="ok"] { color: #86efac; opacity: 1; }
+#setup-update-message[data-tone="warn"] { color: #fcd34d; opacity: 1; }
+
 .setup-health-head {
   display: flex;
   align-items: flex-start;
@@ -12150,6 +12200,17 @@ select.settings-input { cursor: pointer; }
   background: rgba(34,197,94,0.12);
 }
 .setup-health-needs_attention {
+  border-color: rgba(245,158,11,0.45);
+  color: #fcd34d;
+  background: rgba(245,158,11,0.12);
+}
+.setup-health-badge.setup-ready-ok,
+.setup-health-badge.setup-ready-info {
+  border-color: rgba(34,197,94,0.4);
+  color: #86efac;
+  background: rgba(34,197,94,0.12);
+}
+.setup-health-badge.setup-ready-warn {
   border-color: rgba(245,158,11,0.45);
   color: #fcd34d;
   background: rgba(245,158,11,0.12);

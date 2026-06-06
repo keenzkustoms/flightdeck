@@ -8803,8 +8803,47 @@ function _setupReadinessTile(label, value, detail, cls = 'ok') {
   </div>`;
 }
 
+function _setupVersionHtml(version) {
+  const notes = (version?.release_notes || []).map(note => `<li>${esc(note)}</li>`).join('');
+  const current = [version?.version ? `v${version.version}` : 'version unknown', version?.commit || ''].filter(Boolean).join(' · ');
+  let updateText = 'Check GitHub';
+  let updateClass = 'info';
+  if (version?.behind) {
+    updateText = `Update available ${version.remote_commit ? `· ${version.remote_commit}` : ''}`;
+    updateClass = 'warn';
+  } else if (version?.fetch_ok === true) {
+    updateText = 'Up to date';
+    updateClass = 'ok';
+  } else if (version?.fetch_ok === false) {
+    updateText = 'GitHub check failed';
+    updateClass = 'warn';
+  }
+  const dirty = version?.dirty ? '<span class="setup-version-flag">Local changes</span>' : '';
+  return `<div class="settings-section setup-version-panel">
+    <div class="setup-version-main">
+      <div>
+        <div class="settings-section-title">Version &amp; Updates</div>
+        <div class="settings-hint">${esc(version?.name || 'Flightdeck build details')}</div>
+      </div>
+      <div class="setup-version-actions">
+        <span class="setup-health-badge setup-ready-${updateClass}" id="setup-update-state">${esc(updateText)}</span>
+        <button type="button" class="settings-save-btn" id="setup-check-update">Check</button>
+        <button type="button" class="settings-save-btn" id="setup-run-update" ${version?.dirty ? 'disabled' : ''}>Update</button>
+      </div>
+    </div>
+    <div class="setup-version-meta">
+      <strong>${esc(current)}</strong>
+      <span>${esc(version?.branch || 'unknown branch')} ${version?.remote ? `· ${esc(version.remote)}` : ''}</span>
+      ${dirty}
+    </div>
+    ${notes ? `<ul class="setup-version-notes">${notes}</ul>` : ''}
+    <div class="settings-hint" id="setup-update-message">Updates use <code>git pull --ff-only</code>. Restart Flightdeck after a successful update.</div>
+  </div>`;
+}
+
 function _setupHealthHtml(health, context = {}) {
   const checks = health?.checks || [];
+  const version = context.version || {};
   const summary = health?.summary || {};
   const requiredText = `${summary.required_ok ?? 0}/${summary.required_total ?? 0}`;
   const optionalText = `${summary.optional_ok ?? 0}/${summary.optional_total ?? 0}`;
@@ -8849,6 +8888,7 @@ function _setupHealthHtml(health, context = {}) {
     <div class="setup-path-row"><span>${esc(key.replaceAll('_', ' '))}</span><code>${esc(value)}</code></div>
   `).join('');
   return `
+    ${_setupVersionHtml(version)}
     <div class="settings-section setup-health-panel">
       <div class="setup-ready-banner setup-ready-banner-${health?.status === 'ready' ? 'ok' : 'warn'}">
         <div>
@@ -8876,6 +8916,49 @@ function _setupHealthHtml(health, context = {}) {
       <div class="settings-section-title">Runtime Paths</div>
       <div class="setup-path-list">${pathRows}</div>
     </div>`;
+}
+
+function _attachSetupEvents(el) {
+  const message = el.querySelector('#setup-update-message');
+  const state = el.querySelector('#setup-update-state');
+  const setMessage = (text, tone = 'info') => {
+    if (message) {
+      message.textContent = text;
+      message.dataset.tone = tone;
+    }
+  };
+  el.querySelector('#setup-check-update')?.addEventListener('click', async () => {
+    setMessage('Checking GitHub...');
+    try {
+      const r = await fetch('/api/update/status?check_remote=true');
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.detail || 'Update check failed');
+      if (state) {
+        state.textContent = data.behind
+          ? `Update available ${data.remote_commit ? `· ${data.remote_commit}` : ''}`
+          : data.fetch_ok === false ? 'GitHub check failed' : 'Up to date';
+      }
+      setMessage(data.behind ? 'A newer GitHub build is available.' : (data.fetch_detail || 'Flightdeck is up to date.'), data.behind ? 'warn' : 'ok');
+    } catch (err) {
+      setMessage(err.message || 'Update check failed', 'warn');
+    }
+  });
+  el.querySelector('#setup-run-update')?.addEventListener('click', async e => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    setMessage('Updating from GitHub...');
+    try {
+      const r = await fetch('/api/update', { method: 'POST' });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.detail || 'Update failed');
+      if (state) state.textContent = 'Updated';
+      setMessage(`${data.message || 'Update complete.'} Restart Flightdeck to load the new code.`, 'ok');
+      showToast('Flightdeck updated', 'Restart Flightdeck to load the new build.', 'success');
+    } catch (err) {
+      btn.disabled = false;
+      setMessage(err.message || 'Update failed', 'warn');
+    }
+  });
 }
 
 async function _saveSetting(key, value) {
@@ -11933,15 +12016,17 @@ async function _renderSettingsContent(category) {
 
   if (category === 'setup') {
     el.innerHTML = `<div class="detail-placeholder" style="min-height:10rem">Checking install…</div>`;
-    const [health, printers, scale, labelPrinter] = await Promise.all([
+    const [health, printers, scale, labelPrinter, version] = await Promise.all([
       fetch('/api/setup/health').then(r => r.json()).catch(() => null),
       fetch('/api/printers').then(r => r.json()).catch(() => (_latestPrinters || [])),
       fetch('/api/scale/status').then(r => r.json()).catch(() => ({})),
       fetch('/api/label_printer/status').then(r => r.json()).catch(() => ({})),
+      fetch('/api/update/status').then(r => r.json()).catch(() => ({})),
     ]);
     el.innerHTML = health
-      ? _setupHealthHtml(health, { printers, scale, labelPrinter })
+      ? _setupHealthHtml(health, { printers, scale, labelPrinter, version })
       : `<div class="settings-empty">Setup health is unavailable.</div>`;
+    _attachSetupEvents(el);
   } else if (category === 'printers') {
     el.innerHTML = `<div class="detail-placeholder" style="min-height:10rem">Loading…</div>`;
     let printers = [];

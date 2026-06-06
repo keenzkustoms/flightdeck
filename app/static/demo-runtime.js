@@ -282,8 +282,27 @@
 
     if (path === '/api/settings') return jsonResponse({ temp_unit: 'F', time_format: '24h', accent: '#3b82f6' });
     if (path.startsWith('/api/settings/')) return method === 'GET' ? jsonResponse({ value: null }) : jsonResponse({ ok: true, demo: true });
+    if (path === '/api/update/status') return jsonResponse({
+      version: '0.4.0',
+      name: 'Windows installer and fleet setup',
+      release_notes: [
+        'Windows tray installer with dependency checks',
+        'Setup health, diagnostics, and first-run printer setup',
+        'Live AMS visual loadout and Bambu/Klipper fleet tools',
+      ],
+      branch: 'demo',
+      commit: 'demo',
+      dirty: false,
+      runtime: 'demo',
+      remote: 'https://github.com/Kidabah/flightdeck.git',
+      fetch_ok: true,
+      behind: false,
+    });
+    if (path === '/api/update') return jsonResponse({ ok: true, message: 'Demo mode does not update files.', restart_required: false });
     if (path === '/api/instance') return jsonResponse({
       app: 'flightdeck-demo',
+      version: '0.4.0',
+      version_name: 'Windows installer and fleet setup',
       address: 'demo.local',
       hardware: 'Demo Pi 5 8GB',
       runtime: 'standalone demo',

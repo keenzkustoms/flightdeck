@@ -44,6 +44,7 @@ from .printer_config import BambuConnection, BambuRtspCamera, MjpegDirectCamera,
 from .printers import moonraker, simulated
 from .printers.bambu import BambuPrinter
 from .scale import Scale
+from .version import APP_RELEASE_NOTES, APP_VERSION, APP_VERSION_NAME
 
 _bambu: list[BambuPrinter] = []
 _moonraker: list[tuple[str, str, str, str, str]] = []  # (id, model_name, custom_name, icon, url)
@@ -2374,6 +2375,58 @@ def _label_spool(spool: dict) -> dict:
     return {**spool, "_label_preferences": settings}
 
 
+def _run_git(args: list[str], timeout: int = 8) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["git", *args],
+        cwd=APP_DIR,
+        text=True,
+        capture_output=True,
+        timeout=timeout,
+    )
+
+
+def _git_text(args: list[str], fallback: str = "", timeout: int = 8) -> str:
+    try:
+        proc = _run_git(args, timeout=timeout)
+        if proc.returncode == 0:
+            return proc.stdout.strip()
+    except Exception:
+        pass
+    return fallback
+
+
+def _app_version_info(include_remote: bool = False) -> dict:
+    branch = _git_text(["rev-parse", "--abbrev-ref", "HEAD"], "unknown")
+    commit = _git_text(["rev-parse", "--short", "HEAD"], "unknown")
+    dirty = bool(_git_text(["status", "--porcelain"], ""))
+    info = {
+        "version": APP_VERSION,
+        "name": APP_VERSION_NAME,
+        "release_notes": APP_RELEASE_NOTES,
+        "branch": branch,
+        "commit": commit,
+        "dirty": dirty,
+        "runtime": os.environ.get("FLIGHTDECK_RUNTIME", "").strip() or ("docker" if Path("/.dockerenv").exists() else "systemd"),
+        "remote": _git_text(["config", "--get", "remote.origin.url"], ""),
+    }
+    if include_remote and branch not in {"", "unknown", "HEAD"}:
+        try:
+            fetch = _run_git(["fetch", "origin", branch], timeout=20)
+            info["fetch_ok"] = fetch.returncode == 0
+            info["fetch_detail"] = (fetch.stderr or fetch.stdout).strip()
+            local = _git_text(["rev-parse", "HEAD"], "")
+            remote = _git_text(["rev-parse", f"origin/{branch}"], "")
+            base = _git_text(["merge-base", "HEAD", f"origin/{branch}"], "")
+            info["remote_commit"] = remote[:7] if remote else ""
+            info["behind"] = bool(local and remote and local != remote and base == local)
+            info["ahead"] = bool(local and remote and local != remote and base == remote)
+            info["diverged"] = bool(local and remote and local != remote and base not in {local, remote})
+        except Exception as exc:
+            info["fetch_ok"] = False
+            info["fetch_detail"] = str(exc)
+    return info
+
+
 def _setup_check(
     key: str,
     label: str,
@@ -2595,6 +2648,8 @@ def _host_health() -> dict:
 async def instance_info():
     return {
         "app": "flightdeck",
+        "version": APP_VERSION,
+        "version_name": APP_VERSION_NAME,
         "address": _local_ipv4(),
         "hardware": _hardware_label(),
         "runtime": os.environ.get("FLIGHTDECK_RUNTIME", "").strip() or ("docker" if Path("/.dockerenv").exists() else "systemd"),
@@ -2609,6 +2664,37 @@ def _tailnet_hint(url: str) -> tuple[bool, str]:
     if ".ts.net" in url or "tailscale" in url.lower():
         return True, url
     return True, f"{url} (LAN or custom URL)"
+
+
+@app.get("/api/update/status")
+async def update_status(check_remote: bool = False):
+    return _app_version_info(include_remote=check_remote)
+
+
+@app.post("/api/update")
+async def run_update():
+    info = _app_version_info(include_remote=False)
+    if info.get("dirty"):
+        raise HTTPException(status_code=409, detail="Local changes are present. Commit or stash them before updating.")
+    branch = str(info.get("branch") or "")
+    if branch in {"", "unknown", "HEAD"}:
+        raise HTTPException(status_code=409, detail="Flightdeck is not on a named Git branch.")
+    try:
+        proc = _run_git(["pull", "--ff-only", "origin", branch], timeout=120)
+    except FileNotFoundError:
+        raise HTTPException(status_code=500, detail="Git is not installed or not on PATH.")
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=504, detail="Git update timed out.")
+    detail = (proc.stdout or proc.stderr or "").strip()
+    if proc.returncode != 0:
+        raise HTTPException(status_code=502, detail=detail or "Git update failed.")
+    updated = _app_version_info(include_remote=False)
+    return {
+        "ok": True,
+        "message": detail or "Already up to date.",
+        "version": updated,
+        "restart_required": True,
+    }
 
 
 @app.get("/api/setup/health")
