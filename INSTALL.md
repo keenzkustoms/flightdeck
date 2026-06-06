@@ -66,7 +66,7 @@ Easy install:
 2. Open the Flightdeck folder.
 3. Double-click `Install-Flightdeck-Windows.cmd`.
 
-The bootstrap checks for Python and Git. If either is missing and `winget` is available, it asks Windows to install them. If Windows SmartScreen warns because the installer is not digitally signed yet, choose **More info -> Run anyway**.
+The bootstrap checks for Python, Git, and ffmpeg. If any are missing and `winget` is available, it asks Windows to install them. ffmpeg is required for Bambu live camera streams. If Windows SmartScreen warns because the installer is not digitally signed yet, choose **More info -> Run anyway**.
 
 PowerShell install, if you prefer running it manually:
 

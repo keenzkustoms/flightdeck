@@ -107,6 +107,19 @@ if ($GitPath) {
     Write-Host "Git is still not available. Flightdeck can install from this folder, but updates will need Git later." -ForegroundColor Yellow
 }
 
+Write-Step "Checking ffmpeg"
+$FfmpegPath = Find-CommandPath @("ffmpeg")
+if (-not $FfmpegPath) {
+    Install-WithWinget -PackageId "Gyan.FFmpeg" -Name "ffmpeg"
+    $env:PATH = [Environment]::GetEnvironmentVariable("PATH", "Machine") + ";" + [Environment]::GetEnvironmentVariable("PATH", "User")
+    $FfmpegPath = Find-CommandPath @("ffmpeg")
+}
+if ($FfmpegPath) {
+    Write-Host "ffmpeg ready: $FfmpegPath"
+} else {
+    throw "ffmpeg is required for Bambu camera streams but was not found after install. Install ffmpeg manually, then run this installer again."
+}
+
 Write-Step "Installing Flightdeck"
 $InstallScript = Join-Path $ScriptDir "install-windows.ps1"
 $Args = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $InstallScript, "-Port", $Port, "-PythonCommand", $PythonCommand)
