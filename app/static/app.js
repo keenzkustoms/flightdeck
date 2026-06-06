@@ -3,6 +3,7 @@
 let _serverSettings = {};
 let _moistureWatchMemory = {};
 let _instanceInfo = null;
+let _slicerProfileData = null;
 const FLIGHTDECK_DEMO = window.FLIGHTDECK_DEMO === true;
 
 function _toDisplayTemp(celsius) {
@@ -8446,7 +8447,39 @@ function _slicerDatalist(id, rows) {
   </datalist>`;
 }
 
+function _slicerProfileToken(text, fallback = '') {
+  const raw = String(text || fallback || '').toUpperCase();
+  if (raw.includes('H2DP') || raw.includes('H2D PRO')) return 'H2DP';
+  if (raw.includes('H2D')) return 'H2D';
+  if (raw.includes('X1C') || raw.includes('X1 CARBON')) return 'X1C';
+  if (raw.includes('X1')) return 'X1';
+  if (raw.includes('P1S')) return 'P1S';
+  if (raw.includes('P1P')) return 'P1P';
+  if (raw.includes('A1 MINI')) return 'A1 MINI';
+  if (raw.includes('A1')) return 'A1';
+  const sovol = raw.match(/SOVOL\s+(SV\d+(?:\s*MAX)?)/);
+  if (sovol) return sovol[1].replace(/\s+/g, ' ');
+  const prusa = raw.match(/PRUSA\s+([A-Z0-9 ]+)/);
+  if (prusa) return prusa[1].trim();
+  const anycubic = raw.match(/ANYCUBIC\s+([A-Z0-9 ]+)/);
+  if (anycubic) return anycubic[1].trim();
+  return '';
+}
+
+function _slicerFilterRowsForPrinter(rows, printerProfile, fallback = '') {
+  const token = _slicerProfileToken(printerProfile, fallback);
+  if (!token) return rows;
+  const tokenNoSpace = token.replace(/\s+/g, '');
+  const filtered = rows.filter(row => {
+    const name = String(row.name || '').toUpperCase();
+    const compact = name.replace(/\s+/g, '');
+    return name.includes(token) || compact.includes(tokenNoSpace);
+  });
+  return filtered.length ? filtered : rows;
+}
+
 function _slicerProfilesHtml(profileData, printers) {
+  _slicerProfileData = profileData;
   const vendors = profileData?.vendors || [];
   const defaults = profileData?.defaults || {};
   const printerProfiles = _slicerProfileOptions(profileData, 'printer');
@@ -8457,14 +8490,20 @@ function _slicerProfilesHtml(profileData, printers) {
     : '<span class="settings-empty">No standard profiles synced yet.</span>';
   const rows = (printers || []).map(p => {
     const d = defaults[p.id] || {};
+    const rowKey = String(p.id || '').replace(/[^A-Za-z0-9_-]/g, '_');
+    const rowFallback = [p.model_name, p.custom_name, p.id].filter(Boolean).join(' ');
+    const rowProcesses = _slicerFilterRowsForPrinter(processProfiles, d.printer_profile, rowFallback);
+    const rowFilaments = _slicerFilterRowsForPrinter(filamentProfiles, d.printer_profile, rowFallback);
     return `<div class="slicer-profile-row" data-printer-id="${esc(p.id)}">
       <div class="slicer-profile-printer">
         <strong>${esc(p.custom_name || p.model_name || p.id)}</strong>
         <span>${esc([p.model_name, p.kind].filter(Boolean).join(' · '))}</span>
       </div>
       <input class="settings-input slicer-profile-input" data-profile-slot="printer" list="slicer-printer-profiles" value="${esc(d.printer_profile || '')}" placeholder="Printer profile">
-      <input class="settings-input slicer-profile-input" data-profile-slot="process" list="slicer-process-profiles" value="${esc(d.process_profile || '')}" placeholder="Process profile">
-      <input class="settings-input slicer-profile-input" data-profile-slot="filament" list="slicer-filament-profiles" value="${esc(d.filament_profile || '')}" placeholder="Filament profile">
+      <input class="settings-input slicer-profile-input" data-profile-slot="process" list="slicer-process-profiles-${esc(rowKey)}" value="${esc(d.process_profile || '')}" placeholder="Process profile">
+      <input class="settings-input slicer-profile-input" data-profile-slot="filament" list="slicer-filament-profiles-${esc(rowKey)}" value="${esc(d.filament_profile || '')}" placeholder="Filament profile">
+      ${_slicerDatalist(`slicer-process-profiles-${rowKey}`, rowProcesses)}
+      ${_slicerDatalist(`slicer-filament-profiles-${rowKey}`, rowFilaments)}
       <button type="button" class="settings-save-btn slicer-profile-save">Save</button>
     </div>`;
   }).join('') || '<div class="settings-empty">Add a printer before assigning slicer profiles.</div>';
@@ -8488,6 +8527,25 @@ function _slicerProfilesHtml(profileData, printers) {
       ${_slicerDatalist('slicer-filament-profiles', filamentProfiles)}
       <div class="slicer-profile-table">${rows}</div>
     </div>`;
+}
+
+function _slicerReplaceDatalist(id, rows) {
+  const list = document.getElementById(id);
+  if (!list) return;
+  list.innerHTML = rows.map(row => `<option value="${esc(row.name)}">${esc(row.vendor)}</option>`).join('');
+}
+
+function _slicerRefreshRowProfileLists(row) {
+  if (!_slicerProfileData || !row) return;
+  const printerInput = row.querySelector('[data-profile-slot="printer"]');
+  const processInput = row.querySelector('[data-profile-slot="process"]');
+  const filamentInput = row.querySelector('[data-profile-slot="filament"]');
+  const printerText = printerInput?.value || '';
+  const fallback = row.querySelector('.slicer-profile-printer')?.textContent || '';
+  const processRows = _slicerFilterRowsForPrinter(_slicerProfileOptions(_slicerProfileData, 'process'), printerText, fallback);
+  const filamentRows = _slicerFilterRowsForPrinter(_slicerProfileOptions(_slicerProfileData, 'filament'), printerText, fallback);
+  if (processInput?.list?.id) _slicerReplaceDatalist(processInput.list.id, processRows);
+  if (filamentInput?.list?.id) _slicerReplaceDatalist(filamentInput.list.id, filamentRows);
 }
 
 function _slicerCategoryHtml(profileData = null, printers = []) {
@@ -8667,6 +8725,11 @@ function _attachSlicerEvents(el) {
         btn.textContent = old;
       }
     });
+  });
+
+  el.querySelectorAll('.slicer-profile-input[data-profile-slot="printer"]').forEach(input => {
+    input.addEventListener('change', () => _slicerRefreshRowProfileLists(input.closest('[data-printer-id]')));
+    input.addEventListener('input', () => _slicerRefreshRowProfileLists(input.closest('[data-printer-id]')));
   });
 }
 
