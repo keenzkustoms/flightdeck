@@ -8525,10 +8525,14 @@ function _slicerProfilesHtml(profileData, printers) {
       <div class="setup-version-main">
         <div>
           <div class="settings-section-title">Standard Profiles</div>
-          <div class="settings-hint">Synced from OrcaSlicer standard profiles. Used to make source-model slicing printer-specific.</div>
+          <div class="settings-hint">Synced from OrcaSlicer standard profiles, plus any custom profiles you upload.</div>
         </div>
-        <button type="button" class="settings-save-btn" id="slicer-sync-profiles">Sync profiles</button>
+        <div class="setup-version-actions">
+          <button type="button" class="settings-save-btn" id="slicer-upload-profiles">Upload profiles</button>
+          <button type="button" class="settings-save-btn" id="slicer-sync-profiles">Sync profiles</button>
+        </div>
       </div>
+      <input id="slicer-profile-upload-input" type="file" accept=".json,.bbscfg,.zip" multiple hidden>
       <div class="slicer-profile-pills">${vendorStats}</div>
       <div class="settings-hint">Credit: <a href="${esc(profileData?.attribution?.url || 'https://github.com/OrcaSlicer/OrcaSlicer')}" target="_blank" rel="noreferrer">OrcaSlicer standard profiles</a> (${esc(profileData?.attribution?.license || 'AGPL-3.0')}).</div>
     </div>
@@ -8703,6 +8707,35 @@ function _attachSlicerEvents(el) {
       showToast('Profile sync failed', err.message || '', 'error');
       btn.disabled = false;
       btn.textContent = old;
+    }
+  });
+
+  const uploadInput = el.querySelector('#slicer-profile-upload-input');
+  el.querySelector('#slicer-upload-profiles')?.addEventListener('click', () => {
+    uploadInput?.click();
+  });
+  uploadInput?.addEventListener('change', async () => {
+    const files = [...(uploadInput.files || [])];
+    if (!files.length) return;
+    const form = new FormData();
+    files.forEach(file => form.append('files', file));
+    try {
+      const r = await fetch('/api/slicer/profiles/upload', {
+        method: 'POST',
+        body: form,
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        const detail = data.detail;
+        throw new Error(typeof detail === 'string' ? detail : detail?.message || 'Profile upload failed');
+      }
+      const added = data.added || {};
+      showToast('Profiles uploaded', `${added.machines || 0} printer · ${added.processes || 0} process · ${added.filaments || 0} filament`, 'success');
+      await _renderSettingsContent('slicer');
+    } catch (err) {
+      showToast('Profile upload failed', err.message || '', 'error');
+    } finally {
+      uploadInput.value = '';
     }
   });
 

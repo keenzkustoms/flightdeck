@@ -13,6 +13,7 @@ import sqlite3
 import subprocess
 import urllib.parse
 import urllib.request
+import zipfile
 from html import escape as html_escape
 from contextlib import asynccontextmanager
 from dataclasses import asdict
@@ -2518,6 +2519,86 @@ def _fetch_orca_profile_vendor(vendor: str) -> dict:
     return _normalise_orca_profile_vendor(vendor, payload)
 
 
+def _profile_bucket_from_json(payload: dict, source_path: str = "") -> Optional[str]:
+    text = " ".join(str(payload.get(k) or "") for k in ("type", "preset_type", "inherits", "name")).lower()
+    path = source_path.replace("\\", "/").lower()
+    if "filament" in path or "filament" in text:
+        return "filaments"
+    if "process" in path or "process" in text or "print" in text:
+        return "processes"
+    if "machine" in path or "printer" in path or "machine" in text:
+        return "machines"
+    return None
+
+
+def _custom_profile_payload() -> dict:
+    for vendor in db.get_slicer_profile_vendors():
+        if vendor.get("vendor") == "Custom":
+            return {
+                "vendor": "Custom",
+                "name": "Custom",
+                "version": None,
+                "source": "User uploaded profiles",
+                "source_url": "",
+                "machines": list(vendor.get("machines") or []),
+                "machine_models": list(vendor.get("machine_models") or []),
+                "processes": list(vendor.get("processes") or []),
+                "filaments": list(vendor.get("filaments") or []),
+            }
+    return {
+        "vendor": "Custom",
+        "name": "Custom",
+        "version": None,
+        "source": "User uploaded profiles",
+        "source_url": "",
+        "machines": [],
+        "machine_models": [],
+        "processes": [],
+        "filaments": [],
+    }
+
+
+def _add_custom_profile(payload: dict, profile: dict, source_path: str) -> Optional[str]:
+    if not isinstance(profile, dict):
+        return None
+    name = str(profile.get("name") or Path(source_path).stem).strip()
+    if not name or name.startswith("fdm_"):
+        return None
+    bucket = _profile_bucket_from_json(profile, source_path)
+    if not bucket:
+        return None
+    item = {"name": name, "path": f"custom/{source_path}"}
+    existing = {row.get("name") for row in payload[bucket]}
+    if name not in existing:
+        payload[bucket].append(item)
+    return bucket
+
+
+def _parse_uploaded_slicer_profiles(filename: str, data: bytes, payload: dict) -> dict:
+    added = {"machines": 0, "processes": 0, "filaments": 0}
+    lower = filename.lower()
+    if lower.endswith((".bbscfg", ".zip")):
+        with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            for info in zf.infolist():
+                if info.is_dir() or not info.filename.lower().endswith(".json"):
+                    continue
+                try:
+                    profile = json.loads(zf.read(info).decode("utf-8-sig"))
+                except Exception:
+                    continue
+                bucket = _add_custom_profile(payload, profile, info.filename)
+                if bucket:
+                    added[bucket] += 1
+    else:
+        profile = json.loads(data.decode("utf-8-sig"))
+        bucket = _add_custom_profile(payload, profile, filename)
+        if bucket:
+            added[bucket] += 1
+    for key in ("machines", "machine_models", "processes", "filaments"):
+        payload[key] = sorted(payload[key], key=lambda row: row.get("name", ""))
+    return {"payload": payload, "added": added}
+
+
 def _slicer_profile_defaults(settings: dict, printers: list[dict]) -> dict:
     return {
         p.get("id"): {
@@ -2564,6 +2645,31 @@ async def sync_slicer_profiles(body: SlicerProfileSyncRequest):
     if errors and not synced:
         raise HTTPException(status_code=502, detail={"message": "Profile sync failed", "errors": errors})
     return {"ok": True, "synced": synced, "errors": errors, "vendors": db.get_slicer_profile_vendors()}
+
+
+@app.post("/api/slicer/profiles/upload")
+async def upload_slicer_profiles(files: list[UploadFile] = File(...)):
+    if not files:
+        raise HTTPException(status_code=422, detail="Profile file required")
+    total = {"machines": 0, "processes": 0, "filaments": 0}
+    errors = []
+    payload = _custom_profile_payload()
+    for file in files:
+        name = (file.filename or "profile").rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+        if not name.lower().endswith((".json", ".bbscfg", ".zip")):
+            errors.append({"file": name, "error": "Unsupported profile file type"})
+            continue
+        try:
+            parsed = await asyncio.to_thread(_parse_uploaded_slicer_profiles, name, await file.read(), payload)
+            payload = parsed["payload"]
+            for key, count in parsed["added"].items():
+                total[key] += count
+        except Exception as exc:
+            errors.append({"file": name, "error": str(exc)})
+    if not any(total.values()) and errors:
+        raise HTTPException(status_code=422, detail={"message": "No profiles imported", "errors": errors})
+    db.save_slicer_profile_vendor("Custom", payload)
+    return {"ok": True, "added": total, "errors": errors, "vendors": db.get_slicer_profile_vendors()}
 
 
 @app.put("/api/slicer/profiles/defaults/{printer_id}")
