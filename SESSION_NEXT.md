@@ -1,5 +1,12 @@
 # Flightdeck — next session brief
-_Last updated 6 June 2026 (Session 28.192 Dashboard add-printer CTA)_
+_Last updated 6 June 2026 (Session 28.193 Spool scan stage 1)_
+
+## What was added - Session 28.193 (Spool scan stage 1 - 6 June)
+- Add Spool now has a `Spool scan` panel inside the filament catalogue area.
+- Stage 1 supports browser camera capture plus a photo-upload fallback for filament labels/boxes.
+- Chromium barcode detection is used when available; detected barcodes populate the catalogue search and keep the final spool form editable before saving.
+- Camera streams are stopped when the spool modal closes or saves, so the browser does not leave the camera session running.
+- Bumped static cache to `app.js?v=296` and `style.css?v=232`; frontend refresh required.
 
 ## What was added - Session 28.192 (Dashboard add-printer CTA - 6 June)
 - Dashboard now shows a first-run `Add Printer` panel when there are no configured printers.

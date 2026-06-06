@@ -10597,6 +10597,29 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
             </div>
             <input id="sm-catalogue-search" class="spool-form-input" type="search" placeholder="Search brand, material, colour...">
             <div id="sm-catalogue-picked" class="spool-catalogue-picked hidden"></div>
+            <div class="spool-scan-panel" id="sm-spool-scan">
+              <div class="spool-scan-head">
+                <div>
+                  <strong>Spool scan</strong>
+                  <span>Camera or label photo</span>
+                </div>
+                <div class="spool-scan-actions">
+                  <button type="button" class="spool-inline-btn" id="sm-scan-start">Camera</button>
+                  <label class="spool-inline-btn spool-file-btn" for="sm-scan-file">Photo</label>
+                  <input id="sm-scan-file" type="file" accept="image/*" hidden>
+                </div>
+              </div>
+              <div class="spool-scan-stage hidden" id="sm-scan-stage">
+                <video id="sm-scan-video" playsinline muted></video>
+                <canvas id="sm-scan-canvas" hidden></canvas>
+                <img id="sm-scan-photo" alt="">
+              </div>
+              <div class="spool-scan-controls hidden" id="sm-scan-controls">
+                <button type="button" class="spool-inline-btn" id="sm-scan-capture">Capture</button>
+                <button type="button" class="spool-inline-btn" id="sm-scan-stop">Stop</button>
+              </div>
+              <div class="spool-scan-result" id="sm-scan-result">Stage 1: capture the label, then use barcode/catalogue hints before saving.</div>
+            </div>
             <div id="sm-spool-preview" class="spool-draft-card"></div>
             <div id="sm-catalogue-results" class="spool-catalogue-results hidden"></div>
           </div>
@@ -10750,6 +10773,18 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
   const spoolPreview = overlay.querySelector('#sm-spool-preview');
   const catalogueSync = overlay.querySelector('#sm-catalogue-sync');
   const catalogueChips = overlay.querySelector('#sm-catalogue-chips');
+  const scanStart = overlay.querySelector('#sm-scan-start');
+  const scanFile = overlay.querySelector('#sm-scan-file');
+  const scanStage = overlay.querySelector('#sm-scan-stage');
+  const scanVideo = overlay.querySelector('#sm-scan-video');
+  const scanCanvas = overlay.querySelector('#sm-scan-canvas');
+  const scanPhoto = overlay.querySelector('#sm-scan-photo');
+  const scanControls = overlay.querySelector('#sm-scan-controls');
+  const scanCapture = overlay.querySelector('#sm-scan-capture');
+  const scanStop = overlay.querySelector('#sm-scan-stop');
+  const scanResult = overlay.querySelector('#sm-scan-result');
+  let scanStream = null;
+  let scanObjectUrl = null;
 
   let matNewMode = false;
   let brandNewMode = false;
@@ -10926,6 +10961,125 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
       btn.addEventListener('click', () => applyCatalogueEntry(rows[Number(btn.dataset.idx)]));
     });
   }
+
+  function setCatalogueSearch(q, note = 'Scan hint applied') {
+    const cleaned = String(q || '').replace(/\s+/g, ' ').trim();
+    if (!cleaned) return;
+    catalogueSearch.value = cleaned;
+    updateDraftPreview(note);
+    searchCatalogue();
+  }
+
+  function applyScanWords(words) {
+    const text = String(words || '').replace(/\s+/g, ' ').trim();
+    if (!text) return;
+    const upper = text.toUpperCase();
+    const material = ['PLA+', 'PLA', 'PETG', 'ASA', 'ABS', 'TPU', 'PA', 'PC'].find(v => upper.includes(v));
+    const brand = materials.flatMap(m => matBrands[m] || []).find(b => b && upper.includes(String(b).toUpperCase()));
+    const colourWords = ['BLACK', 'WHITE', 'RED', 'BLUE', 'GREEN', 'YELLOW', 'ORANGE', 'PURPLE', 'PINK', 'SILVER', 'GREY', 'GRAY', 'BROWN', 'RAINBOW'];
+    const colour = colourWords.find(c => upper.includes(c));
+    setCatalogueSearch([brand, material, colour].filter(Boolean).join(' ') || text);
+  }
+
+  function setScanMessage(message, kind = '') {
+    scanResult.textContent = message;
+    scanResult.classList.toggle('spool-scan-warn', kind === 'warn');
+    scanResult.classList.toggle('spool-scan-good', kind === 'good');
+  }
+
+  function stopScanStream() {
+    if (scanStream) {
+      scanStream.getTracks().forEach(track => track.stop());
+      scanStream = null;
+    }
+    scanVideo.srcObject = null;
+    scanControls.classList.add('hidden');
+    scanStart.disabled = false;
+  }
+
+  async function detectBarcodeFromImage(source) {
+    if (!('BarcodeDetector' in window)) return null;
+    try {
+      const detector = new BarcodeDetector({ formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'qr_code'] });
+      const results = await detector.detect(source);
+      return results?.[0]?.rawValue || null;
+    } catch {
+      return null;
+    }
+  }
+
+  async function captureScanFrame() {
+    if (!scanVideo.videoWidth || !scanVideo.videoHeight) {
+      setScanMessage('Camera is still warming up. Try capture again.', 'warn');
+      return;
+    }
+    scanCanvas.width = scanVideo.videoWidth;
+    scanCanvas.height = scanVideo.videoHeight;
+    const ctx = scanCanvas.getContext('2d');
+    ctx.drawImage(scanVideo, 0, 0, scanCanvas.width, scanCanvas.height);
+    const dataUrl = scanCanvas.toDataURL('image/jpeg', 0.86);
+    scanPhoto.src = dataUrl;
+    scanPhoto.hidden = false;
+    const barcode = await detectBarcodeFromImage(scanCanvas);
+    if (barcode) {
+      setScanMessage(`Barcode found: ${barcode}. Searching catalogue.`, 'good');
+      setCatalogueSearch(barcode, 'Barcode scan applied');
+    } else {
+      setScanMessage('Photo captured. No browser barcode found, so type any visible brand/material into the catalogue search.', 'warn');
+    }
+  }
+
+  scanStart.addEventListener('click', async () => {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setScanMessage('Camera capture is not available in this browser. Use Photo instead.', 'warn');
+      return;
+    }
+    scanStart.disabled = true;
+    setScanMessage('Opening camera...');
+    try {
+      scanStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false,
+      });
+      scanVideo.srcObject = scanStream;
+      scanVideo.hidden = false;
+      scanPhoto.hidden = true;
+      scanStage.classList.remove('hidden');
+      scanControls.classList.remove('hidden');
+      await scanVideo.play();
+      setScanMessage('Hold the filament label steady, then capture.');
+    } catch (err) {
+      scanStart.disabled = false;
+      setScanMessage(err?.name === 'NotAllowedError' ? 'Camera permission was blocked. Use Photo or allow camera access.' : 'Unable to open camera. Use Photo instead.', 'warn');
+    }
+  });
+
+  scanCapture.addEventListener('click', () => captureScanFrame());
+  scanStop.addEventListener('click', () => stopScanStream());
+  scanFile.addEventListener('change', async () => {
+    const file = scanFile.files?.[0];
+    if (!file) return;
+    stopScanStream();
+    if (scanObjectUrl) URL.revokeObjectURL(scanObjectUrl);
+    scanObjectUrl = URL.createObjectURL(file);
+    scanPhoto.src = scanObjectUrl;
+    scanPhoto.hidden = false;
+    scanVideo.hidden = true;
+    scanStage.classList.remove('hidden');
+    setScanMessage('Photo loaded. Checking for barcode...');
+    await new Promise(resolve => {
+      if (scanPhoto.complete) resolve();
+      else scanPhoto.onload = resolve;
+    });
+    const barcode = await detectBarcodeFromImage(scanPhoto);
+    if (barcode) {
+      setScanMessage(`Barcode found: ${barcode}. Searching catalogue.`, 'good');
+      setCatalogueSearch(barcode, 'Barcode photo applied');
+    } else {
+      applyScanWords(file.name.replace(/\.[^.]+$/, ' '));
+      setScanMessage('Photo loaded. No browser barcode found; catalogue search can still use the file name or typed label text.', 'warn');
+    }
+  });
 
   catalogueSearch.addEventListener('input', () => {
     clearTimeout(catalogueTimer);
@@ -11160,9 +11314,14 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
   updateSlots();
   updateDraftPreview();
 
-  overlay.querySelector('.modal-close-btn').addEventListener('click', () => overlay.remove());
-  overlay.querySelector('#sm-cancel').addEventListener('click', () => overlay.remove());
-  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+  function closeSpoolModal() {
+    stopScanStream();
+    if (scanObjectUrl) URL.revokeObjectURL(scanObjectUrl);
+    overlay.remove();
+  }
+  overlay.querySelector('.modal-close-btn').addEventListener('click', () => closeSpoolModal());
+  overlay.querySelector('#sm-cancel').addEventListener('click', () => closeSpoolModal());
+  overlay.addEventListener('click', e => { if (e.target === overlay) closeSpoolModal(); });
 
   overlay.querySelector('#sm-submit').addEventListener('click', async () => {
     const material = matNewMode ? matNewIn.value.trim().toUpperCase() : matSel.value.trim();
@@ -11251,7 +11410,7 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
         if (!r.ok) throw new Error(await _spoolSaveErrorMessage(r, 'Unable to add spool'));
         savedData = await r.json().catch(() => ({}));
       }
-      overlay.remove();
+      closeSpoolModal();
       if (locMode === 'loaded') {
         _spoolMoveSyncToast(
           savedData,
