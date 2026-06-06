@@ -10983,7 +10983,7 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
 
   function applyScanWords(words) {
     const text = String(words || '').replace(/\s+/g, ' ').trim();
-    if (!text) return;
+    if (!text) return [];
     const upper = text.toUpperCase();
     const material = [
       ['PLA+', /\bPLA\s*\+|\bPLA\s*PLUS\b/],
@@ -11035,8 +11035,23 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
       ['Brown', '#7c3f20', /\bBROWN\b/],
       ['Rainbow', '#ec4899', /\bRAINBOW\b/],
     ].find(([, , rx]) => rx.test(upper));
-    if (material || brand) {
-      ensureMaterialBrand(material || 'PLA', brand || 'Unknown');
+    if (brand && material) {
+      ensureMaterialBrand(material, brand);
+    } else if (material) {
+      if (matNewMode) matToggle.click();
+      if (brandNewMode) brandToggle.click();
+      if (matBrands[material]) {
+        matSel.value = material;
+        populateBrands(material);
+        brandSel.value = '';
+      } else {
+        matNewMode = false;
+        matToggle.click();
+        matNewIn.value = material;
+      }
+    } else if (brand) {
+      const materialForBrand = materials.find(m => (matBrands[m] || []).includes(brand));
+      if (materialForBrand) ensureMaterialBrand(materialForBrand, brand);
     }
     if (subtype && !overlay.querySelector('#sm-subtype').value.trim()) {
       overlay.querySelector('#sm-subtype').value = subtype;
@@ -11049,11 +11064,13 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
         updateSchemeColourRows();
       }
     }
-    const query = [brand, material, colourMap?.[0], subtype].filter(Boolean).join(' ') || text;
-    setCatalogueSearch(query, 'Label text applied');
+    const applied = [brand, material, colourMap?.[0], subtype].filter(Boolean);
+    const query = applied.join(' ');
+    if (query) setCatalogueSearch(query, 'Label text applied');
     applyDefaultTare();
     updatePrevPicks();
     updateDraftPreview('Label text applied');
+    return applied;
   }
 
   function setScanMessage(message, kind = '') {
@@ -11129,8 +11146,12 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
         setScanMessage('No readable label text found. Try a closer, brighter photo.', 'warn');
         return;
       }
-      applyScanWords(text);
-      setScanMessage(`Read label: ${text.replace(/\s+/g, ' ').slice(0, 120)}`, 'good');
+      const applied = applyScanWords(text);
+      if (applied.length) {
+        setScanMessage(`Applied from label: ${applied.join(' · ')}`, 'good');
+      } else {
+        setScanMessage('Label text was too noisy to apply safely. Try a closer photo or type the visible details.', 'warn');
+      }
     } catch (err) {
       setScanMessage(`${err?.message || 'OCR failed'}. You can still type the visible brand/material into search.`, 'warn');
     } finally {

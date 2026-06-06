@@ -1,5 +1,11 @@
 # Flightdeck — next session brief
-_Last updated 6 June 2026 (Session 28.194 Spool scan OCR stage 2)_
+_Last updated 6 June 2026 (Session 28.195 Spool OCR conservative apply)_
+
+## What was fixed - Session 28.195 (Spool OCR conservative apply - 6 June)
+- OCR no longer creates or selects an `Unknown` brand when the label text is noisy.
+- The scan result message now shows only the fields Flightdeck actually applied instead of raw OCR gibberish.
+- Material-only OCR keeps the brand blank for operator confirmation unless the label confidently names a brand.
+- Bumped static cache to `app.js?v=298` and `style.css?v=234`; frontend refresh required.
 
 ## What was added - Session 28.194 (Spool scan OCR stage 2 - 6 June)
 - Spool scan now has a `Read label` step using browser-side OCR loaded on demand.
