@@ -1,5 +1,11 @@
 # Flightdeck — next session brief
-_Last updated 6 June 2026 (Session 28.191 Printer edit in settings)_
+_Last updated 6 June 2026 (Session 28.192 Dashboard add-printer CTA)_
+
+## What was added - Session 28.192 (Dashboard add-printer CTA - 6 June)
+- Dashboard now shows a first-run `Add Printer` panel when there are no configured printers.
+- Dashboard printer cards now end with a dashed `+ Add Printer` card that links straight to Settings -> Printers.
+- The add-printer card reminds operators to edit existing printers when only an IP changes, preserving printer history and metrics.
+- Bumped static cache to `app.js?v=295` and `style.css?v=230`; frontend refresh required.
 
 ## What was added - Session 28.191 (Printer edit in settings - 6 June)
 - Added a Settings -> Printers `Edit` action so connection details can change without changing the printer ID.

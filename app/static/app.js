@@ -1616,6 +1616,24 @@ function renderCard(p) {
     </div>`;
 }
 
+function _renderAddPrinterCard(empty = false) {
+  if (empty) {
+    return `<section class="dashboard-first-run">
+      <div>
+        <span>First run</span>
+        <strong>Add your first printer</strong>
+        <p>Connect a Bambu, Moonraker/Klipper, or simulated printer to start building live status, history, queue, and spool tracking.</p>
+      </div>
+      <a class="dashboard-add-printer-primary" href="#/settings/printers">Add Printer</a>
+    </section>`;
+  }
+  return `<a class="card dashboard-add-printer-card" href="#/settings/printers" aria-label="Add another printer">
+    <span class="dashboard-add-plus">+</span>
+    <strong>Add Printer</strong>
+    <small>Keep existing metrics by editing printers when only an IP changes.</small>
+  </a>`;
+}
+
 // ── Header status pill ─────────────────────────────────────────────────────
 
 function updateStatusPill(printers) {
@@ -7299,7 +7317,10 @@ function updateDashboard(printers) {
   if (parseRoute().view === 'stats') renderStatsView();
 
   const grid = document.getElementById('printer-grid');
-  grid.innerHTML = `${_renderDashboardBriefing(sortedPrinters)}${sortedPrinters.map(renderCard).join('')}`;
+  const printerCards = sortedPrinters.length
+    ? `${sortedPrinters.map(renderCard).join('')}${_renderAddPrinterCard()}`
+    : _renderAddPrinterCard(true);
+  grid.innerHTML = `${_renderDashboardBriefing(sortedPrinters)}${printerCards}`;
 
   grid.querySelectorAll('[data-printer-id]').forEach(card => {
     const p = printers.find(x => x.id === card.dataset.printerId);

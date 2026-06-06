@@ -2646,6 +2646,11 @@ button.briefing-row {
     grid-template-columns: 1fr;
   }
 
+  .dashboard-first-run {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
   .briefing-head {
     flex-direction: row;
     align-items: flex-end;
@@ -2682,6 +2687,107 @@ button.briefing-row {
   display: flex;
   flex-direction: column;
   gap: 1rem;
+}
+
+.dashboard-add-printer-card {
+  min-height: 11rem;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed rgba(96,165,250,0.42);
+  background: rgba(96,165,250,0.045);
+  color: inherit;
+  text-align: center;
+  text-decoration: none;
+  transition: border-color 0.16s, background 0.16s, transform 0.16s;
+}
+
+.dashboard-add-printer-card:hover {
+  border-color: rgba(96,165,250,0.78);
+  background: rgba(96,165,250,0.1);
+  transform: translateY(-1px);
+}
+
+.dashboard-add-plus {
+  display: grid;
+  place-items: center;
+  width: 2.7rem;
+  height: 2.7rem;
+  border: 1px solid rgba(96,165,250,0.6);
+  border-radius: 999px;
+  color: #93c5fd;
+  font-size: 2rem;
+  font-weight: 300;
+  line-height: 1;
+}
+
+.dashboard-add-printer-card strong {
+  color: var(--text);
+  font-size: 0.92rem;
+}
+
+.dashboard-add-printer-card small {
+  max-width: 15rem;
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
+.dashboard-first-run {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.25rem;
+  padding: 1.25rem;
+  border: 1px solid rgba(96,165,250,0.36);
+  border-radius: 0.75rem;
+  background: rgba(96,165,250,0.07);
+}
+
+.dashboard-first-run span {
+  display: block;
+  color: #93c5fd;
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.dashboard-first-run strong {
+  display: block;
+  margin-top: 0.25rem;
+  color: var(--text);
+  font-size: 1.05rem;
+}
+
+.dashboard-first-run p {
+  max-width: 44rem;
+  margin: 0.35rem 0 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.dashboard-add-printer-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.4rem;
+  padding: 0.5rem 1rem;
+  border: 1px solid rgba(96,165,250,0.65);
+  border-radius: 0.5rem;
+  background: rgba(96,165,250,0.14);
+  color: #bfdbfe;
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.dashboard-add-printer-primary:hover {
+  border-color: rgba(147,197,253,0.9);
+  background: rgba(96,165,250,0.22);
+  color: #eff6ff;
 }
 
 .card-header {
