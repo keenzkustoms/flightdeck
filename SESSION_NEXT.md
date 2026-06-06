@@ -1,5 +1,11 @@
 # Flightdeck — next session brief
-_Last updated 6 June 2026 (Session 28.195 Spool OCR conservative apply)_
+_Last updated 6 June 2026 (Session 28.196 Spool scan label swatch colour)_
+
+## What was added - Session 28.196 (Spool scan label swatch colour - 6 June)
+- Spool OCR now falls back to photo colour detection when label text finds material/subtype but misses the colour name.
+- The detector looks for a saturated swatch near white label pixels, aimed at Bambu-style coloured label dots.
+- Colour detection only runs when OCR has not already applied a colour, keeping operator-entered colour choices intact.
+- Bumped static cache to `app.js?v=299` and `style.css?v=235`; frontend refresh required.
 
 ## What was fixed - Session 28.195 (Spool OCR conservative apply - 6 June)
 - OCR no longer creates or selects an `Unknown` brand when the label text is noisy.

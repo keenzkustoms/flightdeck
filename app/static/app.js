@@ -11073,6 +11073,121 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
     return applied;
   }
 
+  function rgbToHsv(r, g, b) {
+    r /= 255; g /= 255; b /= 255;
+    const max = Math.max(r, g, b), min = Math.min(r, g, b);
+    const d = max - min;
+    let h = 0;
+    if (d) {
+      if (max === r) h = ((g - b) / d) % 6;
+      else if (max === g) h = (b - r) / d + 2;
+      else h = (r - g) / d + 4;
+      h *= 60;
+      if (h < 0) h += 360;
+    }
+    return { h, s: max ? d / max : 0, v: max };
+  }
+
+  function hsvToHex(h, s, v) {
+    const c = v * s;
+    const x = c * (1 - Math.abs((h / 60) % 2 - 1));
+    const m = v - c;
+    let r = 0, g = 0, b = 0;
+    if (h < 60) [r, g, b] = [c, x, 0];
+    else if (h < 120) [r, g, b] = [x, c, 0];
+    else if (h < 180) [r, g, b] = [0, c, x];
+    else if (h < 240) [r, g, b] = [0, x, c];
+    else if (h < 300) [r, g, b] = [x, 0, c];
+    else [r, g, b] = [c, 0, x];
+    return '#' + [r, g, b].map(n => Math.round((n + m) * 255).toString(16).padStart(2, '0')).join('');
+  }
+
+  function colourNameFromHue(h, s, v) {
+    if (v < 0.18) return 'Black';
+    if (s < 0.16 && v > 0.82) return 'White';
+    if (s < 0.18) return v > 0.58 ? 'Silver' : 'Grey';
+    if (h < 15 || h >= 345) return 'Red';
+    if (h < 38) return 'Orange';
+    if (h < 65) return 'Yellow';
+    if (h < 155) return 'Green';
+    if (h < 195) return 'Cyan';
+    if (h < 255) return 'Blue';
+    if (h < 290) return 'Purple';
+    if (h < 345) return 'Magenta';
+    return 'Colour';
+  }
+
+  async function loadScanImage(source) {
+    if (source instanceof HTMLCanvasElement || source instanceof HTMLImageElement) return source;
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error('Unable to read scan image'));
+      img.src = source;
+    });
+  }
+
+  async function detectLabelSwatchColour(source = scanLastImageSource) {
+    if (!source) return null;
+    const image = await loadScanImage(source);
+    const width = Math.min(640, image.naturalWidth || image.width || 0);
+    const height = Math.round(width * ((image.naturalHeight || image.height || 1) / (image.naturalWidth || image.width || 1)));
+    if (!width || !height) return null;
+    scanCanvas.width = width;
+    scanCanvas.height = height;
+    const ctx = scanCanvas.getContext('2d');
+    ctx.drawImage(image, 0, 0, width, height);
+    const { data } = ctx.getImageData(0, 0, width, height);
+    const bins = new Map();
+    for (let y = 2; y < height - 2; y += 2) {
+      for (let x = 2; x < width - 2; x += 2) {
+        const i = (y * width + x) * 4;
+        const r = data[i], g = data[i + 1], b = data[i + 2];
+        const hsv = rgbToHsv(r, g, b);
+        if (hsv.s < 0.34 || hsv.v < 0.24 || hsv.v > 0.92) continue;
+        let whiteNeighbours = 0;
+        for (let oy = -18; oy <= 18; oy += 9) {
+          for (let ox = -18; ox <= 18; ox += 9) {
+            const nx = Math.max(0, Math.min(width - 1, x + ox));
+            const ny = Math.max(0, Math.min(height - 1, y + oy));
+            const ni = (ny * width + nx) * 4;
+            const nr = data[ni], ng = data[ni + 1], nb = data[ni + 2];
+            const nh = rgbToHsv(nr, ng, nb);
+            if (nh.s < 0.22 && nh.v > 0.68) whiteNeighbours += 1;
+          }
+        }
+        if (whiteNeighbours < 5) continue;
+        const bin = Math.round(hsv.h / 12) * 12;
+        const current = bins.get(bin) || { count: 0, h: 0, s: 0, v: 0 };
+        current.count += 1;
+        current.h += hsv.h;
+        current.s += hsv.s;
+        current.v += hsv.v;
+        bins.set(bin, current);
+      }
+    }
+    const best = [...bins.values()].sort((a, b) => b.count - a.count)[0];
+    if (!best || best.count < 6) return null;
+    const h = best.h / best.count;
+    const s = best.s / best.count;
+    const v = Math.min(0.95, Math.max(0.35, best.v / best.count));
+    return { name: colourNameFromHue(h, s, v), hex: hsvToHex(h, Math.max(0.55, s), v), confidence: best.count };
+  }
+
+  async function applyScanSwatchColour(source = scanLastImageSource, force = false) {
+    if (!force && overlay.querySelector('#sm-color-name').value.trim()) return null;
+    try {
+      const colour = await detectLabelSwatchColour(source);
+      if (!colour) return null;
+      overlay.querySelector('#sm-color-name').value = colour.name;
+      syncColor(colour.hex);
+      updateDraftPreview('Label colour detected');
+      return colour;
+    } catch {
+      return null;
+    }
+  }
+
   function setScanMessage(message, kind = '') {
     scanResult.textContent = message;
     scanResult.classList.toggle('spool-scan-warn', kind === 'warn');
@@ -11147,6 +11262,10 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
         return;
       }
       const applied = applyScanWords(text);
+      const hasColour = ['Black', 'White', 'Red', 'Blue', 'Green', 'Yellow', 'Orange', 'Purple', 'Pink', 'Magenta', 'Silver', 'Grey', 'Brown', 'Rainbow'].some(c => applied.includes(c));
+      let swatchColour = null;
+      if (!hasColour) swatchColour = await applyScanSwatchColour(source);
+      if (swatchColour) applied.push(swatchColour.name);
       if (applied.length) {
         setScanMessage(`Applied from label: ${applied.join(' · ')}`, 'good');
       } else {
