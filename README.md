@@ -223,6 +223,17 @@ cd flightdeck
 ./scripts/install-systemd.sh
 ```
 
+Windows per-user tray install:
+
+```powershell
+git clone https://github.com/Kidabah/flightdeck.git
+cd flightdeck
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+.\scripts\windows\install-windows.ps1
+```
+
+The Windows installer creates a local venv, stores live data under `%LOCALAPPDATA%\Flightdeck`, and adds a Startup shortcut that runs the tray launcher through `pythonw.exe`. Flightdeck then lives in the Windows hidden icons / notification area with menu actions for opening the dashboard, restarting, viewing logs, and exiting.
+
 By default the installer stores live data in `~/flightdeck-data`:
 
 - `flightdeck.db`

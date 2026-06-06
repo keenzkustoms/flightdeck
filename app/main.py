@@ -2343,6 +2343,9 @@ def _systemd_status() -> tuple[bool, str]:
     if runtime in {"docker", "container", "portainer"} or Path("/.dockerenv").exists():
         manager = os.environ.get("FLIGHTDECK_SERVICE_MANAGER", "Docker / Portainer").strip()
         return True, f"{manager} managed"
+    if runtime in {"windows", "tray", "windows-tray"}:
+        manager = os.environ.get("FLIGHTDECK_SERVICE_MANAGER", "Windows tray").strip()
+        return True, f"{manager} managed"
     try:
         active = subprocess.run(
             ["systemctl", "is-active", "flightdeck.service"],

@@ -51,6 +51,52 @@ curl -fsSL https://raw.githubusercontent.com/Kidabah/flightdeck/main/scripts/ins
 
 When it finishes, open the URL printed by the installer.
 
+## Windows Tray Install
+
+Flightdeck can also run on Windows as a quiet per-user tray app. It starts at login, keeps the backend hidden in the notification area, and opens the dashboard from the tray menu.
+
+Requirements:
+
+- Windows 10 or 11.
+- Python 3.11 or newer installed and available as `python`.
+- Git, or a downloaded copy of this repository.
+
+From PowerShell inside the Flightdeck checkout:
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+.\scripts\windows\install-windows.ps1
+```
+
+The installer creates:
+
+```text
+%LOCALAPPDATA%\Flightdeck
+%LOCALAPPDATA%\Flightdeck\uploads
+%LOCALAPPDATA%\Flightdeck\print_library
+%LOCALAPPDATA%\Flightdeck\logs
+```
+
+It also creates a Startup shortcut named `Flightdeck Tray`, using `pythonw.exe` so no terminal window stays open. After login, Flightdeck appears in the Windows hidden icons / notification area.
+
+Start it immediately without logging out:
+
+```powershell
+& ".\.venv\Scripts\pythonw.exe" ".\scripts\windows\flightdeck-tray.py"
+```
+
+Then open:
+
+```text
+http://127.0.0.1:8000
+```
+
+To remove the Startup shortcut:
+
+```powershell
+.\scripts\windows\uninstall-windows.ps1 -KeepData
+```
+
 ## Manual Install
 
 Use this only if you want to run each step yourself.

@@ -1,5 +1,13 @@
 # Flightdeck — next session brief
-_Last updated 6 June 2026 (Session 28.189 OrcaSlicer launcher guard)_
+_Last updated 6 June 2026 (Session 28.190 Windows tray install)_
+
+## What was added - Session 28.190 (Windows tray install - 6 June)
+- Added a per-user Windows install path with `scripts/windows/install-windows.ps1`.
+- Added `scripts/windows/flightdeck-tray.py`, a `pythonw.exe` tray launcher that starts Uvicorn hidden, shows Flightdeck in the notification area, and provides Open Dashboard, Restart, Open Logs, Stop, and Exit actions.
+- Windows live data defaults to `%LOCALAPPDATA%\Flightdeck`, with uploads, print vault, and logs kept outside the git checkout.
+- Added `requirements-windows.txt` for the tray dependency and `scripts/windows/uninstall-windows.ps1` for removing the Startup shortcut/data.
+- Setup Health now treats `FLIGHTDECK_RUNTIME=windows` / `Windows tray` as a managed runtime instead of expecting systemd.
+- Updated README and INSTALL with the Windows tray install flow.
 
 ## What was fixed - Session 28.189 (OrcaSlicer launcher guard - 6 June)
 - Settings -> Slicer no longer opens a guessed `:3011` URL when no Orca Docker URL has been configured.
