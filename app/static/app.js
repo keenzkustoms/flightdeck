@@ -8955,7 +8955,7 @@ function _openSliceModelDialog({ sourceId, path, file, printers }) {
         : data.message || 'Set the OrcaSlicer Docker URL in Settings -> Slicer first.';
       errEl.classList.toggle('filedesk-dialog-ok', !!data.ready);
       if (data.ready && actionsEl) {
-        const sourceUrl = data.source?.download_url || '';
+        const sourceUrl = data.source?.download_url || `/api/files/source/download?${new URLSearchParams({ source_id: sourceId, path }).toString()}`;
         const sidecarUrl = data.sidecar_url || '';
         const outputName = data.output?.filename || 'sliced-output';
         actionsEl.hidden = false;
@@ -8965,7 +8965,7 @@ function _openSliceModelDialog({ sourceId, path, file, printers }) {
             <span>Download the model, open Orca, import it, then export as ${esc(outputName)} back into the Print Vault.</span>
           </div>
           <div class="filedesk-slice-buttons">
-            <a class="filedesk-slice-link" href="${esc(sourceUrl)}" download>Download model</a>
+            ${sourceUrl ? `<a class="filedesk-slice-link" href="${esc(sourceUrl)}" download>Download model</a>` : ''}
             <a class="filedesk-slice-link" href="${esc(sidecarUrl)}" target="_blank" rel="noreferrer">Open Orca</a>
             <button class="filedesk-slice-link" type="button" data-copy-slice-name="${esc(outputName)}">Copy output name</button>
           </div>`;
