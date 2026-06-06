@@ -11684,12 +11684,21 @@ select.settings-input { cursor: pointer; }
 /* -- File Desk ------------------------------------------------------------- */
 .filedesk-page { min-height: 100%; }
 .filedesk-shell { max-width: 1720px; margin: 0 auto; padding: 1.55rem; }
-.printer-bay-body { padding: 1.25rem; }
+.printer-bay-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  padding: 1.25rem;
+}
 .printer-bay-shell {
   display: grid;
   gap: 0.75rem;
   max-width: 1720px;
+  height: 100%;
   margin: 0 auto;
+  overflow-y: auto;
+  padding-right: 0.35rem;
+  scrollbar-gutter: stable;
 }
 .printer-bay-hero {
   display: flex;
@@ -11741,7 +11750,7 @@ select.settings-input { cursor: pointer; }
 }
 .printer-bay-grid .filedesk-list-wrap,
 .printer-bay-vault .filedesk-list-wrap {
-  max-height: clamp(20rem, 52vh, 42rem);
+  max-height: clamp(14rem, 34vh, 32rem);
 }
 .filedesk-hero { display: flex; justify-content: space-between; align-items: flex-end; gap: 1rem; margin-bottom: 0.65rem; }
 .filedesk-hero h1 { margin-top: 0.2rem; font-size: 1.72rem; line-height: 1; }

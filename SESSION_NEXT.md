@@ -1,5 +1,10 @@
 # Flightdeck — next session brief
-_Last updated 7 June 2026 (Session 28.205 Bambu live controls)_
+_Last updated 7 June 2026 (Session 28.206 Printer Print Bay scroll)_
+
+## What was fixed - Session 28.206 (Printer Print Bay scroll - 7 June)
+- Per-printer Print Bay pages now keep their content inside a scrollable bay shell, so tall BigBoy/H2D storage and vault lists do not push the page layout out of view.
+- Printer-local and vault file lists are capped a little lower inside the bay to keep the printer sub-tabs/header usable.
+- Bumped static cache to `style.css?v=251`; frontend refresh only.
 
 ## What was added - Session 28.205 (Bambu live controls - 7 June)
 - Bambu live pages now report separate fan speeds for Part, Aux, and Chamber fans.
