@@ -8911,6 +8911,7 @@ function _openSliceModelDialog({ sourceId, path, file, printers }) {
         Slice all plates
       </label>
       <div class="filedesk-dialog-error" id="slice-plan-result" hidden></div>
+      <div class="filedesk-slice-actions" id="slice-handoff-actions" hidden></div>
       <div class="settings-hint">Source models are portable. Flightdeck will create a printer-specific sliced job before queueing or sending it.</div>
       <div class="modal-actions">
         <button class="modal-btn" data-dialog-close>Close</button>
@@ -8926,9 +8927,14 @@ function _openSliceModelDialog({ sourceId, path, file, printers }) {
     const choice = e.target.closest('[data-printer-id]');
     if (!choice) return;
     const errEl = overlay.querySelector('#slice-plan-result');
+    const actionsEl = overlay.querySelector('#slice-handoff-actions');
     overlay.querySelectorAll('.filedesk-printer-choice').forEach(b => { b.disabled = true; });
     choice.classList.add('is-working');
     choice.querySelector('span').textContent = 'Preparing slice plan...';
+    if (actionsEl) {
+      actionsEl.hidden = true;
+      actionsEl.innerHTML = '';
+    }
     try {
       const r = await fetch('/api/slicer/plan', {
         method: 'POST',
@@ -8945,9 +8951,25 @@ function _openSliceModelDialog({ sourceId, path, file, printers }) {
       if (!r.ok) throw new Error(data.detail || 'Unable to prepare slice');
       errEl.hidden = false;
       errEl.textContent = data.ready
-        ? `${data.output?.filename || 'Sliced output'} will be created by the slicer sidecar.`
+        ? `Prepare ${data.output?.filename || 'a printer-specific sliced job'} for ${data.target?.custom_name || data.target?.model_name || choice.dataset.printerId}.`
         : data.message || 'Set the OrcaSlicer Docker URL in Settings -> Slicer first.';
       errEl.classList.toggle('filedesk-dialog-ok', !!data.ready);
+      if (data.ready && actionsEl) {
+        const sourceUrl = data.source?.download_url || '';
+        const sidecarUrl = data.sidecar_url || '';
+        const outputName = data.output?.filename || 'sliced-output';
+        actionsEl.hidden = false;
+        actionsEl.innerHTML = `
+          <div class="filedesk-slice-steps">
+            <strong>Slice handoff</strong>
+            <span>Download the model, open Orca, import it, then export as ${esc(outputName)} back into the Print Vault.</span>
+          </div>
+          <div class="filedesk-slice-buttons">
+            <a class="filedesk-slice-link" href="${esc(sourceUrl)}" download>Download model</a>
+            <a class="filedesk-slice-link" href="${esc(sidecarUrl)}" target="_blank" rel="noreferrer">Open Orca</a>
+            <button class="filedesk-slice-link" type="button" data-copy-slice-name="${esc(outputName)}">Copy output name</button>
+          </div>`;
+      }
       showToast(data.ready ? 'Slice plan ready' : 'Slicer not configured', data.message || '', data.ready ? 'success' : 'warning');
     } catch (err) {
       errEl.textContent = err.message || 'Unable to prepare slice';
@@ -8956,6 +8978,16 @@ function _openSliceModelDialog({ sourceId, path, file, printers }) {
       choice.classList.remove('is-working');
       overlay.querySelectorAll('.filedesk-printer-choice').forEach(b => { b.disabled = false; });
     }
+  });
+  overlay.addEventListener('click', e => {
+    const copyBtn = e.target.closest('[data-copy-slice-name]');
+    if (!copyBtn) return;
+    const name = copyBtn.dataset.copySliceName || '';
+    navigator.clipboard?.writeText(name).then(() => {
+      showToast('Output name copied', name, 'success');
+    }).catch(() => {
+      showToast('Copy failed', name, 'warning');
+    });
   });
 }
 

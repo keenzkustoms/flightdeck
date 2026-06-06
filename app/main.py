@@ -11,6 +11,7 @@ import shutil
 import socket
 import sqlite3
 import subprocess
+import urllib.parse
 import urllib.request
 from html import escape as html_escape
 from contextlib import asynccontextmanager
@@ -1374,6 +1375,21 @@ async def upload_file_to_library(file: UploadFile = File(...)):
     }
 
 
+@app.get("/api/files/source/download")
+async def download_file_desk_source(source_id: str, path: str):
+    source_id = source_id.strip()
+    source_path = path.strip().lstrip("/")
+    if not source_id or not source_path:
+        raise HTTPException(status_code=422, detail="Source and path required")
+    filename, data = await _read_file_desk_source(source_id, source_path)
+    safe_name = (filename.rsplit("/", 1)[-1].rsplit("\\", 1)[-1] or "flightdeck-model").replace('"', "_")
+    return Response(
+        content=data,
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{safe_name}"'},
+    )
+
+
 @app.post("/api/slicer/plan")
 async def plan_slice_from_file_desk(body: SlicePlanRequest):
     printer_id = body.printer_id.strip()
@@ -1403,6 +1419,10 @@ async def plan_slice_from_file_desk(body: SlicePlanRequest):
             "filename": filename,
             "kind": _file_kind(filename),
             "size": len(data),
+            "download_url": (
+                "/api/files/source/download?"
+                f"source_id={urllib.parse.quote(source_id)}&path={urllib.parse.quote(source_path)}"
+            ),
         },
         "target": {
             "id": printer_id,
@@ -1417,7 +1437,7 @@ async def plan_slice_from_file_desk(body: SlicePlanRequest):
         "plate": body.plate or "auto",
         "all_plates": bool(body.all_plates),
         "message": (
-            "Slicer sidecar configured. Full slicing handoff is ready for the next stage."
+            "Slicer sidecar configured. Download the model, open Orca, then export the printer-specific job back to the Print Vault."
             if sidecar_url else
             "Set the OrcaSlicer Docker URL in Settings -> Slicer before Flightdeck can slice this model."
         ),
