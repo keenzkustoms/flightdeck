@@ -51,6 +51,8 @@ class PrinterStatus:
     maintenance: list = field(default_factory=list)  # live printer-reported care/advisory items
     light_state: Optional[str] = None  # Bambu chamber light state: "on" | "off" | "unknown"
     temperature_presets: dict = field(default_factory=dict)  # {hotend: [{label, value}], bed: [...]}
+    fan_speed: Optional[float] = None  # 0.0 - 1.0 where reported
+    toolhead_position: Optional[list[float]] = None
     error: Optional[str] = None
     last_seen: Optional[datetime] = None  # last successful data from printer link
     updated_at: datetime = field(default_factory=datetime.utcnow)

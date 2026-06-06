@@ -1909,6 +1909,14 @@ class SetTempRequest(BaseModel):
     target: int
 
 
+class FanRequest(BaseModel):
+    speed: int
+
+
+class JogZRequest(BaseModel):
+    distance: float
+
+
 class AmsDryRequest(BaseModel):
     enabled: bool
     filament: str = "PLA"
@@ -1944,6 +1952,56 @@ async def set_printer_temp(printer_id: str, req: SetTempRequest):
     for (id, *_) in _simulated:
         if id == printer_id:
             raise HTTPException(status_code=422, detail="simulated printer does not accept hardware temperature commands")
+
+    raise HTTPException(status_code=404, detail="printer not found")
+
+
+@app.post("/api/printers/{printer_id}/fan")
+async def set_printer_fan(printer_id: str, req: FanRequest):
+    if not (0 <= req.speed <= 100):
+        raise HTTPException(status_code=400, detail="fan speed out of range (0-100)")
+
+    for (id, model_name, custom_name, icon, url) in _moonraker:
+        if id == printer_id:
+            try:
+                await moonraker.set_fan(url, req.speed)
+            except Exception as exc:
+                raise HTTPException(status_code=502, detail=str(exc))
+            return {"ok": True}
+
+    for p in _bambu:
+        if p.id == printer_id:
+            raise HTTPException(status_code=422, detail="fan control is only available for Klipper/Moonraker printers")
+
+    for (id, *_) in _simulated:
+        if id == printer_id:
+            raise HTTPException(status_code=422, detail="simulated printer does not accept hardware fan commands")
+
+    raise HTTPException(status_code=404, detail="printer not found")
+
+
+@app.post("/api/printers/{printer_id}/jog-z")
+async def jog_printer_z(printer_id: str, req: JogZRequest):
+    if abs(req.distance) < 0.01:
+        raise HTTPException(status_code=400, detail="distance must be non-zero")
+    if not (-10 <= req.distance <= 10):
+        raise HTTPException(status_code=400, detail="Z jog out of range (-10 to 10mm)")
+
+    for (id, model_name, custom_name, icon, url) in _moonraker:
+        if id == printer_id:
+            try:
+                await moonraker.jog_z(url, req.distance)
+            except Exception as exc:
+                raise HTTPException(status_code=502, detail=str(exc))
+            return {"ok": True}
+
+    for p in _bambu:
+        if p.id == printer_id:
+            raise HTTPException(status_code=422, detail="Z jog is only available for Klipper/Moonraker printers")
+
+    for (id, *_) in _simulated:
+        if id == printer_id:
+            raise HTTPException(status_code=422, detail="simulated printer does not accept hardware movement commands")
 
     raise HTTPException(status_code=404, detail="printer not found")
 

@@ -1799,6 +1799,9 @@ function _preheatPresets(p) {
 
 function _detailLiveOps(p) {
   const canPreheat = !['offline', 'printing', 'error', 'estop'].includes(p.state || '');
+  const isMoonraker = p.kind === 'moonraker';
+  const canFan = isMoonraker && !['offline', 'error', 'estop'].includes(p.state || '');
+  const canJog = isMoonraker && !['offline', 'printing', 'paused', 'finished', 'error', 'estop'].includes(p.state || '');
   const presets = _preheatPresets(p);
   const preheatButtons = presets.map(row => `<button class="live-op-btn" type="button"
       data-preheat data-printer-id="${esc(p.id)}" data-material="${esc(row.label)}"
@@ -1815,7 +1818,30 @@ function _detailLiveOps(p) {
         <span>Klipper</span><small>Mainsail / Fluidd</small>
       </a>`
     : '';
-  const controls = [preheatButtons, presets.length ? cooldown : '', klipper].filter(Boolean).join('');
+  const fanPct = Number.isFinite(Number(p.fan_speed)) ? Math.round(Number(p.fan_speed) * 100) : null;
+  const fan = isMoonraker
+    ? `<div class="live-op-group" aria-label="Part cooling fan">
+        <span class="live-op-group-label">Fan ${fanPct == null ? '--' : fanPct}%</span>
+        ${[0, 50, 100].map(speed => `<button class="live-op-btn live-op-mini" type="button"
+          data-fan-speed="${speed}" data-printer-id="${esc(p.id)}" ${canFan ? '' : 'disabled'}>
+          <span>${speed === 0 ? 'Off' : speed}</span><small>${speed === 0 ? 'fan' : '%'}</small>
+        </button>`).join('')}
+      </div>`
+    : '';
+  const pos = Array.isArray(p.toolhead_position) ? Number(p.toolhead_position[2]) : NaN;
+  const zLabel = Number.isFinite(pos) ? `Z ${pos.toFixed(1)}` : 'Z --';
+  const jog = isMoonraker
+    ? `<div class="live-op-group" aria-label="Bed and Z movement">
+        <span class="live-op-group-label">Bed / ${zLabel}</span>
+        <button class="live-op-btn live-op-mini" type="button" data-jog-z="-1" data-printer-id="${esc(p.id)}" ${canJog ? '' : 'disabled'}>
+          <span>Z -1</span><small>mm</small>
+        </button>
+        <button class="live-op-btn live-op-mini" type="button" data-jog-z="1" data-printer-id="${esc(p.id)}" ${canJog ? '' : 'disabled'}>
+          <span>Z +1</span><small>mm</small>
+        </button>
+      </div>`
+    : '';
+  const controls = [preheatButtons, presets.length ? cooldown : '', fan, jog, klipper].filter(Boolean).join('');
   if (!controls) return '';
   return `<div class="live-op-row" aria-label="Live printer shortcuts">${controls}</div>`;
 }
@@ -1983,6 +2009,40 @@ document.getElementById('view-printer').addEventListener('click', e => {
       preheatBtn.disabled = false;
       preheatBtn.innerHTML = old;
     });
+    return;
+  }
+
+  const fanBtn = e.target.closest('[data-fan-speed]');
+  if (fanBtn && !fanBtn.disabled) {
+    const id = fanBtn.dataset.printerId;
+    const speed = Number(fanBtn.dataset.fanSpeed || 0);
+    const old = fanBtn.innerHTML;
+    fanBtn.disabled = true;
+    fanBtn.innerHTML = `<span>Sending</span><small>${speed}%</small>`;
+    sendFanSet(id, speed)
+      .then(() => showToast('Fan command sent', `${speed}% part cooling`, 'success'))
+      .catch(err => showToast('Fan command failed', err.message || '', 'error'))
+      .finally(() => {
+        fanBtn.disabled = false;
+        fanBtn.innerHTML = old;
+      });
+    return;
+  }
+
+  const jogBtn = e.target.closest('[data-jog-z]');
+  if (jogBtn && !jogBtn.disabled) {
+    const id = jogBtn.dataset.printerId;
+    const distance = Number(jogBtn.dataset.jogZ || 0);
+    const old = jogBtn.innerHTML;
+    jogBtn.disabled = true;
+    jogBtn.innerHTML = `<span>Moving</span><small>${distance > 0 ? '+' : ''}${distance}mm</small>`;
+    sendJogZ(id, distance)
+      .then(() => showToast('Z jog sent', `${distance > 0 ? '+' : ''}${distance}mm`, 'success'))
+      .catch(err => showToast('Z jog failed', err.message || '', 'error'))
+      .finally(() => {
+        jogBtn.disabled = false;
+        jogBtn.innerHTML = old;
+      });
     return;
   }
 
@@ -3117,6 +3177,32 @@ async function sendTempSet(id, heater, target) {
   } catch (err) {
     delete _tempOptimistic[`${id}:${heater}`];
     throw err instanceof Error ? err : new Error('Temperature command failed');
+  }
+}
+
+async function sendFanSet(id, speed) {
+  const clampedSpeed = Math.max(0, Math.min(100, Math.round(speed)));
+  const resp = await fetch(`/api/printers/${id}/fan`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ speed: clampedSpeed }),
+  });
+  if (!resp.ok) {
+    const data = await resp.json().catch(() => ({}));
+    throw new Error(data.detail || 'Fan command failed');
+  }
+}
+
+async function sendJogZ(id, distance) {
+  const dz = Math.max(-10, Math.min(10, Number(distance)));
+  const resp = await fetch(`/api/printers/${id}/jog-z`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ distance: dz }),
+  });
+  if (!resp.ok) {
+    const data = await resp.json().catch(() => ({}));
+    throw new Error(data.detail || 'Z jog failed');
   }
 }
 

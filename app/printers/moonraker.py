@@ -199,10 +199,14 @@ async def fetch(id: str, model_name: str, custom_name: str, icon: str, base_url:
     )
 
     now = datetime.utcnow()
+    fan = data.get("fan", {}) or {}
+    toolhead = data.get("toolhead", {}) or {}
     return PrinterStatus(
         id=id, model_name=model_name, custom_name=custom_name, icon=icon,
         kind="moonraker", state=state, temps=temps, job=job,
         idle_info=idle_info, mmu=mmu_panel, last_seen=now, updated_at=now,
+        fan_speed=fan.get("speed"),
+        toolhead_position=toolhead.get("position"),
         error=error_message if state == "error" else None,
     )
 
@@ -390,27 +394,42 @@ _CONTROL_GCODE = {
 _HEATER_NAMES = {"hotend": "extruder", "bed": "heater_bed"}
 
 
+async def run_gcode(base_url: str, script: str) -> None:
+    async with httpx.AsyncClient(timeout=5.0) as client:
+        resp = await client.post(
+            f"{base_url.rstrip('/')}/printer/gcode/script",
+            json={"script": script},
+        )
+        resp.raise_for_status()
+
+
 async def set_temp(base_url: str, heater: str, target: int) -> None:
     name = _HEATER_NAMES.get(heater)
     if not name:
         return
     gcode = f"SET_HEATER_TEMPERATURE HEATER={name} TARGET={target}"
-    async with httpx.AsyncClient(timeout=5.0) as client:
-        resp = await client.post(
-            f"{base_url.rstrip('/')}/printer/gcode/script",
-            json={"script": gcode},
-        )
-        resp.raise_for_status()
+    await run_gcode(base_url, gcode)
+
+
+async def set_fan(base_url: str, speed_percent: int) -> None:
+    pct = max(0, min(100, int(speed_percent)))
+    if pct <= 0:
+        await run_gcode(base_url, "M107")
+        return
+    pwm = round(pct * 255 / 100)
+    await run_gcode(base_url, f"M106 S{pwm}")
+
+
+async def jog_z(base_url: str, distance: float) -> None:
+    dz = max(-10.0, min(10.0, float(distance)))
+    if abs(dz) < 0.01:
+        raise ValueError("distance must be non-zero")
+    await run_gcode(base_url, f"G91\nG1 Z{dz:.2f} F600\nG90")
 
 
 async def control(base_url: str, action: str) -> None:
     if action in _CONTROL_GCODE:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.post(
-                f"{base_url.rstrip('/')}/printer/gcode/script",
-                json={"script": _CONTROL_GCODE[action]},
-            )
-            resp.raise_for_status()
+        await run_gcode(base_url, _CONTROL_GCODE[action])
         return
 
     path = _CONTROL_PATHS.get(action)

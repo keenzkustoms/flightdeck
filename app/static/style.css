@@ -3605,6 +3605,29 @@ button.briefing-row {
   border-top: 1px solid rgba(255,255,255,0.07);
 }
 
+.live-op-group {
+  display: inline-flex;
+  align-items: stretch;
+  gap: 0.25rem;
+  min-width: 0;
+  padding: 0.2rem;
+  border: 1px solid rgba(148,163,184,0.18);
+  border-radius: 0.65rem;
+  background: rgba(15,23,42,0.28);
+}
+
+.live-op-group-label {
+  display: inline-flex;
+  align-items: center;
+  min-width: 4.6rem;
+  max-width: 8.5rem;
+  color: var(--muted);
+  font-size: 0.66rem;
+  font-weight: 900;
+  line-height: 1.05;
+  padding: 0 0.42rem;
+}
+
 .live-op-btn {
   display: inline-grid;
   grid-template-columns: auto;
@@ -3619,6 +3642,12 @@ button.briefing-row {
   text-align: left;
   text-decoration: none;
   cursor: pointer;
+}
+
+.live-op-mini {
+  min-width: 2.8rem;
+  padding-inline: 0.42rem;
+  text-align: center;
 }
 
 .live-op-btn:hover:not(:disabled) {
