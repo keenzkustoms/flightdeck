@@ -8506,14 +8506,17 @@ function _slicerProfilesHtml(profileData, printers) {
     const selectedPrinter = d.printer_profile || rowPrinters[0]?.name || '';
     const rowProcesses = _slicerFilterRowsForPrinter(processProfiles, selectedPrinter, rowFallback);
     const rowFilaments = _slicerFilterRowsForPrinter(filamentProfiles, selectedPrinter, rowFallback);
+    const printerPlaceholder = rowPrinters[0]?.name || 'Printer/nozzle profile';
+    const processPlaceholder = rowProcesses[0]?.name || 'Process/layer profile';
+    const filamentPlaceholder = rowFilaments[0]?.name || 'Filament profile';
     return `<div class="slicer-profile-row" data-printer-id="${esc(p.id)}">
       <div class="slicer-profile-printer">
         <strong>${esc(p.custom_name || p.model_name || p.id)}</strong>
         <span>${esc([p.model_name, p.kind].filter(Boolean).join(' · '))}</span>
       </div>
-      <input class="settings-input slicer-profile-input" data-profile-slot="printer" list="slicer-printer-profiles-${esc(rowKey)}" value="${esc(d.printer_profile || '')}" placeholder="Printer profile">
-      <input class="settings-input slicer-profile-input" data-profile-slot="process" list="slicer-process-profiles-${esc(rowKey)}" value="${esc(d.process_profile || '')}" placeholder="Process profile">
-      <input class="settings-input slicer-profile-input" data-profile-slot="filament" list="slicer-filament-profiles-${esc(rowKey)}" value="${esc(d.filament_profile || '')}" placeholder="Filament profile">
+      <input class="settings-input slicer-profile-input" data-profile-slot="printer" list="slicer-printer-profiles-${esc(rowKey)}" value="${esc(d.printer_profile || '')}" placeholder="${esc(printerPlaceholder)}">
+      <input class="settings-input slicer-profile-input" data-profile-slot="process" list="slicer-process-profiles-${esc(rowKey)}" value="${esc(d.process_profile || '')}" placeholder="${esc(processPlaceholder)}">
+      <input class="settings-input slicer-profile-input" data-profile-slot="filament" list="slicer-filament-profiles-${esc(rowKey)}" value="${esc(d.filament_profile || '')}" placeholder="${esc(filamentPlaceholder)}">
       ${_slicerDatalist(`slicer-printer-profiles-${rowKey}`, rowPrinters)}
       ${_slicerDatalist(`slicer-process-profiles-${rowKey}`, rowProcesses)}
       ${_slicerDatalist(`slicer-filament-profiles-${rowKey}`, rowFilaments)}
@@ -8538,7 +8541,7 @@ function _slicerProfilesHtml(profileData, printers) {
     </div>
     <div class="settings-section slicer-profiles-panel">
       <div class="settings-section-title">Printer Defaults</div>
-      <div class="settings-hint">Choose the default profile triplet Flightdeck should use when slicing for each printer.</div>
+      <div class="settings-hint">Choose the default profile triplet Flightdeck should use when slicing for each printer. Nozzle size lives in the printer profile; Bambu 0.4 process profiles are usually named by layer height, like 0.20mm Standard @BBL H2D.</div>
       ${_slicerDatalist('slicer-process-profiles', processProfiles)}
       ${_slicerDatalist('slicer-filament-profiles', filamentProfiles)}
       <div class="slicer-profile-table">${rows}</div>
@@ -8562,6 +8565,8 @@ function _slicerRefreshRowProfileLists(row) {
   const filamentRows = _slicerFilterRowsForPrinter(_slicerProfileOptions(_slicerProfileData, 'filament'), printerText, fallback);
   if (processInput?.list?.id) _slicerReplaceDatalist(processInput.list.id, processRows);
   if (filamentInput?.list?.id) _slicerReplaceDatalist(filamentInput.list.id, filamentRows);
+  if (processInput && !processInput.value) processInput.placeholder = processRows[0]?.name || 'Process/layer profile';
+  if (filamentInput && !filamentInput.value) filamentInput.placeholder = filamentRows[0]?.name || 'Filament profile';
 }
 
 function _slicerCategoryHtml(profileData = null, printers = []) {
