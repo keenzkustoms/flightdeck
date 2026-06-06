@@ -852,6 +852,7 @@ class SlicePlanRequest(BaseModel):
     path: str
     printer_id: str
     plate: str = "auto"
+    bed_type: str = "Textured PEI Plate"
     all_plates: bool = False
 
 
@@ -1535,6 +1536,7 @@ async def slicer_worker_slice(
     all_plates: bool = Form(False),
     sidecar_url: str = Form(""),
     arrange: bool = Form(False),
+    bed_type: str = Form("Textured PEI Plate"),
 ):
     output_kind = "gcode.3mf" if output_kind == "gcode.3mf" else "gcode"
     source_name = file.filename or "flightdeck-model.stl"
@@ -1557,6 +1559,7 @@ async def slicer_worker_slice(
             plate=plate,
             all_plates=all_plates,
             arrange=arrange,
+            bed_type=bed_type,
         )
     else:
         name, data, _log = await asyncio.to_thread(
@@ -1624,6 +1627,7 @@ async def run_slice_from_file_desk(body: SliceRunRequest):
             "all_plates": str(bool(body.all_plates)).lower(),
             "sidecar_url": sidecar_url,
             "arrange": str(bool(arrange)).lower(),
+            "bed_type": body.bed_type or "Textured PEI Plate",
         }
         files = {"file": (filename, data, "application/octet-stream")}
         try:
@@ -1651,6 +1655,7 @@ async def run_slice_from_file_desk(body: SliceRunRequest):
             plate=body.plate or "1",
             all_plates=bool(body.all_plates),
             arrange=arrange,
+            bed_type=body.bed_type or "Textured PEI Plate",
         )
     else:
         sliced_name, sliced_data, _log = await asyncio.to_thread(
@@ -2980,6 +2985,7 @@ def _run_orca_slice_sidecar(
     plate: str = "1",
     all_plates: bool = False,
     arrange: bool = False,
+    bed_type: str = "Textured PEI Plate",
 ) -> tuple[str, bytes, str]:
     exe = _orca_executable()
     if not exe:
@@ -3004,7 +3010,7 @@ def _run_orca_slice_sidecar(
         "plate": "0" if all_plates else str(plate or "1"),
         "exportType": "3mf" if output_kind == "gcode.3mf" else "gcode",
         "arrange": "true" if arrange else "false",
-        "bedType": "Textured PEI Plate",
+        "bedType": (bed_type or "Textured PEI Plate").strip() or "Textured PEI Plate",
         "requestId": f"flightdeck-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S%f')}",
     }
     try:

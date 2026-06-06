@@ -9176,6 +9176,7 @@ function _openSliceModelDialog({ sourceId, path, file, printers }) {
   document.querySelector('.filedesk-slice-dialog')?.remove();
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay filedesk-slice-dialog';
+  const bedTypes = ['Textured PEI Plate', 'Smooth PEI Plate', 'High Temp Plate', 'Cool Plate', 'Engineering Plate'];
   overlay.innerHTML = `
     <div class="modal-box filedesk-queue-box filedesk-slice-box" role="dialog" aria-modal="true" aria-label="Slice model">
       <div class="filedesk-queue-head">
@@ -9195,6 +9196,12 @@ function _openSliceModelDialog({ sourceId, path, file, printers }) {
       <label class="filedesk-slice-toggle">
         <input type="checkbox" id="slice-all-plates">
         Slice all plates
+      </label>
+      <label class="filedesk-slice-field">
+        <span>Plate type</span>
+        <select id="slice-bed-type">
+          ${bedTypes.map(name => `<option value="${esc(name)}">${esc(name)}</option>`).join('')}
+        </select>
       </label>
       <div class="filedesk-dialog-error" id="slice-plan-result" hidden></div>
       <div class="filedesk-slice-actions" id="slice-handoff-actions" hidden></div>
@@ -9230,6 +9237,7 @@ function _openSliceModelDialog({ sourceId, path, file, printers }) {
           path,
           printer_id: choice.dataset.printerId,
           plate: 'auto',
+          bed_type: overlay.querySelector('#slice-bed-type')?.value || 'Textured PEI Plate',
           all_plates: !!overlay.querySelector('#slice-all-plates')?.checked,
         }),
       });
@@ -9330,6 +9338,7 @@ function _openSliceModelDialog({ sourceId, path, file, printers }) {
           printer_id: runBtn.dataset.printerId,
           output_filename: runBtn.dataset.runSlice || '',
           plate: '1',
+          bed_type: overlay.querySelector('#slice-bed-type')?.value || 'Textured PEI Plate',
           all_plates: !!overlay.querySelector('#slice-all-plates')?.checked,
         }),
       });
