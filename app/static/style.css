@@ -3320,6 +3320,29 @@ button.briefing-row {
   white-space: nowrap;
 }
 
+.live-state-wrap {
+  justify-self: end;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.live-print-enabled {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.38rem;
+  color: var(--muted);
+  font-size: 0.66rem;
+  white-space: nowrap;
+}
+
+.live-print-enabled input[type="checkbox"] {
+  width: 0.9rem;
+  height: 0.9rem;
+}
+
 .live-transport {
   justify-self: end;
   display: flex;
@@ -4718,6 +4741,9 @@ button.live-route-node:hover {
   }
   .live-state-badge {
     justify-self: start;
+  }
+  .live-state-wrap {
+    align-items: flex-start;
   }
   .live-transport {
     justify-self: start;
@@ -7739,6 +7765,20 @@ button.live-route-node:hover {
   align-items: center;
   gap: 1rem;
   flex-shrink: 0;
+}
+
+.settings-printer-enable {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.7rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.settings-printer-enable-input {
+  width: 0.95rem;
+  height: 0.95rem;
 }
 
 .settings-printer-type {

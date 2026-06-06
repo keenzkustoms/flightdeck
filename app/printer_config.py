@@ -30,7 +30,7 @@ class BambuConnection(BaseModel):
 
 class SimulatedConnection(BaseModel):
     type: Literal["simulated"]
-    profile: Literal["prusalink", "reprap", "octoprint"] = "prusalink"
+    profile: Literal["prusalink", "reprap", "octoprint", "ideaformer"] = "prusalink"
     scenario: Literal["idle", "printing", "paused", "error", "mixed"] = "mixed"
 
 

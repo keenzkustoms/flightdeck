@@ -26,6 +26,8 @@ DEFAULT_SETTINGS = {
     "print_vault_path": "",
 }
 
+_PRINTER_PRINTING_ENABLED_PREFIX = "printer_print_enabled_"
+
 
 def init() -> None:
     with _conn() as conn:
@@ -1319,6 +1321,27 @@ def get_all_settings() -> dict:
     settings = dict(DEFAULT_SETTINGS)
     settings.update({r["key"]: r["value"] for r in rows})
     return settings
+
+
+def _print_enabled_key(printer_id: str) -> str:
+    return f"{_PRINTER_PRINTING_ENABLED_PREFIX}{printer_id}"
+
+
+def _parse_bool(value: Optional[str]) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def is_printer_printing_enabled(printer_id: str) -> bool:
+    key = _print_enabled_key(printer_id)
+    with _conn() as conn:
+        row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+    if row is None:
+        return True
+    return _parse_bool(row["value"])
+
+
+def set_printer_printing_enabled(printer_id: str, enabled: bool) -> None:
+    set_setting(_print_enabled_key(printer_id), "true" if enabled else "false")
 
 
 def set_setting(key: str, value: str) -> None:

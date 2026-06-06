@@ -1,6 +1,7 @@
 from __future__ import annotations
 import asyncio
 import csv
+import gzip
 import io
 import json
 import logging
@@ -13,7 +14,7 @@ import subprocess
 import urllib.request
 from contextlib import asynccontextmanager
 from dataclasses import asdict
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -133,6 +134,8 @@ async def _gather_all_locked() -> list[dict]:
             log.warning("printer fetch failed: %s", r)
         else:
             out.append(r)
+    for entry in out:
+        entry["print_enabled"] = db.is_printer_printing_enabled(entry["id"])
     _latest_printers.clear()
     _latest_printers.update({p["id"]: p for p in out})
     _latest_printers_at = datetime.utcnow()
@@ -589,6 +592,16 @@ def _notify(level: str, title: str, message: str = "", *, printer_id: Optional[s
         log.warning("notification insert failed: %s", exc)
 
 
+def _recently_finished(printer_id: str, ttl: timedelta | None = None) -> bool:
+    ttl = ttl or moonraker.FINISHED_TTL
+    finished_at = db.get_finished_at(printer_id)
+    if not finished_at:
+        return False
+    if finished_at.tzinfo is not None:
+        finished_at = finished_at.astimezone(timezone.utc).replace(tzinfo=None)
+    return (datetime.utcnow() - finished_at) <= ttl
+
+
 def _check_transitions(data: list[dict]) -> None:
     for p in data:
         pid = p["id"]
@@ -607,12 +620,19 @@ def _check_transitions(data: list[dict]) -> None:
         is_simulated = bool(p.get("_simulated"))
         title_prefix = "SIM " if is_simulated else ""
 
-        if prev == "printing" and curr == "finished":
-            msg = f"{name}" + (f" · {label}" if label else "")
-            _notify("success", f"{title_prefix}Print complete", msg, printer_id=pid, link=f"#/printer/{pid}/history")
-            if not is_simulated:
-                asyncio.create_task(_send_ntfy("Print complete", msg, ["white_check_mark"]))
-            asyncio.create_task(_on_print_finished_queue(pid))
+        if prev == "printing" and curr in {"finished", "ready", "standby", "complete"}:
+            if curr == "finished" or _recently_finished(pid):
+                msg = f"{name}" + (f" · {label}" if label else "")
+                _notify("success", f"{title_prefix}Print complete", msg, printer_id=pid, link=f"#/printer/{pid}/history")
+                if not is_simulated:
+                    asyncio.create_task(_send_ntfy("Print complete", msg, ["white_check_mark"]))
+                asyncio.create_task(_on_print_finished_queue(pid))
+            else:
+                msg = f"{name}" + (f" · {label}" if label else "")
+                _notify("warn", f"{title_prefix}Print cancelled", msg, printer_id=pid, link=f"#/printer/{pid}/history")
+                if not is_simulated:
+                    asyncio.create_task(_send_ntfy("Print cancelled", msg, ["x"]))
+                db.queue_cancel_active(pid, "cancelled")
         elif curr in ("error", "estop"):
             error_pid = p.get("_error_print_id")
             is_print_failure = prev == "printing" or has_error_print
@@ -979,6 +999,72 @@ def _queue_file_extension(filename: str) -> str:
     return ""
 
 
+_GCODE_METADATA_LINES = 5000
+
+
+def _parse_gcode_metadata_from_lines(lines) -> tuple[Optional[int], Optional[float], Optional[str], Optional[str]]:
+    estimated_seconds = filament_weight_g = None
+    filament_type = None
+    colors: set[str] = set()
+
+    # Common slicer metadata comment patterns
+    re_time = re.compile(r"\bTIME\s*:\s*(\d+)", re.I)
+    re_filament_weight = re.compile(
+        r"\b(?:filament[_ -]?weight|filament[_ -]?used|filament_total|filament_total_weight)\s*(?:\[[gG]\])?\s*=\s*([0-9]+(?:\.[0-9]+)?)",
+        re.I,
+    )
+    re_material = re.compile(r"\b(?:material|filament[_ -]?type)\b\s*[:=]\s*([A-Za-z0-9+\\-/* ]+)", re.I)
+    re_colour = re.compile(r"\b(?:filament[_ -]?(?:colour|color)|material[_ -]?color)\b\s*[:=]\s*([^;]+)", re.I)
+    re_hex = re.compile(r"#[0-9a-fA-F]{3,8}\b")
+
+    for raw in lines:
+        if not raw:
+            continue
+        line = raw.decode("utf-8", "ignore") if isinstance(raw, bytes) else str(raw)
+        if not line.startswith(";"):
+            continue
+        if estimated_seconds is None:
+            m_time = re_time.search(line)
+            if m_time:
+                try:
+                    estimated_seconds = int(m_time.group(1))
+                except ValueError:
+                    pass
+
+        if filament_weight_g is None:
+            m_weight = re_filament_weight.search(line)
+            if m_weight:
+                try:
+                    filament_weight_g = float(m_weight.group(1))
+                except ValueError:
+                    pass
+
+        if filament_type is None:
+            m_type = re_material.search(line)
+            if m_type:
+                t = m_type.group(1).strip()
+                # Prefer the first clearly material-like token.
+                t = re.split(r"[,/;]", t)[0].strip()
+                if t:
+                    filament_type = t
+
+        for colour in re_colour.findall(line):
+            for token in re.split(r"[;,\\s]+", str(colour).strip()):
+                token = token.strip().strip(",")
+                if not token:
+                    continue
+                for hit in re_hex.findall(token):
+                    colors.add(hit.upper())
+
+    color_entry = None
+    if colors:
+        entries = []
+        for c in sorted(colors):
+            entries.append({"color": c, "type": filament_type or "", "used_g": 0})
+        color_entry = json.dumps(entries)
+    return estimated_seconds, filament_weight_g, filament_type, color_entry
+
+
 def _queue_file_metadata(filename: str, data: bytes) -> dict:
     preview_png = estimated_seconds = filament_weight_g = filament_type = filament_colors = None
     if _queue_file_extension(filename) == ".3mf":
@@ -992,6 +1078,27 @@ def _queue_file_metadata(filename: str, data: bytes) -> dict:
             filament_colors = p.filament_colors
         except Exception:
             pass
+    else:
+        ext = _queue_file_extension(filename)
+        if ext in {".gcode", ".gcode.gz", ".ufp"}:
+            try:
+                if ext == ".gcode.gz":
+                    lines = gzip.open(io.BytesIO(data), mode="rt", encoding="utf-8", errors="ignore")
+                    with lines:
+                        meta = _parse_gcode_metadata_from_lines(list(lines)[:_GCODE_METADATA_LINES])
+                else:
+                    text = data.decode("utf-8", "ignore")
+                    meta = _parse_gcode_metadata_from_lines(text.splitlines()[:_GCODE_METADATA_LINES])
+                if meta[0] is not None:
+                    estimated_seconds = meta[0]
+                if meta[1] is not None:
+                    filament_weight_g = meta[1]
+                if meta[2] and not filament_type:
+                    filament_type = meta[2]
+                if meta[3] and not filament_colors:
+                    filament_colors = meta[3]
+            except Exception:
+                pass
     return {
         "preview_png": preview_png,
         "estimated_seconds": estimated_seconds,
@@ -1395,7 +1502,7 @@ async def get_printer_preview(printer_id: str):
                 estimated_total_seconds=estimated,
                 elapsed_seconds=elapsed,
                 filament_weight_g=86.5,
-                filament_type="PETG" if profile == "prusalink" else "PLA",
+                filament_type="PETG" if profile == "prusalink" else "PLA+" if profile == "ideaformer" else "PLA",
             )
 
     raise HTTPException(status_code=404, detail="printer not found")
@@ -1939,6 +2046,32 @@ async def remove_printer(printer_id: str):
     return {"ok": True}
 
 
+class PrinterPrintEnabledRequest(BaseModel):
+    enabled: bool
+
+
+@app.get("/api/printers/{printer_id}/print-enabled")
+async def get_printer_print_enabled(printer_id: str):
+    cfg = load()
+    if not any(p.id == printer_id for p in cfg.printers):
+        raise HTTPException(status_code=404, detail="printer not found")
+    return {
+        "printer_id": printer_id,
+        "print_enabled": db.is_printer_printing_enabled(printer_id),
+    }
+
+
+@app.put("/api/printers/{printer_id}/print-enabled")
+async def set_printer_print_enabled(printer_id: str, body: PrinterPrintEnabledRequest):
+    cfg = load()
+    if not any(p.id == printer_id for p in cfg.printers):
+        raise HTTPException(status_code=404, detail="printer not found")
+    db.set_printer_printing_enabled(printer_id, bool(body.enabled))
+    if printer_id in _latest_printers:
+        _latest_printers[printer_id]["print_enabled"] = bool(body.enabled)
+    return {"ok": True}
+
+
 @app.post("/api/printers/{printer_id}/exclude-object")
 async def post_exclude_object(printer_id: str, req: ExcludeObjectRequest):
     for (id, model_name, custom_name, icon, url) in _moonraker:
@@ -1986,7 +2119,14 @@ async def get_printer_thumbnail(printer_id: str):
             if not status.job:
                 raise HTTPException(status_code=404, detail="no thumbnail")
             label = status.job.subtask_name or status.job.filename
-            colour = "#f97316" if profile == "prusalink" else "#22c55e" if profile == "reprap" else "#60a5fa"
+            if profile == "prusalink":
+                colour = "#f97316"
+            elif profile == "reprap":
+                colour = "#22c55e"
+            elif profile == "ideaformer":
+                colour = "#2dd4bf"
+            else:
+                colour = "#60a5fa"
             svg = f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360">
   <rect width="640" height="360" fill="#070910"/>
   <rect x="32" y="36" width="576" height="288" rx="18" fill="#111827" stroke="#334155"/>
@@ -3363,11 +3503,14 @@ def _queue_preflight(job: dict, printer_status: Optional[dict]) -> dict:
     settings = db.get_all_settings()
     strict_colour = settings.get("queue_strict_colour", "true") == "true"
 
+    if not (printer_status or {}).get("print_enabled", db.is_printer_printing_enabled(job["printer_id"])):
+        issues.append({"level": "block", "message": "Printer disabled in Flightdeck. Tick 'Print enabled' to dispatch."})
+
     if not printer_status:
         issues.append({"level": "wait", "message": "Waiting for printer telemetry"})
     elif state in ("offline", "error", "estop"):
         issues.append({"level": "block", "message": f"Printer is {state}"})
-    elif state not in ("idle", "finished"):
+    elif state not in ("idle", "ready", "standby", "finished"):
         issues.append({"level": "wait", "message": f"Printer is {state}"})
 
     due_maintenance = [m for m in db.get_maintenance_items(job["printer_id"]) if m.get("is_due")]
@@ -3565,27 +3708,15 @@ async def queue_upload(printer_id: str = Form(...), file: UploadFile = File(...)
     with open(file_path, "wb") as f:
         f.write(data)
 
-    preview_png = estimated_seconds = filament_weight_g = filament_type = filament_colors = None
-    if ext == ".3mf":
-        try:
-            from .printers.bambu_ftp import _parse_3mf
-            import io
-            p = _parse_3mf(io.BytesIO(data))
-            preview_png = p.image_png
-            estimated_seconds = p.estimated_total_seconds
-            filament_weight_g = p.filament_weight_g
-            filament_type = p.filament_type
-            filament_colors = p.filament_colors
-        except Exception:
-            pass
+    meta = _queue_file_metadata(raw_name, data)
 
     job_id = db.queue_add(
         printer_id, raw_name, file_path, len(data),
-        preview_png=preview_png,
-        estimated_seconds=estimated_seconds,
-        filament_weight_g=filament_weight_g,
-        filament_type=filament_type,
-        filament_colors=filament_colors,
+        preview_png=meta["preview_png"],
+        estimated_seconds=meta["estimated_seconds"],
+        filament_weight_g=meta["filament_weight_g"],
+        filament_type=meta["filament_type"],
+        filament_colors=meta["filament_colors"],
     )
     return {"id": job_id}
 
@@ -3597,6 +3728,19 @@ async def get_queue_preview(job_id: int):
         raise HTTPException(status_code=404, detail="no preview")
     return Response(content=png, media_type="image/png",
                     headers={"Cache-Control": "public, max-age=86400"})
+
+
+@app.get("/api/queue/{job_id}/preflight")
+async def get_queue_preflight(job_id: int):
+    job = db.queue_get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    statuses = await _printer_status_map()
+    return {
+        "job_id": job_id,
+        "printer_id": job["printer_id"],
+        "preflight": _queue_preflight(job, statuses.get(job["printer_id"])),
+    }
 
 
 @app.delete("/api/queue/{job_id}")
@@ -3738,9 +3882,33 @@ async def relay_print_start(printer_id: str, request: Request):
     if not filename:
         raise HTTPException(status_code=422, detail="filename required")
 
+    if not db.is_printer_printing_enabled(printer_id):
+        db.log_decision(
+            printer_id,
+            "relay_start_blocked",
+            f"file={filename} source={source_ip} printer_disabled",
+        )
+        raise HTTPException(status_code=409, detail="Printer is currently disabled")
+
+    if not _latest_printers:
+        await _gather_all()
+    current = _latest_printers.get(printer_id)
+    if not current:
+        raise HTTPException(status_code=409, detail="Waiting for printer telemetry")
+
+    state = current.get("state")
+    if state in ("offline", "error", "estop"):
+        db.log_decision(printer_id, "relay_start_blocked",
+                        f"file={filename} source={source_ip} printer_state={state}")
+        raise HTTPException(status_code=409, detail=f"Printer is {state}")
+
+    if state not in ("idle", "ready", "standby", "finished"):
+        db.log_decision(printer_id, "relay_start_blocked",
+                        f"file={filename} source={source_ip} printer_state={state}")
+        raise HTTPException(status_code=409, detail=f"Printer is {state}")
+
     # Belt-and-braces: refuse if printer is already busy
-    current = next((p for p in _latestPrinters if p.get("id") == printer_id), None)
-    if current and current.get("state") in _BUSY_STATES:
+    if state in _BUSY_STATES:
         state = current["state"]
         db.log_decision(printer_id, "relay_start_blocked",
                         f"file={filename} source={source_ip} printer_state={state}")

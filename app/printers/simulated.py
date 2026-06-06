@@ -28,6 +28,13 @@ _PROFILES = {
         "idle": "OctoPrint ready",
         "control": "OctoPrint simulator",
     },
+    "ideaformer": {
+        "kind": "moonraker",
+        "file": "IR3_V2_test_cube.gcode",
+        "material": "PLA",
+        "idle": "Klipper ready",
+        "control": "Klipper/Moonraker simulator",
+    },
 }
 
 
@@ -66,7 +73,16 @@ def status(
 
     job = None
     if state in {"printing", "paused", "error"}:
-        total_layers = 180 if profile == "prusalink" else 220 if profile == "reprap" else 140
+        if profile == "prusalink":
+            total_layers = 180
+        elif profile == "reprap":
+            total_layers = 220
+        elif profile == "octoprint":
+            total_layers = 140
+        elif profile == "ideaformer":
+            total_layers = 240
+        else:
+            total_layers = 180
         current_layer = max(1, min(total_layers, int(total_layers * progress)))
         eta = int((1 - progress) * (4.5 * 3600)) if state == "printing" else None
         job = JobStatus(
@@ -118,6 +134,16 @@ def status(
             "state": "due",
             "is_due": True,
             "detail": "Synthetic RepRapFirmware care item",
+        })
+    elif profile == "ideaformer":
+        maintenance.append({
+            "id": "sim:ideaformer-mesh",
+            "code": "mesh",
+            "title": "Probe build plate",
+            "source": "simulator",
+            "state": "ok",
+            "is_due": False,
+            "detail": "Synthetic Klipper bed mesh check",
         })
 
     return PrinterStatus(

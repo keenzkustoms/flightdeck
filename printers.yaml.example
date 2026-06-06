@@ -49,3 +49,13 @@ printers:
         - { label: PETG, value: 80 }
         - { label: ASA, value: 100 }
         - { label: ABS, value: 100 }
+
+  # Simulator example:
+  # - id: ir3
+  #   model_name: IdeaFormer
+  #   custom_name: IdeaFormer IR3 V2
+  #   icon: generic
+  #   connection:
+  #     type: simulated
+  #     profile: ideaformer
+  #     scenario: mixed

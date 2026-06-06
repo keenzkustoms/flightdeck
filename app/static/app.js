@@ -1798,6 +1798,15 @@ document.getElementById('view-printer').addEventListener('click', e => {
   }
 });
 
+document.getElementById('view-printer').addEventListener('change', async e => {
+  const liveToggle = e.target.closest('[data-live-print-enabled]');
+  if (!liveToggle) return;
+  const id = liveToggle.dataset.printerId;
+  const enabled = liveToggle.checked;
+  const ok = await setPrinterPrintEnabled(id, enabled);
+  if (!ok) liveToggle.checked = !enabled;
+});
+
 document.addEventListener('click', e => {
   const lightToggle = e.target.closest('[data-light-toggle]');
   if (!lightToggle) return;
@@ -2374,7 +2383,16 @@ function _detailLiveHeader(p, printerColor, bannerTextColor) {
       <strong title="${esc(job?.filename || jobName)}">${esc(jobName)}</strong>
       <small>${esc(statusMeta)}</small>
     </div>
-    <span class="badge badge-${esc(p.state || 'idle')} live-state-badge">${esc(stateLabel)}</span>
+    <div class="live-state-wrap">
+      <span class="badge badge-${esc(p.state || 'idle')} live-state-badge">${esc(stateLabel)}</span>
+      <label class="live-print-enabled">
+        <input type="checkbox"
+          data-live-print-enabled
+          data-printer-id="${p.id}"
+          ${p.print_enabled ?? true ? 'checked' : ''}>
+        Print enabled
+      </label>
+    </div>
     ${_detailTransportControls(p.id, p)}
     ${signals ? `<div class="live-signal-row">${signals}</div>` : ''}
   </div>`;
@@ -5836,6 +5854,33 @@ function _queuePreflightIssues(preflight) {
   </div>`;
 }
 
+function _queuePreflightModal(jobId, filename, preflight) {
+  const issues = Array.isArray(preflight?.issues) ? preflight.issues : [];
+  const rows = issues.length
+    ? issues.map(i => `<li class="queue-preflight-issue queue-preflight-${i.level}">${esc(i.message)}</li>`).join('')
+    : '<li class="queue-preflight-issue">No issues found.</li>';
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal-box">
+      <div class="modal-message">Filament check · #${jobId}</div>
+      ${filename ? `<div class="modal-submessage">${esc(filename)}</div>` : ''}
+      <div class="queue-preflight-issues">
+        <span class="queue-preflight queue-preflight-${preflight?.status || 'warning'}">
+          ${esc(preflight?.status || 'UNKNOWN')}
+        </span>
+      </div>
+      <ul class="queue-preflight-report">${rows}</ul>
+      <div class="modal-actions">
+        <button class="modal-btn modal-btn-danger" id="queue-preflight-close">Close</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+  overlay.querySelector('#queue-preflight-close').addEventListener('click', close);
+}
+
 function _fmtSeconds(s) {
   if (!s) return '';
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
@@ -6616,10 +6661,11 @@ function _queueJobCard(job, isFirst, isLast) {
       ${_queuePreflightIssues(preflight)}
     </div>
     <div class="queue-job-actions">
-      ${isPending ? `
+    ${isPending ? `
         <button class="queue-act-btn" data-action="up"   data-id="${job.id}" title="Move up"   ${isFirst ? 'disabled' : ''}>▲</button>
         <button class="queue-act-btn" data-action="down" data-id="${job.id}" title="Move down" ${isLast  ? 'disabled' : ''}>▼</button>
         <button class="queue-act-btn queue-act-send" data-action="send"   data-id="${job.id}" title="${canSend ? 'Send now' : 'Preflight blocked'}" ${canSend ? '' : 'disabled'}>▶</button>
+        <button class="queue-act-btn queue-act-check" data-action="check"  data-id="${job.id}" title="Run filament check">FIL</button>
         <button class="queue-act-btn queue-act-del"  data-action="delete" data-id="${job.id}" title="Remove">✕</button>
       ` : isRecoverable ? `
         <button class="queue-act-btn queue-act-retry" data-action="retry"  data-id="${job.id}" title="Retry">↺</button>
@@ -6769,6 +6815,11 @@ async function _queueHandleAction(e) {
       });
     } else if (action === 'send') {
       await fetch(`/api/queue/${id}/send`, { method: 'POST' });
+    } else if (action === 'check') {
+      const r = await fetch(`/api/queue/${id}/preflight`);
+      if (!r.ok) throw new Error((await r.json())?.detail || `Queue preflight ${r.status}`);
+      const payload = await r.json();
+      _queuePreflightModal(id, payload?.filename || null, payload?.preflight || {});
     } else if (action === 'retry') {
       await fetch(`/api/queue/${id}/retry`, { method: 'POST' });
     } else if (action === 'clear-completed') {
@@ -7634,6 +7685,11 @@ function _printersCategoryHtml(printers) {
           </div>
           <div class="settings-printer-meta">
             <span class="settings-printer-type">${connInfo}</span>
+            <label class="settings-printer-enable">
+              <input type="checkbox" class="settings-printer-enable-input" data-printer-id="${p.id}"
+                ${p.print_enabled ?? true ? 'checked' : ''}>
+              Print enabled
+            </label>
             <button class="settings-delete-btn"
               data-delete-id="${p.id}"
               data-delete-name="${p.custom_name}">Remove</button>
@@ -7771,6 +7827,7 @@ function _printersCategoryHtml(printers) {
               <option value="prusalink">PrusaLink</option>
               <option value="reprap">RepRapFirmware</option>
               <option value="octoprint">OctoPrint</option>
+              <option value="ideaformer">IdeaFormer IR3 V2</option>
             </select>
           </div>
           <div class="settings-form-row">
@@ -7840,6 +7897,18 @@ function _attachPrintersEvents(el) {
         `Remove "${name}" from Flightdeck? This takes effect immediately.`,
         () => _deletePrinter(id)
       );
+    });
+  });
+
+  el.querySelectorAll('.settings-printer-enable-input').forEach(input => {
+    input.addEventListener('change', async e => {
+      const target = e.currentTarget;
+      const id = target.dataset.printerId;
+      const enabled = target.checked;
+      const ok = await setPrinterPrintEnabled(id, enabled);
+      if (!ok) {
+        target.checked = !enabled;
+      }
     });
   });
 
@@ -8003,6 +8072,27 @@ function _showDuplicateModal(name, id) {
     });
     overlay.querySelector('#dup-continue').addEventListener('click', () => cleanup('continue'));
   });
+}
+
+async function setPrinterPrintEnabled(printerId, enabled) {
+  try {
+    const r = await fetch(`/api/printers/${printerId}/print-enabled`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled }),
+    });
+    if (!r.ok) {
+      const body = await r.json().catch(() => ({}));
+      showToast('Unable to update printer status', body.detail ?? 'Please try again.', 'error');
+      return false;
+    }
+    await refreshPrinters();
+    _renderSettingsContent('printers');
+    return true;
+  } catch {
+    showToast('Unable to update printer status', 'Network error', 'error');
+    return false;
+  }
 }
 
 async function _deletePrinter(id) {

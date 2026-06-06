@@ -316,6 +316,41 @@ def _resolve_state(
         db.clear_finished_at(printer_id)
         return "error"
 
+    # standby/ready fallback:
+    # some Klipper setups transition directly from printing to standby/ready
+    # without exposing a "complete" state. If the active job came from printing,
+    # treat that as a normal finish so spool deduction/queueing still advances.
+    if printer_id in _active_job_key and prev_raw == "printing":
+        _estimated_stored.discard(printer_id)
+        job_key = _active_job_key.pop(printer_id)
+        completed_print_id = _active_print_id.pop(printer_id, None)
+        _error_print_id.pop(printer_id, None)
+        filament_g = _filament_grams.pop(printer_id, None)
+        finished_print_id = db.on_print_finished(
+            printer_id,
+            job_key,
+            layers_completed=job.layer_current if job else None,
+            filament_grams=filament_g,
+        )
+        pid = finished_print_id or completed_print_id
+        if pid and filament_g:
+            db.deduct_spool_usage(printer_id, pid)
+        elif pid and _mmu_gate_snapshot_print_id.get(printer_id) == pid:
+            db.log_decision(
+                printer_id,
+                "spool_no_deduction_cancelled",
+                "Print finished without filament estimate (printing->standby)",
+                print_id=pid,
+            )
+        finished_at = db.get_finished_at(printer_id)
+        if finished_at is None:
+            finished_at = now
+            db.set_finished_at(printer_id, finished_at)
+        if (now - finished_at.replace(tzinfo=timezone.utc)) > FINISHED_TTL:
+            db.clear_finished_at(printer_id)
+            return "idle"
+        return "finished"
+
     # standby — check for recent finish (startup hydration)
     _estimated_stored.discard(printer_id)
     if printer_id in _active_job_key:
