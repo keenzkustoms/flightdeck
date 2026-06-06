@@ -52,6 +52,7 @@ class PrinterStatus:
     light_state: Optional[str] = None  # Bambu chamber light state: "on" | "off" | "unknown"
     temperature_presets: dict = field(default_factory=dict)  # {hotend: [{label, value}], bed: [...]}
     fan_speed: Optional[float] = None  # 0.0 - 1.0 where reported
+    fan_speeds: dict[str, float] = field(default_factory=dict)  # channel -> 0.0 - 1.0
     toolhead_position: Optional[list[float]] = None
     error: Optional[str] = None
     last_seen: Optional[datetime] = None  # last successful data from printer link

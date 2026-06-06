@@ -270,6 +270,7 @@ class BambuPrinter:
             bed = self._printer.get_bed_temperature()
             chamber = _read_chamber_temp(dump, self.model_name)
             light_state = _read_light_state(print_data)
+            fan_speeds = _read_fan_speeds(mc)
             if bed is not None:
                 temps["bed"] = TempReading(
                     actual=float(bed),
@@ -355,6 +356,8 @@ class BambuPrinter:
                 icon=self.icon, kind="bambu", state=state,
                 temps=temps, job=job, substage=substage,
                 idle_info=idle_info, ams=ams, maintenance=maintenance, light_state=light_state,
+                fan_speed=fan_speeds.get("part"),
+                fan_speeds=fan_speeds,
                 error=alarm_message if state in ("paused", "error") else None,
                 last_seen=now, updated_at=now,
             )
@@ -812,6 +815,25 @@ class BambuPrinter:
         elif heater == "bed":
             self._printer.set_bed_temperature(target)
 
+    def set_fan(self, channel: str, speed_percent: int) -> None:
+        pct = max(0, min(100, int(speed_percent)))
+        pwm = round(pct * 255 / 100)
+        channel_key = (channel or "part").lower()
+        if channel_key == "part":
+            ok = self._printer.set_part_fan_speed(pwm)
+        elif channel_key == "aux":
+            ok = self._printer.set_aux_fan_speed(pwm)
+        elif channel_key == "chamber":
+            ok = self._printer.set_chamber_fan_speed(pwm)
+        else:
+            raise ValueError("invalid fan channel")
+        if not ok:
+            raise RuntimeError(f"Bambu {channel_key} fan command was not accepted")
+
+    def home_all(self) -> None:
+        if not self._printer.home_printer():
+            raise RuntimeError("Bambu home command was not accepted")
+
     def get_preview(self):
         """Return cached BambuPreview, fetching via FTP if the job changed."""
         if not self._connected:
@@ -1160,6 +1182,24 @@ def _read_light_state(print_data: dict) -> str:
     if any(m == "on" for m in known):
         return "on"
     return "off"
+
+
+def _read_fan_speeds(mc) -> dict[str, float]:
+    speeds: dict[str, float] = {}
+    readers = {
+        "part": mc.get_part_fan_speed,
+        "aux": mc.get_aux_fan_speed,
+        "chamber": mc.get_chamber_fan_speed,
+    }
+    for channel, reader in readers.items():
+        try:
+            raw = reader()
+            if raw is None:
+                continue
+            speeds[channel] = max(0.0, min(1.0, float(raw) / 255.0))
+        except Exception:
+            continue
+    return speeds
 
 
 _BAMBU_ALARM_MESSAGES = {

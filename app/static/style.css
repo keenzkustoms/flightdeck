@@ -3608,12 +3608,20 @@ button.briefing-row {
 .live-op-group {
   display: inline-flex;
   align-items: stretch;
+  flex-wrap: wrap;
   gap: 0.25rem;
   min-width: 0;
   padding: 0.2rem;
   border: 1px solid rgba(148,163,184,0.18);
   border-radius: 0.65rem;
   background: rgba(15,23,42,0.28);
+}
+
+.live-op-fan-row {
+  display: inline-flex;
+  align-items: stretch;
+  gap: 0.25rem;
+  min-width: 0;
 }
 
 .live-op-group-label {

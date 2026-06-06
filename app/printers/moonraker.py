@@ -206,6 +206,7 @@ async def fetch(id: str, model_name: str, custom_name: str, icon: str, base_url:
         kind="moonraker", state=state, temps=temps, job=job,
         idle_info=idle_info, mmu=mmu_panel, last_seen=now, updated_at=now,
         fan_speed=fan.get("speed"),
+        fan_speeds={"part": fan.get("speed")} if fan.get("speed") is not None else {},
         toolhead_position=toolhead.get("position"),
         error=error_message if state == "error" else None,
     )

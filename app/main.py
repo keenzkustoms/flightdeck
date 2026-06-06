@@ -1911,6 +1911,7 @@ class SetTempRequest(BaseModel):
 
 class FanRequest(BaseModel):
     speed: int
+    channel: str = "part"
 
 
 class JogZRequest(BaseModel):
@@ -1964,9 +1965,14 @@ async def set_printer_temp(printer_id: str, req: SetTempRequest):
 async def set_printer_fan(printer_id: str, req: FanRequest):
     if not (0 <= req.speed <= 100):
         raise HTTPException(status_code=400, detail="fan speed out of range (0-100)")
+    channel = req.channel.lower().strip()
+    if channel not in ("part", "aux", "chamber"):
+        raise HTTPException(status_code=400, detail="invalid fan channel")
 
     for (id, model_name, custom_name, icon, url) in _moonraker:
         if id == printer_id:
+            if channel != "part":
+                raise HTTPException(status_code=422, detail="Klipper fan control only supports the part fan from Flightdeck")
             try:
                 await moonraker.set_fan(url, req.speed)
             except Exception as exc:
@@ -1975,7 +1981,11 @@ async def set_printer_fan(printer_id: str, req: FanRequest):
 
     for p in _bambu:
         if p.id == printer_id:
-            raise HTTPException(status_code=422, detail="fan control is only available for Klipper/Moonraker printers")
+            try:
+                await asyncio.to_thread(p.set_fan, channel, req.speed)
+            except Exception as exc:
+                raise HTTPException(status_code=502, detail=str(exc))
+            return {"ok": True}
 
     for (id, *_) in _simulated:
         if id == printer_id:
@@ -2026,7 +2036,13 @@ async def home_printer_axes(printer_id: str, req: HomeRequest):
 
     for p in _bambu:
         if p.id == printer_id:
-            raise HTTPException(status_code=422, detail="homing is only available for Klipper/Moonraker printers")
+            if axes != "all":
+                raise HTTPException(status_code=422, detail="Bambu homing only supports Home All from Flightdeck")
+            try:
+                await asyncio.to_thread(p.home_all)
+            except Exception as exc:
+                raise HTTPException(status_code=502, detail=str(exc))
+            return {"ok": True}
 
     for (id, *_) in _simulated:
         if id == printer_id:

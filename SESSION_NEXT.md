@@ -1,5 +1,12 @@
 # Flightdeck — next session brief
-_Last updated 7 June 2026 (Session 28.204 Klipper live control polish)_
+_Last updated 7 June 2026 (Session 28.205 Bambu live controls)_
+
+## What was added - Session 28.205 (Bambu live controls - 7 June)
+- Bambu live pages now report separate fan speeds for Part, Aux, and Chamber fans.
+- Added Bambu Part/Aux/Chamber fan controls with Off/50/100 buttons and fine sliders.
+- Added guarded Bambu `Home All` on the live page using the existing confirmation prompt.
+- The shared fan endpoint now accepts a `channel` (`part`, `aux`, or `chamber`) and routes commands to Moonraker or Bambu as appropriate.
+- Bumped static cache to `app.js?v=322` and `style.css?v=250`; backend restart required.
 
 ## What was added - Session 28.204 (Klipper live control polish - 7 June)
 - Added a fine fan slider beside the Moonraker/Klipper fan quick buttons; the command is sent when the slider change is committed.

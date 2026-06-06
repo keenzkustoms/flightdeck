@@ -1800,9 +1800,10 @@ function _preheatPresets(p) {
 function _detailLiveOps(p) {
   const canPreheat = !['offline', 'printing', 'error', 'estop'].includes(p.state || '');
   const isMoonraker = p.kind === 'moonraker';
-  const canFan = isMoonraker && !['offline', 'error', 'estop'].includes(p.state || '');
+  const isBambu = p.kind === 'bambu';
+  const canFan = (isMoonraker || isBambu) && !['offline', 'error', 'estop'].includes(p.state || '');
   const canJog = isMoonraker && !['offline', 'printing', 'paused', 'finished', 'error', 'estop'].includes(p.state || '');
-  const canHome = canJog;
+  const canHome = (isMoonraker || isBambu) && !['offline', 'printing', 'paused', 'finished', 'error', 'estop'].includes(p.state || '');
   const presets = _preheatPresets(p);
   const preheatButtons = presets.map(row => `<button class="live-op-btn" type="button"
       data-preheat data-printer-id="${esc(p.id)}" data-material="${esc(row.label)}"
@@ -1819,18 +1820,28 @@ function _detailLiveOps(p) {
         <span>Klipper</span><small>Mainsail / Fluidd</small>
       </a>`
     : '';
-  const fanPct = Number.isFinite(Number(p.fan_speed)) ? Math.round(Number(p.fan_speed) * 100) : null;
-  const fanValue = fanPct == null ? 0 : Math.max(0, Math.min(100, fanPct));
-  const fan = isMoonraker
+  const fanChannels = isBambu
+    ? [['part', 'Part'], ['aux', 'Aux'], ['chamber', 'Chamber']]
+    : isMoonraker
+      ? [['part', 'Fan']]
+      : [];
+  const fan = fanChannels.length
     ? `<div class="live-op-group" aria-label="Part cooling fan">
-        <span class="live-op-group-label">Fan ${fanPct == null ? '--' : fanPct}%</span>
-        ${[0, 50, 100].map(speed => `<button class="live-op-btn live-op-mini" type="button"
-          data-fan-speed="${speed}" data-printer-id="${esc(p.id)}" ${canFan ? '' : 'disabled'}>
-          <span>${speed === 0 ? 'Off' : speed}</span><small>${speed === 0 ? 'fan' : '%'}</small>
-        </button>`).join('')}
-        <label class="live-op-slider" title="Fine fan control">
-          <input type="range" min="0" max="100" step="5" value="${fanValue}" data-fan-slider data-printer-id="${esc(p.id)}" ${canFan ? '' : 'disabled'}>
-        </label>
+        ${fanChannels.map(([channel, label]) => {
+          const raw = p.fan_speeds?.[channel] ?? (channel === 'part' ? p.fan_speed : null);
+          const pct = Number.isFinite(Number(raw)) ? Math.round(Number(raw) * 100) : null;
+          const value = pct == null ? 0 : Math.max(0, Math.min(100, pct));
+          return `<div class="live-op-fan-row">
+            <span class="live-op-group-label">${esc(label)} ${pct == null ? '--' : pct}%</span>
+            ${[0, 50, 100].map(speed => `<button class="live-op-btn live-op-mini" type="button"
+              data-fan-speed="${speed}" data-fan-channel="${esc(channel)}" data-printer-id="${esc(p.id)}" ${canFan ? '' : 'disabled'}>
+              <span>${speed === 0 ? 'Off' : speed}</span><small>${speed === 0 ? 'fan' : '%'}</small>
+            </button>`).join('')}
+            <label class="live-op-slider" title="${esc(label)} fan fine control">
+              <input type="range" min="0" max="100" step="5" value="${value}" data-fan-slider data-fan-channel="${esc(channel)}" data-printer-id="${esc(p.id)}" ${canFan ? '' : 'disabled'}>
+            </label>
+          </div>`;
+        }).join('')}
       </div>`
     : '';
   const pos = Array.isArray(p.toolhead_position) ? Number(p.toolhead_position[2]) : NaN;
@@ -1846,10 +1857,11 @@ function _detailLiveOps(p) {
         </button>
       </div>`
     : '';
-  const home = isMoonraker
+  const homeAxes = isBambu ? [['all', 'All']] : isMoonraker ? [['xy', 'XY'], ['z', 'Z'], ['all', 'All']] : [];
+  const home = homeAxes.length
     ? `<div class="live-op-group" aria-label="Homing controls">
         <span class="live-op-group-label">Home</span>
-        ${[['xy', 'XY'], ['z', 'Z'], ['all', 'All']].map(([axes, label]) => `<button class="live-op-btn live-op-mini" type="button"
+        ${homeAxes.map(([axes, label]) => `<button class="live-op-btn live-op-mini" type="button"
           data-home-axes="${axes}" data-printer-id="${esc(p.id)}" ${canHome ? '' : 'disabled'}>
           <span>${label}</span><small>G28</small>
         </button>`).join('')}
@@ -2030,11 +2042,12 @@ document.getElementById('view-printer').addEventListener('click', e => {
   if (fanBtn && !fanBtn.disabled) {
     const id = fanBtn.dataset.printerId;
     const speed = Number(fanBtn.dataset.fanSpeed || 0);
+    const channel = fanBtn.dataset.fanChannel || 'part';
     const old = fanBtn.innerHTML;
     fanBtn.disabled = true;
     fanBtn.innerHTML = `<span>Sending</span><small>${speed}%</small>`;
-    sendFanSet(id, speed)
-      .then(() => showToast('Fan command sent', `${speed}% part cooling`, 'success'))
+    sendFanSet(id, speed, channel)
+      .then(() => showToast('Fan command sent', `${speed}% ${channel} fan`, 'success'))
       .catch(err => showToast('Fan command failed', err.message || '', 'error'))
       .finally(() => {
         fanBtn.disabled = false;
@@ -2106,8 +2119,9 @@ document.getElementById('view-printer').addEventListener('change', e => {
   if (!slider || slider.disabled) return;
   const id = slider.dataset.printerId;
   const speed = Number(slider.value || 0);
-  sendFanSet(id, speed)
-    .then(() => showToast('Fan command sent', `${speed}% part cooling`, 'success'))
+  const channel = slider.dataset.fanChannel || 'part';
+  sendFanSet(id, speed, channel)
+    .then(() => showToast('Fan command sent', `${speed}% ${channel} fan`, 'success'))
     .catch(err => showToast('Fan command failed', err.message || '', 'error'));
 });
 
@@ -3224,12 +3238,12 @@ async function sendTempSet(id, heater, target) {
   }
 }
 
-async function sendFanSet(id, speed) {
+async function sendFanSet(id, speed, channel = 'part') {
   const clampedSpeed = Math.max(0, Math.min(100, Math.round(speed)));
   const resp = await fetch(`/api/printers/${id}/fan`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ speed: clampedSpeed }),
+    body: JSON.stringify({ speed: clampedSpeed, channel }),
   });
   if (!resp.ok) {
     const data = await resp.json().catch(() => ({}));
