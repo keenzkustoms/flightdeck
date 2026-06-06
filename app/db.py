@@ -24,6 +24,7 @@ DEFAULT_SETTINGS = {
     "label_include_location": "true",
     "queue_strict_colour": "true",
     "print_vault_path": "",
+    "orcaslicer_docker_url": "",
 }
 
 _PRINTER_PRINTING_ENABLED_PREFIX = "printer_print_enabled_"

@@ -20,3 +20,23 @@ services:
       - /dev/bus/usb:/dev/bus/usb
     devices:
       - /dev/hidraw0:/dev/hidraw0
+
+  orcaslicer:
+    image: lscr.io/linuxserver/orcaslicer:latest
+    container_name: flightdeck-orcaslicer
+    restart: unless-stopped
+    security_opt:
+      - seccomp:unconfined
+    environment:
+      PUID: ${ORCASLICER_PUID:-1000}
+      PGID: ${ORCASLICER_PGID:-1000}
+      TZ: ${TZ:-Australia/Sydney}
+      CUSTOM_USER: ${ORCASLICER_USER:-flightdeck}
+      PASSWORD: ${ORCASLICER_PASSWORD:-change-me-before-use}
+      TITLE: OrcaSlicer - Flightdeck
+      FILE_MANAGER_PATH: /prints
+    ports:
+      - "3011:3001"
+    volumes:
+      - /volume2/flightdeck-orcaslicer:/config
+      - /volume3/flightdeck-vault:/prints

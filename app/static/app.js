@@ -8294,6 +8294,8 @@ const _SLICER_DEFINITIONS = [
 function _slicerCategoryHtml() {
   const selected = _serverSettings.preferred_slicer ?? '';
   const detected = _serverSettings.slicer_detected_version ?? '';
+  const dockerUrl = (_serverSettings.orcaslicer_docker_url || '').trim();
+  const dockerLaunchUrl = _slicerDockerLaunchUrl(dockerUrl);
 
   const cards = _SLICER_DEFINITIONS.map(s => {
     const isSelected = s.id === selected;
@@ -8322,7 +8324,38 @@ function _slicerCategoryHtml() {
       <div class="settings-section-title">Preferred Slicer</div>
       <p class="slicer-hint">Select your slicer to record your preference. Flightdeck auto-detects the version from jobs submitted via the relay.</p>
       <div class="slicer-grid">${cards}</div>
+    </div>
+    <div class="settings-section">
+      <div class="settings-section-title">OrcaSlicer Docker</div>
+      <div class="slicer-docker-panel">
+        <div>
+          <strong>Browser-based OrcaSlicer</strong>
+          <span>NAS/PC Docker sidecar. Uses the shared Print Vault at <code>/prints</code>.</span>
+        </div>
+        <a class="slicer-launch-btn" href="${esc(dockerLaunchUrl)}" target="_blank" rel="noreferrer">Open Orca</a>
+      </div>
+      <div class="settings-form-row">
+        <label class="settings-label">Docker URL</label>
+        <input class="settings-input slicer-docker-input" data-pref-key="orcaslicer_docker_url" type="url" value="${esc(dockerUrl)}" placeholder="${esc(_slicerDockerDefaultUrl())}">
+      </div>
+      <div class="settings-hint">Leave blank to use this host on HTTPS port 3011. The LinuxServer Orca image is x86-64 only, so run this sidecar on the NAS or a PC, not the Pi.</div>
     </div>`;
+}
+
+function _slicerDockerDefaultUrl() {
+  const proto = location.protocol === 'https:' ? 'https:' : location.protocol;
+  return `${proto}//${location.hostname}:3011`;
+}
+
+function _slicerDockerLaunchUrl(value = '') {
+  return (value || '').trim().replace(/\/+$/, '') || _slicerDockerDefaultUrl();
+}
+
+function _updateSlicerDockerLaunch(el) {
+  const input = el.querySelector('.slicer-docker-input');
+  const btn = el.querySelector('.slicer-launch-btn');
+  if (!input || !btn) return;
+  btn.href = _slicerDockerLaunchUrl(input.value);
 }
 
 function _attachSlicerEvents(el) {
@@ -8338,6 +8371,22 @@ function _attachSlicerEvents(el) {
       el.querySelectorAll('.slicer-card').forEach(c =>
         c.classList.toggle('slicer-card-selected', c === card)
       );
+    });
+  });
+
+  el.querySelectorAll('.slicer-docker-input').forEach(input => {
+    input.addEventListener('change', async () => {
+      const key = input.dataset.prefKey;
+      let value = input.value.trim().replace(/\/+$/, '');
+      try {
+        const saved = await _saveSetting(key, value);
+        input.value = saved;
+        _updateSlicerDockerLaunch(el);
+        showToast('Orca Docker URL saved', saved || 'Using current host on port 3011', 'success');
+      } catch (err) {
+        showToast('Setting save failed', err.message || '', 'error');
+        input.value = input.defaultValue;
+      }
     });
   });
 }

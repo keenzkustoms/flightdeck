@@ -1,5 +1,12 @@
 # Flightdeck — next session brief
-_Last updated 6 June 2026 (Session 28.187 Dashboard lockout visibility)_
+_Last updated 6 June 2026 (Session 28.188 OrcaSlicer Docker sidecar)_
+
+## What was added - Session 28.188 (OrcaSlicer Docker sidecar - 6 June)
+- Added an OrcaSlicer sidecar service to `docker-compose.nas.yml` using `lscr.io/linuxserver/orcaslicer:latest`.
+- The sidecar publishes Orca on host HTTPS port `3011`, persists config in `/volume2/flightdeck-orcaslicer`, and mounts the Flightdeck print vault at `/prints`.
+- Added `.env.nas.example` for Orca web UI auth and UID/GID settings.
+- Settings -> Slicer now includes an `OrcaSlicer Docker` launcher and configurable Docker URL.
+- Bumped static cache to `app.js?v=292` and `style.css?v=227`; backend restart required for the new default setting.
 
 ## What was updated - Session 28.187 (Dashboard lockout visibility - 6 June)
 - Dashboard now treats printers with `Print enabled` unticked as attention items instead of ordinary idle printers.

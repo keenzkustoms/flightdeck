@@ -316,6 +316,16 @@ The container maps:
 
 The NAS preview publishes Flightdeck on host port `8010` to avoid clashing with ASUSTOR/Portainer services that may already use `8000`.
 
+The NAS compose also includes an optional OrcaSlicer sidecar using the LinuxServer.io browser-based image:
+
+```text
+https://<nas-host>:3011
+```
+
+OrcaSlicer stores its config in `/volume2/flightdeck-orcaslicer` and mounts the Flightdeck print vault at `/prints` so sliced files can be saved into the same NAS-backed library. Copy `.env.nas.example` to `.env` and set `ORCASLICER_PASSWORD` before starting the stack.
+
+The OrcaSlicer image is currently x86-64 only, so run this sidecar on the NAS or another PC-class Docker host rather than the Raspberry Pi. Keep it behind Tailscale or trusted LAN access; the container is a full remote desktop-style app, not a public web service.
+
 The NAS compose also marks the instance as Docker / Portainer managed so the setup health page does not expect a host `systemd` service inside the container.
 
 For optional hardware support, the NAS Docker image includes `usbutils` and the compose file passes through `/dev/bus/usb` plus `/dev/hidraw0` so the Dymo scale and Brother QL-700 can be detected from inside the container.
