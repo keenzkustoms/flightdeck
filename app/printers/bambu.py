@@ -841,7 +841,13 @@ class BambuPrinter:
         """Return skip-object candidates parsed from the current 3MF metadata."""
         preview = self.get_preview()
         if not preview or not preview.objects:
-            return {"supported": False, "objects": []}
+            return {
+                "supported": False,
+                "mode": "bambu_skip_objects",
+                "label": "Bambu skip objects",
+                "objects": [],
+                "detail": "No object metadata found in the active 3MF.",
+            }
 
         skipped = set()
         try:
@@ -856,7 +862,14 @@ class BambuPrinter:
             if obj_id in skipped:
                 state = "excluded"
             objects.append({**obj, "state": state})
-        return {"supported": len(objects) > 1, "objects": objects}
+        return {
+            "supported": len(objects) > 1,
+            "mode": "bambu_skip_objects",
+            "label": "Bambu skip objects",
+            "objects": objects,
+            "excluded_ids": sorted(skipped),
+            "detail": "Bambu object exclusion uses the printer skip-object list.",
+        }
 
     def skip_object(self, object_id: int) -> bool:
         skipped = set()

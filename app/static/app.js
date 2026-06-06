@@ -3343,9 +3343,13 @@ function _detailMmuPanel(p) {
 
 // ── Object exclusion panel ────────────────────────────────────────────────
 
-function _detailObjectsPanel(id, objects) {
+function _detailObjectsPanel(id, data) {
+  const objects = data?.objects || [];
   if (!objects || objects.length < 2) return '';
-  const title = `<div class="detail-panel-title">Print Objects</div>`;
+  const modeLabel = data?.label || 'Object exclusion';
+  const detail = data?.detail || 'Select one object to exclude it from the active print.';
+  const title = `<div class="detail-panel-title">Objects</div>
+    <div class="obj-panel-subtitle"><strong>${esc(modeLabel)}</strong><span>${esc(detail)}</span></div>`;
   const rows = objects.map(obj => {
     const isExcluded = obj.state === 'excluded';
     const isCurrent = obj.state === 'current';
@@ -3354,19 +3358,22 @@ function _detailObjectsPanel(id, objects) {
     const safeName = rawName.replace(/"/g, '&quot;');
     const safeId = obj.id ?? '';
     const stateHtml = isCurrent
-      ? `<span class="obj-state obj-state-current">▶</span>`
+      ? `<span class="obj-state obj-state-current">Current</span>`
       : isExcluded
-        ? `<span class="obj-state obj-state-excluded">✗</span>`
-        : '';
-    return `<div class="obj-row${isExcluded ? ' obj-row-excluded' : ''}">
-      <label class="obj-label">
-        <input type="checkbox" class="obj-check"
+        ? `<span class="obj-state obj-state-excluded">Excluded</span>`
+        : `<span class="obj-state obj-state-ready">Ready</span>`;
+    return `<div class="obj-row${isExcluded ? ' obj-row-excluded' : ''}${isCurrent ? ' obj-row-current' : ''}">
+      <div class="obj-label">
+        <span class="obj-name" title="${safeName}">${shortName}</span>
+        ${safeId !== '' ? `<span class="obj-meta">#${esc(safeId)}</span>` : ''}
+      </div>
+      <div class="obj-actions">
+        ${stateHtml}
+        <button type="button" class="obj-exclude-btn"
           data-obj-name="${safeName}" data-printer-id="${id}"
           data-obj-id="${safeId}"
-          ${isExcluded ? 'checked disabled' : ''}>
-        <span class="obj-name" title="${safeName}">${shortName}</span>
-      </label>
-      ${stateHtml}
+          ${isExcluded ? 'disabled' : ''}>Exclude</button>
+      </div>
     </div>`;
   }).join('');
   return `<div class="detail-panel">${title}<div class="obj-list">${rows}</div></div>`;
@@ -3383,29 +3390,37 @@ async function refreshObjectsPanel(id) {
   if (!el) return;
   const data = _objectsCache[id];
   el.innerHTML = (data?.supported && data.objects?.length > 1)
-    ? _detailObjectsPanel(id, data.objects)
+    ? _detailObjectsPanel(id, data)
     : '';
 }
 
 async function sendExcludeObject(id, name, objectId = null) {
   try {
-    await fetch(`/api/printers/${id}/exclude-object`, {
+    const r = await fetch(`/api/printers/${id}/exclude-object`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name, id: objectId === null || objectId === '' ? null : Number(objectId) }),
     });
+    if (!r.ok) {
+      const body = await r.json().catch(() => ({}));
+      showToast('Object exclude failed', body.detail || 'Printer did not accept the command', 'error');
+      return;
+    }
+    showToast('Object excluded', name.replace(/.*[/\\]/, ''), 'success');
     await refreshObjectsPanel(id);
-  } catch {}
+  } catch {
+    showToast('Object exclude failed', 'Network error', 'error');
+  }
 }
 
-// Delegated click for object exclusion checkboxes
+// Delegated click for Klipper/Bambu object exclusion.
 document.getElementById('view-printer').addEventListener('click', e => {
-  const cb = e.target.closest('.obj-check');
-  if (!cb || cb.disabled) return;
+  const btn = e.target.closest('.obj-exclude-btn');
+  if (!btn || btn.disabled) return;
   e.preventDefault();
-  const name = cb.dataset.objName;
-  const id = cb.dataset.printerId;
-  const objectId = cb.dataset.objId;
+  const name = btn.dataset.objName;
+  const id = btn.dataset.printerId;
+  const objectId = btn.dataset.objId;
   if (!name || !id) return;
   const shortName = name.replace(/.*[/\\]/, '');
   _modal.show(

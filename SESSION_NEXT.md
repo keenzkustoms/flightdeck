@@ -1,5 +1,11 @@
 # Flightdeck — next session brief
-_Last updated 6 June 2026 (Session 28.184 Simulated camera feeds)_
+_Last updated 6 June 2026 (Session 28.185 Unified object exclusion)_
+
+## What was updated - Session 28.185 (Unified object exclusion - 6 June)
+- Bambu object skipping now presents like the Klipper exclude-object flow: one live Objects panel, object status, and a clear Exclude action per object.
+- Backend object metadata now identifies whether the printer uses Klipper `EXCLUDE_OBJECT` or Bambu `skip_objects`, while the UI keeps the operator experience consistent.
+- Object exclusions are logged for both Klipper and Bambu, and failed commands now show a useful toast instead of silently doing nothing.
+- Bumped static cache to `app.js?v=289` and `style.css?v=224`; backend restart required.
 
 ## What was added - Session 28.184 (Simulated camera feeds - 6 June)
 - Simulated printers now expose a generated camera endpoint through the normal printer camera API.

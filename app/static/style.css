@@ -6093,6 +6093,24 @@ button.live-route-node:hover {
   flex-direction: column;
 }
 
+.obj-panel-subtitle {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  margin: -0.35rem 0 0.55rem;
+}
+
+.obj-panel-subtitle strong {
+  color: #dbeafe;
+  font-size: 0.72rem;
+}
+
+.obj-panel-subtitle span {
+  color: var(--muted);
+  font-size: 0.68rem;
+  line-height: 1.35;
+}
+
 .obj-row {
   display: flex;
   align-items: center;
@@ -6106,22 +6124,11 @@ button.live-route-node:hover {
 
 .obj-label {
   display: flex;
-  align-items: center;
-  gap: 0.625rem;
-  cursor: pointer;
+  flex-direction: column;
+  gap: 0.14rem;
   flex: 1;
   min-width: 0;
 }
-
-.obj-check {
-  flex-shrink: 0;
-  width: 14px;
-  height: 14px;
-  accent-color: var(--error);
-  cursor: pointer;
-}
-
-.obj-check:disabled { cursor: not-allowed; opacity: 0.55; }
 
 .obj-name {
   font-size: 0.8125rem;
@@ -6132,19 +6139,56 @@ button.live-route-node:hover {
   text-overflow: ellipsis;
 }
 
+.obj-meta {
+  color: var(--muted);
+  font-size: 0.64rem;
+  font-family: monospace;
+}
+
 .obj-row-excluded .obj-name {
   color: var(--muted);
   text-decoration: line-through;
 }
 
-.obj-state {
-  font-size: 0.75rem;
-  font-weight: 600;
+.obj-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
   flex-shrink: 0;
+}
+
+.obj-state {
+  min-width: 3.6rem;
+  font-size: 0.66rem;
+  font-weight: 800;
+  flex-shrink: 0;
+  text-align: right;
+  text-transform: uppercase;
 }
 
 .obj-state-current  { color: var(--printing); }
 .obj-state-excluded { color: var(--error); }
+.obj-state-ready { color: var(--muted); }
+
+.obj-exclude-btn {
+  border: 1px solid rgba(239,68,68,0.42);
+  border-radius: 0.38rem;
+  background: rgba(127,29,29,0.18);
+  color: #fecaca;
+  padding: 0.24rem 0.48rem;
+  font-size: 0.68rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.obj-exclude-btn:hover:not(:disabled) {
+  background: rgba(153,27,27,0.34);
+}
+
+.obj-exclude-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.44;
+}
 
 /* ── History tab ── */
 .history-body { padding: 1.5rem 2rem 2rem; display: flex; flex-direction: column; gap: 1rem; }

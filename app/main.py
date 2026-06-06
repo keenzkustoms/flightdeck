@@ -2038,7 +2038,13 @@ class ExcludeObjectRequest(BaseModel):
 async def get_printer_objects(printer_id: str):
     for (id, model_name, custom_name, icon, url) in _moonraker:
         if id == printer_id:
-            return await moonraker.fetch_objects(url)
+            data = await moonraker.fetch_objects(url)
+            return {
+                **data,
+                "mode": "klipper_exclude_object",
+                "label": "Klipper exclude object",
+                "detail": "Klipper excludes objects by object name.",
+            }
     for p in _bambu:
         if p.id == printer_id:
             return await asyncio.to_thread(p.get_objects)
@@ -2189,7 +2195,8 @@ async def post_exclude_object(printer_id: str, req: ExcludeObjectRequest):
                 await moonraker.exclude_object(url, req.name)
             except Exception as exc:
                 raise HTTPException(status_code=502, detail=str(exc))
-            return {"ok": True}
+            db.log_decision(printer_id, "object_excluded", f"Klipper object {req.name}")
+            return {"ok": True, "mode": "klipper_exclude_object"}
     for p in _bambu:
         if p.id == printer_id:
             if req.id is None:
@@ -2200,7 +2207,8 @@ async def post_exclude_object(printer_id: str, req: ExcludeObjectRequest):
                 raise HTTPException(status_code=502, detail=str(exc))
             if not ok:
                 raise HTTPException(status_code=502, detail="Bambu skip object command failed")
-            return {"ok": True}
+            db.log_decision(printer_id, "object_excluded", f"Bambu object id={req.id} name={req.name}")
+            return {"ok": True, "mode": "bambu_skip_objects"}
     raise HTTPException(status_code=400, detail="object exclusion not supported for this printer")
 
 
