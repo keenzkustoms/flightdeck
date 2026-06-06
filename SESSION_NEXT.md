@@ -1,5 +1,10 @@
 # Flightdeck — next session brief
-_Last updated 6 June 2026 (Session 28.183 Printer lockout reasons)_
+_Last updated 6 June 2026 (Session 28.184 Simulated camera feeds)_
+
+## What was added - Session 28.184 (Simulated camera feeds - 6 June)
+- Simulated printers now expose a generated camera endpoint through the normal printer camera API.
+- The synthetic feed renders an animated printer scene with state, job name, progress, temperatures, material, and a belt-bed treatment for the IdeaFormer IR3 V2 simulator.
+- No extra camera workers or image libraries are required; the feed is a lightweight SVG served from Flightdeck.
 
 ## What was added - Session 28.183 (Printer lockout reasons - 6 June)
 - Unticking a printer's `Print enabled` checkbox now opens a reason note prompt.

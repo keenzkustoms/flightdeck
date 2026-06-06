@@ -12,6 +12,7 @@ import socket
 import sqlite3
 import subprocess
 import urllib.request
+from html import escape as html_escape
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
@@ -68,6 +69,13 @@ def _dt_default(obj):
     if isinstance(obj, datetime):
         return obj.isoformat()
     raise TypeError(f"{type(obj)} not serializable")
+
+
+def _simulated_entry(printer_id: str) -> Optional[tuple[str, str, str, str, str, str]]:
+    for item in _simulated:
+        if item[0] == printer_id:
+            return item
+    return None
 
 
 async def _gather_all() -> list[dict]:
@@ -1680,6 +1688,8 @@ async def control_ams_drying(printer_id: str, ams_id: int, req: AmsDryRequest):
 @app.get("/api/printers/{printer_id}/camera")
 async def get_printer_camera(printer_id: str):
     """Return camera stream URL for the given printer, regardless of print state."""
+    if _simulated_entry(printer_id):
+        return {"url": f"/api/camera/{printer_id}/simulated.svg", "type": "simulated"}
     camera = _cameras.get(printer_id)
     if camera is None:
         raise HTTPException(status_code=404, detail="no camera configured")
@@ -1688,6 +1698,93 @@ async def get_printer_camera(printer_id: str):
     if isinstance(camera, BambuRtspCamera):
         return {"url": f"/api/camera/{printer_id}/stream", "type": "mjpeg"}
     raise HTTPException(status_code=404, detail="unknown camera type")
+
+
+def _simulated_camera_svg(printer_id: str, model_name: str, custom_name: str, icon: str, profile: str, scenario: str) -> str:
+    status = simulated.status(printer_id, model_name, custom_name, icon, profile, scenario)
+    job = status.job
+    progress = int((job.progress if job else 0) * 100)
+    state = status.state.upper()
+    hotend = status.temps.get("hotend")
+    bed = status.temps.get("bed")
+    material = "PLA+" if profile == "ideaformer" else "PETG" if profile == "prusalink" else "PLA"
+    accent = {
+        "prusalink": "#f97316",
+        "reprap": "#22c55e",
+        "octoprint": "#38bdf8",
+        "ideaformer": "#eab308",
+    }.get(profile, "#60a5fa")
+    name = html_escape(custom_name or model_name or printer_id)
+    model = html_escape(model_name or printer_id)
+    filename = html_escape(job.filename if job else status.idle_info.get("Last print", "Ready"))
+    hot_text = f"{hotend.actual:.0f}/{hotend.target:.0f}C" if hotend else "--"
+    bed_text = f"{bed.actual:.0f}/{bed.target:.0f}C" if bed else "--"
+    is_belt = profile == "ideaformer"
+    belt_marks = "".join(
+        f'<path d="M {80 + i * 82} 560 l42 -28" stroke="#334155" stroke-width="6" stroke-linecap="round"/>'
+        for i in range(10)
+    )
+    bed_shape = (
+        f'<g class="belt-bed"><rect x="70" y="500" width="980" height="105" rx="10" fill="#111827" stroke="#334155" stroke-width="3"/>{belt_marks}</g>'
+        if is_belt
+        else '<g><rect x="160" y="500" width="760" height="110" rx="10" fill="#111827" stroke="#334155" stroke-width="3"/><path d="M190 530h700M190 565h700M190 600h700" stroke="#1f2937" stroke-width="2"/></g>'
+    )
+    part_shape = (
+        '<g class="print-part"><path d="M480 490 h210 l40 72 h-270 z" fill="#94a3b8" opacity="0.92"/><path d="M505 512h160M518 536h176" stroke="#cbd5e1" stroke-width="4" opacity="0.45"/></g>'
+        if job
+        else '<g opacity="0.34"><rect x="500" y="500" width="160" height="54" rx="8" fill="#475569"/></g>'
+    )
+    nozzle_x = 520 + (int(datetime.now(timezone.utc).timestamp()) % 140)
+    return f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1120 630">
+  <style>
+    @keyframes scan {{ 0% {{ transform: translateX(-80px); }} 100% {{ transform: translateX(150px); }} }}
+    @keyframes belt {{ 0% {{ transform: translateX(0); }} 100% {{ transform: translateX(-82px); }} }}
+    @keyframes blink {{ 0%, 100% {{ opacity: 0.35; }} 50% {{ opacity: 1; }} }}
+    @keyframes glow {{ 0%,100% {{ opacity: 0.72; }} 50% {{ opacity: 1; }} }}
+    .gantry {{ animation: scan 4.2s ease-in-out infinite alternate; transform-origin: center; }}
+    .belt-bed {{ animation: belt 3.4s linear infinite; }}
+    .print-part {{ animation: glow 2.2s ease-in-out infinite; }}
+    .status-dot {{ animation: blink 1.4s ease-in-out infinite; }}
+    text {{ font-family: Inter, Segoe UI, Arial, sans-serif; }}
+  </style>
+  <rect width="1120" height="630" fill="#05070d"/>
+  <rect x="24" y="22" width="1068" height="586" rx="20" fill="#0b1120" stroke="#1e3a5f" stroke-width="3"/>
+  <rect x="58" y="82" width="1004" height="500" rx="16" fill="#070b14" stroke="#1f2937"/>
+  <path d="M120 475 h880" stroke="#243244" stroke-width="14" stroke-linecap="round"/>
+  {bed_shape}
+  <g class="gantry">
+    <path d="M250 185 h690" stroke="#475569" stroke-width="16" stroke-linecap="round"/>
+    <path d="M{nozzle_x} 190 v250" stroke="#64748b" stroke-width="10" stroke-linecap="round"/>
+    <path d="M{nozzle_x - 36} 414 h72 l-20 52 h-32 z" fill="{accent}" stroke="#fde68a" stroke-width="3"/>
+    <circle cx="{nozzle_x}" cy="472" r="9" fill="#fef3c7"/>
+  </g>
+  {part_shape}
+  <rect x="58" y="82" width="1004" height="52" rx="16" fill="#020617" opacity="0.78"/>
+  <text x="82" y="116" fill="#dbeafe" font-size="24" font-weight="800">{name}</text>
+  <text x="82" y="150" fill="#7f98bc" font-size="15">{model} simulated camera</text>
+  <circle class="status-dot" cx="980" cy="108" r="9" fill="{accent}"/>
+  <text x="1000" y="115" fill="#e2e8f0" font-size="18" font-weight="800">{state}</text>
+  <rect x="82" y="526" width="360" height="44" rx="9" fill="#020617" opacity="0.74"/>
+  <text x="102" y="554" fill="#e2e8f0" font-size="17" font-weight="700">{filename}</text>
+  <rect x="760" y="526" width="260" height="44" rx="9" fill="#020617" opacity="0.74"/>
+  <text x="780" y="554" fill="#cbd5e1" font-size="17">Hotend {hot_text}  Bed {bed_text}</text>
+  <rect x="82" y="582" width="936" height="9" rx="4.5" fill="#111827"/>
+  <rect x="82" y="582" width="{max(10, int(936 * progress / 100))}" height="9" rx="4.5" fill="{accent}"/>
+  <text x="1030" y="592" fill="#cbd5e1" font-size="16" text-anchor="end">{progress}% · {material}</text>
+</svg>'''
+
+
+@app.get("/api/camera/{printer_id}/simulated.svg")
+async def simulated_camera(printer_id: str):
+    entry = _simulated_entry(printer_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail="simulated printer not found")
+    svg = _simulated_camera_svg(*entry)
+    return Response(
+        content=svg,
+        media_type="image/svg+xml",
+        headers={"Cache-Control": "no-cache, no-store"},
+    )
 
 
 async def _mjpeg_direct_response(url: str) -> StreamingResponse:
