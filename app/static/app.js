@@ -10682,7 +10682,10 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
         </div>
         <div class="spool-form-row">
           <label class="spool-form-label">Colour name</label>
-          <input id="sm-color-name" class="spool-form-input" type="text" placeholder="e.g. Jade White" value="${p0.color_name||''}">
+          <input id="sm-color-name" class="spool-form-input" type="text" placeholder="e.g. Jade White" value="${p0.color_name||''}" list="sm-colour-name-options">
+          <datalist id="sm-colour-name-options">
+            ${['Black','White','Silver','Grey','Red','Orange','Yellow','Green','Cyan','Blue','Purple','Pink','Magenta','Brown','Rainbow'].map(v => `<option value="${v}"></option>`).join('')}
+          </datalist>
         </div>
         <div class="spool-form-row">
           <label class="spool-form-label">Colour scheme</label>
@@ -11489,6 +11492,48 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
     '#06b6d4':'Cyan','#3b82f6':'Blue','#a855f7':'Purple','#ec4899':'Pink',
   };
   const _knownSwatchNames = new Set(Object.values(_swatchNames));
+  const _colourAliases = [
+    { name: 'Black', hex: '#1a1a1a', keys: ['black', 'blk'] },
+    { name: 'White', hex: '#ffffff', keys: ['white', 'wht'] },
+    { name: 'Silver', hex: '#c0c0c0', keys: ['silver', 'sil'] },
+    { name: 'Grey', hex: '#808080', keys: ['grey', 'gray', 'gry'] },
+    { name: 'Red', hex: '#ef4444', keys: ['red'] },
+    { name: 'Orange', hex: '#f97316', keys: ['orange', 'org'] },
+    { name: 'Yellow', hex: '#eab308', keys: ['yellow', 'yel'] },
+    { name: 'Green', hex: '#22c55e', keys: ['green', 'grn'] },
+    { name: 'Cyan', hex: '#06b6d4', keys: ['cyan', 'aqua'] },
+    { name: 'Blue', hex: '#3b82f6', keys: ['blue', 'blu'] },
+    { name: 'Purple', hex: '#a855f7', keys: ['purple', 'purp', 'violet'] },
+    { name: 'Pink', hex: '#ec4899', keys: ['pink', 'pnk'] },
+    { name: 'Magenta', hex: '#ec4899', keys: ['magenta', 'mag'] },
+    { name: 'Brown', hex: '#7c3f20', keys: ['brown', 'brn'] },
+    { name: 'Rainbow', hex: '#ec4899', keys: ['rainbow', 'multi'] },
+  ];
+
+  function colourAliasMatch(value) {
+    const needle = String(value || '').trim().toLowerCase();
+    if (!needle) return null;
+    const exact = _colourAliases.find(c => c.name.toLowerCase() === needle || c.keys.includes(needle));
+    if (exact) return exact;
+    const matches = _colourAliases.filter(c =>
+      c.name.toLowerCase().startsWith(needle) || c.keys.some(k => k.startsWith(needle))
+    );
+    return matches.length === 1 ? matches[0] : null;
+  }
+
+  function applyColourNameAlias(value) {
+    const match = colourAliasMatch(value);
+    if (!match) return false;
+    const nameEl = overlay.querySelector('#sm-color-name');
+    nameEl.value = match.name;
+    syncColor(match.hex);
+    if (match.name === 'Rainbow') {
+      schemeSel.value = 'mixed';
+      updateSchemeColourRows();
+    }
+    updateDraftPreview('Colour matched');
+    return true;
+  }
 
   overlay.querySelectorAll('.spool-swatch').forEach(sw => {
     sw.addEventListener('click', () => {
@@ -11519,7 +11564,13 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
     applyDefaultTare();
     updateDraftPreview();
   });
-  overlay.querySelector('#sm-color-name')?.addEventListener('input', () => updateDraftPreview());
+  const colorNameInput = overlay.querySelector('#sm-color-name');
+  colorNameInput?.addEventListener('input', () => {
+    if (!applyColourNameAlias(colorNameInput.value)) updateDraftPreview();
+  });
+  colorNameInput?.addEventListener('change', () => {
+    applyColourNameAlias(colorNameInput.value);
+  });
   weighBtn.addEventListener('click', async () => {
     const old = weighBtn.textContent;
     weighBtn.disabled = true;

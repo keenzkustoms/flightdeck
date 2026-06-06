@@ -1,5 +1,11 @@
 # Flightdeck — next session brief
-_Last updated 6 June 2026 (Session 28.196 Spool scan label swatch colour)_
+_Last updated 6 June 2026 (Session 28.197 Colour name aliases)_
+
+## What was added - Session 28.197 (Colour name aliases - 6 June)
+- Colour name entry now includes browser autocomplete suggestions for common colour names.
+- Typing short aliases like `mag`, `blu`, `gre`, `sil`, or `rainbow` applies the matching colour name and swatch.
+- Magenta maps to the existing pink/magenta swatch so Bambu-style `Magenta` labels can be corrected quickly when OCR misses the tiny colour text.
+- Bumped static cache to `app.js?v=300` and `style.css?v=236`; frontend refresh required.
 
 ## What was added - Session 28.196 (Spool scan label swatch colour - 6 June)
 - Spool OCR now falls back to photo colour detection when label text finds material/subtype but misses the colour name.
