@@ -8492,16 +8492,19 @@ function _slicerProfilesHtml(profileData, printers) {
     const d = defaults[p.id] || {};
     const rowKey = String(p.id || '').replace(/[^A-Za-z0-9_-]/g, '_');
     const rowFallback = [p.model_name, p.custom_name, p.id].filter(Boolean).join(' ');
-    const rowProcesses = _slicerFilterRowsForPrinter(processProfiles, d.printer_profile, rowFallback);
-    const rowFilaments = _slicerFilterRowsForPrinter(filamentProfiles, d.printer_profile, rowFallback);
+    const rowPrinters = _slicerFilterRowsForPrinter(printerProfiles, rowFallback, rowFallback);
+    const selectedPrinter = d.printer_profile || rowPrinters[0]?.name || '';
+    const rowProcesses = _slicerFilterRowsForPrinter(processProfiles, selectedPrinter, rowFallback);
+    const rowFilaments = _slicerFilterRowsForPrinter(filamentProfiles, selectedPrinter, rowFallback);
     return `<div class="slicer-profile-row" data-printer-id="${esc(p.id)}">
       <div class="slicer-profile-printer">
         <strong>${esc(p.custom_name || p.model_name || p.id)}</strong>
         <span>${esc([p.model_name, p.kind].filter(Boolean).join(' · '))}</span>
       </div>
-      <input class="settings-input slicer-profile-input" data-profile-slot="printer" list="slicer-printer-profiles" value="${esc(d.printer_profile || '')}" placeholder="Printer profile">
+      <input class="settings-input slicer-profile-input" data-profile-slot="printer" list="slicer-printer-profiles-${esc(rowKey)}" value="${esc(d.printer_profile || '')}" placeholder="Printer profile">
       <input class="settings-input slicer-profile-input" data-profile-slot="process" list="slicer-process-profiles-${esc(rowKey)}" value="${esc(d.process_profile || '')}" placeholder="Process profile">
       <input class="settings-input slicer-profile-input" data-profile-slot="filament" list="slicer-filament-profiles-${esc(rowKey)}" value="${esc(d.filament_profile || '')}" placeholder="Filament profile">
+      ${_slicerDatalist(`slicer-printer-profiles-${rowKey}`, rowPrinters)}
       ${_slicerDatalist(`slicer-process-profiles-${rowKey}`, rowProcesses)}
       ${_slicerDatalist(`slicer-filament-profiles-${rowKey}`, rowFilaments)}
       <button type="button" class="settings-save-btn slicer-profile-save">Save</button>
@@ -8522,7 +8525,6 @@ function _slicerProfilesHtml(profileData, printers) {
     <div class="settings-section slicer-profiles-panel">
       <div class="settings-section-title">Printer Defaults</div>
       <div class="settings-hint">Choose the default profile triplet Flightdeck should use when slicing for each printer.</div>
-      ${_slicerDatalist('slicer-printer-profiles', printerProfiles)}
       ${_slicerDatalist('slicer-process-profiles', processProfiles)}
       ${_slicerDatalist('slicer-filament-profiles', filamentProfiles)}
       <div class="slicer-profile-table">${rows}</div>
