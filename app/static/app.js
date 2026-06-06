@@ -8447,35 +8447,45 @@ function _slicerDatalist(id, rows) {
   </datalist>`;
 }
 
-function _slicerProfileToken(text, fallback = '') {
-  const raw = String(text || fallback || '').toUpperCase();
-  if (raw.includes('H2DP') || raw.includes('H2D PRO')) return 'H2DP';
-  if (raw.includes('H2D')) return 'H2D';
-  if (raw.includes('X1C') || raw.includes('X1 CARBON')) return 'X1C';
-  if (raw.includes('X1')) return 'X1';
-  if (raw.includes('P1S')) return 'P1S';
-  if (raw.includes('P1P')) return 'P1P';
-  if (raw.includes('A1 MINI')) return 'A1 MINI';
-  if (raw.includes('A1')) return 'A1';
-  const sovol = raw.match(/SOVOL\s+(SV\d+(?:\s*MAX)?)/);
-  if (sovol) return sovol[1].replace(/\s+/g, ' ');
-  const prusa = raw.match(/PRUSA\s+([A-Z0-9 ]+)/);
-  if (prusa) return prusa[1].trim();
-  const anycubic = raw.match(/ANYCUBIC\s+([A-Z0-9 ]+)/);
-  if (anycubic) return anycubic[1].trim();
-  return '';
+function _slicerProfileKeywords(...parts) {
+  const raw = parts.filter(Boolean).join(' ').toUpperCase();
+  const compact = raw.replace(/[^A-Z0-9]+/g, '');
+  const words = raw
+    .replace(/[_-]+/g, ' ')
+    .split(/[^A-Z0-9]+/)
+    .map(w => w.trim())
+    .filter(w => w.length >= 2)
+    .filter(w => !['THE', 'AND', 'PRO', 'MAX', 'MINI', 'LAB', 'LABS', 'BAMBU', 'PRINTER', 'SIMULATED'].includes(w));
+  const aliases = [];
+  if (raw.includes('X1 CARBON') || compact.includes('X1CARBON')) aliases.push('X1C');
+  if (raw.includes('H2D PRO') || compact.includes('H2DPRO')) aliases.push('H2DP');
+  if (raw.includes('A1 MINI') || compact.includes('A1MINI')) aliases.push('A1 MINI', 'A1M');
+  const modelLike = words.filter(w => /[A-Z]/.test(w) && /\d/.test(w));
+  return [...new Set([...aliases, ...modelLike, ...words])];
+}
+
+function _slicerProfileScore(row, keywords) {
+  if (!keywords.length) return 0;
+  const name = String(row.name || '').toUpperCase();
+  const compact = name.replace(/[^A-Z0-9]+/g, '');
+  let score = 0;
+  keywords.forEach((kw, index) => {
+    const key = String(kw || '').toUpperCase();
+    if (!key) return;
+    const keyCompact = key.replace(/[^A-Z0-9]+/g, '');
+    if (name.includes(key)) score += index < 3 ? 8 : 4;
+    else if (keyCompact && compact.includes(keyCompact)) score += index < 3 ? 7 : 3;
+  });
+  return score;
 }
 
 function _slicerFilterRowsForPrinter(rows, printerProfile, fallback = '') {
-  const token = _slicerProfileToken(printerProfile, fallback);
-  if (!token) return rows;
-  const tokenNoSpace = token.replace(/\s+/g, '');
-  const filtered = rows.filter(row => {
-    const name = String(row.name || '').toUpperCase();
-    const compact = name.replace(/\s+/g, '');
-    return name.includes(token) || compact.includes(tokenNoSpace);
-  });
-  return filtered.length ? filtered : rows;
+  const keywords = _slicerProfileKeywords(printerProfile, fallback);
+  const scored = rows
+    .map(row => ({ row, score: _slicerProfileScore(row, keywords) }))
+    .filter(item => item.score > 0)
+    .sort((a, b) => b.score - a.score || a.row.name.localeCompare(b.row.name));
+  return scored.length ? scored.map(item => item.row) : rows;
 }
 
 function _slicerProfilesHtml(profileData, printers) {
