@@ -5555,10 +5555,16 @@ async function _renderPrinterBayBody(printerId) {
           <h2>${esc(_dashboardPrinterName(printer || { id: printerId }))}</h2>
           <p>Machine-local files, recent work, and vault candidates for this printer.</p>
         </div>
-        <div class="printer-bay-stats">
-          <span><strong>${printerFileCount}</strong> printer files</span>
-          <span><strong>${vaultFiles}</strong> vault matches</span>
-          <span><strong>${recent.length}</strong> recent prints</span>
+        <div class="printer-bay-hero-actions">
+          <label class="filedesk-upload-source">
+            <input type="file" id="printer-bay-source-upload" accept=".stl,.obj,.step,.stp,.3mf,.gcode,.gcode.gz,.ufp">
+            Upload Source
+          </label>
+          <div class="printer-bay-stats">
+            <span><strong>${printerFileCount}</strong> printer files</span>
+            <span><strong>${vaultFiles}</strong> vault matches</span>
+            <span><strong>${recent.length}</strong> recent prints</span>
+          </div>
         </div>
       </section>
       ${_printBayReprintHtml(recent, _fileDeskTargets)}
@@ -5604,6 +5610,11 @@ function _attachFileDeskEvents(el) {
     });
   });
   el.querySelector('#filedesk-source-upload')?.addEventListener('change', e => {
+    const file = e.currentTarget.files?.[0];
+    if (file) _uploadSourceModel(file);
+    e.currentTarget.value = '';
+  });
+  el.querySelector('#printer-bay-source-upload')?.addEventListener('change', e => {
     const file = e.currentTarget.files?.[0];
     if (file) _uploadSourceModel(file);
     e.currentTarget.value = '';
