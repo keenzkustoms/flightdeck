@@ -8186,6 +8186,35 @@ button.live-route-node:hover {
   border-bottom: 1px solid rgba(122,162,216,0.16);
 }
 
+.fleet-wall-head-right {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.fleet-wall-head-flag {
+  max-width: 13rem;
+  border: 1px solid rgba(245,158,11,0.5);
+  border-radius: 999px;
+  color: #fde68a;
+  background: rgba(245,158,11,0.08);
+  padding: 0.17rem 0.48rem;
+  font-size: 0.64rem;
+  font-weight: 850;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fleet-wall-head-flag-locked {
+  border-color: rgba(168,85,247,0.58);
+  color: #e9d5ff;
+  background: rgba(168,85,247,0.1);
+}
+
 .fleet-wall-kind {
   flex: 0 0 auto;
   border: 1px solid rgba(122,162,216,0.26);
@@ -8423,8 +8452,8 @@ button.live-route-node:hover {
   border-radius: 999px;
   background: rgba(245,158,11,0.08);
   color: #fde68a;
-  padding: 0.2rem 0.55rem;
-  font-size: 0.72rem;
+  padding: 0.18rem 0.46rem;
+  font-size: 0.68rem;
   font-weight: 800;
 }
 
@@ -8511,6 +8540,119 @@ button.live-route-node:hover {
 
 .fleet-wall-ams-dot.is-active {
   box-shadow: 0 0 0 2px rgba(59,130,246,0.8), 0 0 14px color-mix(in srgb, var(--dot) 62%, transparent);
+}
+
+.fleet-wall-ams-visual {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.fleet-wall-ams-visual .ams-loadout-deck {
+  --ams-loadout-head-space: 1.55rem;
+}
+
+.fleet-wall-ams-visual .ams-loadout-units {
+  flex-wrap: nowrap;
+  gap: 0.5rem;
+  align-items: stretch;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 0.08rem;
+  scrollbar-width: thin;
+}
+
+.fleet-wall-ams-visual .ams-loadout-unit {
+  grid-template-columns: minmax(0, 1fr) 3.85rem;
+  gap: 0.36rem;
+  border-radius: 0.52rem;
+  padding: 0.42rem 0.44rem 0.48rem;
+}
+
+.fleet-wall-ams-visual .ams-loadout-unit:not(.ams-loadout-unit-ht) {
+  width: 20.4rem;
+}
+
+.fleet-wall-ams-visual .ams-loadout-unit-ht {
+  width: 13.2rem;
+  grid-template-columns: minmax(5.7rem, 1fr) 3.85rem;
+}
+
+.fleet-wall-ams-visual .ams-loadout-head {
+  margin-bottom: 0.32rem;
+}
+
+.fleet-wall-ams-visual .ams-loadout-head strong {
+  font-size: 0.7rem;
+}
+
+.fleet-wall-ams-visual .ams-loadout-head span,
+.fleet-wall-ams-visual .ams-loadout-head small,
+.fleet-wall-ams-visual .ams-loadout-side small {
+  font-size: 0.56rem;
+}
+
+.fleet-wall-ams-visual .ams-loadout-side {
+  gap: 0.26rem;
+  padding: 1.55rem 0.25rem 0.1rem 0.45rem;
+}
+
+.fleet-wall-ams-visual .ams-loadout-slots {
+  grid-template-columns: repeat(4, minmax(3rem, 1fr));
+  gap: 0.3rem;
+  padding: 0.36rem;
+}
+
+.fleet-wall-ams-visual .ams-loadout-unit-ht .ams-loadout-slots {
+  grid-template-columns: minmax(3.3rem, 4.2rem);
+  padding: 0.32rem;
+}
+
+.fleet-wall-ams-visual .ams-loadout-lip {
+  inset: 0.18rem auto auto 0.22rem;
+}
+
+.fleet-wall-ams-visual .ams-loadout-lip b {
+  font-size: 0.42rem;
+}
+
+.fleet-wall-ams-visual .ams-loadout-slot::before {
+  right: 0.24rem;
+  top: 0.24rem;
+  width: 0.32rem;
+  height: 0.32rem;
+}
+
+.fleet-wall-ams-visual .ams-loadout-core {
+  min-width: 1.25rem;
+  height: 1.25rem;
+  font-size: 0.52rem;
+}
+
+.fleet-wall-ams-visual .ams-loadout-info {
+  inset: auto 0.1rem 0.1rem;
+  padding: 0.07rem 0.14rem;
+}
+
+.fleet-wall-ams-visual .ams-loadout-info strong {
+  font-size: 0.5rem;
+}
+
+.fleet-wall-ams-visual .ams-loadout-info em {
+  font-size: 0.46rem;
+}
+
+.fleet-wall-ams-visual .ams-loadout-dry-state {
+  font-size: 0.56rem;
+}
+
+.fleet-wall-ams-visual .ams-loadout-dry-time {
+  font-size: 0.5rem;
+}
+
+.fleet-wall-ams-visual .live-ams-dry {
+  min-width: 2.4rem;
+  padding: 0.18rem 0.32rem;
+  font-size: 0.54rem;
 }
 
 .fleet-wall-actions {
@@ -8622,6 +8764,12 @@ button.live-route-node:hover {
   padding: 1rem 1.1rem;
 }
 
+.fleet-wall-large .fleet-wall-head-flag {
+  max-width: 19rem;
+  font-size: 0.74rem;
+  padding: 0.24rem 0.62rem;
+}
+
 .fleet-wall-large .printer-custom {
   font-size: 1.18rem;
 }
@@ -8682,9 +8830,20 @@ button.live-route-node:hover {
   padding: 0.42rem 0.55rem;
 }
 
-.fleet-wall-large .fleet-wall-ams-dot {
-  width: 1.45rem;
-  height: 1.45rem;
+.fleet-wall-large .fleet-wall-ams-visual .ams-loadout-unit:not(.ams-loadout-unit-ht) {
+  width: min(100%, 24.2rem);
+}
+
+.fleet-wall-large .fleet-wall-ams-visual .ams-loadout-unit-ht {
+  width: min(100%, 17rem);
+}
+
+.fleet-wall-large .fleet-wall-ams-visual .ams-loadout-slots {
+  grid-template-columns: repeat(4, minmax(3.75rem, 1fr));
+}
+
+.fleet-wall-large .fleet-wall-ams-visual .ams-loadout-unit-ht .ams-loadout-slots {
+  grid-template-columns: minmax(4rem, 5rem);
 }
 
 .fleet-wall-large .fleet-wall-actions a {
@@ -8744,6 +8903,9 @@ button.live-route-node:hover {
   .fleet-wall-card-head {
     align-items: flex-start;
     flex-direction: column;
+  }
+  .fleet-wall-head-right {
+    justify-content: flex-start;
   }
 }
 

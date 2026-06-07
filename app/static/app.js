@@ -2058,6 +2058,14 @@ document.addEventListener('click', e => {
 }, true);
 
 document.addEventListener('click', e => {
+  const fleetLive = e.target.closest('[data-fleet-live]');
+  if (fleetLive) {
+    e.preventDefault();
+    e.stopPropagation();
+    location.hash = `#/printer/${encodeURIComponent(fleetLive.dataset.fleetLive)}`;
+    return;
+  }
+
   const target = e.target.closest('[data-warning-target], [data-slot-edit]');
   if (!target) return;
   if (target.dataset.warningTarget === 'hash') {
@@ -7621,16 +7629,32 @@ function _fleetWallWarnings(p) {
   if (p.state === 'error' || p.state === 'estop') warnings.push(p.error || _liveStateLabel(p.state));
   if (p.state === 'offline') warnings.push(fmtLastSeen(p.last_seen));
   if (p.state === 'paused') warnings.push(p.error || 'Paused');
-  if (_healthIsActionable(p.health) && p.health?.reasons?.[0]?.message) warnings.push(p.health.reasons[0].message);
   _amsMismatchSignals(p, loaded).slice(0, 2).forEach(w => warnings.push(w.label || w.title || 'AMS review'));
   loaded
     .filter(s => !s.archived_at && Number(s.label_weight_g || 0) > 0)
     .map(s => ({ s, pct: Math.round(Number(s.remaining_g || 0) * 100 / Number(s.label_weight_g || 1)) }))
     .filter(x => x.pct < _latestLowStockPct)
     .slice(0, 2)
-    .forEach(({ s }) => warnings.push(`Low spool #${s.id}: ${Math.round(Number(s.remaining_g || 0))}g`));
+    .forEach(({ s }) => {
+      const grams = Math.max(0, Math.round(Number(s.remaining_g || 0)));
+      const threshold = Math.max(10, Math.ceil(grams / 10) * 10);
+      warnings.push(`#${s.id} <${threshold}g`);
+    });
   if (!warnings.length) return `<div class="fleet-wall-clear">No active warnings</div>`;
   return `<div class="fleet-wall-warnings">${warnings.slice(0, 4).map(w => `<span>${esc(w)}</span>`).join('')}</div>`;
+}
+
+function _fleetWallHeaderFlags(p) {
+  const flags = [];
+  if (_healthIsActionable(p.health) && p.health?.reasons?.[0]?.message) {
+    flags.push({ tone: 'watch', label: p.health.reasons[0].message });
+  }
+  if (_printerPrintLocked(p)) {
+    flags.push({ tone: 'locked', label: `On hold: ${_printerLockoutReason(p)}` });
+  }
+  return flags.slice(0, 2).map(f =>
+    `<span class="fleet-wall-head-flag fleet-wall-head-flag-${f.tone}" title="${esc(f.label)}">${esc(f.label)}</span>`
+  ).join('');
 }
 
 function _fleetWallSpools(p) {
@@ -7672,6 +7696,11 @@ function _fleetWallAmsStrip(p) {
   return `<div class="fleet-wall-ams">${rows}</div>`;
 }
 
+function _fleetWallAmsVisual(p) {
+  if (!p.ams?.length) return _fleetWallSpools(p);
+  return `<div class="fleet-wall-ams-visual">${_detailLiveAmsLoadoutRows(p)}</div>`;
+}
+
 function _fleetWallFeedHtml(p) {
   const cameraId = p._camera_id || p.id;
   const camSrc = _cameraStreamSrc(cameraId);
@@ -7705,19 +7734,14 @@ function _fleetWallCardBody(p) {
         ${_fleetWallMetric('Mode', activeJob ? 'In flight' : (_printerPrintLocked(p) ? 'On hold' : 'Available'))}
       </div>
       ${_fleetWallWarnings(p)}
-      ${_fleetWallSpools(p)}
-      ${_fleetWallAmsStrip(p)}
+      ${_fleetWallAmsVisual(p)}
       ${_fleetWallMode === 'large' ? `<div class="fleet-wall-extra">
         <span><b>Signal</b>${esc(fmtLastSeen(p.last_seen))}</span>
         <span><b>ID</b>${esc(p.id)}</span>
         <span><b>Type</b>${esc(p.kind || p.connection?.type || 'printer')}</span>
       </div>` : ''}
     </div>
-    <div class="fleet-wall-actions">
-      <a href="#/printer/${esc(p.id)}">Live</a>
-      <a href="#/printer/${esc(p.id)}/bay">Bay</a>
-      <a href="#/printer/${esc(p.id)}/history">History</a>
-    </div>`;
+    `;
 }
 
 function _fleetWallHeadHtml(p) {
@@ -7729,7 +7753,10 @@ function _fleetWallHeadHtml(p) {
       ${_printerModelHtml(p)}
     </div>
   </div>
-  <span class="fleet-wall-kind">${esc(p.kind || p.connection?.type || 'printer')}</span>`;
+  <div class="fleet-wall-head-right">
+    ${_fleetWallHeaderFlags(p)}
+    <span class="fleet-wall-kind">${esc(p.kind || p.connection?.type || 'printer')}</span>
+  </div>`;
 }
 
 function _fleetWallCardHtml(p) {
@@ -7737,7 +7764,7 @@ function _fleetWallCardHtml(p) {
     <div class="fleet-wall-card-head">
       ${_fleetWallHeadHtml(p)}
     </div>
-    <a class="fleet-wall-feed" href="#/printer/${esc(p.id)}" data-fleet-feed="${esc(p.id)}">
+    <a class="fleet-wall-feed" href="#/printer/${esc(p.id)}" data-fleet-feed="${esc(p.id)}" data-fleet-live="${esc(p.id)}">
       ${_fleetWallFeedHtml(p)}
     </a>
     <div class="fleet-wall-card-body">${_fleetWallCardBody(p)}</div>
