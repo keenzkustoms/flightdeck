@@ -3660,13 +3660,81 @@ function _objectMapHtml(id, data) {
     ? 'Tap the failed part on the plate map.'
     : `No bed positions in this 3MF; use the object ID shown on the printer screen. Bambu/Orca IDs can be high. ${availableObjects.length} objects still available.`;
   return `<div class="${classes}">
-    <div class="obj-map-stage">
+    <div class="obj-map-stage obj-map-open" data-printer-id="${esc(id)}" title="Open large object selector">
       ${image}
       ${hasGeometry ? `<div class="obj-map-overlay">${mapButtons}</div>` : ''}
     </div>
     ${hasGeometry ? '' : `<div class="obj-id-selector"><span>Printer object IDs</span><div>${mapButtons}</div></div>`}
     <div class="obj-map-helper">${esc(helper)}</div>
   </div>`;
+}
+
+function _largeObjectMapHtml(id, data) {
+  const objects = data?.objects || [];
+  const bounds = data?.plate_bounds;
+  const hasGeometry = bounds && bounds.w > 0 && bounds.h > 0 && objects.some(o => o.bbox);
+  const imageVersion = objects.map(o => `${o.id ?? ''}:${o.state ?? ''}`).join('-') || 'current';
+  const image = data?.plate_image_url
+    ? `<img src="${esc(data.plate_image_url)}?map=${encodeURIComponent(imageVersion)}" alt="Large plate preview" loading="eager">`
+    : '<div class="object-map-missing">No thumbnail available</div>';
+  const buttons = objects.map(obj => {
+    const isExcluded = obj.state === 'excluded';
+    const isCurrent = obj.state === 'current';
+    const rawName = obj.name || `Object ${obj.id ?? ''}`;
+    const safeName = esc(rawName);
+    const safeId = obj.id ?? '';
+    const shortName = (obj.label || rawName).replace(/.*[/\\]/, '');
+    const displayId = safeId !== '' ? `#${esc(safeId)}` : esc(shortName);
+    if (hasGeometry && obj.bbox) {
+      const left = ((obj.bbox.x - bounds.x) / bounds.w) * 100;
+      const top = ((obj.bbox.y - bounds.y) / bounds.h) * 100;
+      const width = (obj.bbox.w / bounds.w) * 100;
+      const height = (obj.bbox.h / bounds.h) * 100;
+      return `<button type="button" class="obj-map-region obj-exclude-btn${isExcluded ? ' is-excluded' : ''}${isCurrent ? ' is-current' : ''}"
+        style="left:${left.toFixed(2)}%;top:${top.toFixed(2)}%;width:${Math.max(width, 5).toFixed(2)}%;height:${Math.max(height, 5).toFixed(2)}%"
+        data-obj-name="${safeName}" data-obj-label="${esc(shortName)}" data-printer-id="${id}" data-obj-id="${safeId}" ${isExcluded ? 'disabled' : ''}
+        title="${esc(shortName)}"><span class="obj-chip-id">${displayId}</span></button>`;
+    }
+    return `<button type="button" class="obj-id-select obj-exclude-btn${isExcluded ? ' is-excluded' : ''}${isCurrent ? ' is-current' : ''}"
+      data-obj-name="${safeName}" data-obj-label="${esc(shortName)}" data-printer-id="${id}" data-obj-id="${safeId}" ${isExcluded ? 'disabled' : ''}
+      title="${esc(shortName)}"><span class="obj-chip-id">${displayId}</span><span>${esc(shortName)}</span></button>`;
+  }).join('');
+  const helper = hasGeometry
+    ? 'Tap the failed object on the enlarged bed map.'
+    : 'This file has no bed-position metadata. Match the object ID shown on the printer screen, then select it below.';
+  return `<div class="object-map-modal-body">
+    <div class="object-map-modal-stage${hasGeometry ? ' has-geometry' : ''}">
+      ${image}
+      ${hasGeometry ? `<div class="obj-map-overlay">${buttons}</div>` : ''}
+    </div>
+    <div class="obj-map-helper">${esc(helper)}</div>
+    ${hasGeometry ? '' : `<div class="obj-id-selector object-map-modal-ids"><span>Printer object IDs</span><div>${buttons}</div></div>`}
+  </div>`;
+}
+
+function _openObjectMapModal(id) {
+  const data = _objectsCache[id];
+  if (!data?.objects?.length) return;
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay object-map-overlay-modal';
+  overlay.innerHTML = `<div class="modal-box object-map-modal">
+    <div class="modal-header">
+      <span class="modal-title">Skip object selector</span>
+      <button class="modal-close-btn">×</button>
+    </div>
+    ${_largeObjectMapHtml(id, data)}
+  </div>`;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+  overlay.querySelector('.modal-close-btn')?.addEventListener('click', close);
+  overlay.addEventListener('click', e => {
+    const btn = e.target.closest('.obj-exclude-btn');
+    if (!btn || btn.disabled) return;
+    e.preventDefault();
+    close();
+    _confirmExcludeButton(btn);
+  });
 }
 
 async function refreshObjectsPanel(id) {
@@ -3703,11 +3771,7 @@ async function sendExcludeObject(id, name, objectId = null) {
   }
 }
 
-// Delegated click for Klipper/Bambu object exclusion.
-document.getElementById('view-printer').addEventListener('click', e => {
-  const btn = e.target.closest('.obj-exclude-btn');
-  if (!btn || btn.disabled) return;
-  e.preventDefault();
+function _confirmExcludeButton(btn) {
   const name = btn.dataset.objName;
   const id = btn.dataset.printerId;
   const objectId = btn.dataset.objId;
@@ -3718,6 +3782,22 @@ document.getElementById('view-printer').addEventListener('click', e => {
     `Exclude "${shortName}"${idText} from this print? The printer will skip this object and Flightdeck cannot un-skip it mid-print.`,
     () => sendExcludeObject(id, name, objectId)
   );
+}
+
+// Delegated click for Klipper/Bambu object exclusion.
+document.getElementById('view-printer').addEventListener('click', e => {
+  const btn = e.target.closest('.obj-exclude-btn');
+  if (!btn || btn.disabled) return;
+  e.preventDefault();
+  _confirmExcludeButton(btn);
+});
+
+document.getElementById('view-printer').addEventListener('click', e => {
+  if (e.target.closest('.obj-exclude-btn')) return;
+  const stage = e.target.closest('.obj-map-open');
+  if (!stage) return;
+  e.preventDefault();
+  _openObjectMapModal(stage.dataset.printerId);
 });
 
 document.getElementById('view-printer').addEventListener('click', e => {

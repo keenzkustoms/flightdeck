@@ -1,5 +1,12 @@
 # Flightdeck — next session brief
-_Last updated 7 June 2026 (Session 28.216 Object ID selector honesty)_
+_Last updated 7 June 2026 (Session 28.217 Enlarged object selector)_
+
+## What was added - Session 28.217 (Enlarged object selector - 7 June)
+- Clicking the object thumbnail now opens a larger skip-object selector modal.
+- Jobs with real object geometry can be selected from the enlarged bed map.
+- Jobs without object geometry show a larger preview plus a clear printer-object-ID selector, so operators can match the ID shown on the printer screen.
+- Shared the same exclusion confirmation flow between the list, inline map, and enlarged selector.
+- Bumped static cache to `app.js?v=334` and `style.css?v=265`; frontend refresh required.
 
 ## What was improved - Session 28.216 (Object ID selector honesty - 7 June)
 - Object exclusion no longer draws approximate ID buttons over the thumbnail when the 3MF lacks object geometry.

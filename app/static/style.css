@@ -6404,6 +6404,10 @@ button.live-route-node:hover {
   background-size: 1.2rem 1.2rem;
 }
 
+.obj-map-open {
+  cursor: zoom-in;
+}
+
 .obj-map-stage img {
   display: block;
   width: 100%;
@@ -6476,6 +6480,7 @@ button.live-route-node:hover {
 
 .obj-id-select {
   display: inline-flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   border: 2px solid rgba(96,165,250,0.62);
@@ -6484,6 +6489,17 @@ button.live-route-node:hover {
   color: #fff;
   min-height: 1.7rem;
   padding: 0.18rem 0.34rem;
+}
+
+.obj-id-select > span:not(.obj-chip-id) {
+  max-width: 100%;
+  color: #bfdbfe;
+  font-size: 0.58rem;
+  font-weight: 800;
+  line-height: 1.05;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .obj-map-chip:hover:not(:disabled) {
@@ -8223,6 +8239,49 @@ button.live-route-node:hover {
 .obj-map-chip.obj-exclude-btn:hover:not(:disabled) {
   border-color: rgba(147,197,253,0.92);
   background: rgba(30,64,175,0.62);
+}
+
+.object-map-modal {
+  width: min(64rem, calc(100vw - 1.5rem));
+  max-height: calc(100vh - 1.5rem);
+  overflow: auto;
+}
+
+.object-map-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.object-map-modal-stage {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(96,165,250,0.22);
+  border-radius: 0.55rem;
+  background:
+    linear-gradient(45deg, rgba(15,23,42,0.9) 25%, transparent 25% 50%, rgba(15,23,42,0.9) 50% 75%, transparent 75%),
+    rgba(2,6,23,0.82);
+  background-size: 1.2rem 1.2rem;
+}
+
+.object-map-modal-stage img {
+  display: block;
+  width: 100%;
+  max-height: 65vh;
+  object-fit: contain;
+  filter: brightness(1.08) contrast(1.08);
+}
+
+.object-map-modal-stage .obj-map-region .obj-chip-id {
+  font-size: 1rem;
+}
+
+.object-map-modal-ids > div {
+  grid-template-columns: repeat(auto-fit, minmax(5.5rem, 1fr));
+}
+
+.object-map-modal-ids .obj-id-select {
+  min-height: 2.45rem;
 }
 
 .settings-content.settings-content-spools {
