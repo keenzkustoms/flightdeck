@@ -79,7 +79,21 @@ function _printerModelHtml(p) {
   const attrs = clickable
     ? `data-light-printer="${p.id}" data-light-toggle="${p.id}" role="button" tabindex="0"`
     : `data-light-printer="${p.id}"`;
-  return `<span class="${cls}" ${attrs} title="${esc(title)}">${esc(p.model_name)}</span>`;
+  const label = _printerSecondaryLabel(p);
+  return label ? `<span class="${cls}" ${attrs} title="${esc(title)}">${esc(label)}</span>` : '';
+}
+
+function _printerPrimaryLabel(p) {
+  return p?.custom_name || p?.shop_name || p?.model_name || p?.id || 'Printer';
+}
+
+function _printerSecondaryLabel(p) {
+  const primary = _printerPrimaryLabel(p);
+  const model = p?.model_name || '';
+  if (model && model !== primary) return model;
+  const kind = p?.kind || p?.connection?.type || '';
+  if (kind && kind !== primary) return kind;
+  return p?.id && p.id !== primary ? p.id : '';
 }
 
 function _bambuLightWordHtml(p) {
@@ -127,8 +141,19 @@ async function loadSettings() {
 function _applyAppearanceSettings() {
   const accent = _serverSettings.accent ?? '#3b82f6';
   document.documentElement.style.setProperty('--printing', accent);
+  document.documentElement.style.setProperty('--sidebar-text', _safeCssHex(_serverSettings.sidebar_text_color, '#8fa8c8'));
   const bg = (_serverSettings.theme_background || 'classic').replace(/[^a-z0-9_-]/gi, '');
   document.documentElement.dataset.themeBg = bg || 'classic';
+  if (bg === 'custom') {
+    document.documentElement.style.setProperty('--bg', _safeCssHex(_serverSettings.theme_background_color, '#0a0a0f'));
+  } else {
+    document.documentElement.style.removeProperty('--bg');
+  }
+}
+
+function _safeCssHex(value, fallback = '#8fa8c8') {
+  const raw = String(value || '').trim();
+  return /^#[0-9a-fA-F]{6}$/.test(raw) ? raw : fallback;
 }
 
 async function loadInstanceInfo() {
@@ -1210,7 +1235,7 @@ function _dashboardPrinterName(p) {
 }
 
 function _printerNavLabel(p) {
-  return p.model_name || p.custom_name || p.id;
+  return _printerPrimaryLabel(p);
 }
 
 function _printerProgressBadge(p) {
@@ -1604,8 +1629,8 @@ function renderCard(p) {
           <div class="printer-icon">${getIcon(p.icon)}</div>
           ${connDot(p.last_seen)}
           <div class="printer-names">
+            <span class="printer-custom">${esc(_printerPrimaryLabel(p))}</span>
             ${_printerModelHtml(p)}
-            <span class="printer-custom">${p.custom_name}</span>
           </div>
         </div>
         <div class="card-badges">
@@ -2555,11 +2580,15 @@ function buildTabs(printers) {
   const printerGroups = printers.map((p, i) => {
     const color = _PRINTER_ACCENT_PALETTE[i % _PRINTER_ACCENT_PALETTE.length];
     const label = _printerNavLabel(p);
+    const subLabel = _printerSecondaryLabel(p);
     const state = p.state || 'unknown';
     const progress = _printerProgressBadge(p);
     return `<a class="tab tab-printer" href="#/printer/${p.id}" style="--tab-accent:${color}" title="${esc(label)} · ${esc(_liveStateLabel(state))}">
       <span class="tab-printer-state tab-printer-state-${esc(state)}"></span>
-      <span class="tab-printer-name">${esc(label)}</span>
+      <span class="tab-printer-title">
+        <span class="tab-printer-name">${esc(label)}</span>
+        ${subLabel ? `<span class="tab-printer-sub">${esc(subLabel)}</span>` : ''}
+      </span>
       ${progress ? `<span class="tab-printer-progress">${progress}</span>` : ''}
     </a>`;
   }).join('');
@@ -2620,7 +2649,8 @@ function _liveEtaText(p) {
 
 function _detailLiveHeader(p, printerColor, bannerTextColor) {
   const stateLabel = _liveStateLabel(p.state);
-  const shop = p.custom_name && p.custom_name !== p.model_name ? p.custom_name : (p.shop_name || p.id);
+  const primary = _printerPrimaryLabel(p);
+  const secondary = _printerSecondaryLabel(p);
   const job = _activePrinterJob(p);
   const progress = job?.progress != null ? Math.round(job.progress * 100) : null;
   const jobName = job ? jobDisplayName(job) : (p.idle_info?.['Last print'] || 'Ready for the next job');
@@ -2631,8 +2661,8 @@ function _detailLiveHeader(p, printerColor, bannerTextColor) {
   const disabledNote = (p.print_enabled ?? true) ? '' : (p.print_enabled_note || 'No reason entered');
   return `<div class="live-command-header" style="--tab-accent:${printerColor}">
     <div class="live-printer-mark" style="color:${bannerTextColor}">
-      <span class="live-printer-name">${esc(p.model_name || p.custom_name || p.id)}</span>
-      <span class="live-printer-shop">${esc(shop)}</span>
+      <span class="live-printer-name">${esc(primary)}</span>
+      ${secondary ? `<span class="live-printer-shop">${esc(secondary)}</span>` : ''}
     </div>
     <div class="live-job-brief">
       <span class="live-job-kicker">${job ? 'Now printing' : 'Status'}</span>
@@ -7342,8 +7372,8 @@ function _camHeaderInner(p) {
     <div class="printer-icon">${getIcon(p.icon)}</div>
     ${connDot(p.last_seen)}
     <div class="printer-names">
+      <span class="printer-custom">${esc(_printerPrimaryLabel(p))}</span>
       ${_printerModelHtml(p)}
-      <span class="printer-custom">${p.custom_name}</span>
     </div>
   </div>
   <span class="badge badge-${p.state}">${badgeLabel}</span>`;
@@ -8182,8 +8212,8 @@ function _printersCategoryHtml(printers) {
           <div class="printer-identity">
             <div class="printer-icon">${getIcon(p.icon ?? 'generic')}</div>
             <div class="printer-names">
-            ${_printerModelHtml(p)}
-              <span class="printer-custom">${p.custom_name}</span>
+              <span class="printer-custom">${esc(_printerPrimaryLabel(p))}</span>
+              ${_printerModelHtml(p)}
             </div>
           </div>
           <div class="settings-printer-meta">
@@ -9515,6 +9545,14 @@ const _BACKGROUND_THEMES = [
   { label: 'Grey Bay', value: 'grey', swatch: '#111318' },
 ];
 
+const _SIDEBAR_TEXT_COLORS = [
+  { label: 'Flight Blue', value: '#8fa8c8' },
+  { label: 'Clean White', value: '#e2e8f0' },
+  { label: 'Signal Red', value: '#fca5a5' },
+  { label: 'Console Green', value: '#86efac' },
+  { label: 'Amber', value: '#fcd34d' },
+];
+
 function _settingToggle(key, options, current) {
   return options.map(({ value, label }) =>
     `<button class="setting-toggle-btn${current === value ? ' setting-toggle-active' : ''}"
@@ -10021,6 +10059,8 @@ function _attachPreferencesEvents(el) {
 function _appearanceCategoryHtml() {
   const accent = (_serverSettings.accent ?? '#3b82f6').trim();
   const background = (_serverSettings.theme_background || 'classic').trim();
+  const customBackground = _safeCssHex(_serverSettings.theme_background_color, '#0a0a0f');
+  const sidebarText = _safeCssHex(_serverSettings.sidebar_text_color, '#8fa8c8');
   const backgrounds = _BACKGROUND_THEMES.map(t =>
     `<button class="theme-preset theme-background${t.value === background ? ' theme-preset-active' : ''}"
       data-theme-bg="${t.value}" type="button">
@@ -10037,6 +10077,10 @@ function _appearanceCategoryHtml() {
     `<button class="accent-swatch${c.value === accent ? ' accent-swatch-active' : ''}"
       style="background:${c.value}" data-accent="${c.value}" title="${c.label}"></button>`
   ).join('');
+  const sidebarSwatches = _SIDEBAR_TEXT_COLORS.map(c =>
+    `<button class="accent-swatch sidebar-text-swatch${c.value === sidebarText ? ' accent-swatch-active' : ''}"
+      style="background:${c.value}" data-sidebar-text="${c.value}" title="${c.label}"></button>`
+  ).join('');
 
   const tempUnit = _serverSettings.temp_unit ?? 'C';
   const timeFormat = _serverSettings.time_format ?? '24h';
@@ -10046,7 +10090,13 @@ function _appearanceCategoryHtml() {
       <div class="settings-section-title">Theme</div>
       <div class="settings-form-row">
         <label class="settings-label">Background</label>
-        <div class="theme-presets">${backgrounds}</div>
+        <div class="theme-presets">
+          ${backgrounds}
+          <label class="theme-custom-colour${background === 'custom' ? ' theme-preset-active' : ''}" title="Custom background">
+            <span>Custom</span>
+            <input class="settings-color-input" type="color" value="${esc(customBackground)}" data-background-custom>
+          </label>
+        </div>
       </div>
       <div class="settings-form-row">
         <label class="settings-label">Preset</label>
@@ -10055,6 +10105,13 @@ function _appearanceCategoryHtml() {
       <div class="settings-form-row">
         <label class="settings-label">Custom accent</label>
         <div class="accent-swatches">${swatches}</div>
+      </div>
+      <div class="settings-form-row">
+        <label class="settings-label">Side panel text</label>
+        <div class="accent-swatches">
+          ${sidebarSwatches}
+          <input class="settings-color-input" type="color" value="${esc(sidebarText)}" data-sidebar-text-custom>
+        </div>
       </div>
     </div>
     <div class="settings-section">
@@ -10097,10 +10154,46 @@ function _attachAppearanceEvents(el) {
     el.querySelectorAll('.theme-background').forEach(p =>
       p.classList.toggle('theme-preset-active', p.dataset.themeBg === _serverSettings.theme_background)
     );
+    el.querySelector('.theme-custom-colour')?.classList.remove('theme-preset-active');
     try {
       await _saveSetting('theme_background', _serverSettings.theme_background);
     } catch (err) {
       showToast('Theme save failed', err.message || '', 'error');
+    }
+  };
+
+  const selectCustomBackground = async (color, save = true) => {
+    const safe = _safeCssHex(color, '#0a0a0f');
+    _serverSettings.theme_background = 'custom';
+    _serverSettings.theme_background_color = safe;
+    _applyAppearanceSettings();
+    el.querySelectorAll('.theme-background').forEach(p =>
+      p.classList.toggle('theme-preset-active', false)
+    );
+    el.querySelector('.theme-custom-colour')?.classList.add('theme-preset-active');
+    if (!save) return;
+    try {
+      await _saveSetting('theme_background_color', safe);
+      await _saveSetting('theme_background', 'custom');
+    } catch (err) {
+      showToast('Background save failed', err.message || '', 'error');
+    }
+  };
+
+  const selectSidebarText = async (color, save = true) => {
+    const safe = _safeCssHex(color, '#8fa8c8');
+    _serverSettings.sidebar_text_color = safe;
+    _applyAppearanceSettings();
+    el.querySelectorAll('.sidebar-text-swatch').forEach(s =>
+      s.classList.toggle('accent-swatch-active', s.dataset.sidebarText === safe)
+    );
+    const picker = el.querySelector('[data-sidebar-text-custom]');
+    if (picker) picker.value = safe;
+    if (!save) return;
+    try {
+      await _saveSetting('sidebar_text_color', safe);
+    } catch (err) {
+      showToast('Sidebar colour save failed', err.message || '', 'error');
     }
   };
 
@@ -10112,6 +10205,26 @@ function _attachAppearanceEvents(el) {
 
   el.querySelectorAll('.theme-background').forEach(btn => {
     btn.addEventListener('click', () => selectBackground(btn.dataset.themeBg));
+  });
+
+  el.querySelector('[data-background-custom]')?.addEventListener('input', e => {
+    selectCustomBackground(e.target.value, false);
+  });
+
+  el.querySelector('[data-background-custom]')?.addEventListener('change', e => {
+    selectCustomBackground(e.target.value, true);
+  });
+
+  el.querySelectorAll('.sidebar-text-swatch').forEach(btn => {
+    btn.addEventListener('click', () => selectSidebarText(btn.dataset.sidebarText));
+  });
+
+  el.querySelector('[data-sidebar-text-custom]')?.addEventListener('input', e => {
+    selectSidebarText(e.target.value, false);
+  });
+
+  el.querySelector('[data-sidebar-text-custom]')?.addEventListener('change', e => {
+    selectSidebarText(e.target.value, true);
   });
 
   el.querySelectorAll('.setting-toggle-btn').forEach(btn => {
