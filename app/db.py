@@ -2859,13 +2859,16 @@ def get_recent_spool_for_slot(printer_id: str, slot: int, limit: int = 25) -> Op
                LIMIT ?""",
             (printer_id, int(limit)),
         ).fetchall()
-    key = str(int(slot))
+    slot_int = int(slot)
+    keys = [str(slot_int)]
+    if 128 <= slot_int < 512:
+        keys.append(str(slot_int * 4))
     for row in rows:
         try:
             snapshot = json.loads(row["ams_slot_snapshot"] or "{}")
         except Exception:
             continue
-        entry = snapshot.get(key)
+        entry = next((snapshot.get(key) for key in keys if snapshot.get(key) is not None), None)
         if isinstance(entry, dict) and entry.get("spool_id"):
             try:
                 return int(entry["spool_id"])

@@ -4870,6 +4870,13 @@ def _queue_colour_coverage(requirements: list[dict], spools: list[dict]) -> list
     return coverage
 
 
+def _ams_slot_index(unit_id: int, slot_idx: int) -> int:
+    """Flightdeck canonical AMS slot index; AMS HT uses Bambu's 128+ tray ids."""
+    unit_id = int(unit_id)
+    slot_idx = int(slot_idx)
+    return unit_id + slot_idx if unit_id >= 128 else unit_id * 4 + slot_idx
+
+
 def _flatten_reported_ams_slots(printer_status: Optional[dict], include_empty: bool = False) -> list[dict]:
     slots: list[dict] = []
     for unit in (printer_status or {}).get("ams") or []:
@@ -4881,7 +4888,7 @@ def _flatten_reported_ams_slots(printer_status: Optional[dict], include_empty: b
             slots.append({
                 **slot,
                 "unit": unit_id,
-                "flat_slot": unit_id * 4 + idx,
+                "flat_slot": _ams_slot_index(unit_id, idx),
                 "label": f"{unit.get('label') or 'AMS'} slot {idx + 1}",
             })
     return slots

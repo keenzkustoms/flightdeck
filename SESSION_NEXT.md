@@ -2,13 +2,14 @@
 
 Latest GitHub/Pi state:
 - Branch: main
-- Latest commit: current HEAD after this handoff (`Restrict generic AMS auto-claim`)
+- Latest commit: current HEAD after this handoff (`Canonicalize AMS HT slot ids`)
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
-- Refresh cachebust currently: ?cachebust=365
+- Refresh cachebust currently: ?cachebust=366
 
 Recent work:
+- AMS slot indexing now uses one canonical rule across backend/frontend: regular AMS slots stay `unit*4+slot`, AMS HT uses Bambu tray ids `128+slot`, with legacy `512` accepted during transition.
 - Generic Bambu AMS/AMS HT reports now only auto-claim the exact recently remembered spool for that slot; if that spool is unavailable, Flightdeck leaves the slot for manual confirmation instead of grabbing a similar spool.
 - Bambu printer-side/operator Stop now records as `CANCELLED` when the printer reports `FAILED` with no alarm/error code, instead of polluting reliability stats as `ERROR`.
 - Print Watch focus now preserves the active camera image while refreshing status/HUD text, preventing the double flash when the same printer stays selected.
@@ -31,11 +32,17 @@ Recent work:
 
 Likely next items:
 - Keep polishing Fleet Wall layout and AMS sizing.
-- Recheck BigBoy AMS HT assignment after any physical spool moves; current live data had auto-claimed spool #39 into h2d:512 after spool #68 became unavailable.
+- Recheck BigBoy AMS HT assignment after any physical spool moves; HT should now show as slot `128` rather than legacy `512`.
 - Recheck Fleet Wall click/zoom behaviour after real use.
 - Continue slicer/API integration and profile filtering.
 - Continue stock-in QR/label workflow.
 - Make Windows installer/update flow smoother.
+
+## What was fixed - Session 28.241 (AMS HT slot canonicalization - 7 June)
+- Regular AMS slots continue to use `unit*4 + slot` indexes.
+- AMS HT slots now consistently use Bambu global tray ids (`128 + slot`) across live parsing, snapshots, backend reconciliation, frontend labels, slot editor, and spool assignment UI.
+- Legacy `512` slot ids are still accepted when syncing to Bambu and when reading recent slot memory during transition; existing Pi `h2d:512` spool rows are normalized to `h2d:128`.
+- Bumped static cache to `app.js?v=366`; backend restart and frontend refresh required.
 
 ## What was fixed - Session 28.240 (Generic AMS auto-claim guard - 7 June)
 - Generic Bambu AMS reports now only auto-claim the exact recent spool remembered for that slot.
@@ -69,7 +76,7 @@ Likely next items:
 - Print Watch has a large rotating focus camera, pins to the first printer needing attention, and resumes cycling once attention clears.
 - Print Watch no longer auto-pins just because a printer is intentionally on hold; the `Pinned` chip is now a manual pin/unpin control, and unpinning an auto-pinned feed pauses auto-pin until attention clears.
 - Camera URL fetches are shared across Fleet Wall/Print Watch and camera retry handlers are attached once per image.
-- Demo shell now loads current `app.js?v=365`; main and demo shells load `style.css?v=295`.
+- Demo shell now loads current `app.js?v=366`; main and demo shells load `style.css?v=295`.
 - Static-only change; frontend refresh required.
 
 

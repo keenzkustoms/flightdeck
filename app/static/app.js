@@ -2860,7 +2860,7 @@ function _detailLiveSignals(p) {
 function _amsMismatchSignals(p, loaded = []) {
   const mismatches = [];
   (p.ams || []).forEach(unit => (unit.slots || []).forEach(slot => {
-    const flatSlot = unit.unit * 4 + slot.idx;
+    const flatSlot = _amsFlatSlot(unit, slot);
     const loadedSpool = loaded.find(s => Number(s.location_slot) === flatSlot);
     const mismatch = _slotMismatch(loadedSpool, slot);
     if (!mismatch) return;
@@ -2941,7 +2941,7 @@ function _detailLiveAmsLoadoutRows(p) {
           title="${drying ? 'Stop AMS drying' : 'Start AMS drying'}">${drying ? 'Stop' : 'Dry'}</button>`
       : '';
     const slots = (unit.slots || []).map(slot => {
-      const flatSlot = unit.unit * 4 + slot.idx;
+      const flatSlot = _amsFlatSlot(unit, slot);
       const loadedSpool = loaded.find(s => Number(s.location_slot) === flatSlot);
       const mismatch = _slotMismatch(loadedSpool, slot);
       const routeActive = _slotRouteActive(p, unit, slot);
@@ -3101,6 +3101,12 @@ function _isAmsHtUnit(unit) {
   return Number(unit?.unit) >= 128 || String(unit?.label || '').toLowerCase().includes('ht');
 }
 
+function _amsFlatSlot(unit, slot) {
+  const unitId = Number(unit?.unit ?? unit ?? 0);
+  const slotIdx = Number(slot?.idx ?? slot ?? 0);
+  return unitId >= 128 ? unitId + slotIdx : unitId * 4 + slotIdx;
+}
+
 function _printerHasActiveThermalContext(p) {
   const state = String(p?.state || '').toLowerCase();
   return !!p?.job || ['printing', 'paused', 'loading', 'preparing', 'busy'].includes(state);
@@ -3148,7 +3154,7 @@ function _detailFilamentRoute(p) {
   for (const unit of p.ams) {
     for (const slot of (unit.slots || [])) {
       if (!_slotRouteActive(p, unit, slot)) continue;
-      const flatSlot = unit.unit * 4 + slot.idx;
+      const flatSlot = _amsFlatSlot(unit, slot);
       const spool = loaded.find(s => Number(s.location_slot) === flatSlot);
       const colour = spool?.color_hex || slot.color || '#22c55e';
       const textColour = _spoolTextColor(colour);
@@ -3459,7 +3465,7 @@ function _detailAmsPanel(p) {
           title="${drying ? 'Stop AMS drying' : 'Start AMS drying'}">${drying ? 'Stop' : 'Dry'}</button>`
       : '';
     const slots = unit.slots.map(slot => {
-      const flatSlot = unit.unit * 4 + slot.idx;
+      const flatSlot = _amsFlatSlot(unit, slot);
       const loaded = (_latestSpoolsByPrinter[p.id] || []).find(s => Number(s.location_slot) === flatSlot);
       const mismatch = _slotMismatch(loaded, slot);
       const style = (!slot.empty && slot.color) ? `style="background:${slot.color}"` : '';
@@ -11414,7 +11420,7 @@ function _slotReport(printer, slotIndex) {
   if (!printer) return null;
   for (const unit of printer.ams || []) {
     for (const slot of unit.slots || []) {
-      if (unit.unit * 4 + slot.idx === Number(slotIndex)) return slot;
+      if (_amsFlatSlot(unit, slot) === Number(slotIndex)) return slot;
     }
   }
   for (const unit of printer.mmu || []) {
@@ -11762,7 +11768,7 @@ function _amsSlotLabel(printer, slotIndex) {
   if (!printer?.ams?.length) return `S${slotIndex + 1}`;
   for (const unit of printer.ams) {
     for (const slot of unit.slots) {
-      if (unit.unit * 4 + slot.idx === slotIndex) {
+      if (_amsFlatSlot(unit, slot) === slotIndex) {
         return unit.slots.length === 1
           ? unit.label
           : `${unit.label} · S${slot.idx + 1}`;
@@ -14019,7 +14025,7 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
       const opts = [];
       for (const unit of units) {
         for (const slot of unit.slots) {
-          const flatIdx = unit.unit * 4 + slot.idx;
+          const flatIdx = _amsFlatSlot(unit, slot);
           const label = unit.slots.length === 1
             ? unit.label
             : `${unit.label} · Slot ${slot.idx + 1}`;

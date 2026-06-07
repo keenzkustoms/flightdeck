@@ -931,8 +931,8 @@ class BambuPrinter:
                 if slot.get("empty"):
                     continue
                 slot_idx = int(slot.get("idx", 0))
-                flat_idx = unit_id * 4 + slot_idx
-                bambu_tray_id = unit_id + slot_idx if unit_id >= 128 else flat_idx
+                flat_idx = _bambu_slot_index(unit_id, slot_idx)
+                bambu_tray_id = _bambu_tray_target(flat_idx)
                 slots.append({
                     **slot,
                     "unit": unit_id,
@@ -1265,8 +1265,17 @@ def _bambu_failed_is_operator_cancel(err_code, alarm_message: Optional[str]) -> 
     return not alarm_message and not _normalise_bambu_alarm_code(err_code)
 
 
+def _bambu_slot_index(unit_id: int, tray_id: int) -> int:
+    """Return Flightdeck's canonical AMS slot index."""
+    return int(unit_id) + int(tray_id) if int(unit_id) >= 128 else int(unit_id) * 4 + int(tray_id)
+
+
 def _split_ams_slot(slot: int) -> tuple[int, int]:
     slot = int(slot)
+    if slot >= 512:
+        return slot // 4, slot % 4
+    if slot >= 128:
+        return slot, 0
     return slot // 4, slot % 4
 
 
@@ -1445,7 +1454,8 @@ def _parse_ams(dump: dict) -> list[dict]:
             else:
                 color = ""
 
-            active = (not empty) and (tray_now == unit_id * 4 + tray_id)
+            slot_index = _bambu_slot_index(unit_id, tray_id)
+            active = (not empty) and (tray_now == _bambu_tray_target(slot_index))
 
             slots.append({
                 "idx": tray_id,
@@ -1545,7 +1555,7 @@ def _snapshot_ams_slots(print_data: dict) -> dict[int, dict]:
             tray_type = tray_data.get("tray_type", "")
             if not tray_type:
                 continue
-            slot_index = unit_id * 4 + tray_id
+            slot_index = _bambu_slot_index(unit_id, tray_id)
             hex_c = tray_data.get("tray_color", "")
             color = f"#{hex_c[:6].upper()}" if len(hex_c) >= 6 and hex_c.upper() not in ("00000000", "") else ""
             profile_id = str(tray_data.get("tray_info_idx") or "")
@@ -1560,7 +1570,7 @@ def _snapshot_ams_slots(print_data: dict) -> dict[int, dict]:
                 "color": color,
                 "uuid": tray_data.get("tray_uuid", ""),
                 "remain_pct": tray_data.get("remain", -1),
-                "active": tray_now == slot_index,
+                "active": tray_now == _bambu_tray_target(slot_index),
             }
     return result
 
