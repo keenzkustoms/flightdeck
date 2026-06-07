@@ -1,5 +1,11 @@
 # Flightdeck — next session brief
-_Last updated 7 June 2026 (Session 28.208 Stock-in QR receiving)_
+_Last updated 7 June 2026 (Session 28.209 Mixed stock-in receiving sheets)_
+
+## What was added - Session 28.209 (Mixed stock-in receiving sheets - 7 June)
+- Stock In receiving sheets now support multiple roll-type lines in one batch.
+- Each line carries its own quantity, material, brand, subtype/type, colour name/hex, label weight, tare, shelf, and notes.
+- Added quick colour chips to the Stock In line editor for common colours.
+- Bumped static cache to `app.js?v=324` and `style.css?v=254`; frontend refresh required.
 
 ## What was added - Session 28.208 (Stock-in QR receiving - 7 June)
 - Added a Spools -> `Stock In` view for incoming filament receiving.

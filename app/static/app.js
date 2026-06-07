@@ -11082,6 +11082,45 @@ function _stockInRollLabel(roll) {
   return `${roll.color_name || 'Colour'} ${roll.material || ''}${roll.subtype ? ` ${roll.subtype}` : ''} · ${roll.brand || 'Unknown'}`.trim();
 }
 
+function _stockInLineHtml(index, defaultWeight) {
+  const colours = ['#808080', '#ffffff', '#111827', '#ef4444', '#f97316', '#facc15', '#22c55e', '#3b82f6', '#a855f7', '#ec4899'];
+  const colourButtons = colours.map(c =>
+    `<button type="button" class="stock-in-colour-chip" style="background:${c}" data-stock-colour="${c}" aria-label="${c}"></button>`
+  ).join('');
+  return `<div class="stock-in-line" data-line-index="${index}">
+    <div class="stock-in-line-head">
+      <strong>Roll type ${index + 1}</strong>
+      <button type="button" class="stock-in-remove-line" aria-label="Remove roll type">Remove</button>
+    </div>
+    <div class="stock-in-line-grid">
+      <label>Qty <input name="quantity" type="number" min="1" max="100" value="1"></label>
+      <label>Material <input name="material" value="PLA"></label>
+      <label>Brand <input name="brand" placeholder="Brand" value="Bambu Lab"></label>
+      <label>Type <input name="subtype" placeholder="Basic, Silk, Matte"></label>
+      <label>Colour name <input name="color_name" placeholder="Magenta"></label>
+      <label class="stock-in-colour-field">Colour
+        <span class="stock-in-colour-row">
+          <input name="color_hex" type="color" value="#808080">
+          <span>${colourButtons}</span>
+        </span>
+      </label>
+      <label>Label weight <input name="label_weight_g" type="number" min="0" step="1" value="${defaultWeight}"></label>
+      <label>Tare <input name="empty_spool_weight_g" type="number" min="0" step="1" placeholder="Optional"></label>
+      <label>Home shelf <select name="storage_location_id">${_stockInLocationOptions()}</select></label>
+      <label class="stock-in-notes">Notes <input name="notes" placeholder="Optional notes"></label>
+    </div>
+  </div>`;
+}
+
+function _stockInRenumberLines(form) {
+  form.querySelectorAll('.stock-in-line').forEach((line, index) => {
+    line.dataset.lineIndex = index;
+    const title = line.querySelector('.stock-in-line-head strong');
+    if (title) title.textContent = `Roll type ${index + 1}`;
+    line.querySelector('.stock-in-remove-line').disabled = form.querySelectorAll('.stock-in-line').length <= 1;
+  });
+}
+
 async function _renderStockInView(listEl) {
   const params = _routeParams('#/spools');
   const scanToken = params.get('token') || '';
@@ -11140,19 +11179,18 @@ async function _renderStockInView(listEl) {
     <section class="stock-in-create">
       <div class="settings-section-title">Create Receiving Sheet</div>
       <form id="stock-in-create-form" class="stock-in-form">
-        <label>Supplier <input name="supplier" placeholder="e.g. Bambu Lab"></label>
-        <label>Order ref <input name="order_ref" placeholder="Invoice or PO"></label>
-        <label>Qty <input name="quantity" type="number" min="1" max="100" value="1"></label>
-        <label>Material <input name="material" value="PLA"></label>
-        <label>Brand <input name="brand" placeholder="Brand" value="Bambu Lab"></label>
-        <label>Type <input name="subtype" placeholder="Basic, Silk, Matte"></label>
-        <label>Colour name <input name="color_name" placeholder="Magenta"></label>
-        <label>Colour <input name="color_hex" type="color" value="#808080"></label>
-        <label>Label weight <input name="label_weight_g" type="number" min="0" step="1" value="${defaultWeight}"></label>
-        <label>Tare <input name="empty_spool_weight_g" type="number" min="0" step="1" placeholder="Optional"></label>
-        <label>Home shelf <select name="storage_location_id">${_stockInLocationOptions()}</select></label>
-        <label class="stock-in-notes">Notes <input name="notes" placeholder="Optional notes"></label>
-        <button class="button primary" type="submit">Create sheet</button>
+        <div class="stock-in-order-fields">
+          <label>Supplier <input name="supplier" placeholder="e.g. Bambu Lab"></label>
+          <label>Order ref <input name="order_ref" placeholder="Invoice or PO"></label>
+          <label class="stock-in-notes">Order notes <input name="order_notes" placeholder="Optional order notes"></label>
+        </div>
+        <div class="stock-in-lines" id="stock-in-lines">
+          ${_stockInLineHtml(0, defaultWeight)}
+        </div>
+        <div class="stock-in-form-actions">
+          <button type="button" class="button" id="stock-in-add-line">+ Add roll type</button>
+          <button class="button primary" type="submit">Create sheet</button>
+        </div>
       </form>
     </section>
     <section class="stock-in-orders">
@@ -11162,26 +11200,33 @@ async function _renderStockInView(listEl) {
 
   listEl.querySelector('#stock-in-create-form')?.addEventListener('submit', async e => {
     e.preventDefault();
-    const fd = new FormData(e.currentTarget);
-    const numberOrNull = name => {
-      const v = String(fd.get(name) || '').trim();
+    const form = e.currentTarget;
+    const fd = new FormData(form);
+    const fieldValue = (line, name) => line.querySelector(`[name="${name}"]`)?.value ?? '';
+    const numberOrNull = (line, name) => {
+      const v = String(fieldValue(line, name) || '').trim();
       return v === '' ? null : Number(v);
     };
+    const lines = [...form.querySelectorAll('.stock-in-line')].map(line => {
+      return {
+        quantity: Number(fieldValue(line, 'quantity') || 1),
+        material: String(fieldValue(line, 'material') || '').trim(),
+        brand: String(fieldValue(line, 'brand') || '').trim(),
+        subtype: String(fieldValue(line, 'subtype') || '').trim() || null,
+        color_name: String(fieldValue(line, 'color_name') || '').trim() || null,
+        color_hex: String(fieldValue(line, 'color_hex') || '#808080'),
+        label_weight_g: Number(fieldValue(line, 'label_weight_g') || defaultWeight),
+        empty_spool_weight_g: numberOrNull(line, 'empty_spool_weight_g'),
+        storage_location_id: numberOrNull(line, 'storage_location_id'),
+        notes: String(fieldValue(line, 'notes') || '').trim() || null,
+      };
+    }).filter(line => line.material && line.brand);
+    if (!lines.length) return showToast('Stock-in needs a roll', 'Add at least one material and brand.', 'warn');
     const body = {
       supplier: String(fd.get('supplier') || '').trim() || null,
       order_ref: String(fd.get('order_ref') || '').trim() || null,
-      notes: String(fd.get('notes') || '').trim() || null,
-      lines: [{
-        quantity: Number(fd.get('quantity') || 1),
-        material: String(fd.get('material') || '').trim(),
-        brand: String(fd.get('brand') || '').trim(),
-        subtype: String(fd.get('subtype') || '').trim() || null,
-        color_name: String(fd.get('color_name') || '').trim() || null,
-        color_hex: String(fd.get('color_hex') || '#808080'),
-        label_weight_g: Number(fd.get('label_weight_g') || defaultWeight),
-        empty_spool_weight_g: numberOrNull('empty_spool_weight_g'),
-        storage_location_id: numberOrNull('storage_location_id'),
-      }],
+      notes: String(fd.get('order_notes') || '').trim() || null,
+      lines,
     };
     const r = await fetch('/api/stock-in/orders', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
     if (!r.ok) return showToast('Stock-in failed', (await r.json()).detail || 'Could not create sheet', 'error');
@@ -11190,6 +11235,32 @@ async function _renderStockInView(listEl) {
     await _renderStockInView(listEl);
     _printStockInSheet(order);
   });
+
+  const createForm = listEl.querySelector('#stock-in-create-form');
+  if (createForm) {
+    createForm.addEventListener('click', e => {
+      const colourBtn = e.target.closest('[data-stock-colour]');
+      if (colourBtn) {
+        const line = colourBtn.closest('.stock-in-line');
+        const input = line?.querySelector('input[name="color_hex"]');
+        if (input) input.value = colourBtn.dataset.stockColour;
+        return;
+      }
+      if (e.target.closest('#stock-in-add-line')) {
+        const linesEl = createForm.querySelector('#stock-in-lines');
+        linesEl.insertAdjacentHTML('beforeend', _stockInLineHtml(linesEl.querySelectorAll('.stock-in-line').length, defaultWeight));
+        _stockInRenumberLines(createForm);
+        return;
+      }
+      const remove = e.target.closest('.stock-in-remove-line');
+      if (remove) {
+        const line = remove.closest('.stock-in-line');
+        if (line && createForm.querySelectorAll('.stock-in-line').length > 1) line.remove();
+        _stockInRenumberLines(createForm);
+      }
+    });
+    _stockInRenumberLines(createForm);
+  }
 
   listEl.querySelector('.stock-in-receive-form')?.addEventListener('submit', async e => {
     e.preventDefault();

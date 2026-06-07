@@ -12661,12 +12661,88 @@ select.settings-input { cursor: pointer; }
   background: rgba(15, 23, 42, 0.42);
   padding: 1rem;
 }
-.stock-in-form,
 .stock-in-receive-form {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 0.75rem;
   margin-top: 0.75rem;
+}
+.stock-in-form {
+  display: grid;
+  gap: 0.85rem;
+  margin-top: 0.75rem;
+}
+.stock-in-order-fields,
+.stock-in-line-grid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+.stock-in-lines {
+  display: grid;
+  gap: 0.75rem;
+}
+.stock-in-line {
+  background: rgba(2, 6, 23, 0.28);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 8px;
+  padding: 0.8rem;
+}
+.stock-in-line-head {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  gap: 0.7rem;
+  margin-bottom: 0.65rem;
+}
+.stock-in-line-head strong {
+  color: var(--text);
+  font-size: 0.85rem;
+}
+.stock-in-remove-line {
+  background: transparent;
+  border: 1px solid rgba(239, 68, 68, 0.5);
+  border-radius: 6px;
+  color: #fecaca;
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.25rem 0.5rem;
+}
+.stock-in-remove-line:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+.stock-in-colour-field {
+  min-width: 0;
+}
+.stock-in-colour-row {
+  align-items: center;
+  display: flex;
+  gap: 0.45rem;
+  min-width: 0;
+}
+.stock-in-colour-row input[type="color"] {
+  min-width: 2.6rem;
+  padding: 0.15rem;
+  width: 2.6rem;
+}
+.stock-in-colour-row span {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+.stock-in-colour-chip {
+  border: 1px solid rgba(255,255,255,0.25);
+  border-radius: 999px;
+  cursor: pointer;
+  height: 1.25rem;
+  width: 1.25rem;
+}
+.stock-in-form-actions {
+  display: flex;
+  gap: 0.65rem;
+  justify-content: flex-end;
 }
 .stock-in-form label,
 .stock-in-receive-form label {
@@ -12789,7 +12865,8 @@ select.settings-input { cursor: pointer; }
   .filedesk-bulk-actions { justify-content: flex-start; }
   .filedesk-file-row { grid-template-columns: auto minmax(0, 1fr) auto; }
   .filedesk-compat { grid-column: 2 / -1; justify-content: flex-start; }
-  .stock-in-form,
+  .stock-in-order-fields,
+  .stock-in-line-grid,
   .stock-in-receive-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
@@ -12799,9 +12876,11 @@ select.settings-input { cursor: pointer; }
   .printbay-reprint-thumb { min-height: 7rem; }
   .filedesk-file-row { grid-template-columns: auto minmax(0, 1fr); }
   .filedesk-queue-primary { grid-column: 2; justify-self: start; }
-  .stock-in-form,
+  .stock-in-order-fields,
+  .stock-in-line-grid,
   .stock-in-receive-form,
   .stock-in-order-head { grid-template-columns: 1fr; }
   .stock-in-notes { grid-column: auto; }
   .stock-in-order-head .button { justify-self: start; }
+  .stock-in-form-actions { justify-content: flex-start; flex-wrap: wrap; }
 }
