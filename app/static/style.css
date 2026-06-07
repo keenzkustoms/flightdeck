@@ -8597,6 +8597,9 @@ button.live-route-node:hover {
   .fleet-wall-grid {
     grid-template-columns: 1fr;
   }
+  .fleet-wall-large .fleet-wall-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 520px) {
