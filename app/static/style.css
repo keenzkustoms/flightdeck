@@ -6578,6 +6578,16 @@ button.live-route-node:hover {
   z-index: 0;
 }
 
+.obj-map-image-piece {
+  position: absolute;
+  overflow: hidden;
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+  opacity: 0.96;
+  filter: brightness(1.08) contrast(1.08);
+  pointer-events: none;
+}
+
 .obj-map-open {
   cursor: zoom-in;
 }

@@ -3796,6 +3796,7 @@ function _objectMapHtml(id, data) {
   const image = data?.plate_image_url
     ? `<img src="${esc(data.plate_image_url)}?map=${encodeURIComponent(imageVersion)}" alt="Plate object map" loading="lazy">`
     : '';
+  const objectImages = _objectMapImagePieces(data, imageVersion);
   const rotation = Number(data?.map_rotation || 0);
   const imageRotation = Number(data?.map_image_rotation || 0);
   const imageOffsetX = Number(data?.map_image_offset_x || 0);
@@ -3811,7 +3812,7 @@ function _objectMapHtml(id, data) {
   return `<div class="${classes}"${rotationStyle}>
     <div class="obj-map-stage obj-map-open" data-printer-id="${esc(id)}" title="Open large object selector">
       <div class="obj-map-image-plane">
-        ${image}
+        ${objectImages || image}
       </div>
       <div class="obj-map-plane">
         ${hasGeometry ? `<div class="obj-map-overlay">${mapButtons}</div>` : ''}
@@ -3822,6 +3823,26 @@ function _objectMapHtml(id, data) {
   </div>`;
 }
 
+function _objectMapImagePieces(data, imageVersion) {
+  const objects = data?.objects || [];
+  const bounds = data?.plate_bounds;
+  const src = data?.plate_image_url;
+  if (data?.map_image_mode !== 'per_object' || !src || !bounds || bounds.w <= 0 || bounds.h <= 0) return '';
+  return objects.filter(obj => obj.bbox).map(obj => {
+    const left = ((obj.bbox.x - bounds.x) / bounds.w) * 100;
+    const top = ((obj.bbox.y - bounds.y) / bounds.h) * 100;
+    const width = (obj.bbox.w / bounds.w) * 100;
+    const height = (obj.bbox.h / bounds.h) * 100;
+    const bgX = width > 0 ? (left / (100 - width)) * 100 : 50;
+    const bgY = height > 0 ? (top / (100 - height)) * 100 : 50;
+    const bgW = width > 0 ? (100 / width) * 100 : 100;
+    const bgH = height > 0 ? (100 / height) * 100 : 100;
+    return `<div class="obj-map-image-piece"
+      style="left:${left.toFixed(2)}%;top:${top.toFixed(2)}%;width:${Math.max(width, 5).toFixed(2)}%;height:${Math.max(height, 5).toFixed(2)}%;background-image:url('${esc(src)}?map=${encodeURIComponent(imageVersion)}');background-size:${bgW.toFixed(2)}% ${bgH.toFixed(2)}%;background-position:${Number.isFinite(bgX) ? bgX.toFixed(2) : '50'}% ${Number.isFinite(bgY) ? bgY.toFixed(2) : '50'}%"
+      aria-hidden="true"></div>`;
+  }).join('');
+}
+
 function _largeObjectMapHtml(id, data) {
   const objects = data?.objects || [];
   const bounds = data?.plate_bounds;
@@ -3830,6 +3851,7 @@ function _largeObjectMapHtml(id, data) {
   const image = data?.plate_image_url
     ? `<img src="${esc(data.plate_image_url)}?map=${encodeURIComponent(imageVersion)}" alt="Large plate preview" loading="eager">`
     : '<div class="object-map-missing">No thumbnail available</div>';
+  const objectImages = _objectMapImagePieces(data, imageVersion);
   const rotation = Number(data?.map_rotation || 0);
   const imageRotation = Number(data?.map_image_rotation || 0);
   const imageOffsetX = Number(data?.map_image_offset_x || 0);
@@ -3866,7 +3888,7 @@ function _largeObjectMapHtml(id, data) {
   return `<div class="object-map-modal-body">
     <div class="object-map-modal-stage${hasGeometry ? ' has-geometry' : ''}${rotated ? ' obj-map-transformed' : ''}${rotation > 0 ? ' obj-map-overlay-rotated' : ''}${imageRotation > 0 ? ' obj-map-image-rotated' : ''}"${rotationStyle}>
       <div class="obj-map-image-plane">
-        ${image}
+        ${objectImages || image}
       </div>
       <div class="obj-map-plane">
         ${hasGeometry ? `<div class="obj-map-overlay">${buttons}</div>` : ''}

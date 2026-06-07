@@ -2,13 +2,14 @@
 
 Latest GitHub/Pi state:
 - Branch: main
-- Latest commit: current HEAD after this handoff (`Reset Bambu skip thumbnail offsets`)
+- Latest commit: current HEAD after this handoff (`Render Bambu skip thumbnail per object`)
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
-- Refresh cachebust currently: ?cachebust=374
+- Refresh cachebust currently: ?cachebust=375
 
 Recent work:
+- Bambu skip-object maps now support `map_image_mode=per_object`, which slices the thumbnail by each object's bbox and renders that image piece inside its own locked red overlay box. This keeps the red boxes as source of truth and avoids moving the whole bed thumbnail as one layer.
 - Bambu skip-object thumbnail offsets are now both `0` so the thumbnail sits flat under the locked red overlay. Current trial is red overlay locked, thumbnail angle `45deg`, `x=0%`, `y=0%`.
 - Reverted the Bambu/H2D plate underlay because it made the skip-object map worse. Current map is back to the previous best: locked red overlay, thumbnail image `45deg`, `x=5%`, `y=-92%`.
 - Bambu skip-object thumbnail layer now supports image-only X/Y offsets; current H2D trial keeps the red overlay locked and moves the rotated thumbnail by `x=5%`, `y=-92%` to bring the star down inside `#439` and move the spoon shapes left into `#148/#463`.
@@ -118,6 +119,13 @@ Likely next items:
 - Current trial values: `map_rotation=0`, `map_image_rotation=45`, no image offset.
 - This removes image translation so rotation can be judged without making the thumbnail appear to float off the bed.
 - Backend restart required.
+
+## What was added - Session 28.253 (Bambu skip-object per-object thumbnail slices - 8 June)
+- Added `map_image_mode=per_object` for Bambu skip maps.
+- The frontend now slices the plate thumbnail using each object's bbox and renders each slice inside that object's locked red overlay box.
+- This treats each red box as the object's home instead of moving the entire bed thumbnail as a single layer.
+- Current H2D values: `map_rotation=0`, `map_image_rotation=0`, offsets `0,0`, `map_image_mode=per_object`.
+- Static cache bumped to `app.js?v=375` and `style.css?v=304`; backend restart and frontend refresh required.
 
 ## What was fixed - Session 28.240 (Generic AMS auto-claim guard - 7 June)
 - Generic Bambu AMS reports now only auto-claim the exact recent spool remembered for that slot.
