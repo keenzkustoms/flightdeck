@@ -2,13 +2,14 @@
 
 Latest GitHub/Pi state:
 - Branch: main
-- Latest commit: current HEAD after this handoff (`Restore Bambu skip map overlay target`)
+- Latest commit: current HEAD after this handoff (`Lock Bambu skip overlay unrotated`)
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
 - Refresh cachebust currently: ?cachebust=370
 
 Recent work:
+- Bambu skip-object map rotation is now locked at `0` so the red overlay stays axis-aligned like the user's second reference image: `#148/#463` vertical on the left, `#417` bottom-left, and `#439` across the right. Do not rotate or move the red overlay in future thumbnail alignment work.
 - Restored the Bambu skip-object overlay to the user-approved 45-degree shared thumbnail/box rotation and removed the separate image-layer experiment again. The red overlay should match the screenshot target with `#148/#463` left, `#417` bottom-left, and `#439` right.
 - Reverted the image-only rotation trial because it made the H2D skip-object map worse; Flightdeck is back to the better 45-degree shared thumbnail/box rotation.
 - Bambu skip-object map display rotation is currently set to 45 degrees clockwise as a user-requested visual check after the full 90-degree version looked too far.
@@ -81,6 +82,13 @@ Likely next items:
 - Restored the user-approved shared 45-degree thumbnail/box rotation after the separate image-layer approach moved the red overlay away from the desired screenshot target.
 - The red overlay target is `#148/#463` on the left, `#417` bottom-left, and `#439` on the right.
 - Static cache bumped to `app.js?v=370` and `style.css?v=299`; backend restart and frontend refresh required.
+
+## What was locked - Session 28.248 (Bambu skip-object red overlay position - 7 June)
+- The red object overlay is now locked unrotated/axis-aligned to match the user's second reference image.
+- H2D/Bambu maps now report `map_rotation=0`; existing object coordinates from the parsed 3MF remain unchanged.
+- Treat the red overlay as source of truth: `#148/#463` vertical on the left, `#417` bottom-left, `#439` across the right.
+- Future visual alignment should not move/rotate these red boxes.
+- Backend restart required.
 
 ## What was fixed - Session 28.240 (Generic AMS auto-claim guard - 7 June)
 - Generic Bambu AMS reports now only auto-claim the exact recent spool remembered for that slot.
