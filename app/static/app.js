@@ -121,8 +121,14 @@ async function loadSettings() {
     if (r.ok) _serverSettings = await r.json();
   } catch {}
 
+  _applyAppearanceSettings();
+}
+
+function _applyAppearanceSettings() {
   const accent = _serverSettings.accent ?? '#3b82f6';
   document.documentElement.style.setProperty('--printing', accent);
+  const bg = (_serverSettings.theme_background || 'classic').replace(/[^a-z0-9_-]/gi, '');
+  document.documentElement.dataset.themeBg = bg || 'classic';
 }
 
 async function loadInstanceInfo() {
@@ -9501,6 +9507,14 @@ const _THEME_PRESETS = [
   { label: 'Purple Lab', value: '#8b5cf6' },
 ];
 
+const _BACKGROUND_THEMES = [
+  { label: 'Classic', value: 'classic', swatch: '#0a0a0f' },
+  { label: 'Red Deck', value: 'red', swatch: '#240b10' },
+  { label: 'Blue Deck', value: 'blue', swatch: '#071329' },
+  { label: 'Green Bench', value: 'green', swatch: '#071c14' },
+  { label: 'Grey Bay', value: 'grey', swatch: '#111318' },
+];
+
 function _settingToggle(key, options, current) {
   return options.map(({ value, label }) =>
     `<button class="setting-toggle-btn${current === value ? ' setting-toggle-active' : ''}"
@@ -10006,6 +10020,13 @@ function _attachPreferencesEvents(el) {
 
 function _appearanceCategoryHtml() {
   const accent = (_serverSettings.accent ?? '#3b82f6').trim();
+  const background = (_serverSettings.theme_background || 'classic').trim();
+  const backgrounds = _BACKGROUND_THEMES.map(t =>
+    `<button class="theme-preset theme-background${t.value === background ? ' theme-preset-active' : ''}"
+      data-theme-bg="${t.value}" type="button">
+      <span style="background:${t.swatch}"></span>${esc(t.label)}
+    </button>`
+  ).join('');
   const presets = _THEME_PRESETS.map(t =>
     `<button class="theme-preset${t.value === accent ? ' theme-preset-active' : ''}"
       data-accent="${t.value}" type="button">
@@ -10023,6 +10044,10 @@ function _appearanceCategoryHtml() {
   return `
     <div class="settings-section">
       <div class="settings-section-title">Theme</div>
+      <div class="settings-form-row">
+        <label class="settings-label">Background</label>
+        <div class="theme-presets">${backgrounds}</div>
+      </div>
       <div class="settings-form-row">
         <label class="settings-label">Preset</label>
         <div class="theme-presets">${presets}</div>
@@ -10061,15 +10086,32 @@ function _attachAppearanceEvents(el) {
       el.querySelectorAll('.accent-swatch').forEach(s =>
         s.classList.toggle('accent-swatch-active', s.dataset.accent === color)
       );
-      el.querySelectorAll('.theme-preset').forEach(p =>
+      el.querySelectorAll('.theme-preset[data-accent]').forEach(p =>
         p.classList.toggle('theme-preset-active', p.dataset.accent === color)
       );
   };
 
-  el.querySelectorAll('.accent-swatch, .theme-preset').forEach(swatch => {
+  const selectBackground = async bg => {
+    _serverSettings.theme_background = bg || 'classic';
+    _applyAppearanceSettings();
+    el.querySelectorAll('.theme-background').forEach(p =>
+      p.classList.toggle('theme-preset-active', p.dataset.themeBg === _serverSettings.theme_background)
+    );
+    try {
+      await _saveSetting('theme_background', _serverSettings.theme_background);
+    } catch (err) {
+      showToast('Theme save failed', err.message || '', 'error');
+    }
+  };
+
+  el.querySelectorAll('.accent-swatch, .theme-preset[data-accent]').forEach(swatch => {
     swatch.addEventListener('click', () => {
       selectAccent(swatch.dataset.accent);
     });
+  });
+
+  el.querySelectorAll('.theme-background').forEach(btn => {
+    btn.addEventListener('click', () => selectBackground(btn.dataset.themeBg));
   });
 
   el.querySelectorAll('.setting-toggle-btn').forEach(btn => {
