@@ -2,13 +2,14 @@
 
 Latest GitHub/Pi state:
 - Branch: main
-- Latest commit: current HEAD after this handoff (`Flip Bambu skip object map Y axis`)
+- Latest commit: current HEAD after this handoff (`Rotate Bambu skip object map display`)
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
-- Refresh cachebust currently: ?cachebust=366
+- Refresh cachebust currently: ?cachebust=367
 
 Recent work:
+- Bambu skip-object maps now render the thumbnail/object overlay as a 90-degree clockwise display rotation while preserving the underlying skip IDs. This is to match the H2D touchscreen orientation from the user's photo.
 - Bambu/H2D skip-object maps now fall back to matching plate-layout boxes by object name and occurrence when Bambu's plate JSON uses different internal IDs from the MQTT skip IDs, and the Y axis is flipped to match the Bambu screen/thumbnail orientation. BigBoy's current small front `Spool Holder` cylinder is object `#417`.
 - AMS slot indexing now uses one canonical rule across backend/frontend: regular AMS slots stay `unit*4+slot`, AMS HT uses Bambu tray ids `128+slot`, with legacy `512` accepted during transition.
 - Generic Bambu AMS/AMS HT reports now only auto-claim the exact recently remembered spool for that slot; if that spool is unavailable, Flightdeck leaves the slot for manual confirmation instead of grabbing a similar spool.
@@ -56,6 +57,11 @@ Likely next items:
 - This keeps the left/right positions unchanged while moving the front/bottom parts to the bottom of Flightdeck's map.
 - Verified against BigBoy's current job: small front `Spool Holder v3.step` object `#417` now maps near the bottom/front instead of the top.
 - Backend restart required.
+
+## What was changed - Session 28.244 (Bambu skip-object map display rotation - 7 June)
+- Bambu object maps now send `map_rotation=90`, and the frontend rotates the thumbnail plus hit regions clockwise as a display transform.
+- ID labels are counter-rotated so they remain readable.
+- Static cache bumped to `app.js?v=367` and `style.css?v=296`; backend restart and frontend refresh required.
 
 ## What was fixed - Session 28.240 (Generic AMS auto-claim guard - 7 June)
 - Generic Bambu AMS reports now only auto-claim the exact recent spool remembered for that slot.

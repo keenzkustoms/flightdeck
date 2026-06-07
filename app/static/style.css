@@ -6561,6 +6561,11 @@ button.live-route-node:hover {
   background-size: 1.2rem 1.2rem;
 }
 
+.obj-map-plane {
+  position: relative;
+  width: 100%;
+}
+
 .obj-map-open {
   cursor: zoom-in;
 }
@@ -6577,6 +6582,24 @@ button.live-route-node:hover {
 .obj-map-overlay {
   position: absolute;
   inset: 0;
+}
+
+.obj-map-rotate-cw .obj-map-stage,
+.object-map-modal-stage.obj-map-rotate-cw {
+  aspect-ratio: 9 / 16;
+}
+
+.obj-map-rotate-cw .obj-map-plane {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 177.78%;
+  transform: translate(-50%, -50%) rotate(90deg);
+  transform-origin: center;
+}
+
+.obj-map-rotate-cw .obj-chip-id {
+  transform: rotate(-90deg);
 }
 
 .obj-map-region {
@@ -9376,6 +9399,10 @@ button.live-route-node:hover {
     linear-gradient(45deg, rgba(15,23,42,0.9) 25%, transparent 25% 50%, rgba(15,23,42,0.9) 50% 75%, transparent 75%),
     rgba(2,6,23,0.82);
   background-size: 1.2rem 1.2rem;
+}
+
+.object-map-modal-stage.obj-map-rotate-cw {
+  max-height: 65vh;
 }
 
 .object-map-modal-stage img {
