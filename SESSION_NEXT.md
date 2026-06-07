@@ -2,13 +2,14 @@
 
 Latest GitHub/Pi state:
 - Branch: main
-- Latest commit: current HEAD after this handoff (`Undo Bambu skip map image-only rotation`)
+- Latest commit: current HEAD after this handoff (`Preserve Bambu skip overlay while splitting image layer`)
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
-- Refresh cachebust currently: ?cachebust=368
+- Refresh cachebust currently: ?cachebust=369
 
 Recent work:
+- Bambu skip-object maps now keep the red overlay as the source of truth and split the thumbnail onto a separate layer underneath without changing the overlay transform. Current trial values keep both boxes and image at 45 degrees so the overlay should remain visually unchanged.
 - Reverted the image-only rotation trial because it made the H2D skip-object map worse; Flightdeck is back to the better 45-degree shared thumbnail/box rotation.
 - Bambu skip-object map display rotation is currently set to 45 degrees clockwise as a user-requested visual check after the full 90-degree version looked too far.
 - Bambu skip-object maps now render the thumbnail/object overlay as a 90-degree clockwise display rotation while preserving the underlying skip IDs. This is to match the H2D touchscreen orientation from the user's photo.
@@ -75,6 +76,12 @@ Likely next items:
 - The image-only trial kept red boxes at 45 degrees and rotated the thumbnail to 90 degrees underneath, but visually made the map worse.
 - Current live target is back to the shared 45-degree thumbnail/box rotation from Session 28.245.
 - Static cache remains `app.js?v=368` and `style.css?v=297`; backend restart and frontend refresh required.
+
+## What was changed - Session 28.247 (Bambu skip-object layer split without overlay movement - 7 June)
+- Reintroduced separate thumbnail and overlay layers, but locked the red overlay plane to the same 16:9 sizing and 45-degree transform that the user said was correct.
+- Current H2D trial values: red boxes `45deg`, thumbnail image `45deg`; this should preserve the existing visual while making future tweaks image-only.
+- The red object boxes should be treated as source-of-truth and must not be moved during later image alignment.
+- Static cache bumped to `app.js?v=369` and `style.css?v=298`; backend restart and frontend refresh required.
 
 ## What was fixed - Session 28.240 (Generic AMS auto-claim guard - 7 June)
 - Generic Bambu AMS reports now only auto-claim the exact recent spool remembered for that slot.
