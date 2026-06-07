@@ -1,3 +1,36 @@
+## 2026-06-07 Session handoff
+
+Latest GitHub/Pi state:
+- Branch: main
+- Latest commit: e7e65b9 Keep camera zoom cycle on live view
+- Pi repo: /home/flightdeck/flightdeck
+- Data dir: /home/flightdeck/flightdeck-data
+- App URL: https://flightdeck.tail7de73e.ts.net/
+- Refresh cachebust currently: ?cachebust=355
+
+Recent work:
+- Fleet Wall added with Small/Medium/Large modes.
+- Fleet Wall now uses Live-view style AMS visuals.
+- Fleet Wall warnings compacted.
+- Fleet Wall camera tile opens the printer Live view.
+- Live camera zoom cycle stays on Live view instead of jumping to Cameras.
+- Themes, sidebar text colour, and wider adjustable sidebar are in.
+- Printer nav uses shop name first, model second.
+- Print disabled state shows as On hold.
+- Orca/browser/worker slicer settings and tests are in.
+- Bambu/Klipper live controls expanded.
+- Stock-in sheet/QR workflow started.
+- Bambu skip-object UI now thumbnail-first with list removed/reduced.
+- Sim printer stale notifications cleaned up.
+
+Likely next items:
+- Keep polishing Fleet Wall layout and AMS sizing.
+- Recheck Fleet Wall click/zoom behaviour after real use.
+- Continue slicer/API integration and profile filtering.
+- Continue stock-in QR/label workflow.
+- Make Windows installer/update flow smoother.
+
+
 # Flightdeck — next session brief
 _Last updated 7 June 2026 (Session 28.235 Bambu FTP error hints)_
 
