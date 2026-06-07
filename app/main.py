@@ -1588,8 +1588,9 @@ async def check_slicer_connection(body: SlicerConnectionCheckRequest):
 
     path = "/health" if kind == "api" else ("/api/slicer/worker/status" if kind == "worker" else "")
     target = f"{base_url}{path}"
+    verify_tls = False if kind == "browser" else True
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(connect=3.0, read=8.0, write=3.0, pool=3.0), follow_redirects=True) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(connect=3.0, read=8.0, write=3.0, pool=3.0), follow_redirects=True, verify=verify_tls) as client:
             resp = await client.get(target)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Could not reach {kind} URL: {exc}") from exc
