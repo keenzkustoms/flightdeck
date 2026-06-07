@@ -2777,10 +2777,9 @@ function _detailLiveAmsLoadoutRows(p) {
       unit.humidity != null ? `${unit.humidity}% RH` : '',
       unit.temperature != null ? `${Math.round(unit.temperature)}°` : '',
       preset.filament && preset.temperature > 0 ? `${preset.filament} ${preset.temperature}°` : '',
-      drying ? 'Drying' : '',
     ].filter(Boolean).join(' · ');
     const dryControl = unit.dry_capable
-      ? `${drying && dryTime ? `<span class="ams-loadout-dry-time">${esc(dryTime)}</span>` : ''}<button class="live-ams-dry${drying ? ' live-ams-dry-active' : ''}"
+      ? `<button class="live-ams-dry${drying ? ' live-ams-dry-active' : ''}"
           data-ams-dry data-printer-id="${p.id}" data-ams-id="${unit.unit}" data-enabled="${drying ? 'false' : 'true'}"
           title="${drying ? 'Stop AMS drying' : 'Start AMS drying'}">${drying ? 'Stop' : 'Dry'}</button>`
       : '';
@@ -2828,17 +2827,21 @@ function _detailLiveAmsLoadoutRows(p) {
     }).join('');
     const isHt = _isAmsHtUnit(unit);
     return `<div class="ams-loadout-unit${isHt ? ' ams-loadout-unit-ht' : ''}">
-      <div class="ams-loadout-head">
-        <div>
+      <div class="ams-loadout-main">
+        <div class="ams-loadout-head">
           <strong>${esc(unit.label ?? `AMS ${unit.unit + 1}`)}</strong>
           ${meta ? `<span>${esc(meta)}</span>` : ''}
         </div>
+        <div class="ams-loadout-slots">${slots}</div>
+      </div>
+      <div class="ams-loadout-side">
+        <small>${isHt ? 'High-temp bay' : `${(unit.slots || []).length} slot loadout`}</small>
+        ${unit.dry_capable ? `<span class="ams-loadout-dry-state">${drying ? 'Drying' : 'Idle'}</span>` : ''}
+        ${drying && dryTime ? `<span class="ams-loadout-dry-time">${esc(dryTime)}</span>` : ''}
         <div class="ams-loadout-actions">
-          <small>${isHt ? 'High-temp bay' : `${(unit.slots || []).length} slot loadout`}</small>
           ${dryControl}
         </div>
       </div>
-      <div class="ams-loadout-slots">${slots}</div>
     </div>`;
   });
   return `<div class="ams-loadout-deck">

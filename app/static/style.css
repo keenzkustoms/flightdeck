@@ -4490,9 +4490,13 @@ button.live-route-node:hover {
 }
 
 .ams-loadout-unit {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 4.9rem;
+  gap: 0.55rem;
+  align-items: stretch;
   border: 1px solid rgba(96,165,250,0.24);
   background:
-    linear-gradient(180deg, rgba(148,163,184,0.12) 0 1.9rem, rgba(2,6,23,0.12) 1.9rem 100%),
+    linear-gradient(90deg, rgba(148,163,184,0.12) 0 calc(100% - 5.45rem), rgba(2,6,23,0.12) calc(100% - 5.45rem) 100%),
     linear-gradient(90deg, rgba(15,23,42,0.96), rgba(8,13,26,0.98));
   border-radius: 8px;
   padding: 0.55rem 0.65rem 0.65rem;
@@ -4510,33 +4514,22 @@ button.live-route-node:hover {
 }
 
 .ams-loadout-unit:not(.ams-loadout-unit-ht) {
-  width: min(100%, 20rem);
+  width: min(100%, 25.4rem);
 }
 
 .ams-loadout-unit-ht {
-  width: min(100%, 13.8rem);
-  display: grid;
-  grid-template-columns: minmax(4.6rem, 6.2rem) minmax(4.8rem, 1fr);
-  grid-template-areas: "slots head";
-  gap: 0.5rem;
-  align-items: start;
-  background:
-    linear-gradient(90deg, rgba(148,163,184,0.12) 0 6.9rem, rgba(2,6,23,0.12) 6.9rem 100%),
-    linear-gradient(90deg, rgba(15,23,42,0.96), rgba(8,13,26,0.98));
+  width: min(100%, 14.5rem);
+  grid-template-columns: minmax(4.8rem, 6.4rem) minmax(4.8rem, 1fr);
+}
+
+.ams-loadout-main {
+  min-width: 0;
 }
 
 .ams-loadout-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 0.75rem;
+  display: block;
   margin-bottom: 0.45rem;
   min-height: var(--ams-loadout-head-space);
-}
-
-.ams-loadout-head > div:first-child {
-  min-width: 0;
-  flex: 1 1 auto;
 }
 
 .ams-loadout-head strong {
@@ -4559,34 +4552,34 @@ button.live-route-node:hover {
   white-space: nowrap;
 }
 
-.ams-loadout-unit-ht .ams-loadout-head {
-  grid-area: head;
+.ams-loadout-side {
+  min-width: 0;
+  display: flex;
   flex-direction: column;
   align-items: flex-start;
-  justify-content: space-between;
-  gap: 0.45rem;
-  margin-bottom: 0;
-  min-height: calc(var(--ams-loadout-head-space) + 5.9rem);
-  min-width: 0;
-}
-
-.ams-loadout-unit-ht .ams-loadout-head > div {
-  min-width: 0;
-}
-
-.ams-loadout-unit-ht .ams-loadout-actions {
-  align-items: flex-start;
-  flex-direction: column;
   justify-content: flex-start;
+  gap: 0.38rem;
+  padding-top: 0.2rem;
+}
+
+.ams-loadout-side small {
+  color: #7f98bc;
+  font-size: 0.66rem;
+  line-height: 1.25;
+}
+
+.ams-loadout-dry-state {
+  color: #bfdbfe;
+  font-size: 0.64rem;
+  font-weight: 900;
 }
 
 .ams-loadout-actions {
   display: flex;
-  align-items: center;
-  justify-content: flex-end;
+  align-items: flex-start;
+  justify-content: flex-start;
   gap: 0.35rem;
   flex-wrap: wrap;
-  flex: 0 0 auto;
   padding-top: 0.02rem;
 }
 
@@ -4617,10 +4610,8 @@ button.live-route-node:hover {
 }
 
 .ams-loadout-unit-ht .ams-loadout-slots {
-  grid-area: slots;
   grid-template-columns: minmax(4.6rem, 6.2rem);
   justify-content: start;
-  margin-top: calc(var(--ams-loadout-head-space) + 0.45rem);
   padding: 0.42rem;
 }
 
@@ -4898,8 +4889,9 @@ button.live-route-node:hover {
     width: 100%;
   }
 
+  .ams-loadout-unit,
   .ams-loadout-unit-ht {
-    grid-template-columns: minmax(4.6rem, 6.2rem) minmax(4.8rem, 1fr);
+    grid-template-columns: minmax(0, 1fr) 4.9rem;
   }
 
   .ams-loadout-slots {

@@ -1,5 +1,12 @@
 # Flightdeck — next session brief
-_Last updated 7 June 2026 (Session 28.223 AMS dry countdown chip)_
+_Last updated 7 June 2026 (Session 28.224 AMS dryer side rails)_
+
+## What was changed - Session 28.224 (AMS dryer side rails - 7 June)
+- Reworked AMS live loadout cards into a left visual area and a right dryer/status rail.
+- AMS 1 is wider so the four spool slots keep their spacing while dryer controls sit to the RHS.
+- AMS HT uses the same side-rail pattern, keeping the reel visual separate from dryer information.
+- Removed dryer status/time from the cramped title metadata line.
+- Bumped static cache to `app.js?v=338` and `style.css?v=272`; frontend refresh required.
 
 ## What was fixed - Session 28.223 (AMS dry countdown chip - 7 June)
 - Removed the drying countdown from the AMS metadata sentence so it no longer truncates words.
