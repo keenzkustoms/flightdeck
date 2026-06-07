@@ -3629,9 +3629,7 @@ function _objectMapHtml(id, data) {
   const bounds = data?.plate_bounds;
   const hasGeometry = bounds && bounds.w > 0 && bounds.h > 0 && objects.some(o => o.bbox);
   const availableObjects = objects.filter(o => o.state !== 'excluded');
-  const pseudoCols = Math.max(1, Math.ceil(Math.sqrt(objects.length)));
-  const pseudoRows = Math.max(1, Math.ceil(objects.length / pseudoCols));
-  const mapButtons = objects.map((obj, index) => {
+  const mapButtons = objects.map(obj => {
     const isExcluded = obj.state === 'excluded';
     const isCurrent = obj.state === 'current';
     const rawName = obj.name || `Object ${obj.id ?? ''}`;
@@ -3649,12 +3647,7 @@ function _objectMapHtml(id, data) {
         data-obj-name="${safeName}" data-obj-label="${esc(shortName)}" data-printer-id="${id}" data-obj-id="${safeId}" ${isExcluded ? 'disabled' : ''}
         title="${esc(shortName)}"><span class="obj-chip-id">${displayId}</span></button>`;
     }
-    const col = index % pseudoCols;
-    const row = Math.floor(index / pseudoCols);
-    const left = 8 + ((col + 0.5) / pseudoCols) * 84;
-    const top = 16 + ((row + 0.5) / pseudoRows) * 68;
-    return `<button type="button" class="obj-map-chip obj-exclude-btn${isExcluded ? ' is-excluded' : ''}${isCurrent ? ' is-current' : ''}"
-      style="left:${left.toFixed(2)}%;top:${top.toFixed(2)}%;"
+    return `<button type="button" class="obj-id-select obj-exclude-btn${isExcluded ? ' is-excluded' : ''}${isCurrent ? ' is-current' : ''}"
       data-obj-name="${safeName}" data-obj-label="${esc(shortName)}" data-printer-id="${id}" data-obj-id="${safeId}" ${isExcluded ? 'disabled' : ''}
       title="${esc(shortName)}"><span class="obj-chip-id">${displayId}</span></button>`;
   }).join('');
@@ -3662,15 +3655,16 @@ function _objectMapHtml(id, data) {
   const image = data?.plate_image_url
     ? `<img src="${esc(data.plate_image_url)}?map=${encodeURIComponent(imageVersion)}" alt="Plate object map" loading="lazy">`
     : '';
-  const classes = `obj-map${hasGeometry ? ' obj-map-has-geometry' : ' obj-map-no-geometry obj-map-approx'}`;
+  const classes = `obj-map${hasGeometry ? ' obj-map-has-geometry' : ' obj-map-no-geometry'}`;
   const helper = hasGeometry
     ? 'Tap the failed part on the plate map.'
-    : `Approximate selector: Bambu/Orca object IDs can be high; match the ID shown on the printer screen. ${availableObjects.length} objects still available.`;
+    : `No bed positions in this 3MF; use the object ID shown on the printer screen. Bambu/Orca IDs can be high. ${availableObjects.length} objects still available.`;
   return `<div class="${classes}">
     <div class="obj-map-stage">
       ${image}
-      <div class="obj-map-overlay">${mapButtons}</div>
+      ${hasGeometry ? `<div class="obj-map-overlay">${mapButtons}</div>` : ''}
     </div>
+    ${hasGeometry ? '' : `<div class="obj-id-selector"><span>Printer object IDs</span><div>${mapButtons}</div></div>`}
     <div class="obj-map-helper">${esc(helper)}</div>
   </div>`;
 }

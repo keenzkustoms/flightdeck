@@ -1,5 +1,11 @@
 # Flightdeck — next session brief
-_Last updated 7 June 2026 (Session 28.215 Object panel empty state)_
+_Last updated 7 June 2026 (Session 28.216 Object ID selector honesty)_
+
+## What was improved - Session 28.216 (Object ID selector honesty - 7 June)
+- Object exclusion no longer draws approximate ID buttons over the thumbnail when the 3MF lacks object geometry.
+- No-geometry Bambu jobs now show the thumbnail as a preview and a separate `Printer object IDs` selector.
+- Helper text now states that there are no bed positions in the 3MF and the operator must match the ID shown on the printer screen.
+- Bumped static cache to `app.js?v=333` and `style.css?v=264`; frontend refresh required.
 
 ## What was fixed - Session 28.215 (Object panel empty state - 7 June)
 - Object exclusion panel now shows an explicit no-metadata note instead of going blank when a Bambu print has no usable object metadata.
