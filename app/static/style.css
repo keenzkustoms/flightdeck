@@ -15,6 +15,7 @@
   --paused:   #f59e0b;
   --error:    #ef4444;
   --offline:  #6b7280;
+  color-scheme: dark;
 }
 
 body {
@@ -8290,6 +8291,12 @@ button.live-route-node:hover {
 }
 .settings-input:focus { border-color: var(--printing); }
 select.settings-input { cursor: pointer; }
+select,
+select option,
+select optgroup {
+  background: var(--surface);
+  color: var(--text);
+}
 
 .settings-type-toggle { display: flex; gap: 0.375rem; }
 
@@ -12761,6 +12768,12 @@ select.settings-input { cursor: pointer; }
   color: var(--text);
   min-height: 2.15rem;
   padding: 0.35rem 0.55rem;
+}
+.stock-in-form select option,
+.stock-in-receive-form select option,
+.stock-edit-form select option {
+  background: var(--surface);
+  color: var(--text);
 }
 .stock-in-form button,
 .stock-in-receive-form button {
