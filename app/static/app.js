@@ -5444,38 +5444,53 @@ async function renderPrinterDetail(id, subtab = 'live') {
     return;
   }
 
-  // Live tab — fetch camera URL once
+  // Live tab: resolve camera URL in the background so it never blocks status render.
   if (_cameraUrlCache[id] === undefined) {
-    try {
-      const r = await fetch(`/api/printers/${id}/camera`);
-      _cameraUrlCache[id] = r.ok ? (await r.json()).url : null;
-    } catch { _cameraUrlCache[id] = null; }
+    _cameraUrlCache[id] = null;
+    fetch(`/api/printers/${id}/camera`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        _cameraUrlCache[id] = data?.url || null;
+        const route = parseRoute();
+        if (route.view === 'printer' && route.id === id && route.subtab === 'live') {
+          _renderedDetailOk = false;
+          renderPrinterDetail(id, subtab);
+        }
+      })
+      .catch(() => { _cameraUrlCache[id] = null; });
   }
 
   if (needsFullRender) {
     const existingImg = el.querySelector('#detail-cam-img');
     if (existingImg) existingImg.src = '';
 
-    const camSrc = _cameraStreamSrc(id);
-    const camHtml = _detailCameraContent(id, p, camSrc);
+    try {
+      const camSrc = _cameraStreamSrc(id);
+      const camHtml = _detailCameraContent(id, p, camSrc);
 
-    const printerColor = _printerColor(id);
-    const bannerTextColor = p.icon === 'bambu' ? '#22c55e' : p.icon === 'voron' ? '#ef4444' : 'var(--text)';
-    el.innerHTML =
-      _detailSubTabs(id, 'live') +
-      `<div class="detail-body">
-        <div class="detail-left">
-          <div id="detail-live-head">${_detailLiveHeader(p, printerColor, bannerTextColor)}</div>
-          <div class="camera-hero">${camHtml}<div class="camera-hud" id="detail-camera-hud">${_detailCameraHud(p)}</div></div>
-          <div class="live-strip" id="detail-live-strip">${_detailLiveStrip(p)}</div>
-        </div>
-        <div class="detail-right">
-          <div class="detail-panels">
-            <div class="detail-panel" id="detail-print">${_detailPrintPanel(p)}</div>
+      const printerColor = _printerColor(id);
+      const bannerTextColor = p.icon === 'bambu' ? '#22c55e' : p.icon === 'voron' ? '#ef4444' : 'var(--text)';
+      el.innerHTML =
+        _detailSubTabs(id, 'live') +
+        `<div class="detail-body">
+          <div class="detail-left">
+            <div id="detail-live-head">${_detailLiveHeader(p, printerColor, bannerTextColor)}</div>
+            <div class="camera-hero">${camHtml}<div class="camera-hud" id="detail-camera-hud">${_detailCameraHud(p)}</div></div>
+            <div class="live-strip" id="detail-live-strip">${_detailLiveStrip(p)}</div>
           </div>
-          <div id="detail-objects"></div>
-        </div>
-      </div>`;
+          <div class="detail-right">
+            <div class="detail-panels">
+              <div class="detail-panel" id="detail-print">${_detailPrintPanel(p)}</div>
+            </div>
+            <div id="detail-objects"></div>
+          </div>
+        </div>`;
+    } catch (err) {
+      _renderedDetailOk = false;
+      el.innerHTML = _detailSubTabs(id, 'live') +
+        `<div class="detail-placeholder">Live view failed: ${esc(err?.message || 'render error')}</div>`;
+      return;
+    }
     _attachCameraRetries(el);
 
     // Click cycles — desktop: normal→wide→fullscreen→normal; mobile: normal↔fullscreen
