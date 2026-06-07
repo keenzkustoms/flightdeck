@@ -2,14 +2,14 @@
 
 Latest GitHub/Pi state:
 - Branch: main
-- Latest commit: current HEAD after this handoff (`Reposition Bambu skip thumbnail under locked overlay`)
+- Latest commit: current HEAD after this handoff (`Nudge Bambu skip thumbnail down left`)
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
 - Refresh cachebust currently: ?cachebust=372
 
 Recent work:
-- Bambu skip-object thumbnail layer now supports image-only X/Y offsets; current H2D trial keeps the red overlay locked and moves the rotated thumbnail by `x=20%`, `y=-105%` to bring the star closer to the centre of `#439`.
+- Bambu skip-object thumbnail layer now supports image-only X/Y offsets; current H2D trial keeps the red overlay locked and moves the rotated thumbnail by `x=5%`, `y=-92%` to bring the star down inside `#439` and move the spoon shapes left into `#148/#463`.
 - Bambu skip-object red overlay remains locked unrotated/axis-aligned. The thumbnail image is now on a separate layer underneath and currently rotates 45 degrees to try to bring the left spoon/keeper shape into the `#148` box without moving the red boxes.
 - Bambu skip-object map rotation is now locked at `0` so the red overlay stays axis-aligned like the user's second reference image: `#148/#463` vertical on the left, `#417` bottom-left, and `#439` across the right. Do not rotate or move the red overlay in future thumbnail alignment work.
 - Restored the Bambu skip-object overlay to the user-approved 45-degree shared thumbnail/box rotation and removed the separate image-layer experiment again. The red overlay should match the screenshot target with `#148/#463` left, `#417` bottom-left, and `#439` right.
@@ -101,7 +101,7 @@ Likely next items:
 
 ## What was changed - Session 28.250 (Bambu skip-object thumbnail upward offset - 7 June)
 - Added `map_image_offset_x` / `map_image_offset_y` support for Bambu object maps.
-- Current H2D trial values: `map_rotation=0`, `map_image_rotation=45`, `map_image_offset_x=20`, `map_image_offset_y=-105`.
+- Current H2D trial values: `map_rotation=0`, `map_image_rotation=45`, `map_image_offset_x=5`, `map_image_offset_y=-92`.
 - This moves only the thumbnail layer upward so the star shape moves toward the centre of the locked `#439` red overlay.
 - Red boxes remain locked and must not be moved.
 - Static cache bumped to `app.js?v=372` and `style.css?v=301`; backend restart and frontend refresh required.
