@@ -298,6 +298,8 @@ let _camerasMode = 'live';       // live | sim30
 let _printWatchFocusIndex = 0;
 let _printWatchTimer = null;
 let _printWatchPinnedId = '';
+let _printWatchManualPinnedId = '';
+let _printWatchAutoPinPaused = false;
 let _camZoom = 0;               // 0=normal, 1=wide, 2=fullscreen
 let _cameraReturnTarget = null; // { printerId, hash } when Fleet Wall opened Live camera
 let _onSettings = false;        // true while settings view is active
@@ -2084,6 +2086,14 @@ document.addEventListener('click', e => {
 }, true);
 
 document.addEventListener('click', e => {
+  const printWatchPin = e.target.closest('[data-print-watch-pin]');
+  if (printWatchPin) {
+    e.preventDefault();
+    e.stopPropagation();
+    _togglePrintWatchPin(printWatchPin.dataset.printerId);
+    return;
+  }
+
   const fleetLive = e.target.closest('[data-fleet-live]');
   if (fleetLive) {
     e.preventDefault();
@@ -7600,15 +7610,31 @@ function _camTileFeedHtml(p) {
 }
 
 function _printWatchAttention(p) {
-  const target = _printerWarningTarget(p);
-  if (!target) return null;
-  return target.title || _dashboardIssueText(p) || 'Needs attention';
+  if (!p) return null;
+  const loaded = _latestSpoolsByPrinter[p.id] || [];
+  const amsWarning = _amsMismatchSignals(p, loaded)[0];
+  if (amsWarning) return amsWarning.title || amsWarning.label || 'AMS review';
+  if (_healthIsActionable(p.health)) return p.health?.reasons?.[0]?.message || 'Open printer attention';
+  if (p.state === 'offline' || p.state === 'error' || p.state === 'estop' || p.state === 'paused') {
+    return _dashboardIssueText(p);
+  }
+  return null;
 }
 
 function _printWatchFocusPrinter(printers) {
   const fleet = printers || [];
   if (!fleet.length) return null;
-  const attention = fleet.find(p => _printWatchAttention(p));
+  const attentionPrinters = fleet.filter(p => _printWatchAttention(p));
+  if (_printWatchAutoPinPaused && !attentionPrinters.length) _printWatchAutoPinPaused = false;
+  if (_printWatchManualPinnedId) {
+    const manual = fleet.find(p => String(p.id) === String(_printWatchManualPinnedId));
+    if (manual) {
+      _printWatchPinnedId = manual.id;
+      return manual;
+    }
+    _printWatchManualPinnedId = '';
+  }
+  const attention = _printWatchAutoPinPaused ? null : attentionPrinters[0];
   if (attention) {
     _printWatchPinnedId = attention.id;
     return attention;
@@ -7616,6 +7642,19 @@ function _printWatchFocusPrinter(printers) {
   if (_printWatchPinnedId) _printWatchPinnedId = '';
   _printWatchFocusIndex = Math.max(0, Math.min(_printWatchFocusIndex, fleet.length - 1));
   return fleet[_printWatchFocusIndex % fleet.length];
+}
+
+function _printWatchPinnedCount(printers) {
+  if (_printWatchManualPinnedId) return 1;
+  const autoCount = _printWatchAutoPinPaused ? 0 : (printers || []).filter(p => _printWatchAttention(p)).length;
+  return autoCount;
+}
+
+function _printWatchSummaryHtml(printers) {
+  const pinned = _printWatchPinnedCount(printers);
+  return `${_fleetWallMetric('Feeds', String((printers || []).length))}
+    ${_fleetWallMetric('Pinned', String(pinned), pinned ? 'hot' : '')}
+    ${_fleetWallMetric('Mode', pinned ? 'Hold' : 'Cycle')}`;
 }
 
 function _printWatchFocusHtml(printers, sim = false) {
@@ -7626,11 +7665,15 @@ function _printWatchFocusHtml(printers, sim = false) {
   const activeJob = _activePrinterJob(p);
   const pct = activeJob?.progress != null ? `${Math.round(activeJob.progress * 100)}%` : _printerDisplayStateLabel(p);
   const attention = _printWatchAttention(p);
-  const mode = attention ? 'Pinned' : 'Cycling';
+  const manualPinned = String(_printWatchManualPinnedId) === String(p.id);
+  const autoPinned = !!attention && String(_printWatchPinnedId) === String(p.id);
+  const pinned = manualPinned || autoPinned;
+  const mode = pinned ? 'Pinned' : 'Cycling';
+  const pinTitle = pinned ? 'Unpin and continue cycling' : 'Pin this camera';
   const feed = (camSrc && p.state !== 'offline')
     ? `<img src="${camSrc}" alt="${esc(_printerPrimaryLabel(p))} print watch camera" data-camera-id="${esc(cameraId)}" loading="eager" fetchpriority="high">`
     : _cameraOfflineContent(p, 'print-watch-offline');
-  return `<section class="print-watch-focus ${attention ? 'print-watch-focus-pinned' : ''}" data-print-watch-focus="${esc(p.id)}">
+  return `<section class="print-watch-focus ${pinned ? 'print-watch-focus-pinned' : ''}" data-print-watch-focus="${esc(p.id)}">
     <div class="print-watch-focus-head">
       <div class="printer-identity">
         <div class="printer-icon">${getIcon(p.icon)}</div>
@@ -7641,7 +7684,7 @@ function _printWatchFocusHtml(printers, sim = false) {
         </div>
       </div>
       <div class="print-watch-focus-status">
-        <span class="print-watch-mode">${esc(mode)}</span>
+        <button type="button" class="print-watch-mode print-watch-pin-btn ${pinned ? 'is-pinned' : ''}" data-print-watch-pin data-printer-id="${esc(p.id)}" title="${esc(pinTitle)}">${esc(pinned ? 'Pinned' : 'Pin')}</button>
         <span class="fleet-wall-state fleet-wall-state-${_fleetWallTone(p)}">${esc(_printerDisplayStateLabel(p))}</span>
       </div>
     </div>
@@ -7657,6 +7700,22 @@ function _printWatchFocusHtml(printers, sim = false) {
       </div>
     </a>
   </section>`;
+}
+
+function _togglePrintWatchPin(printerId) {
+  const current = String(printerId || '');
+  if (!current) return;
+  const attention = _printWatchAttention((_latestPrinters || []).find(p => p.id === current));
+  if (_printWatchManualPinnedId === current || _printWatchPinnedId === current) {
+    _printWatchManualPinnedId = '';
+    _printWatchPinnedId = '';
+    if (attention) _printWatchAutoPinPaused = true;
+  } else {
+    _printWatchManualPinnedId = current;
+    _printWatchPinnedId = current;
+    _printWatchAutoPinPaused = false;
+  }
+  renderCamerasView();
 }
 
 function _renderPrintWatchFocus(printers, sim = false) {
@@ -8034,6 +8093,8 @@ async function renderCamerasView() {
 
   if (_camerasFull && _camerasMode === mode) {
     _renderPrintWatchFocus(cameraPrinters, sim);
+    const summary = el.querySelector('.print-watch-summary');
+    if (summary) summary.innerHTML = _printWatchSummaryHtml(cameraPrinters);
     cameraPrinters.forEach(p => {
       const tile = el.querySelector(`.cam-tile[data-printer-id="${p.id}"]`);
       const header = tile?.querySelector('.cam-tile-header');
@@ -8067,9 +8128,7 @@ async function renderCamerasView() {
         <h1>${sim ? 'Simulated camera watch' : 'Rotating print watch'}</h1>
       </div>
       <div class="print-watch-summary">
-        ${_fleetWallMetric('Feeds', String(cameraPrinters.length))}
-        ${_fleetWallMetric('Pinned', String(cameraPrinters.filter(p => _printWatchAttention(p)).length), cameraPrinters.some(p => _printWatchAttention(p)) ? 'hot' : '')}
-        ${_fleetWallMetric('Mode', cameraPrinters.some(p => _printWatchAttention(p)) ? 'Hold' : 'Cycle')}
+        ${_printWatchSummaryHtml(cameraPrinters)}
       </div>
     </div>
     <div id="print-watch-focus-host">${_printWatchFocusHtml(cameraPrinters, sim)}</div>

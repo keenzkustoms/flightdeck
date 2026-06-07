@@ -9039,10 +9039,28 @@ button.live-route-node:hover {
   text-transform: uppercase;
 }
 
-.print-watch-focus-pinned .print-watch-mode {
+.print-watch-pin-btn {
+  cursor: pointer;
+}
+
+.print-watch-pin-btn:hover,
+.print-watch-pin-btn:focus-visible {
+  border-color: rgba(147,197,253,0.7);
+  background: rgba(59,130,246,0.18);
+  color: #dbeafe;
+}
+
+.print-watch-focus-pinned .print-watch-mode,
+.print-watch-pin-btn.is-pinned {
   border-color: rgba(245,158,11,0.52);
   color: #fde68a;
   background: rgba(245,158,11,0.1);
+}
+
+.print-watch-pin-btn.is-pinned:hover,
+.print-watch-pin-btn.is-pinned:focus-visible {
+  border-color: rgba(245,158,11,0.78);
+  background: rgba(245,158,11,0.18);
 }
 
 .print-watch-feed {

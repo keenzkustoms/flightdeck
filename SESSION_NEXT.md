@@ -6,7 +6,7 @@ Latest GitHub/Pi state:
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
-- Refresh cachebust currently: ?cachebust=361
+- Refresh cachebust currently: ?cachebust=364
 
 Recent work:
 - Fleet Wall added with Small/Medium/Large modes.
@@ -40,8 +40,9 @@ Likely next items:
 - Fleet Wall now renders immediately and hydrates camera feeds as their URLs resolve, avoiding one slow camera lookup blocking the whole wall.
 - `Cameras` has been renamed to `Print Watch` in navigation and command search while keeping `#/cameras` compatible.
 - Print Watch has a large rotating focus camera, pins to the first printer needing attention, and resumes cycling once attention clears.
+- Print Watch no longer auto-pins just because a printer is intentionally on hold; the `Pinned` chip is now a manual pin/unpin control, and unpinning an auto-pinned feed pauses auto-pin until attention clears.
 - Camera URL fetches are shared across Fleet Wall/Print Watch and camera retry handlers are attached once per image.
-- Demo shell now loads current `app.js?v=361`; main and demo shells load `style.css?v=293`.
+- Demo shell now loads current `app.js?v=364`; main and demo shells load `style.css?v=295`.
 - Static-only change; frontend refresh required.
 
 
