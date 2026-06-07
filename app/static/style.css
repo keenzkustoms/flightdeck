@@ -10,6 +10,7 @@
   --text:     #e2e8f0;
   --muted:    #64748b;
   --sidebar-text: #8fa8c8;
+  --sidebar-width: 220px;
   --accent:   #3b82f6;
   --printing: #3b82f6;
   --idle:     #22c55e;
@@ -73,13 +74,50 @@ body {
 }
 
 .app-sidebar {
-  width: 184px;
-  flex: 0 0 184px;
+  width: var(--sidebar-width);
+  flex: 0 0 var(--sidebar-width);
+  position: relative;
   border-right: 1px solid var(--border);
   background: rgba(255,255,255,0.015);
   color: var(--sidebar-text);
   padding: 1rem 0.75rem;
   overflow-y: auto;
+}
+
+.sidebar-resizer {
+  position: absolute;
+  top: 0;
+  right: -4px;
+  width: 8px;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  cursor: col-resize;
+  z-index: 3;
+}
+
+.sidebar-resizer::after {
+  content: "";
+  position: absolute;
+  top: 1rem;
+  right: 3px;
+  width: 2px;
+  height: calc(100% - 2rem);
+  border-radius: 999px;
+  background: transparent;
+  transition: background 0.15s, box-shadow 0.15s;
+}
+
+.sidebar-resizer:hover::after,
+body.sidebar-resizing .sidebar-resizer::after {
+  background: var(--printing);
+  box-shadow: 0 0 10px rgba(59,130,246,0.35);
+}
+
+body.sidebar-resizing {
+  cursor: col-resize;
+  user-select: none;
 }
 
 .app-views {
@@ -1323,11 +1361,13 @@ header {
   .app-sidebar {
     width: auto;
     flex: none;
+    position: static;
     border-right: none;
     border-bottom: 1px solid var(--border);
     padding: 0.6rem 0.75rem;
     overflow-x: auto;
   }
+  .sidebar-resizer { display: none; }
   #tab-strip {
     flex-direction: row;
     align-items: center;
@@ -4951,7 +4991,6 @@ button.live-route-node:hover {
   .ams-loadout-unit-ht {
     width: 100%;
   }
-
   .ams-loadout-unit,
   .ams-loadout-unit-ht {
     grid-template-columns: minmax(0, 1fr) 4.9rem;

@@ -142,6 +142,7 @@ function _applyAppearanceSettings() {
   const accent = _serverSettings.accent ?? '#3b82f6';
   document.documentElement.style.setProperty('--printing', accent);
   document.documentElement.style.setProperty('--sidebar-text', _safeCssHex(_serverSettings.sidebar_text_color, '#8fa8c8'));
+  document.documentElement.style.setProperty('--sidebar-width', `${_safeSidebarWidth(_serverSettings.sidebar_width_px)}px`);
   const bg = (_serverSettings.theme_background || 'classic').replace(/[^a-z0-9_-]/gi, '');
   document.documentElement.dataset.themeBg = bg || 'classic';
   if (bg === 'custom') {
@@ -154,6 +155,55 @@ function _applyAppearanceSettings() {
 function _safeCssHex(value, fallback = '#8fa8c8') {
   const raw = String(value || '').trim();
   return /^#[0-9a-fA-F]{6}$/.test(raw) ? raw : fallback;
+}
+
+function _safeSidebarWidth(value) {
+  const n = Number.parseInt(value, 10);
+  if (!Number.isFinite(n)) return 220;
+  return Math.max(180, Math.min(360, n));
+}
+
+function initSidebarResizer() {
+  const handle = document.querySelector('.sidebar-resizer');
+  if (!handle || handle.dataset.ready) return;
+  handle.dataset.ready = 'true';
+
+  let active = false;
+  let width = _safeSidebarWidth(_serverSettings.sidebar_width_px);
+
+  const setWidth = next => {
+    width = _safeSidebarWidth(next);
+    _serverSettings.sidebar_width_px = String(width);
+    document.documentElement.style.setProperty('--sidebar-width', `${width}px`);
+  };
+
+  const finish = async () => {
+    if (!active) return;
+    active = false;
+    document.body.classList.remove('sidebar-resizing');
+    try {
+      await _saveSetting('sidebar_width_px', width);
+    } catch (err) {
+      showToast('Sidebar width save failed', err.message || '', 'error');
+    }
+  };
+
+  handle.addEventListener('pointerdown', e => {
+    if (window.matchMedia('(max-width: 760px)').matches) return;
+    active = true;
+    handle.setPointerCapture?.(e.pointerId);
+    document.body.classList.add('sidebar-resizing');
+    setWidth(e.clientX);
+    e.preventDefault();
+  });
+
+  handle.addEventListener('pointermove', e => {
+    if (!active) return;
+    setWidth(e.clientX);
+  });
+
+  handle.addEventListener('pointerup', finish);
+  handle.addEventListener('pointercancel', finish);
 }
 
 async function loadInstanceInfo() {
@@ -13691,6 +13741,7 @@ async function renderSettingsView() {
 }
 
 loadSettings();
+initSidebarResizer();
 loadInstanceInfo().then(() => {
   if (_latestPrinters?.length) updateDashboard(_latestPrinters);
 });
