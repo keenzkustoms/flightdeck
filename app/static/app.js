@@ -5544,10 +5544,7 @@ async function renderPrinterDetail(id, subtab = 'live') {
           _camZoom = (_camZoom + 1) % 3;
           if (_camZoom === 0) {
             body.classList.remove('cam-wide');
-            if (document.fullscreenElement) {
-              document.exitFullscreen?.();
-              location.hash = '#/cameras';
-            }
+            if (document.fullscreenElement) document.exitFullscreen?.();
           } else if (_camZoom === 1) {
             body.classList.add('cam-wide');
           } else {
