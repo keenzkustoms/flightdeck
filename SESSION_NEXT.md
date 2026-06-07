@@ -1,5 +1,11 @@
 # Flightdeck — next session brief
-_Last updated 7 June 2026 (Session 28.233 Setup backup check)_
+_Last updated 7 June 2026 (Session 28.234 Slicer connection diagnostics)_
+
+## What was added - Session 28.234 (Slicer connection diagnostics - 7 June)
+- Added `POST /api/slicer/check` so Flightdeck can test Browser Orca, Slicer API, and Worker URLs from the host running Flightdeck.
+- Settings -> Slicer now has `Test Browser Orca`, `Test API`, and `Test Worker` buttons with inline reachability feedback.
+- Demo mode now stubs the slicer check endpoint.
+- Bumped static cache to `app.js?v=339` and `style.css?v=277`; backend restart required.
 
 ## What was improved - Session 28.233 (Setup backup check - 7 June)
 - Setup Health now has an explicit optional `Backup tools` check for the backup/restore scripts.

@@ -8947,6 +8947,12 @@ function _slicerCategoryHtml(profileData = null, printers = []) {
         <input class="settings-input pref-input" data-pref-key="orcaslicer_worker_url" type="url" value="${esc(workerUrl)}" placeholder="http://100.x.x.x:8000">
       </div>
       <div class="settings-hint">Browser Orca URL opens the web slicer. Slicer API URL points to the background /slice service, usually port 3003. Worker URL points to a Windows Flightdeck instance with native Orca profiles installed.</div>
+      <div class="slicer-connection-actions">
+        <button type="button" class="settings-save-btn" data-slicer-test="browser">Test Browser Orca</button>
+        <button type="button" class="settings-save-btn" data-slicer-test="api">Test API</button>
+        <button type="button" class="settings-save-btn" data-slicer-test="worker">Test Worker</button>
+        <span class="slicer-connection-status" id="slicer-connection-status"></span>
+      </div>
     </div>
     ${_slicerProfilesHtml(profileData, printers)}`;
 }
@@ -9032,6 +9038,57 @@ function _attachSlicerEvents(el) {
       } catch (err) {
         showToast('Setting save failed', err.message || '', 'error');
         input.value = input.defaultValue;
+      }
+    });
+  });
+
+  el.querySelectorAll('[data-slicer-test]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const kind = btn.dataset.slicerTest;
+      const status = el.querySelector('#slicer-connection-status');
+      const selector = kind === 'api'
+        ? '[data-pref-key="orcaslicer_api_url"]'
+        : kind === 'worker'
+          ? '[data-pref-key="orcaslicer_worker_url"]'
+          : '[data-pref-key="orcaslicer_docker_url"]';
+      const input = el.querySelector(selector);
+      const fallback = kind === 'api' ? _slicerApiDefaultUrl() : (kind === 'browser' ? _slicerDockerDefaultUrl() : '');
+      const url = (input?.value || fallback || '').trim().replace(/\/+$/, '');
+      if (!url) {
+        showToast('Slicer test needs a URL', 'Set the URL first.', 'warning');
+        return;
+      }
+      const old = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = 'Testing';
+      if (status) {
+        status.textContent = `Testing ${kind}...`;
+        status.dataset.tone = 'info';
+      }
+      try {
+        const r = await fetch('/api/slicer/check', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ kind, url }),
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Slicer check failed');
+        const label = kind === 'api' ? 'Slicer API' : (kind === 'worker' ? 'Slicer worker' : 'Browser Orca');
+        const detail = data.version ? `${label} reachable · ${data.version}` : `${label} reachable`;
+        if (status) {
+          status.textContent = detail;
+          status.dataset.tone = 'ok';
+        }
+        showToast(`${label} reachable`, url, 'success');
+      } catch (err) {
+        if (status) {
+          status.textContent = err.message || 'Slicer check failed';
+          status.dataset.tone = 'warn';
+        }
+        showToast('Slicer check failed', err.message || '', 'error');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = old;
       }
     });
   });

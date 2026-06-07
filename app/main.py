@@ -869,6 +869,11 @@ class SliceRunRequest(SlicePlanRequest):
     output_filename: Optional[str] = None
 
 
+class SlicerConnectionCheckRequest(BaseModel):
+    kind: str
+    url: str
+
+
 class BambuSdClearRequest(BaseModel):
     confirm: str = ""
 
@@ -1568,6 +1573,43 @@ async def slicer_worker_status():
         "datadir": str(_orca_datadir() or ""),
         "profile_roots": [str(p) for p in _orca_profile_roots(exe)],
         "platform": os.name,
+    }
+
+
+@app.post("/api/slicer/check")
+async def check_slicer_connection(body: SlicerConnectionCheckRequest):
+    kind = (body.kind or "").strip().lower()
+    base_url = (body.url or "").strip().rstrip("/")
+    if kind not in {"api", "worker", "browser"}:
+        raise HTTPException(status_code=422, detail="kind must be api, worker, or browser")
+    parsed = urllib.parse.urlparse(base_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise HTTPException(status_code=422, detail="Enter a full http:// or https:// URL")
+
+    path = "/health" if kind == "api" else ("/api/slicer/worker/status" if kind == "worker" else "")
+    target = f"{base_url}{path}"
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(connect=3.0, read=8.0, write=3.0, pool=3.0), follow_redirects=True) as client:
+            resp = await client.get(target)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Could not reach {kind} URL: {exc}") from exc
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=resp.status_code, detail=f"{kind} URL returned HTTP {resp.status_code}")
+
+    payload = None
+    try:
+        payload = resp.json()
+    except Exception:
+        payload = None
+    version = ""
+    if isinstance(payload, dict):
+        version = str(payload.get("version") or payload.get("executable") or payload.get("status") or "")
+    return {
+        "ok": True,
+        "kind": kind,
+        "url": target,
+        "status": resp.status_code,
+        "version": version,
     }
 
 

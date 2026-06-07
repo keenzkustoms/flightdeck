@@ -8713,6 +8713,25 @@ select optgroup {
   cursor: default;
 }
 
+.slicer-connection-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+  margin-top: 0.7rem;
+}
+
+.slicer-connection-status {
+  min-height: 1.6rem;
+  display: inline-flex;
+  align-items: center;
+  color: #94a3b8;
+  font-size: 0.76rem;
+}
+
+.slicer-connection-status[data-tone="ok"] { color: #86efac; }
+.slicer-connection-status[data-tone="warn"] { color: #fcd34d; }
+
 .slicer-profiles-panel {
   gap: 0.85rem;
 }

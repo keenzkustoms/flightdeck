@@ -408,6 +408,7 @@
       target: { id: 'h2d', kind: 'bambu', model_name: 'H2D', custom_name: 'BigBoy' },
       output: { filename: 'HULA_H2D_feet_h2d.gcode.3mf', kind: 'gcode.3mf' },
     });
+    if (path === '/api/slicer/check') return jsonResponse({ ok: true, kind: 'demo', status: 200, version: 'demo reachable' });
     if (path.match(/^\/api\/files\/bambu\/[^/]+\/clear$/)) return jsonResponse({ ok: true, demo: true });
     if (path === '/api/queue') return jsonResponse(clone(demoQueue));
     if (path === '/api/queue/summary') return jsonResponse({ h2d: 1, x1c: 1 });
