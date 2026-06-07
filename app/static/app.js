@@ -295,6 +295,9 @@ const _historyHeatmapMode = {}; // printer_id -> yearly | monthly | weekly
 const _dayPrintsCache = {};     // `${printerId}:${dateStr}` → prints[]
 let _camerasFull = false;       // true once cameras grid has been fully rendered
 let _camerasMode = 'live';       // live | sim30
+let _printWatchFocusIndex = 0;
+let _printWatchTimer = null;
+let _printWatchPinnedId = '';
 let _camZoom = 0;               // 0=normal, 1=wide, 2=fullscreen
 let _cameraReturnTarget = null; // { printerId, hash } when Fleet Wall opened Live camera
 let _onSettings = false;        // true while settings view is active
@@ -777,7 +780,7 @@ function _commandStaticItems() {
     ['Fleet Wall', '#/fleet', 'Shop-floor camera and printer wall'],
     ['Flight Tower', '#/mission', 'Dispatch and queue intelligence'],
     ['Telemetry', '#/stats', 'Stats, RH, utilisation'],
-    ['Cameras', '#/cameras', 'All live feeds'],
+    ['Print Watch', '#/cameras', 'Rotating camera watch'],
     ['Queue', '#/queue', 'Pending print jobs'],
     ['Global Print Bay', '#/files', 'Files, printer storage, and reprint staging'],
     ['Spools', '#/spools', 'Spool inventory'],
@@ -2380,7 +2383,7 @@ async function renderManualView() {
         '<strong>Telemetry</strong><span>Printer hours, print count, RH, and host health belong on Telemetry for the long view.</span>',
       ])}
       ${_manualSection('Tester Notes', 'For a demo or friend testing pass, give them these rails so they can explore without breaking the story.', [
-        '<strong>Try read-only first</strong><span>Dashboard, Cameras, Telemetry, History, Failures, and Flight Manual are safe places to browse.</span>',
+        '<strong>Try read-only first</strong><span>Dashboard, Print Watch, Telemetry, History, Failures, and Flight Manual are safe places to browse.</span>',
         '<strong>Ask before destructive controls</strong><span>Cancel, E-stop, SD cleanup, delete, and archive actions should be deliberate.</span>',
         '<strong>Report exact screen</strong><span>When something looks wrong, note the page name, printer, and whether the printer screen agrees.</span>',
       ])}
@@ -2578,6 +2581,10 @@ function router() {
   if (route.view !== 'cameras') {
     document.querySelectorAll('#cameras-grid img').forEach(img => { img.src = ''; });
     _camerasFull = false;
+    if (_printWatchTimer) {
+      clearInterval(_printWatchTimer);
+      _printWatchTimer = null;
+    }
   }
   if (route.view !== 'fleet') {
     document.querySelectorAll('#fleet-wall-page img').forEach(img => { img.src = ''; });
@@ -2689,7 +2696,7 @@ function buildTabs(printers) {
   nav.innerHTML = [
     `<a class="tab" href="#/">Dashboard</a>`,
     `<a class="tab" href="#/fleet">Fleet Wall</a>`,
-    `<a class="tab" href="#/cameras">Cameras</a>`,
+    `<a class="tab" href="#/cameras">Print Watch</a>`,
     `<a class="tab" href="#/mission">Flight Tower</a>`,
     `<a class="tab" href="#/stats">Telemetry</a>`,
     `<div class="tab-section">Printers</div>`,
@@ -7183,7 +7190,7 @@ async function renderMissionControl() {
     ).join('');
     const simToggle = `<div class="mission-sim-actions">
       <a class="mission-sim-toggle ${prefs.sim ? 'active' : ''}" href="${_missionHref(prefs.filter, !prefs.sim)}">${prefs.sim ? '30-printer sim on' : 'Sim 30 printers'}</a>
-      ${prefs.sim ? '<a class="mission-sim-toggle" href="#/cameras?sim=30">View 30 cameras</a>' : ''}
+      ${prefs.sim ? '<a class="mission-sim-toggle" href="#/cameras?sim=30">View 30 feeds</a>' : ''}
     </div>`;
 
     const lanes = filteredContexts.map(({ p, laneJobs, signals, bucket }) => {
@@ -7500,7 +7507,7 @@ async function _queueHandleAction(e) {
 }
 
 
-// ── Cameras grid ──────────────────────────────────────────────────────────
+// ── Print Watch ───────────────────────────────────────────────────────────
 
 let _fleetWallSignature = '';
 let _fleetWallMode = localStorage.getItem('fleetWallMode') || 'medium';
@@ -7590,6 +7597,98 @@ function _camTileFeedHtml(p) {
   return (camSrc && p.state !== 'offline')
     ? `<img src="${camSrc}" alt="${p.custom_name}" data-camera-id="${cameraId}">`
     : _cameraOfflineContent(p, 'cam-tile-offline');
+}
+
+function _printWatchAttention(p) {
+  const target = _printerWarningTarget(p);
+  if (!target) return null;
+  return target.title || _dashboardIssueText(p) || 'Needs attention';
+}
+
+function _printWatchFocusPrinter(printers) {
+  const fleet = printers || [];
+  if (!fleet.length) return null;
+  const attention = fleet.find(p => _printWatchAttention(p));
+  if (attention) {
+    _printWatchPinnedId = attention.id;
+    return attention;
+  }
+  if (_printWatchPinnedId) _printWatchPinnedId = '';
+  _printWatchFocusIndex = Math.max(0, Math.min(_printWatchFocusIndex, fleet.length - 1));
+  return fleet[_printWatchFocusIndex % fleet.length];
+}
+
+function _printWatchFocusHtml(printers, sim = false) {
+  const p = _printWatchFocusPrinter(printers);
+  if (!p) return `<section class="print-watch-focus"><div class="detail-placeholder">Connecting...</div></section>`;
+  const cameraId = p._camera_id || p.id;
+  const camSrc = _cameraStreamSrc(cameraId);
+  const activeJob = _activePrinterJob(p);
+  const pct = activeJob?.progress != null ? `${Math.round(activeJob.progress * 100)}%` : _printerDisplayStateLabel(p);
+  const attention = _printWatchAttention(p);
+  const mode = attention ? 'Pinned' : 'Cycling';
+  const feed = (camSrc && p.state !== 'offline')
+    ? `<img src="${camSrc}" alt="${esc(_printerPrimaryLabel(p))} print watch camera" data-camera-id="${esc(cameraId)}" loading="eager" fetchpriority="high">`
+    : _cameraOfflineContent(p, 'print-watch-offline');
+  return `<section class="print-watch-focus ${attention ? 'print-watch-focus-pinned' : ''}" data-print-watch-focus="${esc(p.id)}">
+    <div class="print-watch-focus-head">
+      <div class="printer-identity">
+        <div class="printer-icon">${getIcon(p.icon)}</div>
+        ${connDot(p.last_seen)}
+        <div class="printer-names">
+          <span class="printer-custom">${esc(_printerPrimaryLabel(p))}</span>
+          ${_printerModelHtml(p)}
+        </div>
+      </div>
+      <div class="print-watch-focus-status">
+        <span class="print-watch-mode">${esc(mode)}</span>
+        <span class="fleet-wall-state fleet-wall-state-${_fleetWallTone(p)}">${esc(_printerDisplayStateLabel(p))}</span>
+      </div>
+    </div>
+    <a class="print-watch-feed" href="#/printer/${esc(p._source_id || p.id)}" data-printer-id="${esc(p._source_id || p.id)}">
+      ${feed}
+      <div class="camera-hud print-watch-hud">
+        <div class="camera-hud-main">
+          <strong>${esc(activeJob ? jobDisplayName(activeJob) : (attention || 'Watching print bay'))}</strong>
+          <span>${esc(attention || `${pct} · ${fmtLastSeen(p.last_seen)}`)}</span>
+        </div>
+        <div class="camera-hud-progress"><span style="width:${activeJob?.progress != null ? Math.max(0, Math.min(100, Math.round(activeJob.progress * 100))) : 0}%"></span></div>
+        <div class="camera-hud-chips">${_detailLiveTempChips(p, sim ? 2 : 3)}</div>
+      </div>
+    </a>
+  </section>`;
+}
+
+function _renderPrintWatchFocus(printers, sim = false) {
+  const host = document.getElementById('print-watch-focus-host');
+  if (!host) return;
+  host.innerHTML = _printWatchFocusHtml(printers, sim);
+  _attachCameraRetries(host);
+}
+
+function _startPrintWatchCycle(printers, sim = false) {
+  if (_printWatchTimer) return;
+  _printWatchTimer = setInterval(() => {
+    const fleet = sim
+      ? _missionSimPrinters(_latestPrinters || []).map(p => {
+          const source = (_latestPrinters || []).find(x => p.id.startsWith(`${x.id}-sim-`)) || (_latestPrinters || [])[0];
+          return { ...p, _simulated: true, _source_id: source?.id || p.id, _camera_id: source?.id || p.id };
+        })
+      : (_latestPrinters || []);
+    if (!fleet.length || _printWatchPinnedId) return;
+    _printWatchFocusIndex = (_printWatchFocusIndex + 1) % fleet.length;
+    _renderPrintWatchFocus(fleet, sim);
+  }, 8000);
+}
+
+function _ensurePrintWatchCameraUrls(printers) {
+  (printers || []).forEach(p => {
+    const cameraId = p._camera_id || p.id;
+    if (_cameraUrlCache[cameraId] !== undefined || _cameraUrlFetches[cameraId]) return;
+    _loadCameraUrl(cameraId, () => {
+      if (parseRoute().view === 'cameras') renderCamerasView();
+    });
+  });
 }
 
 function _fleetWallTone(p) {
@@ -7840,10 +7939,6 @@ async function _ensureFleetWallCameraUrls(printers) {
   });
 }
 
-async function _ensureCameraUrls(printers) {
-  await Promise.all((printers || []).map(p => _loadCameraUrl(p.id)));
-}
-
 async function renderFleetWall() {
   const el = document.getElementById('fleet-wall-page');
   _fleetWallMode = _safeFleetWallMode(_fleetWallMode);
@@ -7925,6 +8020,10 @@ async function renderCamerasView() {
   const el = document.getElementById('cameras-grid');
   const sim = (location.hash || '').includes('sim=30');
   const mode = sim ? 'sim30' : 'live';
+  if (_printWatchTimer && _camerasMode !== mode) {
+    clearInterval(_printWatchTimer);
+    _printWatchTimer = null;
+  }
   const sourcePrinters = _latestPrinters || [];
   const cameraPrinters = sim
     ? _missionSimPrinters(sourcePrinters).map(p => {
@@ -7934,6 +8033,7 @@ async function renderCamerasView() {
     : sourcePrinters;
 
   if (_camerasFull && _camerasMode === mode) {
+    _renderPrintWatchFocus(cameraPrinters, sim);
     cameraPrinters.forEach(p => {
       const tile = el.querySelector(`.cam-tile[data-printer-id="${p.id}"]`);
       const header = tile?.querySelector('.cam-tile-header');
@@ -7957,10 +8057,24 @@ async function renderCamerasView() {
     return;
   }
 
-  await _ensureCameraUrls(sourcePrinters);
+  _ensurePrintWatchCameraUrls(cameraPrinters);
 
   el.classList.toggle('cameras-grid-sim', sim);
-  el.innerHTML = cameraPrinters.map(_camTileHtml).join('');
+  el.innerHTML = `<div class="print-watch-page">
+    <div class="print-watch-hero">
+      <div>
+        <span>Print Watch</span>
+        <h1>${sim ? 'Simulated camera watch' : 'Rotating print watch'}</h1>
+      </div>
+      <div class="print-watch-summary">
+        ${_fleetWallMetric('Feeds', String(cameraPrinters.length))}
+        ${_fleetWallMetric('Pinned', String(cameraPrinters.filter(p => _printWatchAttention(p)).length), cameraPrinters.some(p => _printWatchAttention(p)) ? 'hot' : '')}
+        ${_fleetWallMetric('Mode', cameraPrinters.some(p => _printWatchAttention(p)) ? 'Hold' : 'Cycle')}
+      </div>
+    </div>
+    <div id="print-watch-focus-host">${_printWatchFocusHtml(cameraPrinters, sim)}</div>
+    <div class="print-watch-grid">${cameraPrinters.map(_camTileHtml).join('')}</div>
+  </div>`;
   _attachCameraRetries(el);
 
   el.querySelectorAll('.cam-tile[data-printer-id]').forEach(tile => {
@@ -7975,6 +8089,7 @@ async function renderCamerasView() {
 
   _camerasFull = true;
   _camerasMode = mode;
+  _startPrintWatchCycle(cameraPrinters, sim);
 }
 
 // ── Tab title ─────────────────────────────────────────────────────────────

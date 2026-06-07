@@ -2,11 +2,11 @@
 
 Latest GitHub/Pi state:
 - Branch: main
-- Latest commit: current HEAD after this handoff (`Fix Fleet Wall camera return flow`)
+- Latest commit: current HEAD after this handoff (`Add Print Watch rotating focus`)
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
-- Refresh cachebust currently: ?cachebust=360
+- Refresh cachebust currently: ?cachebust=361
 
 Recent work:
 - Fleet Wall added with Small/Medium/Large modes.
@@ -14,6 +14,7 @@ Recent work:
 - Fleet Wall warnings compacted.
 - Fleet Wall camera tile opens the printer Live view.
 - Fleet Wall camera fullscreen exits back to Fleet Wall when opened from Fleet Wall.
+- Cameras is now Print Watch with a rotating large focus feed that pins on attention.
 - Live camera zoom cycle stays on Live view instead of jumping to Cameras.
 - Themes, sidebar text colour, and wider adjustable sidebar are in.
 - Printer nav uses shop name first, model second.
@@ -37,8 +38,10 @@ Likely next items:
 - Standalone `/demo` now includes the missing Fleet Wall view container, so the demo Fleet Wall nav item renders instead of hitting a null view.
 - Fleet Wall camera feed clicks now open Live as `#/printer/{id}?from=fleet`; fullscreen camera close uses that origin marker to return to Fleet Wall, while direct Live-page fullscreen still shrinks back to Live.
 - Fleet Wall now renders immediately and hydrates camera feeds as their URLs resolve, avoiding one slow camera lookup blocking the whole wall.
-- Camera URL fetches are shared across Fleet Wall/Cameras and camera retry handlers are attached once per image.
-- Demo shell now loads current `app.js?v=360`; main and demo shells load `style.css?v=292`.
+- `Cameras` has been renamed to `Print Watch` in navigation and command search while keeping `#/cameras` compatible.
+- Print Watch has a large rotating focus camera, pins to the first printer needing attention, and resumes cycling once attention clears.
+- Camera URL fetches are shared across Fleet Wall/Print Watch and camera retry handlers are attached once per image.
+- Demo shell now loads current `app.js?v=361`; main and demo shells load `style.css?v=293`.
 - Static-only change; frontend refresh required.
 
 
