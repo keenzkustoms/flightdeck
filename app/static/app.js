@@ -11071,10 +11071,13 @@ function _applySpoolFilters(spools) {
   });
 }
 
-function _stockInLocationOptions(selected = '') {
+function _stockInLocationOptions(selected = '', opts = {}) {
   const locs = _spoolLocations.length ? _spoolLocations : [{ id: '', name: 'Shelf #1' }];
+  const selectedValue = opts.defaultFirst && String(selected ?? '') === '' && locs[0]?.id
+    ? String(locs[0].id)
+    : String(selected ?? '');
   return `<option value="">No shelf set</option>` + locs.map(loc =>
-    `<option value="${loc.id}"${String(selected ?? '') === String(loc.id) ? ' selected' : ''}>${esc(loc.name)}</option>`
+    `<option value="${loc.id}"${selectedValue === String(loc.id) ? ' selected' : ''}>${esc(loc.name)}</option>`
   ).join('');
 }
 
@@ -11106,7 +11109,7 @@ function _stockInLineHtml(index, defaultWeight) {
       </label>
       <label>Label weight <input name="label_weight_g" type="number" min="0" step="1" value="${defaultWeight}"></label>
       <label>Tare <input name="empty_spool_weight_g" type="number" min="0" step="1" placeholder="Optional"></label>
-      <label>Home shelf <select name="storage_location_id">${_stockInLocationOptions()}</select></label>
+      <label>Home shelf <select name="storage_location_id">${_stockInLocationOptions('', { defaultFirst: true })}</select></label>
       <label class="stock-in-notes">Notes <input name="notes" placeholder="Optional notes"></label>
     </div>
   </div>`;
@@ -11169,7 +11172,7 @@ async function _renderStockInView(listEl) {
       <div class="stock-in-received">Already received as <a href="#/spool/${scanRoll.spool_id}">Spool #${scanRoll.spool_id}</a></div>
     ` : `
       <form class="stock-in-receive-form" data-token="${esc(scanRoll.token)}">
-        <label>Storage <select name="storage_location_id">${_stockInLocationOptions(scanRoll.storage_location_id || '')}</select></label>
+        <label>Storage <select name="storage_location_id">${_stockInLocationOptions(scanRoll.storage_location_id || '', { defaultFirst: true })}</select></label>
         <label>Remaining <input name="remaining_g" type="number" min="0" step="1" value="${Math.round(Number(scanRoll.label_weight_g || defaultWeight))}"></label>
         <label>Label weight <input name="label_weight_g" type="number" min="0" step="1" value="${Math.round(Number(scanRoll.label_weight_g || defaultWeight))}"></label>
         <label>Tare <input name="empty_spool_weight_g" type="number" min="0" step="1" value="${scanRoll.empty_spool_weight_g ?? ''}"></label>
