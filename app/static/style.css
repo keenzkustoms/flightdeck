@@ -1290,6 +1290,7 @@ header {
 .tab-printer-state-paused { background: var(--paused); box-shadow: 0 0 0 3px rgba(245,158,11,0.16); }
 .tab-printer-state-idle,
 .tab-printer-state-finished { background: var(--idle); box-shadow: 0 0 0 3px rgba(34,197,94,0.16); }
+.tab-printer-state-hold { background: #a855f7; box-shadow: 0 0 0 3px rgba(168,85,247,0.18); }
 .tab-printer-state-error,
 .tab-printer-state-estop { background: var(--error); box-shadow: 0 0 0 3px rgba(239,68,68,0.16); }
 
@@ -3058,6 +3059,7 @@ button.briefing-row {
 .badge-error     { background: #7f1d1d; color: #fecaca; }
 .badge-estop     { background: #7f1d1d; color: #fca5a5; border: 1px solid #b91c1c; }
 .badge-offline   { background: #374151; color: #d1d5db; }
+.badge-hold      { background: #581c87; color: #e9d5ff; border: 1px solid #a855f7; }
 
 .temps {
   display: flex;

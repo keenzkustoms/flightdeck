@@ -1643,7 +1643,8 @@ function renderCard(p) {
     </div>` : '';
 
   const error = p.state !== 'offline' && p.error ? `<div class="error-msg">${p.error}</div>` : '';
-  const badgeLabel = p.state === 'finished' ? 'complete' : p.state;
+  const badgeLabel = _printerDisplayStateLabel(p);
+  const badgeClass = _printerDisplayStateClass(p);
 
   // Loaded spools panel
   const loadedSpools = (_latestSpoolsByPrinter[p.id] || []).filter(s => !s.archived_at);
@@ -1686,7 +1687,7 @@ function renderCard(p) {
         </div>
         <div class="card-badges">
           ${healthBadge}
-          <span class="badge badge-${p.state}">${badgeLabel}</span>
+          <span class="badge badge-${badgeClass}">${badgeLabel}</span>
         </div>
       </div>
       ${temps ? `<div class="temps">${temps}</div>` : ''}
@@ -2380,7 +2381,8 @@ function _demoPrinterCard(p) {
   const route = `#/printer/${p.id}`;
   const bayRoute = `${route}/bay`;
   const failuresRoute = `${route}/failures`;
-  const state = _liveStateLabel(p.state);
+  const state = _printerDisplayStateLabel(p);
+  const stateClass = _printerDisplayStateClass(p);
   const loaded = (_latestSpoolsByPrinter[p.id] || []).filter(s => !s.archived_at);
   const loadedCount = loaded.length;
   const signals = [];
@@ -2392,7 +2394,7 @@ function _demoPrinterCard(p) {
   const signalText = signals.length ? signals.slice(0, 2).join(' - ') : 'ready for walkthrough';
   return `<article class="demo-printer-card">
     <div>
-      <span class="badge badge-${esc(p.state || 'idle')}">${esc(state)}</span>
+      <span class="badge badge-${esc(stateClass)}">${esc(state)}</span>
       <h3>${esc(_dashboardPrinterName(p))}</h3>
       <p>${esc(p.custom_name || p.shop_name || p.kind || '')}</p>
     </div>
@@ -2641,9 +2643,10 @@ function buildTabs(printers) {
     const label = _printerNavLabel(p);
     const subLabel = _printerSecondaryLabel(p);
     const state = p.state || 'unknown';
+    const stateClass = _printerDisplayStateClass(p);
     const progress = _printerProgressBadge(p);
-    return `<a class="tab tab-printer" href="#/printer/${p.id}" style="--tab-accent:${color}" title="${esc(label)} · ${esc(_liveStateLabel(state))}">
-      <span class="tab-printer-state tab-printer-state-${esc(state)}"></span>
+    return `<a class="tab tab-printer" href="#/printer/${p.id}" style="--tab-accent:${color}" title="${esc(label)} · ${esc(_printerDisplayStateLabel(p))}">
+      <span class="tab-printer-state tab-printer-state-${esc(stateClass)}"></span>
       <span class="tab-printer-title">
         <span class="tab-printer-name">${esc(label)}</span>
         ${subLabel ? `<span class="tab-printer-sub">${esc(subLabel)}</span>` : ''}
@@ -2698,6 +2701,14 @@ function _liveStateLabel(state) {
   return labels[state] || state || 'Unknown';
 }
 
+function _printerDisplayStateLabel(p) {
+  return _printerPrintLocked(p) ? 'On hold' : _liveStateLabel(p?.state);
+}
+
+function _printerDisplayStateClass(p) {
+  return _printerPrintLocked(p) ? 'hold' : (p?.state || 'idle');
+}
+
 function _liveEtaText(p) {
   const job = _activePrinterJob(p);
   if (!job?.eta_seconds) return 'ETA unknown';
@@ -2708,7 +2719,8 @@ function _liveEtaText(p) {
 }
 
 function _detailLiveHeader(p, printerColor, bannerTextColor) {
-  const stateLabel = _liveStateLabel(p.state);
+  const stateLabel = _printerDisplayStateLabel(p);
+  const stateClass = _printerDisplayStateClass(p);
   const primary = _printerPrimaryLabel(p);
   const secondary = _printerSecondaryLabel(p);
   const job = _activePrinterJob(p);
@@ -2730,7 +2742,7 @@ function _detailLiveHeader(p, printerColor, bannerTextColor) {
       <small>${esc(statusMeta)}</small>
     </div>
     <div class="live-state-wrap">
-      <span class="badge badge-${esc(p.state || 'idle')} live-state-badge">${esc(stateLabel)}</span>
+      <span class="badge badge-${esc(stateClass)} live-state-badge">${esc(stateLabel)}</span>
       <label class="live-print-enabled">
         <input type="checkbox"
           data-live-print-enabled
@@ -7157,7 +7169,7 @@ async function renderMissionControl() {
             <a class="mission-printer-name" href="#/printer/${p.id}">${esc(_dashboardPrinterName(p))}</a>
             <div class="mission-printer-sub">${esc(p.custom_name || '')}</div>
           </div>
-          <span class="badge badge-${p.state}">${esc(p.state || 'unknown')}</span>
+          <span class="badge badge-${_printerDisplayStateClass(p)}">${esc(_printerDisplayStateLabel(p))}</span>
         </div>
         <div class="mission-now">
           <span>Now</span>
@@ -7455,7 +7467,8 @@ async function _queueHandleAction(e) {
 let _fleetWallSignature = '';
 
 function _camHeaderInner(p) {
-  const badgeLabel = p.state === 'finished' ? 'complete' : p.state;
+  const badgeLabel = _printerDisplayStateLabel(p);
+  const badgeClass = _printerDisplayStateClass(p);
   return `<div class="printer-identity">
     <div class="printer-icon">${getIcon(p.icon)}</div>
     ${connDot(p.last_seen)}
@@ -7464,7 +7477,7 @@ function _camHeaderInner(p) {
       ${_printerModelHtml(p)}
     </div>
   </div>
-  <span class="badge badge-${p.state}">${badgeLabel}</span>`;
+  <span class="badge badge-${badgeClass}">${esc(badgeLabel)}</span>`;
 }
 
 function _cameraStreamSrc(printerId) {
@@ -7539,7 +7552,7 @@ function _fleetWallJob(p) {
     : '';
   const layers = job.layer_current != null && job.layer_total != null ? `${job.layer_current}/${job.layer_total}` : '';
   const meta = [
-    p.state === 'printing' || p.state === 'paused' ? `${pct}%` : _liveStateLabel(p.state || 'idle'),
+    p.state === 'printing' || p.state === 'paused' ? `${pct}%` : _printerDisplayStateLabel(p),
     eta ? `ETA ${eta}` : '',
     layers ? `Layer ${layers}` : '',
   ].filter(Boolean).join(' · ');
@@ -7630,15 +7643,14 @@ function _fleetWallCardBody(p) {
   return `
     <div class="fleet-wall-card-main">
       <div class="fleet-wall-status-row">
-        <span class="fleet-wall-state fleet-wall-state-${tone}">${esc(_liveStateLabel(p.state || 'idle'))}</span>
-        ${_printerPrintLocked(p) ? '<span class="fleet-wall-state fleet-wall-state-locked">Print disabled</span>' : ''}
+        <span class="fleet-wall-state fleet-wall-state-${tone}">${esc(_printerDisplayStateLabel(p))}</span>
       </div>
       ${_fleetWallJob(p)}
       <div class="fleet-wall-metrics">
         ${_fleetWallMetric('Hotend', hotend.actual != null ? `${_toDisplayTemp(hotend.actual)}${_tempUnitLabel()}` : '—', hotend.actual >= 180 ? 'hot' : '')}
         ${_fleetWallMetric('Bed', bed.actual != null ? `${_toDisplayTemp(bed.actual)}${_tempUnitLabel()}` : '—', bed.actual >= 50 ? 'warm' : '')}
         ${_fleetWallMetric('Chamber', chamber.actual != null ? `${_toDisplayTemp(chamber.actual)}${_tempUnitLabel()}` : '—')}
-        ${_fleetWallMetric('Mode', activeJob ? 'In flight' : (_printerPrintLocked(p) ? 'Locked' : 'Available'))}
+        ${_fleetWallMetric('Mode', activeJob ? 'In flight' : (_printerPrintLocked(p) ? 'On hold' : 'Available'))}
       </div>
       ${_fleetWallWarnings(p)}
       ${_fleetWallSpools(p)}
