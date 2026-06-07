@@ -1,5 +1,10 @@
 # Flightdeck — next session brief
-_Last updated 7 June 2026 (Session 28.226 AMS side rail header anchor)_
+_Last updated 7 June 2026 (Session 28.227 AMS HT scale correction)_
+
+## What was fixed - Session 28.227 (AMS HT scale correction - 7 June)
+- Reduced AMS HT reel bay to match normal AMS slot visual scale more closely.
+- Gave the AMS HT RHS rail more width so its status text sits further right.
+- Bumped static cache to `style.css?v=275`; frontend refresh required.
 
 ## What was fixed - Session 28.226 (AMS side rail header anchor - 7 June)
 - AMS side rail now aligns from the top label (`4 slot loadout` / `High-temp bay`) instead of centering the entire control stack.
