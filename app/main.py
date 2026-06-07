@@ -513,9 +513,17 @@ def _reconcile_reported_loaded_slots(printer_status: dict) -> None:
         if flat_slot is None or loaded_by_slot.get(int(flat_slot)):
             continue
         preferred_spool_id = db.get_recent_spool_for_slot(str(printer_id), int(flat_slot))
-        if _reported_slot_is_generic(slot) and preferred_spool_id is None:
-            continue
-        best = _best_spool_for_reported_slot(slot, available, preferred_spool_id)
+        slot_available = available
+        if _reported_slot_is_generic(slot):
+            if preferred_spool_id is None:
+                continue
+            slot_available = [
+                spool for spool in available
+                if int(spool.get("id") or 0) == int(preferred_spool_id)
+            ]
+            if not slot_available:
+                continue
+        best = _best_spool_for_reported_slot(slot, slot_available, preferred_spool_id)
         if not best:
             continue
 

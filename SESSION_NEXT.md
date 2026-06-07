@@ -2,13 +2,14 @@
 
 Latest GitHub/Pi state:
 - Branch: main
-- Latest commit: current HEAD after this handoff (`Treat code-free Bambu failed as cancel`)
+- Latest commit: current HEAD after this handoff (`Restrict generic AMS auto-claim`)
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
 - Refresh cachebust currently: ?cachebust=365
 
 Recent work:
+- Generic Bambu AMS/AMS HT reports now only auto-claim the exact recently remembered spool for that slot; if that spool is unavailable, Flightdeck leaves the slot for manual confirmation instead of grabbing a similar spool.
 - Bambu printer-side/operator Stop now records as `CANCELLED` when the printer reports `FAILED` with no alarm/error code, instead of polluting reliability stats as `ERROR`.
 - Print Watch focus now preserves the active camera image while refreshing status/HUD text, preventing the double flash when the same printer stays selected.
 - Printer health now excludes prints marked no-stats/Flightdeck testing from 14d failure totals, early-failure counts, cancelled totals, and success-rate math.
@@ -30,10 +31,17 @@ Recent work:
 
 Likely next items:
 - Keep polishing Fleet Wall layout and AMS sizing.
+- Recheck BigBoy AMS HT assignment after any physical spool moves; current live data had auto-claimed spool #39 into h2d:512 after spool #68 became unavailable.
 - Recheck Fleet Wall click/zoom behaviour after real use.
 - Continue slicer/API integration and profile filtering.
 - Continue stock-in QR/label workflow.
 - Make Windows installer/update flow smoother.
+
+## What was fixed - Session 28.240 (Generic AMS auto-claim guard - 7 June)
+- Generic Bambu AMS reports now only auto-claim the exact recent spool remembered for that slot.
+- If the remembered spool is unavailable, Flightdeck no longer grabs another matching generic colour/material spool from storage.
+- This prevents BigBoy/AMS HT generic ABS black reports from stealing a different black ABS spool after the original remembered spool was moved elsewhere.
+- Backend restart required.
 
 ## What was fixed - Session 28.239 (Bambu operator cancel stats - 7 June)
 - Bambu printer-side/operator Stop now maps code-free `FAILED` reports to `CANCELLED`.
