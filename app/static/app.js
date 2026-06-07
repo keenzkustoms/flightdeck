@@ -289,6 +289,7 @@ const _pendingControls = {};    // printer_id → { action, fromState }
 const _lightOptimistic = {};    // printer_id → { state, expiresAt }
 const _tempOptimistic = {};     // `${id}:${heater}` → { sentTarget, expiresAt }
 const _objectsCache = {};       // printer_id → { supported, objects }
+const _cameraUrlFetches = {};   // printer_id → in-flight camera URL fetch
 const _historyYear = {};        // printer_id → selected year (int)
 const _historyHeatmapMode = {}; // printer_id -> yearly | monthly | weekly
 const _dayPrintsCache = {};     // `${printerId}:${dateStr}` → prints[]
@@ -7538,8 +7539,30 @@ function _cameraStreamSrc(printerId) {
   return `${url}${url.includes('?') ? '&' : '?'}t=${Date.now()}`;
 }
 
+function _loadCameraUrl(printerId, onResolved) {
+  if (!printerId || _cameraUrlCache[printerId] !== undefined) return Promise.resolve(_cameraUrlCache[printerId] || null);
+  if (_cameraUrlFetches[printerId]) return _cameraUrlFetches[printerId];
+  _cameraUrlFetches[printerId] = fetch(`/api/printers/${encodeURIComponent(printerId)}/camera`)
+    .then(async r => {
+      const body = r.ok ? await r.json() : null;
+      _cameraUrlCache[printerId] = body?.url || null;
+      return _cameraUrlCache[printerId];
+    })
+    .catch(() => {
+      _cameraUrlCache[printerId] = null;
+      return null;
+    })
+    .finally(() => {
+      delete _cameraUrlFetches[printerId];
+      onResolved?.(printerId, _cameraUrlCache[printerId] || null);
+    });
+  return _cameraUrlFetches[printerId];
+}
+
 function _attachCameraRetries(root) {
   root.querySelectorAll('img[data-camera-id]').forEach(img => {
+    if (img.dataset.retryAttached === '1') return;
+    img.dataset.retryAttached = '1';
     let tries = 0;
     img.addEventListener('error', () => {
       if (tries >= 3) return;
@@ -7734,7 +7757,7 @@ function _fleetWallFeedHtml(p) {
   const cameraId = p._camera_id || p.id;
   const camSrc = _cameraStreamSrc(cameraId);
   return camSrc && p.state !== 'offline'
-    ? `<img src="${camSrc}" alt="${esc(_printerPrimaryLabel(p))} live camera" data-camera-id="${cameraId}">`
+    ? `<img src="${camSrc}" alt="${esc(_printerPrimaryLabel(p))} live camera" data-camera-id="${cameraId}" loading="eager" fetchpriority="high">`
     : `<div class="fleet-wall-camera-fallback">
         <div class="fleet-wall-printer-glyph">${getIcon(p.icon)}</div>
         <strong>${esc(_printerPrimaryLabel(p))}</strong>
@@ -7801,16 +7824,24 @@ function _fleetWallCardHtml(p) {
 }
 
 async function _ensureFleetWallCameraUrls(printers) {
-  await Promise.all((printers || []).map(async p => {
-    if (_cameraUrlCache[p.id] !== undefined) return;
-    try {
-      const r = await fetch(`/api/printers/${p.id}/camera`);
-      const body = r.ok ? await r.json() : null;
-      _cameraUrlCache[p.id] = body?.url || null;
-    } catch {
-      _cameraUrlCache[p.id] = null;
-    }
-  }));
+  (printers || []).forEach(p => {
+    if (_cameraUrlCache[p.id] !== undefined || _cameraUrlFetches[p.id]) return;
+    _loadCameraUrl(p.id, printerId => {
+      const page = document.getElementById('fleet-wall-page');
+      if (!page || page.hidden || !page.classList.contains('fleet-wall-page')) return;
+      const card = page.querySelector(`.fleet-wall-card[data-printer-id="${CSS.escape(printerId)}"]`);
+      const printer = (_latestPrinters || []).find(x => x.id === printerId);
+      const feed = card?.querySelector('[data-fleet-feed]');
+      if (!printer || !feed || printer.state === 'offline') return;
+      feed.innerHTML = _fleetWallFeedHtml(printer);
+      _attachCameraRetries(feed);
+      _fleetWallSignature = '';
+    });
+  });
+}
+
+async function _ensureCameraUrls(printers) {
+  await Promise.all((printers || []).map(p => _loadCameraUrl(p.id)));
 }
 
 async function renderFleetWall() {
@@ -7829,7 +7860,7 @@ async function renderFleetWall() {
     return;
   }
 
-  await _ensureFleetWallCameraUrls(printers);
+  _ensureFleetWallCameraUrls(printers);
 
   const signature = `${_fleetWallMode}|${printers.map(p => `${p.id}:${_cameraUrlCache[p.id] ? 'cam' : 'nocam'}`).join('|')}`;
   if (_fleetWallSignature !== signature || !el.querySelector('.fleet-wall-grid')) {
@@ -7926,15 +7957,7 @@ async function renderCamerasView() {
     return;
   }
 
-  await Promise.all(sourcePrinters.map(async p => {
-    if (_cameraUrlCache[p.id] === undefined) {
-      try {
-        const r = await fetch(`/api/printers/${p.id}/camera`);
-        const body = r.ok ? await r.json() : null;
-        _cameraUrlCache[p.id] = body?.url || null;
-      } catch { _cameraUrlCache[p.id] = null; }
-    }
-  }));
+  await _ensureCameraUrls(sourcePrinters);
 
   el.classList.toggle('cameras-grid-sim', sim);
   el.innerHTML = cameraPrinters.map(_camTileHtml).join('');

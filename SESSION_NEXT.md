@@ -6,7 +6,7 @@ Latest GitHub/Pi state:
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
-- Refresh cachebust currently: ?cachebust=359
+- Refresh cachebust currently: ?cachebust=360
 
 Recent work:
 - Fleet Wall added with Small/Medium/Large modes.
@@ -36,7 +36,9 @@ Likely next items:
 - Feed indicators are no longer hidden by the Fleet Wall AMS wrapper's vertical clipping.
 - Standalone `/demo` now includes the missing Fleet Wall view container, so the demo Fleet Wall nav item renders instead of hitting a null view.
 - Fleet Wall camera feed clicks now open Live as `#/printer/{id}?from=fleet`; fullscreen camera close uses that origin marker to return to Fleet Wall, while direct Live-page fullscreen still shrinks back to Live.
-- Demo shell now loads current `app.js?v=359`; main and demo shells load `style.css?v=292`.
+- Fleet Wall now renders immediately and hydrates camera feeds as their URLs resolve, avoiding one slow camera lookup blocking the whole wall.
+- Camera URL fetches are shared across Fleet Wall/Cameras and camera retry handlers are attached once per image.
+- Demo shell now loads current `app.js?v=360`; main and demo shells load `style.css?v=292`.
 - Static-only change; frontend refresh required.
 
 
