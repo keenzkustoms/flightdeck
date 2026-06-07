@@ -1,5 +1,11 @@
 # Flightdeck — next session brief
-_Last updated 7 June 2026 (Session 28.219 AMS HT side rail layout)_
+_Last updated 7 June 2026 (Session 28.220 AMS loadout alignment)_
+
+## What was improved - Session 28.220 (AMS loadout alignment - 7 June)
+- Normal AMS headers now reserve a consistent header band so their slot row starts cleanly.
+- AMS HT spool bay is offset by the same header band, aligning the HT reel with AMS 1 slot visuals.
+- AMS 1 header text/actions now align from the top instead of drifting around the center line.
+- Bumped static cache to `style.css?v=268`; frontend refresh required.
 
 ## What was improved - Session 28.219 (AMS HT side rail layout - 7 June)
 - AMS HT live loadout now moves bay/status/dry information into a side rail beside the spool.

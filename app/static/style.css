@@ -4479,6 +4479,7 @@ button.live-route-node:hover {
 
 .ams-loadout-deck {
   display: block;
+  --ams-loadout-head-space: 2.35rem;
 }
 
 .ams-loadout-units {
@@ -4518,7 +4519,7 @@ button.live-route-node:hover {
   grid-template-columns: minmax(4.6rem, 6.2rem) minmax(4.8rem, 1fr);
   grid-template-areas: "slots head";
   gap: 0.5rem;
-  align-items: stretch;
+  align-items: start;
   background:
     linear-gradient(90deg, rgba(148,163,184,0.12) 0 6.9rem, rgba(2,6,23,0.12) 6.9rem 100%),
     linear-gradient(90deg, rgba(15,23,42,0.96), rgba(8,13,26,0.98));
@@ -4526,10 +4527,11 @@ button.live-route-node:hover {
 
 .ams-loadout-head {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 0.75rem;
   margin-bottom: 0.45rem;
+  min-height: var(--ams-loadout-head-space);
 }
 
 .ams-loadout-head strong {
@@ -4551,6 +4553,7 @@ button.live-route-node:hover {
   justify-content: space-between;
   gap: 0.45rem;
   margin-bottom: 0;
+  min-height: calc(var(--ams-loadout-head-space) + 5.9rem);
   min-width: 0;
 }
 
@@ -4570,6 +4573,7 @@ button.live-route-node:hover {
   justify-content: flex-end;
   gap: 0.35rem;
   flex-wrap: wrap;
+  padding-top: 0.02rem;
 }
 
 .ams-loadout-slots {
@@ -4589,6 +4593,7 @@ button.live-route-node:hover {
 .ams-loadout-unit-ht .ams-loadout-slots {
   grid-area: slots;
   grid-template-columns: minmax(4.6rem, 6.2rem);
+  margin-top: calc(var(--ams-loadout-head-space) + 0.45rem);
   padding: 0.42rem;
 }
 
