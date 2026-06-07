@@ -4590,6 +4590,18 @@ button.live-route-node:hover {
   padding-top: 0.02rem;
 }
 
+.ams-loadout-dry-time {
+  border: 1px solid rgba(96,165,250,0.28);
+  border-radius: 999px;
+  background: rgba(30,64,175,0.16);
+  color: #bfdbfe;
+  font-size: 0.58rem;
+  font-weight: 900;
+  line-height: 1;
+  padding: 0.16rem 0.34rem;
+  white-space: nowrap;
+}
+
 .ams-loadout-slots {
   position: relative;
   display: grid;

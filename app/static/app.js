@@ -2777,10 +2777,10 @@ function _detailLiveAmsLoadoutRows(p) {
       unit.humidity != null ? `${unit.humidity}% RH` : '',
       unit.temperature != null ? `${Math.round(unit.temperature)}°` : '',
       preset.filament && preset.temperature > 0 ? `${preset.filament} ${preset.temperature}°` : '',
-      drying && dryTime ? `${dryTime} left` : drying ? 'Drying' : '',
+      drying ? 'Drying' : '',
     ].filter(Boolean).join(' · ');
     const dryControl = unit.dry_capable
-      ? `<button class="live-ams-dry${drying ? ' live-ams-dry-active' : ''}"
+      ? `${drying && dryTime ? `<span class="ams-loadout-dry-time">${esc(dryTime)}</span>` : ''}<button class="live-ams-dry${drying ? ' live-ams-dry-active' : ''}"
           data-ams-dry data-printer-id="${p.id}" data-ams-id="${unit.unit}" data-enabled="${drying ? 'false' : 'true'}"
           title="${drying ? 'Stop AMS drying' : 'Start AMS drying'}">${drying ? 'Stop' : 'Dry'}</button>`
       : '';

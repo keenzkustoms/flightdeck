@@ -1,5 +1,10 @@
 # Flightdeck — next session brief
-_Last updated 7 June 2026 (Session 28.222 AMS header wrap fix)_
+_Last updated 7 June 2026 (Session 28.223 AMS dry countdown chip)_
+
+## What was fixed - Session 28.223 (AMS dry countdown chip - 7 June)
+- Removed the drying countdown from the AMS metadata sentence so it no longer truncates words.
+- Added the remaining drying time as a compact chip beside the Dry/Stop control.
+- Bumped static cache to `app.js?v=337` and `style.css?v=271`; frontend refresh required.
 
 ## What was fixed - Session 28.222 (AMS header wrap fix - 7 June)
 - AMS loadout metadata now stays on one clipped line instead of wrapping a final word onto its own row.
