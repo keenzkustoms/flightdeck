@@ -1,5 +1,11 @@
 # Flightdeck — next session brief
-_Last updated 7 June 2026 (Session 28.214 Object exclude map simplification)_
+_Last updated 7 June 2026 (Session 28.215 Object panel empty state)_
+
+## What was fixed - Session 28.215 (Object panel empty state - 7 June)
+- Object exclusion panel now shows an explicit no-metadata note instead of going blank when a Bambu print has no usable object metadata.
+- Object map thumbnails no longer get a timestamp cache-buster on every refresh, preventing live-panel flashing.
+- Object panel refresh now only rewrites the DOM when the rendered content actually changes.
+- Bumped static cache to `app.js?v=332` and `style.css?v=263`; frontend refresh required.
 
 ## What was improved - Session 28.214 (Object exclude map simplification - 7 June)
 - Simplified the object exclusion map after the first readability pass became too busy.

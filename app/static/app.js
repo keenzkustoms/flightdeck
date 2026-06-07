@@ -3575,7 +3575,7 @@ function _detailMmuPanel(p) {
 
 function _detailObjectsPanel(id, data) {
   const objects = data?.objects || [];
-  if (!objects || objects.length < 2) return '';
+  if (!objects || objects.length < 2) return _detailObjectsUnavailablePanel(data);
   const modeLabel = data?.label || 'Object exclusion';
   const detail = data?.detail || 'Select one object to exclude it from the active print.';
   const title = `<div class="detail-panel-title">Objects</div>
@@ -3608,6 +3608,20 @@ function _detailObjectsPanel(id, data) {
     </div>`;
   }).join('');
   return `<div class="detail-panel">${title}${mapHtml}<div class="obj-list">${rows}</div></div>`;
+}
+
+function _detailObjectsUnavailablePanel(data) {
+  const modeLabel = data?.label || 'Object exclusion';
+  const detail = data?.detail || 'No object map is available for this print.';
+  const objects = data?.objects || [];
+  const hint = objects.length === 1
+    ? 'This file only reports one object, so there is nothing useful to exclude.'
+    : 'The active 3MF did not expose skip-object metadata. Reslicing/exporting with object metadata may make this available.';
+  return `<div class="detail-panel obj-unavailable">
+    <div class="detail-panel-title">Objects</div>
+    <div class="obj-panel-subtitle"><strong>${esc(modeLabel)}</strong><span>${esc(detail)}</span></div>
+    <div class="obj-empty-note">${esc(hint)}</div>
+  </div>`;
 }
 
 function _objectMapHtml(id, data) {
@@ -3644,8 +3658,9 @@ function _objectMapHtml(id, data) {
       data-obj-name="${safeName}" data-obj-label="${esc(shortName)}" data-printer-id="${id}" data-obj-id="${safeId}" ${isExcluded ? 'disabled' : ''}
       title="${esc(shortName)}"><span class="obj-chip-id">${displayId}</span></button>`;
   }).join('');
+  const imageVersion = objects.map(o => `${o.id ?? ''}:${o.state ?? ''}`).join('-') || 'current';
   const image = data?.plate_image_url
-    ? `<img src="${esc(data.plate_image_url)}?map=${Date.now()}" alt="Plate object map" loading="lazy">`
+    ? `<img src="${esc(data.plate_image_url)}?map=${encodeURIComponent(imageVersion)}" alt="Plate object map" loading="lazy">`
     : '';
   const classes = `obj-map${hasGeometry ? ' obj-map-has-geometry' : ' obj-map-no-geometry obj-map-approx'}`;
   const helper = hasGeometry
@@ -3670,9 +3685,9 @@ async function refreshObjectsPanel(id) {
   const el = document.querySelector('#detail-objects');
   if (!el) return;
   const data = _objectsCache[id];
-  el.innerHTML = (data?.supported && data.objects?.length > 1)
-    ? _detailObjectsPanel(id, data)
-    : '';
+  if (!data?.mode) return;
+  const nextHtml = _detailObjectsPanel(id, data);
+  if (el.innerHTML !== nextHtml) el.innerHTML = nextHtml;
 }
 
 async function sendExcludeObject(id, name, objectId = null) {
