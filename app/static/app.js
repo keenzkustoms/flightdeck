@@ -7465,6 +7465,20 @@ async function _queueHandleAction(e) {
 // ── Cameras grid ──────────────────────────────────────────────────────────
 
 let _fleetWallSignature = '';
+let _fleetWallMode = localStorage.getItem('fleetWallMode') || 'medium';
+
+function _safeFleetWallMode(mode) {
+  return ['small', 'medium', 'large'].includes(mode) ? mode : 'medium';
+}
+
+function _fleetWallModeControls() {
+  _fleetWallMode = _safeFleetWallMode(_fleetWallMode);
+  return `<div class="fleet-wall-mode" role="group" aria-label="Fleet Wall size">
+    ${['small', 'medium', 'large'].map(mode => `<button type="button"
+      class="${_fleetWallMode === mode ? 'active' : ''}"
+      data-fleet-wall-mode="${mode}">${mode[0].toUpperCase()}${mode.slice(1)}</button>`).join('')}
+  </div>`;
+}
 
 function _camHeaderInner(p) {
   const badgeLabel = _printerDisplayStateLabel(p);
@@ -7655,6 +7669,11 @@ function _fleetWallCardBody(p) {
       ${_fleetWallWarnings(p)}
       ${_fleetWallSpools(p)}
       ${_fleetWallAmsStrip(p)}
+      ${_fleetWallMode === 'large' ? `<div class="fleet-wall-extra">
+        <span><b>Signal</b>${esc(fmtLastSeen(p.last_seen))}</span>
+        <span><b>ID</b>${esc(p.id)}</span>
+        <span><b>Type</b>${esc(p.kind || p.connection?.type || 'printer')}</span>
+      </div>` : ''}
     </div>
     <div class="fleet-wall-actions">
       <a href="#/printer/${esc(p.id)}">Live</a>
@@ -7702,6 +7721,7 @@ async function _ensureFleetWallCameraUrls(printers) {
 
 async function renderFleetWall() {
   const el = document.getElementById('fleet-wall-page');
+  _fleetWallMode = _safeFleetWallMode(_fleetWallMode);
   const printers = [...(_latestPrinters || [])].sort((a, b) =>
     _dashboardStateRank(a) - _dashboardStateRank(b) ||
     _dashboardPrinterName(a).localeCompare(_dashboardPrinterName(b))
@@ -7717,15 +7737,17 @@ async function renderFleetWall() {
 
   await _ensureFleetWallCameraUrls(printers);
 
-  const signature = printers.map(p => `${p.id}:${_cameraUrlCache[p.id] ? 'cam' : 'nocam'}`).join('|');
+  const signature = `${_fleetWallMode}|${printers.map(p => `${p.id}:${_cameraUrlCache[p.id] ? 'cam' : 'nocam'}`).join('|')}`;
   if (_fleetWallSignature !== signature || !el.querySelector('.fleet-wall-grid')) {
     const active = printers.filter(p => ['printing', 'paused'].includes(p.state)).length;
     const attention = printers.filter(p => _printerWarningTarget(p) || _printerPrintLocked(p)).length;
+    el.className = `fleet-wall-page fleet-wall-${_fleetWallMode}`;
     el.innerHTML = `<div class="fleet-wall-hero">
       <div>
         <span>Fleet Wall</span>
         <h1>Shop floor live</h1>
       </div>
+      ${_fleetWallModeControls()}
       <div class="fleet-wall-summary">
         ${_fleetWallMetric('Printers', String(printers.length))}
         ${_fleetWallMetric('Active', String(active), active ? 'warm' : '')}
@@ -7737,7 +7759,16 @@ async function renderFleetWall() {
     </div>`;
     _fleetWallSignature = signature;
     _attachCameraRetries(el);
+    el.querySelectorAll('[data-fleet-wall-mode]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        _fleetWallMode = _safeFleetWallMode(btn.dataset.fleetWallMode);
+        localStorage.setItem('fleetWallMode', _fleetWallMode);
+        _fleetWallSignature = '';
+        renderFleetWall();
+      });
+    });
   } else {
+    el.className = `fleet-wall-page fleet-wall-${_fleetWallMode}`;
     printers.forEach(p => {
       const card = el.querySelector(`.fleet-wall-card[data-printer-id="${CSS.escape(p.id)}"]`);
       if (!card) return;
