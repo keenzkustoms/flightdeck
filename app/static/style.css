@@ -4559,7 +4559,7 @@ button.live-route-node:hover {
   align-items: center;
   justify-content: flex-start;
   gap: 0.38rem;
-  padding: 2.35rem 0.1rem 0.2rem;
+  padding: 2.35rem 0.45rem 0.2rem 0.85rem;
   text-align: center;
 }
 

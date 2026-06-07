@@ -1,5 +1,9 @@
 # Flightdeck — next session brief
-_Last updated 7 June 2026 (Session 28.227 AMS HT scale correction)_
+_Last updated 7 June 2026 (Session 28.228 AMS RHS rail padding)_
+
+## What was fixed - Session 28.228 (AMS RHS rail padding - 7 June)
+- Nudged AMS dryer/status side-rail content to align visually within the dark RHS panel.
+- Bumped static cache to `style.css?v=276`; frontend refresh required.
 
 ## What was fixed - Session 28.227 (AMS HT scale correction - 7 June)
 - Reduced AMS HT reel bay to match normal AMS slot visual scale more closely.
