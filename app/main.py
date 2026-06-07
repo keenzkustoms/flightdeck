@@ -3763,6 +3763,16 @@ async def setup_health():
         _is_writable_dir(_print_library_path()),
         str(_print_library_path()),
     ))
+    backup_script = APP_DIR / "scripts" / "backup-flightdeck-data.sh"
+    restore_script = APP_DIR / "scripts" / "restore-flightdeck-data.sh"
+    backup_ok = backup_script.exists() and restore_script.exists()
+    checks.append(_setup_check(
+        "backup",
+        "Backup tools",
+        backup_ok,
+        f"{backup_script}" if backup_ok else "Backup/restore scripts not found",
+        optional=True,
+    ))
 
     try:
         config = load()
@@ -3845,6 +3855,7 @@ async def setup_health():
             "uploads": str(UPLOADS_DIR),
             "printer_config": str(PRINTERS_CONFIG_PATH),
             "print_vault": str(_print_library_path()),
+            "backup_script": str(APP_DIR / "scripts" / "backup-flightdeck-data.sh"),
         },
         "checks": checks,
     }

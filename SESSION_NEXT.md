@@ -1,5 +1,10 @@
 # Flightdeck — next session brief
-_Last updated 7 June 2026 (Session 28.232 Printer config startup guard)_
+_Last updated 7 June 2026 (Session 28.233 Setup backup check)_
+
+## What was improved - Session 28.233 (Setup backup check - 7 June)
+- Setup Health now has an explicit optional `Backup tools` check for the backup/restore scripts.
+- Print Vault readiness and Backup readiness are no longer conflated in the first-run summary.
+- Backend restart required.
 
 ## What was improved - Session 28.232 (Printer config startup guard - 7 June)
 - Flightdeck now starts with an empty fleet if `printers.yaml` is missing or empty, which helps fresh Windows/Pi installs reach the Add Printer screen.
