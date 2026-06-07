@@ -67,6 +67,9 @@ _scale_keep_awake_task: asyncio.Task | None = None
 _EMPTY_SLOT_AUTO_RETURN_GRACE_SECONDS = 600
 _scale = Scale()
 _label_printer = LabelPrinter()
+_MAX_PRINT_FILE_BYTES = int(os.getenv("FLIGHTDECK_MAX_PRINT_FILE_MB", "2048")) * 1024 * 1024
+_MAX_PROFILE_UPLOAD_BYTES = int(os.getenv("FLIGHTDECK_MAX_PROFILE_UPLOAD_MB", "64")) * 1024 * 1024
+_UPLOAD_READ_CHUNK_BYTES = 1024 * 1024
 
 
 def _dt_default(obj):
@@ -951,6 +954,36 @@ def _safe_join_under(root: Path, *parts: str | Path, missing_ok: bool = False) -
     return target
 
 
+def _format_bytes(size: int) -> str:
+    value = float(max(0, int(size or 0)))
+    for unit in ("B", "KB", "MB", "GB"):
+        if value < 1024 or unit == "GB":
+            return f"{value:.1f} {unit}" if unit != "B" else f"{int(value)} B"
+        value /= 1024
+    return f"{value:.1f} GB"
+
+
+def _enforce_file_size(size: int, limit: int = _MAX_PRINT_FILE_BYTES, label: str = "File") -> None:
+    if size > limit:
+        raise HTTPException(
+            status_code=413,
+            detail=f"{label} is too large ({_format_bytes(size)}). Limit is {_format_bytes(limit)}.",
+        )
+
+
+async def _read_upload_bytes(file: UploadFile, limit: int = _MAX_PRINT_FILE_BYTES, label: str = "File") -> bytes:
+    data = bytearray()
+    while True:
+        chunk = await file.read(_UPLOAD_READ_CHUNK_BYTES)
+        if not chunk:
+            break
+        data.extend(chunk)
+        _enforce_file_size(len(data), limit, label)
+    if not data:
+        raise HTTPException(status_code=422, detail="Empty file")
+    return bytes(data)
+
+
 def _print_library_path(raw: str | None = None) -> Path:
     if raw is None:
         raw = db.get_all_settings().get("print_vault_path") or ""
@@ -1193,7 +1226,9 @@ async def _read_file_desk_source(source_id: str, source_path: str) -> tuple[str,
         raise HTTPException(status_code=422, detail="Unsupported file type")
 
     if source_id == "library":
-        data = _safe_library_path(source_path).read_bytes()
+        source_file = _safe_library_path(source_path)
+        _enforce_file_size(source_file.stat().st_size, label="Print Vault file")
+        data = source_file.read_bytes()
     else:
         bambu = _find_bambu(source_id)
         if bambu:
@@ -1207,6 +1242,7 @@ async def _read_file_desk_source(source_id: str, source_path: str) -> tuple[str,
 
     if not data:
         raise HTTPException(status_code=422, detail="Empty file")
+    _enforce_file_size(len(data), label="Source file")
     return filename, data
 
 
@@ -1394,9 +1430,7 @@ async def upload_file_to_library(file: UploadFile = File(...)):
         allowed = _ALLOWED_BAMBU_EXT | _ALLOWED_MOONRAKER_EXT | _SOURCE_MODEL_EXT
     if ext not in allowed:
         raise HTTPException(status_code=422, detail="Unsupported file type")
-    data = await file.read()
-    if not data:
-        raise HTTPException(status_code=422, detail="Empty file")
+    data = await _read_upload_bytes(file, label="Print Vault upload")
     library_root = _print_library_path().resolve()
     library_root.mkdir(parents=True, exist_ok=True)
     dest = _library_import_path(raw_name)
@@ -1552,7 +1586,7 @@ async def slicer_worker_slice(
     output_kind = "gcode.3mf" if output_kind == "gcode.3mf" else "gcode"
     source_name = _safe_basename(file.filename, "flightdeck-model.stl")
     output_filename = _safe_basename(output_filename, "flightdeck-sliced.gcode.3mf")
-    source_data = await file.read()
+    source_data = await _read_upload_bytes(file, label="Slicer source file")
     profiles = {
         "printer": printer_profile,
         "process": process_profile,
@@ -1655,6 +1689,7 @@ async def run_slice_from_file_desk(body: SliceRunRequest):
             raise HTTPException(status_code=resp.status_code, detail=detail or "Slicer worker failed")
         sliced_name = resp.headers.get("X-Flightdeck-Sliced-Filename") or output_filename
         sliced_data = resp.content
+        _enforce_file_size(len(sliced_data), label="Sliced output")
     elif sidecar_url:
         sliced_name, sliced_data, _log = await asyncio.to_thread(
             _run_orca_slice_sidecar,
@@ -1683,6 +1718,7 @@ async def run_slice_from_file_desk(body: SliceRunRequest):
 
     library_root = _print_library_path().resolve()
     library_root.mkdir(parents=True, exist_ok=True)
+    _enforce_file_size(len(sliced_data), label="Sliced output")
     dest = _unique_library_destination(library_root, sliced_name or output_filename)
     dest.write_bytes(sliced_data)
     stat = dest.stat()
@@ -3156,10 +3192,12 @@ def _run_orca_slice_sidecar(
             import base64
             try:
                 decoded = base64.b64decode(encoded)
-                name = payload.get("filename") or payload.get("name") or requested
-                return str(name), decoded, json.dumps({k: v for k, v in payload.items() if k not in {"data", "content", "file"}})
             except Exception:
                 pass
+            else:
+                _enforce_file_size(len(decoded), label="Sliced output")
+                name = payload.get("filename") or payload.get("name") or requested
+                return str(name), decoded, json.dumps({k: v for k, v in payload.items() if k not in {"data", "content", "file"}})
         raise HTTPException(status_code=502, detail=_friendly_slicer_error(payload.get("details") or payload.get("error") or payload.get("message") or "Slicer API did not return a file"))
 
     name = (
@@ -3170,6 +3208,7 @@ def _run_orca_slice_sidecar(
     )
     if not response.content:
         raise HTTPException(status_code=502, detail="Slicer API returned an empty file")
+    _enforce_file_size(len(response.content), label="Sliced output")
     return name, response.content, f"Slicer API {response.status_code}"
 
 
@@ -3231,6 +3270,7 @@ def _run_orca_slice_local(
         if not output_path.exists():
             detail = (proc.stderr or proc.stdout or "OrcaSlicer finished without creating an output file").strip()
             raise HTTPException(status_code=502, detail=_friendly_slicer_error(detail))
+        _enforce_file_size(output_path.stat().st_size, label="Sliced output")
         return output_path.name, output_path.read_bytes(), (proc.stdout or proc.stderr or "").strip()[-2000:]
 
 
@@ -3299,7 +3339,8 @@ async def upload_slicer_profiles(files: list[UploadFile] = File(...)):
             errors.append({"file": name, "error": "Unsupported profile file type"})
             continue
         try:
-            parsed = await asyncio.to_thread(_parse_uploaded_slicer_profiles, name, await file.read(), payload)
+            profile_data = await _read_upload_bytes(file, limit=_MAX_PROFILE_UPLOAD_BYTES, label="Profile upload")
+            parsed = await asyncio.to_thread(_parse_uploaded_slicer_profiles, name, profile_data, payload)
             payload = parsed["payload"]
             for key, count in parsed["added"].items():
                 total[key] += count
@@ -5087,9 +5128,7 @@ async def queue_upload(printer_id: str = Form(...), file: UploadFile = File(...)
             detail=f"Unsupported file type '{ext}' for {kind} printer. Expected: {', '.join(sorted(allowed))}",
         )
 
-    data = await file.read()
-    if not data:
-        raise HTTPException(status_code=422, detail="Empty file")
+    data = await _read_upload_bytes(file, label="Queue upload")
 
     import uuid as _uuid
     safe_name = f"{_uuid.uuid4().hex[:8]}_{raw_name}"
@@ -5246,7 +5285,7 @@ async def relay_printer_info(printer_id: str):
 async def relay_upload(printer_id: str, request: Request, file: UploadFile = File(...)):
     source_ip = request.client.host if request.client else "unknown"
     filename = _safe_basename(file.filename, "upload.gcode.3mf")
-    data = await file.read()
+    data = await _read_upload_bytes(file, label="Relay upload")
 
     bambu = _find_bambu(printer_id)
     if bambu:

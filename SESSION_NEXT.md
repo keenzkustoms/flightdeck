@@ -1,5 +1,12 @@
 # Flightdeck — next session brief
-_Last updated 7 June 2026 (Session 28.229 File path safety hardening)_
+_Last updated 7 June 2026 (Session 28.230 Upload size guardrails)_
+
+## What was hardened - Session 28.230 (Upload size guardrails - 7 June)
+- Added shared backend size/read helpers for files entering Flightdeck.
+- Print Vault uploads, Queue uploads, Orca relay uploads, Slicer worker source files, custom slicer profile uploads, and sliced outputs now return clear `413` errors when too large instead of failing later in odd ways.
+- Print/model file limit defaults to 2048 MB and can be changed with `FLIGHTDECK_MAX_PRINT_FILE_MB`.
+- Custom slicer profile import limit defaults to 64 MB and can be changed with `FLIGHTDECK_MAX_PROFILE_UPLOAD_MB`.
+- Backend restart required.
 
 ## What was hardened - Session 28.229 (File path safety hardening - 7 June)
 - Added shared backend helpers for safe basename normalization and safe path joins under trusted directories.
