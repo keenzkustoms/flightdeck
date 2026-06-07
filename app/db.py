@@ -1051,6 +1051,7 @@ def get_printer_health(printer_id: str) -> dict:
                FROM prints
                WHERE printer_id = ?
                  AND final_state IS NOT NULL
+                 AND COALESCE(exclude_from_stats, 0) = 0
                  AND started_at >= datetime('now', '-14 days')""",
             (printer_id,),
         ).fetchone()
@@ -1059,6 +1060,7 @@ def get_printer_health(printer_id: str) -> dict:
                FROM prints
                WHERE printer_id = ?
                  AND final_state IN ('ERROR', 'ESTOP')
+                 AND COALESCE(exclude_from_stats, 0) = 0
                  AND started_at >= datetime('now', '-14 days')
                  AND (
                    (duration_seconds IS NOT NULL AND duration_seconds <= 600)

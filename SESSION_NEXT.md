@@ -2,13 +2,14 @@
 
 Latest GitHub/Pi state:
 - Branch: main
-- Latest commit: current HEAD after this handoff (`Add Print Watch rotating focus`)
+- Latest commit: current HEAD after this handoff (`Filter no-stats prints from health`)
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
 - Refresh cachebust currently: ?cachebust=364
 
 Recent work:
+- Printer health now excludes prints marked no-stats/Flightdeck testing from 14d failure totals, early-failure counts, cancelled totals, and success-rate math.
 - Fleet Wall added with Small/Medium/Large modes.
 - Fleet Wall now uses Live-view style AMS visuals.
 - Fleet Wall warnings compacted.
@@ -31,6 +32,11 @@ Likely next items:
 - Continue slicer/API integration and profile filtering.
 - Continue stock-in QR/label workflow.
 - Make Windows installer/update flow smoother.
+
+## What was fixed - Session 28.237 (No-stats printer health - 7 June)
+- Printer health now follows Print Memory's trusted-stats rule: prints with `exclude_from_stats` set are ignored for 14d health totals, early-failure counts, cancelled counts, and success-rate warnings.
+- This fixes H2D staying in attention because Flightdeck testing/no-stats failures were still counted as `4 failed prints in 14d`.
+- Backend restart required.
 
 ## What was fixed - Session 28.236 (Fleet Wall AMS demo polish - 7 June)
 - Fleet Wall AMS visuals now use mode-specific sizing variables and wrap within the card instead of forcing a clipped horizontal AMS strip.
