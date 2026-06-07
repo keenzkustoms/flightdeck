@@ -2,13 +2,14 @@
 
 Latest GitHub/Pi state:
 - Branch: main
-- Latest commit: current HEAD after this handoff (`Undo Bambu plate underlay`)
+- Latest commit: current HEAD after this handoff (`Reset Bambu skip thumbnail Y offset`)
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
 - Refresh cachebust currently: ?cachebust=374
 
 Recent work:
+- Bambu skip-object thumbnail Y offset was reset to `0` because the large `y=-92%` offset made the thumbnail look like it was not lying flat on the bed. Current trial is red overlay locked, thumbnail angle `45deg`, `x=5%`, `y=0%`.
 - Reverted the Bambu/H2D plate underlay because it made the skip-object map worse. Current map is back to the previous best: locked red overlay, thumbnail image `45deg`, `x=5%`, `y=-92%`.
 - Bambu skip-object thumbnail layer now supports image-only X/Y offsets; current H2D trial keeps the red overlay locked and moves the rotated thumbnail by `x=5%`, `y=-92%` to bring the star down inside `#439` and move the spoon shapes left into `#148/#463`.
 - Bambu skip-object red overlay remains locked unrotated/axis-aligned. The thumbnail image is now on a separate layer underneath and currently rotates 45 degrees to try to bring the left spoon/keeper shape into the `#148` box without moving the red boxes.
@@ -111,6 +112,12 @@ Likely next items:
 - Reverted the Bambu/H2D-style plate underlay because it made the object map worse.
 - Current live target is back to the previous best state: locked red overlay, thumbnail `45deg`, `map_image_offset_x=5`, `map_image_offset_y=-92`.
 - Static cache bumped to `app.js?v=374` and `style.css?v=303`; frontend refresh required.
+
+## What was changed - Session 28.252 (Bambu skip-object Y offset reset - 8 June)
+- Reset H2D thumbnail Y offset to `map_image_offset_y=0` while keeping the small X nudge at `map_image_offset_x=5`.
+- Current trial values: `map_rotation=0`, `map_image_rotation=45`, `map_image_offset_x=5`, `map_image_offset_y=0`.
+- This isolates the suspected vertical-offset problem without moving the locked red overlay.
+- Backend restart required.
 
 ## What was fixed - Session 28.240 (Generic AMS auto-claim guard - 7 June)
 - Generic Bambu AMS reports now only auto-claim the exact recent spool remembered for that slot.
