@@ -6399,7 +6399,8 @@ button.live-route-node:hover {
   width: 100%;
   aspect-ratio: 16 / 9;
   object-fit: contain;
-  opacity: 0.88;
+  opacity: 0.96;
+  filter: brightness(1.08) contrast(1.08);
 }
 
 .obj-map-overlay {
@@ -6409,6 +6410,9 @@ button.live-route-node:hover {
 
 .obj-map-region {
   position: absolute;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-width: 1.7rem;
   min-height: 1.25rem;
   border: 2px solid rgba(248,113,113,0.86);
@@ -6423,17 +6427,49 @@ button.live-route-node:hover {
 
 .obj-map-chip {
   position: absolute;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.1rem;
   transform: translate(-50%, -50%);
-  border-color: rgba(96,165,250,0.32);
-  background: rgba(15,23,42,0.74);
+  border: 2px solid rgba(96,165,250,0.62);
+  background: rgba(2,6,23,0.88);
   color: #dbeafe;
-  min-width: 2.35rem;
-  min-height: 1.65rem;
+  min-width: 3.35rem;
+  max-width: 6.25rem;
+  min-height: 2.35rem;
+  padding: 0.22rem 0.38rem;
   box-shadow: 0 0.45rem 1rem rgba(0,0,0,0.28);
 }
 
 .obj-map-chip:hover:not(:disabled) {
   border-color: rgba(248,113,113,0.7);
+  background: rgba(127,29,29,0.68);
+}
+
+.obj-chip-id {
+  color: #fff;
+  font-size: 0.9rem;
+  font-weight: 900;
+  line-height: 1;
+  text-shadow: 0 1px 0.2rem rgba(0,0,0,0.85);
+}
+
+.obj-map-region .obj-chip-id {
+  font-size: 0.78rem;
+}
+
+.obj-chip-label {
+  max-width: 5.45rem;
+  color: #bfdbfe;
+  font-size: 0.54rem;
+  font-weight: 800;
+  line-height: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-shadow: 0 1px 0.18rem rgba(0,0,0,0.8);
+  white-space: nowrap;
 }
 
 .obj-map-approx .obj-map-stage::after {
@@ -6496,6 +6532,16 @@ button.live-route-node:hover {
   color: var(--muted);
   font-size: 0.64rem;
   font-family: monospace;
+}
+
+.obj-id-pill {
+  align-self: flex-start;
+  border: 1px solid rgba(96,165,250,0.42);
+  border-radius: 999px;
+  padding: 0.04rem 0.32rem;
+  background: rgba(37,99,235,0.16);
+  color: #bfdbfe;
+  font-weight: 900;
 }
 
 .obj-row-excluded .obj-name {

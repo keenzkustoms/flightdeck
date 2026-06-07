@@ -1,5 +1,12 @@
 # Flightdeck — next session brief
-_Last updated 7 June 2026 (Session 28.212 Exclude object map fallback)_
+_Last updated 7 June 2026 (Session 28.213 Object exclude ID readability)_
+
+## What was improved - Session 28.213 (Object exclude ID readability - 7 June)
+- Object exclusion maps now keep the plate thumbnail clearer and put the slicer/printer object ID in a larger, brighter overlay.
+- Approximate Bambu/Orca object selectors now show the object label under the large ID where available.
+- Object list rows now show the ID as a visible pill instead of tiny muted metadata.
+- The helper text explains that Bambu/Orca object IDs can be high and should be matched to the printer screen.
+- Bumped static cache to `app.js?v=330` and `style.css?v=261`; frontend refresh required.
 
 ## What was improved - Session 28.212 (Exclude object map fallback - 7 June)
 - Bambu/Klipper Objects panel now presents no-geometry object IDs as an approximate plate selector instead of a loose chip pile.

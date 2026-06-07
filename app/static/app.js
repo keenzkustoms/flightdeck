@@ -3596,7 +3596,7 @@ function _detailObjectsPanel(id, data) {
     return `<div class="obj-row${isExcluded ? ' obj-row-excluded' : ''}${isCurrent ? ' obj-row-current' : ''}">
       <div class="obj-label">
         <span class="obj-name" title="${safeName}">${shortName}</span>
-        ${safeId !== '' ? `<span class="obj-meta">#${esc(safeId)}</span>` : ''}
+        ${safeId !== '' ? `<span class="obj-meta obj-id-pill">ID #${esc(safeId)}</span>` : ''}
       </div>
       <div class="obj-actions">
         ${stateHtml}
@@ -3624,6 +3624,8 @@ function _objectMapHtml(id, data) {
     const safeName = esc(rawName);
     const safeId = obj.id ?? '';
     const shortName = (obj.label || rawName).replace(/.*[/\\]/, '');
+    const displayId = safeId !== '' ? `#${esc(safeId)}` : esc(shortName);
+    const displayLabel = safeId !== '' ? esc(shortName) : '';
     if (hasGeometry && obj.bbox) {
       const left = ((obj.bbox.x - bounds.x) / bounds.w) * 100;
       const top = ((obj.bbox.y - bounds.y) / bounds.h) * 100;
@@ -3632,7 +3634,7 @@ function _objectMapHtml(id, data) {
       return `<button type="button" class="obj-map-region obj-exclude-btn${isExcluded ? ' is-excluded' : ''}${isCurrent ? ' is-current' : ''}"
         style="left:${left.toFixed(2)}%;top:${top.toFixed(2)}%;width:${Math.max(width, 5).toFixed(2)}%;height:${Math.max(height, 5).toFixed(2)}%"
         data-obj-name="${safeName}" data-obj-label="${esc(shortName)}" data-printer-id="${id}" data-obj-id="${safeId}" ${isExcluded ? 'disabled' : ''}
-        title="${esc(shortName)}">${esc(safeId || shortName)}</button>`;
+        title="${esc(shortName)}"><span class="obj-chip-id">${displayId}</span></button>`;
     }
     const col = index % pseudoCols;
     const row = Math.floor(index / pseudoCols);
@@ -3641,7 +3643,7 @@ function _objectMapHtml(id, data) {
     return `<button type="button" class="obj-map-chip obj-exclude-btn${isExcluded ? ' is-excluded' : ''}${isCurrent ? ' is-current' : ''}"
       style="left:${left.toFixed(2)}%;top:${top.toFixed(2)}%;"
       data-obj-name="${safeName}" data-obj-label="${esc(shortName)}" data-printer-id="${id}" data-obj-id="${safeId}" ${isExcluded ? 'disabled' : ''}
-      title="${esc(shortName)}">${safeId !== '' ? `#${esc(safeId)}` : esc(shortName)}</button>`;
+      title="${esc(shortName)}"><span class="obj-chip-id">${displayId}</span>${displayLabel ? `<span class="obj-chip-label">${displayLabel}</span>` : ''}</button>`;
   }).join('');
   const image = data?.plate_image_url
     ? `<img src="${esc(data.plate_image_url)}?map=${Date.now()}" alt="Plate object map" loading="lazy">`
@@ -3649,7 +3651,7 @@ function _objectMapHtml(id, data) {
   const classes = `obj-map${hasGeometry ? ' obj-map-has-geometry' : ' obj-map-no-geometry obj-map-approx'}`;
   const helper = hasGeometry
     ? 'Tap the failed part on the plate map.'
-    : `Approximate selector: match the object ID shown on the printer screen. ${availableObjects.length} objects still available.`;
+    : `Approximate selector: Bambu/Orca object IDs can be high; match the ID shown on the printer screen. ${availableObjects.length} objects still available.`;
   return `<div class="${classes}">
     <div class="obj-map-stage">
       ${image}
