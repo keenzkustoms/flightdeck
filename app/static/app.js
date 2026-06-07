@@ -7577,6 +7577,43 @@ function _fleetWallJob(p) {
   </div>`;
 }
 
+function _fleetWallBoard(p) {
+  const job = _activePrinterJob(p);
+  let title = 'Ready for dispatch';
+  let detail = 'Printer is available when the queue needs it.';
+  let tone = 'ready';
+  if (_printerPrintLocked(p)) {
+    title = 'On hold';
+    detail = _printerLockoutReason(p);
+    tone = 'locked';
+  } else if (p.state === 'printing') {
+    title = job ? jobDisplayName(job) : 'Printing';
+    detail = job?.eta_seconds ? _liveEtaText(p) : 'Print in progress';
+    tone = 'active';
+  } else if (p.state === 'paused') {
+    title = 'Paused';
+    detail = p.error || (job ? jobDisplayName(job) : 'Operator attention required');
+    tone = 'watch';
+  } else if (p.state === 'error' || p.state === 'estop') {
+    title = _liveStateLabel(p.state);
+    detail = p.error || 'Printer fault active';
+    tone = 'critical';
+  } else if (p.state === 'offline') {
+    title = 'Offline';
+    detail = fmtLastSeen(p.last_seen);
+    tone = 'watch';
+  } else if (_healthIsActionable(p.health) && p.health?.reasons?.[0]?.message) {
+    title = 'Needs review';
+    detail = p.health.reasons[0].message;
+    tone = 'watch';
+  }
+  return `<div class="fleet-wall-board fleet-wall-board-${tone}">
+    <span>Wall board</span>
+    <strong>${esc(title)}</strong>
+    <small>${esc(detail)}</small>
+  </div>`;
+}
+
 function _fleetWallWarnings(p) {
   const loaded = _latestSpoolsByPrinter[p.id] || [];
   const warnings = [];
@@ -7659,6 +7696,7 @@ function _fleetWallCardBody(p) {
       <div class="fleet-wall-status-row">
         <span class="fleet-wall-state fleet-wall-state-${tone}">${esc(_printerDisplayStateLabel(p))}</span>
       </div>
+      ${_fleetWallMode === 'large' ? _fleetWallBoard(p) : ''}
       ${_fleetWallJob(p)}
       <div class="fleet-wall-metrics">
         ${_fleetWallMetric('Hotend', hotend.actual != null ? `${_toDisplayTemp(hotend.actual)}${_tempUnitLabel()}` : '—', hotend.actual >= 180 ? 'hot' : '')}
