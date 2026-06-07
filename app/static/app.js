@@ -5365,7 +5365,7 @@ async function renderFailuresView(options = {}) {
 
 async function renderPrinterDetail(id, subtab = 'live') {
   const el = document.getElementById('printer-detail');
-  const p = _latestPrinters.find(x => x.id === id);
+  let p = _latestPrinters.find(x => x.id === id);
 
   const needsFullRender =
     _renderedDetailId !== id ||
@@ -5378,6 +5378,17 @@ async function renderPrinterDetail(id, subtab = 'live') {
   if (!p) {
     _renderedDetailOk = false;
     el.innerHTML = `<div class="detail-placeholder">Connecting…</div>`;
+    try {
+      const r = await fetch(`/api/printers/${encodeURIComponent(id)}`);
+      if (!r.ok) return;
+      p = await r.json();
+      const idx = _latestPrinters.findIndex(x => x.id === id);
+      if (idx >= 0) _latestPrinters[idx] = p;
+      else _latestPrinters.push(p);
+      if (parseRoute().view === 'printer' && parseRoute().id === id) {
+        renderPrinterDetail(id, subtab);
+      }
+    } catch {}
     return;
   }
 
