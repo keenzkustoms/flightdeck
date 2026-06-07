@@ -3811,6 +3811,7 @@ function _objectMapHtml(id, data) {
   return `<div class="${classes}"${rotationStyle}>
     <div class="obj-map-stage obj-map-open" data-printer-id="${esc(id)}" title="Open large object selector">
       <div class="obj-map-image-plane">
+        <div class="obj-bambu-plate-underlay" aria-hidden="true"></div>
         ${image}
       </div>
       <div class="obj-map-plane">
@@ -3866,6 +3867,7 @@ function _largeObjectMapHtml(id, data) {
   return `<div class="object-map-modal-body">
     <div class="object-map-modal-stage${hasGeometry ? ' has-geometry' : ''}${rotated ? ' obj-map-transformed' : ''}${rotation > 0 ? ' obj-map-overlay-rotated' : ''}${imageRotation > 0 ? ' obj-map-image-rotated' : ''}"${rotationStyle}>
       <div class="obj-map-image-plane">
+        <div class="obj-bambu-plate-underlay" aria-hidden="true"></div>
         ${image}
       </div>
       <div class="obj-map-plane">
