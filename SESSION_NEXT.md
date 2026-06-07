@@ -1,5 +1,11 @@
 # Flightdeck — next session brief
-_Last updated 7 June 2026 (Session 28.228 AMS RHS rail padding)_
+_Last updated 7 June 2026 (Session 28.229 File path safety hardening)_
+
+## What was hardened - Session 28.229 (File path safety hardening - 7 June)
+- Added shared backend helpers for safe basename normalization and safe path joins under trusted directories.
+- Routed Print Vault reads/writes, library upload/copy destinations, slicer output checks, slicer output writes, queue upload staging, and relay filenames through the shared helpers.
+- Normal filenames still work, but path-like or unsafe filenames are flattened/sanitized instead of being treated as filesystem paths.
+- Backend restart required.
 
 ## What was fixed - Session 28.228 (AMS RHS rail padding - 7 June)
 - Nudged AMS dryer/status side-rail content to align visually within the dark RHS panel.

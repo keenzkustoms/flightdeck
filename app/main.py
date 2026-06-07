@@ -932,6 +932,25 @@ def _file_archive_key(name: str) -> str:
     return text.strip()
 
 
+def _safe_basename(name: str | None, fallback: str = "flightdeck-file") -> str:
+    raw = str(name or fallback).replace("\x00", "")
+    raw = raw.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+    safe = re.sub(r"[^A-Za-z0-9._ -]+", "_", raw).strip(" ._")
+    return safe or fallback
+
+
+def _safe_join_under(root: Path, *parts: str | Path, missing_ok: bool = False) -> Path:
+    base = root.resolve()
+    target = base.joinpath(*[str(p) for p in parts]).resolve()
+    try:
+        target.relative_to(base)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid path")
+    if not missing_ok and not target.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+    return target
+
+
 def _print_library_path(raw: str | None = None) -> Path:
     if raw is None:
         raw = db.get_all_settings().get("print_vault_path") or ""
@@ -994,10 +1013,8 @@ def _mark_vaulted_files(files: list[dict], vault_lookup: dict[str, dict]) -> lis
 
 
 def _safe_library_path(rel_path: str) -> Path:
-    root = _print_library_path().resolve()
-    target = (root / rel_path).resolve()
-    if root != target and root not in target.parents:
-        raise HTTPException(status_code=400, detail="Invalid library path")
+    root = _print_library_path()
+    target = _safe_join_under(root, rel_path)
     if not target.is_file():
         raise HTTPException(status_code=404, detail="Library file not found")
     return target
@@ -1194,17 +1211,13 @@ async def _read_file_desk_source(source_id: str, source_path: str) -> tuple[str,
 
 
 def _library_import_path(filename: str) -> Path:
-    safe = re.sub(r"[^A-Za-z0-9._ -]+", "_", filename).strip(" ._") or "print_file"
-    root = _print_library_path().resolve()
-    dest = (root / safe).resolve()
-    if root != dest and root not in dest.parents:
-        raise HTTPException(status_code=400, detail="Invalid destination path")
-    return dest
+    root = _print_library_path()
+    return _safe_join_under(root, _safe_basename(filename, "print_file"), missing_ok=True)
 
 
 @app.get("/api/files")
 async def get_file_desk(printer_id: Optional[str] = None):
-    library_root = _print_library_path()
+    library_root = _print_library_path().resolve()
     library_files = _local_library_files()
     vault_lookup = {
         _file_archive_key(f.get("path") or f.get("name")): f
@@ -1327,8 +1340,8 @@ async def queue_file_from_file_desk(body: FileQueueRequest):
         )
 
     import uuid as _uuid
-    safe_name = f"{_uuid.uuid4().hex[:8]}_{filename}"
-    file_path = str(db.UPLOADS_DIR / safe_name)
+    safe_name = f"{_uuid.uuid4().hex[:8]}_{_safe_basename(filename, 'queued-print')}"
+    file_path = str(_safe_join_under(db.UPLOADS_DIR, safe_name, missing_ok=True))
     with open(file_path, "wb") as f:
         f.write(data)
 
@@ -1352,7 +1365,7 @@ async def copy_file_to_library(body: FileDeskPathRequest):
     if source_id == "library":
         raise HTTPException(status_code=422, detail="File is already in the Print Vault")
     filename, data = await _read_file_desk_source(source_id, source_path)
-    library_root = _print_library_path()
+    library_root = _print_library_path().resolve()
     library_root.mkdir(parents=True, exist_ok=True)
     dest = _library_import_path(filename)
     replaced = dest.exists()
@@ -1373,7 +1386,7 @@ async def copy_file_to_library(body: FileDeskPathRequest):
 
 @app.post("/api/files/library/upload", status_code=201)
 async def upload_file_to_library(file: UploadFile = File(...)):
-    raw_name = (file.filename or "model").rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+    raw_name = _safe_basename(file.filename, "model")
     ext = _queue_file_extension(raw_name)
     if raw_name.lower().endswith(".gcode.3mf"):
         allowed = _ALLOWED_BAMBU_EXT
@@ -1384,7 +1397,7 @@ async def upload_file_to_library(file: UploadFile = File(...)):
     data = await file.read()
     if not data:
         raise HTTPException(status_code=422, detail="Empty file")
-    library_root = _print_library_path()
+    library_root = _print_library_path().resolve()
     library_root.mkdir(parents=True, exist_ok=True)
     dest = _library_import_path(raw_name)
     if dest.exists():
@@ -1492,15 +1505,11 @@ async def plan_slice_from_file_desk(body: SlicePlanRequest):
 
 @app.post("/api/slicer/output-status")
 async def slicer_output_status(body: SliceOutputStatusRequest):
-    filename = (body.filename or "").rsplit("/", 1)[-1].rsplit("\\", 1)[-1].strip()
+    filename = _safe_basename(body.filename, "")
     if not filename:
         raise HTTPException(status_code=422, detail="Output filename required")
     library_root = _print_library_path().resolve()
-    path = (library_root / filename).resolve()
-    try:
-        path.relative_to(library_root)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid output filename")
+    path = _safe_join_under(library_root, filename, missing_ok=True)
     if not path.exists():
         return {"exists": False, "filename": filename, "path": filename}
     stat = path.stat()
@@ -1541,7 +1550,8 @@ async def slicer_worker_slice(
     bed_type: str = Form("Textured PEI Plate"),
 ):
     output_kind = "gcode.3mf" if output_kind == "gcode.3mf" else "gcode"
-    source_name = file.filename or "flightdeck-model.stl"
+    source_name = _safe_basename(file.filename, "flightdeck-model.stl")
+    output_filename = _safe_basename(output_filename, "flightdeck-sliced.gcode.3mf")
     source_data = await file.read()
     profiles = {
         "printer": printer_profile,
@@ -1671,7 +1681,7 @@ async def run_slice_from_file_desk(body: SliceRunRequest):
             all_plates=bool(body.all_plates),
         )
 
-    library_root = _print_library_path()
+    library_root = _print_library_path().resolve()
     library_root.mkdir(parents=True, exist_ok=True)
     dest = _unique_library_destination(library_root, sliced_name or output_filename)
     dest.write_bytes(sliced_data)
@@ -3099,8 +3109,8 @@ def _run_orca_slice_sidecar(
     process = _orca_profile_file(str(profiles.get("process") or ""), "process", exe)
     filament = _orca_profile_file(str(profiles.get("filament") or ""), "filament", exe)
 
-    safe_source = (filename or "flightdeck-model.stl").rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
-    requested = output_filename.rsplit("/", 1)[-1].rsplit("\\", 1)[-1] or f"{_file_archive_key(safe_source)}.gcode.3mf"
+    safe_source = _safe_basename(filename, "flightdeck-model.stl")
+    requested = _safe_basename(output_filename, f"{_file_archive_key(safe_source)}.gcode.3mf")
     sidecar_url = sidecar_url.strip().rstrip("/")
     if not sidecar_url:
         raise HTTPException(status_code=422, detail="Slicer API URL is not set")
@@ -3180,10 +3190,10 @@ def _run_orca_slice_local(
     process = _orca_profile_file(str(profiles.get("process") or ""), "process", exe)
     filament = _orca_profile_file(str(profiles.get("filament") or ""), "filament", exe)
 
-    safe_source = (filename or "flightdeck-model").rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+    safe_source = _safe_basename(filename, "flightdeck-model")
     suffixes = "".join(Path(safe_source).suffixes)
     suffix = suffixes if suffixes.lower() in {".stl", ".obj", ".step", ".stp", ".3mf"} else ".stl"
-    requested = output_filename.rsplit("/", 1)[-1].rsplit("\\", 1)[-1] or f"{_file_archive_key(safe_source)}.gcode.3mf"
+    requested = _safe_basename(output_filename, f"{_file_archive_key(safe_source)}.gcode.3mf")
     with tempfile.TemporaryDirectory(prefix="flightdeck-slice-") as tmp_raw:
         tmp = Path(tmp_raw)
         source_path = tmp / f"source{suffix}"
@@ -3225,12 +3235,8 @@ def _run_orca_slice_local(
 
 
 def _unique_library_destination(root: Path, filename: str) -> Path:
-    safe = filename.rsplit("/", 1)[-1].rsplit("\\", 1)[-1].strip() or "flightdeck-sliced.gcode.3mf"
-    dest = (root / safe).resolve()
-    try:
-        dest.relative_to(root.resolve())
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid output filename")
+    safe = _safe_basename(filename, "flightdeck-sliced.gcode.3mf")
+    dest = _safe_join_under(root, safe, missing_ok=True)
     if not dest.exists():
         return dest
     stem = dest.name
@@ -5063,7 +5069,7 @@ async def queue_upload(printer_id: str = Form(...), file: UploadFile = File(...)
     if kind not in {"moonraker", "bambu"}:
         raise HTTPException(status_code=422, detail="queueing to simulated printers is not supported yet")
 
-    raw_name = (file.filename or "upload").rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+    raw_name = _safe_basename(file.filename, "upload")
     # Resolve multi-part extensions in priority order
     if raw_name.endswith(".gcode.3mf"):
         ext = ".3mf"
@@ -5087,7 +5093,7 @@ async def queue_upload(printer_id: str = Form(...), file: UploadFile = File(...)
 
     import uuid as _uuid
     safe_name = f"{_uuid.uuid4().hex[:8]}_{raw_name}"
-    file_path = str(db.UPLOADS_DIR / safe_name)
+    file_path = str(_safe_join_under(db.UPLOADS_DIR, safe_name, missing_ok=True))
     with open(file_path, "wb") as f:
         f.write(data)
 
@@ -5239,9 +5245,7 @@ async def relay_printer_info(printer_id: str):
 @app.post("/relay/{printer_id}/server/files/upload")
 async def relay_upload(printer_id: str, request: Request, file: UploadFile = File(...)):
     source_ip = request.client.host if request.client else "unknown"
-    filename = file.filename or "upload.gcode.3mf"
-    # Strip any path prefix OrcaSlicer may include (e.g. "gcodes/model.gcode.3mf")
-    filename = filename.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+    filename = _safe_basename(file.filename, "upload.gcode.3mf")
     data = await file.read()
 
     bambu = _find_bambu(printer_id)
@@ -5261,7 +5265,7 @@ async def relay_upload(printer_id: str, request: Request, file: UploadFile = Fil
 async def relay_print_start(printer_id: str, request: Request):
     source_ip = request.client.host if request.client else "unknown"
     body = await request.json()
-    filename = (body.get("filename") or "").rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+    filename = _safe_basename(body.get("filename"), "")
     if not filename:
         raise HTTPException(status_code=422, detail="filename required")
 
