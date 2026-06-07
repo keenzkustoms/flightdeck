@@ -1,5 +1,10 @@
 # Flightdeck — next session brief
-_Last updated 7 June 2026 (Session 28.225 AMS side rail centering)_
+_Last updated 7 June 2026 (Session 28.226 AMS side rail header anchor)_
+
+## What was fixed - Session 28.226 (AMS side rail header anchor - 7 June)
+- AMS side rail now aligns from the top label (`4 slot loadout` / `High-temp bay`) instead of centering the entire control stack.
+- Drying state/time/stop controls remain centered under the side-rail label.
+- Bumped static cache to `style.css?v=274`; frontend refresh required.
 
 ## What was fixed - Session 28.225 (AMS side rail centering - 7 June)
 - Centered AMS dryer/status side-rail contents horizontally and vertically in the RHS column.
