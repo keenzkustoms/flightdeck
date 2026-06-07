@@ -4065,6 +4065,35 @@ class SpoolUsageReconcile(BaseModel):
     reading_g: Optional[float] = None
     empty_spool_weight_g: Optional[float] = None
 
+class IncomingStockLine(BaseModel):
+    quantity: int = 1
+    material: str
+    brand: str
+    subtype: Optional[str] = None
+    color_hex: str = "#808080"
+    color_name: Optional[str] = None
+    color_hex_2: Optional[str] = None
+    color_hex_3: Optional[str] = None
+    color_scheme: Optional[str] = "solid"
+    label_weight_g: float = 1000
+    empty_spool_weight_g: Optional[float] = None
+    storage_location_id: Optional[int] = None
+    notes: Optional[str] = None
+
+class IncomingStockOrderCreate(BaseModel):
+    supplier: Optional[str] = None
+    order_ref: Optional[str] = None
+    notes: Optional[str] = None
+    lines: list[IncomingStockLine]
+
+class IncomingStockReceive(BaseModel):
+    storage_location_id: Optional[int] = None
+    remaining_g: Optional[float] = None
+    label_weight_g: Optional[float] = None
+    empty_spool_weight_g: Optional[float] = None
+    notes: Optional[str] = None
+    print_label: bool = True
+
 @app.get("/api/spools/summary")
 async def get_spools_summary():
     return db.get_spools_summary()
@@ -4072,6 +4101,73 @@ async def get_spools_summary():
 @app.get("/api/spools/intelligence")
 async def get_spool_intelligence(days: int = 30):
     return db.get_spool_intelligence(days)
+
+@app.get("/api/stock-in/orders")
+async def get_incoming_stock_orders(limit: int = 20):
+    return db.get_incoming_stock_orders(limit)
+
+@app.post("/api/stock-in/orders")
+async def create_incoming_stock_order(body: IncomingStockOrderCreate):
+    lines = []
+    for line in body.lines:
+        item = line.model_dump()
+        item["quantity"] = max(1, min(int(item.get("quantity") or 1), 100))
+        if not (item.get("material") or "").strip():
+            raise HTTPException(status_code=400, detail="Material required")
+        if not (item.get("brand") or "").strip():
+            raise HTTPException(status_code=400, detail="Brand required")
+        lines.append(item)
+    try:
+        return db.create_incoming_stock_order(body.supplier, body.order_ref, body.notes, lines)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+@app.get("/api/stock-in/rolls/{token}")
+async def get_incoming_stock_roll(token: str):
+    roll = db.get_incoming_stock_roll(token)
+    if not roll:
+        raise HTTPException(status_code=404, detail="Incoming roll not found")
+    return roll
+
+@app.get("/api/stock-in/rolls/{token}/qr.png")
+async def get_incoming_stock_roll_qr(token: str):
+    if not db.get_incoming_stock_roll(token):
+        raise HTTPException(status_code=404, detail="Incoming roll not found")
+    import qrcode
+    url = f"{_label_base_url().rstrip('/')}/#/spools?view=incoming&token={urllib.parse.quote(token)}"
+    qr = qrcode.QRCode(border=2, box_size=6)
+    qr.add_data(url)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="black", back_color="white")
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return Response(content=buf.getvalue(), media_type="image/png")
+
+@app.post("/api/stock-in/rolls/{token}/receive")
+async def receive_incoming_stock_roll(token: str, body: IncomingStockReceive):
+    result = db.receive_incoming_stock_roll(
+        token,
+        storage_location_id=body.storage_location_id,
+        remaining_g=body.remaining_g,
+        label_weight_g=body.label_weight_g,
+        empty_spool_weight_g=body.empty_spool_weight_g,
+        notes=body.notes,
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail="Incoming roll not found")
+    label_printed = False
+    label_error = None
+    spool = result.get("spool")
+    if body.print_label and spool:
+        ok = await asyncio.to_thread(_label_printer.print_spool_label, _label_spool(spool), _label_base_url())
+        if ok:
+            label_printed = True
+            db.log_decision("system", "label_printed", f"Spool #{spool['id']} stock-in receive")
+        else:
+            label_error = _label_printer.last_error or "Label printer unavailable"
+            db.log_decision("system", "label_print_failed", f"Spool #{spool['id']}: {label_error}")
+            _notify("warn", "Label print failed", f"Spool #{spool['id']}: {label_error}", link="#/settings/hardware")
+    return {**result, "label_printed": label_printed, "label_error": label_error}
 
 @app.get("/api/spools/by-printer/{printer_id}")
 async def get_spools_by_printer(printer_id: str):

@@ -2,6 +2,7 @@ from __future__ import annotations
 import sqlite3
 import logging
 import json
+import secrets
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -161,6 +162,43 @@ def init() -> None:
                 archived_at TIMESTAMP,
                 created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
+
+            CREATE TABLE IF NOT EXISTS incoming_stock_orders (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                supplier    TEXT,
+                order_ref   TEXT,
+                notes       TEXT,
+                created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+                closed_at   TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS incoming_stock_rolls (
+                id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+                order_id             INTEGER NOT NULL REFERENCES incoming_stock_orders(id),
+                token                TEXT NOT NULL UNIQUE,
+                material             TEXT NOT NULL,
+                brand                TEXT NOT NULL,
+                subtype              TEXT,
+                color_hex            TEXT NOT NULL,
+                color_name           TEXT,
+                color_scheme         TEXT NOT NULL DEFAULT 'solid',
+                color_hex_2          TEXT,
+                color_hex_3          TEXT,
+                label_weight_g       REAL NOT NULL DEFAULT 1000,
+                empty_spool_weight_g REAL,
+                storage_location_id  INTEGER,
+                notes                TEXT,
+                status               TEXT NOT NULL DEFAULT 'pending',
+                spool_id             INTEGER REFERENCES spools(id),
+                received_at          TEXT,
+                created_at           TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_incoming_stock_rolls_order
+                ON incoming_stock_rolls(order_id, id);
+
+            CREATE INDEX IF NOT EXISTS idx_incoming_stock_rolls_token
+                ON incoming_stock_rolls(token);
 
             CREATE TABLE IF NOT EXISTS print_queue (
                 id                  INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1978,6 +2016,160 @@ def get_spool(spool_id: int) -> Optional[dict]:
         spool = dict(row)
         _attach_spool_confidence(conn, [spool])
     return spool
+
+
+def _incoming_roll_from_row(row) -> dict:
+    item = dict(row)
+    item["label_weight_g"] = float(item.get("label_weight_g") or 0)
+    if item.get("empty_spool_weight_g") is not None:
+        item["empty_spool_weight_g"] = float(item["empty_spool_weight_g"])
+    return item
+
+
+def _new_stock_token(conn) -> str:
+    for _ in range(12):
+        token = secrets.token_urlsafe(10).replace("-", "").replace("_", "")[:12]
+        if not conn.execute("SELECT 1 FROM incoming_stock_rolls WHERE token = ?", (token,)).fetchone():
+            return token
+    return secrets.token_hex(12)
+
+
+def create_incoming_stock_order(supplier: Optional[str], order_ref: Optional[str], notes: Optional[str], lines: list[dict]) -> dict:
+    clean_lines = []
+    for line in lines or []:
+        qty = max(1, int(line.get("quantity") or 1))
+        clean_lines.append({**line, "quantity": qty})
+    if not clean_lines:
+        raise ValueError("At least one roll is required")
+    with _conn() as conn:
+        cursor = conn.execute(
+            "INSERT INTO incoming_stock_orders (supplier, order_ref, notes) VALUES (?, ?, ?)",
+            (supplier, order_ref, notes),
+        )
+        order_id = cursor.lastrowid
+        for line in clean_lines:
+            for _ in range(line["quantity"]):
+                conn.execute(
+                    """INSERT INTO incoming_stock_rolls
+                       (order_id, token, material, brand, subtype, color_hex, color_name,
+                        color_scheme, color_hex_2, color_hex_3, label_weight_g,
+                        empty_spool_weight_g, storage_location_id, notes)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        order_id,
+                        _new_stock_token(conn),
+                        (line.get("material") or "PLA").strip(),
+                        (line.get("brand") or "Unknown").strip(),
+                        line.get("subtype"),
+                        (line.get("color_hex") or "#808080").strip(),
+                        line.get("color_name"),
+                        _clean_spool_color_scheme(line.get("color_scheme")),
+                        _clean_optional_hex(line.get("color_hex_2")),
+                        _clean_optional_hex(line.get("color_hex_3")),
+                        float(line.get("label_weight_g") or 1000),
+                        line.get("empty_spool_weight_g"),
+                        line.get("storage_location_id"),
+                        line.get("notes"),
+                    ),
+                )
+    log_decision("system", "stock_in_created", f"Incoming stock order #{order_id} created")
+    return get_incoming_stock_order(order_id) or {"id": order_id, "rolls": []}
+
+
+def get_incoming_stock_order(order_id: int) -> Optional[dict]:
+    with _conn() as conn:
+        order = conn.execute(
+            """SELECT id, supplier, order_ref, notes, created_at, closed_at
+               FROM incoming_stock_orders WHERE id = ?""",
+            (order_id,),
+        ).fetchone()
+        if not order:
+            return None
+        rolls = conn.execute(
+            """SELECT r.*,
+                      (SELECT name FROM spool_locations WHERE id = r.storage_location_id) AS storage_location_name
+               FROM incoming_stock_rolls r
+               WHERE r.order_id = ?
+               ORDER BY r.id""",
+            (order_id,),
+        ).fetchall()
+    item = dict(order)
+    item["rolls"] = [_incoming_roll_from_row(r) for r in rolls]
+    item["pending_count"] = sum(1 for r in item["rolls"] if r.get("status") == "pending")
+    item["received_count"] = sum(1 for r in item["rolls"] if r.get("status") == "received")
+    return item
+
+
+def get_incoming_stock_orders(limit: int = 20) -> list:
+    with _conn() as conn:
+        rows = conn.execute(
+            """SELECT id FROM incoming_stock_orders
+               ORDER BY created_at DESC, id DESC
+               LIMIT ?""",
+            (max(1, min(int(limit or 20), 100)),),
+        ).fetchall()
+    return [order for row in rows if (order := get_incoming_stock_order(int(row["id"])))]
+
+
+def get_incoming_stock_roll(token: str) -> Optional[dict]:
+    with _conn() as conn:
+        row = conn.execute(
+            """SELECT r.*,
+                      o.supplier, o.order_ref,
+                      (SELECT name FROM spool_locations WHERE id = r.storage_location_id) AS storage_location_name
+               FROM incoming_stock_rolls r
+               JOIN incoming_stock_orders o ON o.id = r.order_id
+               WHERE r.token = ?""",
+            (token,),
+        ).fetchone()
+    return _incoming_roll_from_row(row) if row else None
+
+
+def receive_incoming_stock_roll(
+    token: str,
+    *,
+    storage_location_id: Optional[int] = None,
+    remaining_g: Optional[float] = None,
+    label_weight_g: Optional[float] = None,
+    empty_spool_weight_g: Optional[float] = None,
+    notes: Optional[str] = None,
+) -> Optional[dict]:
+    roll = get_incoming_stock_roll(token)
+    if not roll:
+        return None
+    if roll.get("status") == "received" and roll.get("spool_id"):
+        return {"roll": roll, "spool": get_spool(int(roll["spool_id"])), "already_received": True}
+
+    final_label = float(label_weight_g if label_weight_g is not None else roll["label_weight_g"])
+    final_remaining = float(remaining_g if remaining_g is not None else final_label)
+    final_tare = empty_spool_weight_g if empty_spool_weight_g is not None else roll.get("empty_spool_weight_g")
+    final_location = storage_location_id if storage_location_id is not None else roll.get("storage_location_id")
+    final_notes = notes if notes is not None else roll.get("notes")
+    spool_id = create_spool(
+        material=roll["material"],
+        brand=roll["brand"],
+        color_hex=roll["color_hex"],
+        label_weight_g=final_label,
+        remaining_g=final_remaining,
+        subtype=roll.get("subtype"),
+        color_name=roll.get("color_name"),
+        color_hex_2=roll.get("color_hex_2"),
+        color_hex_3=roll.get("color_hex_3"),
+        color_scheme=roll.get("color_scheme") or "solid",
+        storage_location_id=final_location,
+        notes=final_notes,
+        empty_spool_weight_g=final_tare,
+    )
+    with _conn() as conn:
+        conn.execute(
+            """UPDATE incoming_stock_rolls
+               SET status = 'received', spool_id = ?, received_at = datetime('now'),
+                   storage_location_id = ?, label_weight_g = ?, empty_spool_weight_g = ?, notes = ?
+               WHERE token = ?""",
+            (spool_id, final_location, final_label, final_tare, final_notes, token),
+        )
+    log_decision("system", "stock_in_received", f"Incoming roll {token} received as spool #{spool_id}")
+    return {"roll": get_incoming_stock_roll(token), "spool": get_spool(spool_id), "already_received": False}
 
 
 def _parse_ts(value: Optional[str]) -> Optional[datetime]:

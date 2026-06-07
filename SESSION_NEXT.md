@@ -1,5 +1,17 @@
 # Flightdeck — next session brief
-_Last updated 7 June 2026 (Session 28.207 Printer Print Bay scroll fix)_
+_Last updated 7 June 2026 (Session 28.208 Stock-in QR receiving)_
+
+## What was added - Session 28.208 (Stock-in QR receiving - 7 June)
+- Added a Spools -> `Stock In` view for incoming filament receiving.
+- Operators can create a receiving sheet from supplier/order, quantity, material, brand, subtype/type, colour name/hex, label weight, tare, shelf, and notes.
+- Flightdeck creates pending incoming-roll tokens and prints a receiving sheet with QR codes.
+- Scanning a receiving QR opens the pending roll, then `Receive and number spool` creates the real spool record, assigns the next spool number, and optionally prints the permanent spool label.
+- Added backend stock-in tables/endpoints plus QR PNG generation:
+  - `GET/POST /api/stock-in/orders`
+  - `GET /api/stock-in/rolls/{token}`
+  - `GET /api/stock-in/rolls/{token}/qr.png`
+  - `POST /api/stock-in/rolls/{token}/receive`
+- Bumped static cache to `app.js?v=323` and `style.css?v=253`; backend restart required.
 
 ## What was fixed - Session 28.207 (Printer Print Bay scroll fix - 7 June)
 - Corrected the per-printer Print Bay scroll container so `.printer-bay-body` scrolls directly inside the printer detail flex layout.

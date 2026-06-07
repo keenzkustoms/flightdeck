@@ -12648,6 +12648,135 @@ select.settings-input { cursor: pointer; }
   overflow-wrap: anywhere;
 }
 
+.stock-in-view {
+  display: grid;
+  gap: 1rem;
+}
+.stock-in-create,
+.stock-in-orders,
+.stock-in-scan-card,
+.stock-in-order {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.42);
+  padding: 1rem;
+}
+.stock-in-form,
+.stock-in-receive-form {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+.stock-in-form label,
+.stock-in-receive-form label {
+  color: var(--muted);
+  display: grid;
+  font-size: 0.75rem;
+  gap: 0.3rem;
+}
+.stock-in-form input,
+.stock-in-form select,
+.stock-in-receive-form input,
+.stock-in-receive-form select {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  min-height: 2.15rem;
+  padding: 0.35rem 0.55rem;
+}
+.stock-in-form button,
+.stock-in-receive-form button {
+  align-self: end;
+}
+.stock-in-notes {
+  grid-column: span 2;
+}
+.stock-in-check {
+  align-items: center;
+  display: flex !important;
+  flex-direction: row;
+  gap: 0.45rem !important;
+}
+.stock-in-check input {
+  min-height: auto;
+}
+.stock-in-scan-card {
+  border-color: rgba(34, 197, 94, 0.38);
+  display: grid;
+  gap: 0.9rem;
+}
+.stock-in-scan-card h3,
+.stock-in-order h3 {
+  color: var(--text);
+  font-size: 1rem;
+  margin: 0.25rem 0;
+}
+.stock-in-scan-card p,
+.stock-in-order p {
+  color: var(--muted);
+  margin: 0;
+}
+.stock-in-warn {
+  border-color: rgba(239, 68, 68, 0.55);
+  color: var(--error);
+}
+.stock-in-received {
+  color: var(--idle);
+  font-weight: 700;
+}
+.stock-in-order-head {
+  align-items: center;
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  margin-bottom: 0.75rem;
+}
+.stock-in-counts {
+  color: var(--muted);
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+.stock-in-table {
+  border-collapse: collapse;
+  width: 100%;
+}
+.stock-in-table td {
+  border-top: 1px solid rgba(148, 163, 184, 0.15);
+  color: var(--text);
+  padding: 0.55rem 0.4rem;
+  vertical-align: middle;
+}
+.stock-in-table small {
+  color: var(--muted);
+  display: block;
+  font-size: 0.7rem;
+  margin-top: 0.12rem;
+}
+.stock-in-swatch {
+  border: 1px solid rgba(255,255,255,0.25);
+  border-radius: 999px;
+  display: inline-block;
+  height: 1.25rem;
+  width: 1.25rem;
+}
+.stock-in-row-actions {
+  text-align: right;
+}
+.stock-in-row-actions .tiny-btn,
+.stock-in-table .badge {
+  border: 1px solid rgba(96, 165, 250, 0.55);
+  border-radius: 999px;
+  color: #bfdbfe;
+  display: inline-flex;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.18rem 0.5rem;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
 @media (max-width: 1100px) {
   .filedesk-overview { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .filedesk-grid { grid-template-columns: 1fr; }
@@ -12660,6 +12789,8 @@ select.settings-input { cursor: pointer; }
   .filedesk-bulk-actions { justify-content: flex-start; }
   .filedesk-file-row { grid-template-columns: auto minmax(0, 1fr) auto; }
   .filedesk-compat { grid-column: 2 / -1; justify-content: flex-start; }
+  .stock-in-form,
+  .stock-in-receive-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 620px) {
@@ -12668,4 +12799,9 @@ select.settings-input { cursor: pointer; }
   .printbay-reprint-thumb { min-height: 7rem; }
   .filedesk-file-row { grid-template-columns: auto minmax(0, 1fr); }
   .filedesk-queue-primary { grid-column: 2; justify-self: start; }
+  .stock-in-form,
+  .stock-in-receive-form,
+  .stock-in-order-head { grid-template-columns: 1fr; }
+  .stock-in-notes { grid-column: auto; }
+  .stock-in-order-head .button { justify-self: start; }
 }

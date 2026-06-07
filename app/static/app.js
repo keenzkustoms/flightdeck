@@ -11071,9 +11071,199 @@ function _applySpoolFilters(spools) {
   });
 }
 
+function _stockInLocationOptions(selected = '') {
+  const locs = _spoolLocations.length ? _spoolLocations : [{ id: '', name: 'Shelf #1' }];
+  return `<option value="">No shelf set</option>` + locs.map(loc =>
+    `<option value="${loc.id}"${String(selected ?? '') === String(loc.id) ? ' selected' : ''}>${esc(loc.name)}</option>`
+  ).join('');
+}
+
+function _stockInRollLabel(roll) {
+  return `${roll.color_name || 'Colour'} ${roll.material || ''}${roll.subtype ? ` ${roll.subtype}` : ''} · ${roll.brand || 'Unknown'}`.trim();
+}
+
+async function _renderStockInView(listEl) {
+  const params = _routeParams('#/spools');
+  const scanToken = params.get('token') || '';
+  const [orders, scanRoll] = await Promise.all([
+    fetch('/api/stock-in/orders').then(r => r.json()).catch(() => []),
+    scanToken ? fetch(`/api/stock-in/rolls/${encodeURIComponent(scanToken)}`).then(r => r.ok ? r.json() : null).catch(() => null) : Promise.resolve(null),
+  ]);
+  const defaultWeight = Number(_serverSettings.default_label_weight_g || 1000) || 1000;
+  const orderRows = orders.length ? orders.map(order => {
+    const rolls = order.rolls || [];
+    const rollRows = rolls.map(roll => `
+      <tr>
+        <td><span class="stock-in-swatch" style="background:${esc(roll.color_hex || '#808080')}"></span></td>
+        <td>${esc(_stockInRollLabel(roll))}<small>${esc(roll.storage_location_name || 'No shelf set')}</small></td>
+        <td>${Math.round(Number(roll.label_weight_g || 0))}g</td>
+        <td>${roll.status === 'received' ? `<a href="#/spool/${roll.spool_id}">Spool #${roll.spool_id}</a>` : '<span class="badge">Pending</span>'}</td>
+        <td class="stock-in-row-actions">
+          <a class="tiny-btn" href="#/spools?view=incoming&token=${encodeURIComponent(roll.token)}">Receive</a>
+        </td>
+      </tr>`).join('');
+    return `<section class="stock-in-order" data-order-id="${order.id}">
+      <div class="stock-in-order-head">
+        <div>
+          <h3>Order #${order.id}</h3>
+          <p>${esc(order.supplier || 'Supplier not set')} ${order.order_ref ? `· ${esc(order.order_ref)}` : ''}</p>
+        </div>
+        <div class="stock-in-counts">${order.received_count || 0}/${rolls.length} received</div>
+        <button class="button" data-stock-print="${order.id}">Print QR sheet</button>
+      </div>
+      <table class="stock-in-table"><tbody>${rollRows}</tbody></table>
+    </section>`;
+  }).join('') : `<div class="filament-empty">No stock-in batches yet.</div>`;
+
+  const scanPanel = scanRoll ? `<section class="stock-in-scan-card">
+    <div>
+      <div class="settings-section-title">Receive Roll</div>
+      <h3>${esc(_stockInRollLabel(scanRoll))}</h3>
+      <p>${esc(scanRoll.supplier || 'Supplier not set')} ${scanRoll.order_ref ? `· ${esc(scanRoll.order_ref)}` : ''}</p>
+    </div>
+    ${scanRoll.status === 'received' ? `
+      <div class="stock-in-received">Already received as <a href="#/spool/${scanRoll.spool_id}">Spool #${scanRoll.spool_id}</a></div>
+    ` : `
+      <form class="stock-in-receive-form" data-token="${esc(scanRoll.token)}">
+        <label>Storage <select name="storage_location_id">${_stockInLocationOptions(scanRoll.storage_location_id || '')}</select></label>
+        <label>Remaining <input name="remaining_g" type="number" min="0" step="1" value="${Math.round(Number(scanRoll.label_weight_g || defaultWeight))}"></label>
+        <label>Label weight <input name="label_weight_g" type="number" min="0" step="1" value="${Math.round(Number(scanRoll.label_weight_g || defaultWeight))}"></label>
+        <label>Tare <input name="empty_spool_weight_g" type="number" min="0" step="1" value="${scanRoll.empty_spool_weight_g ?? ''}"></label>
+        <label class="stock-in-notes">Notes <input name="notes" value="${esc(scanRoll.notes || '')}" placeholder="Optional notes"></label>
+        <label class="stock-in-check"><input name="print_label" type="checkbox" checked> Print permanent spool label</label>
+        <button class="button primary" type="submit">Receive and number spool</button>
+      </form>`}
+  </section>` : scanToken ? `<section class="stock-in-scan-card stock-in-warn">Incoming roll not found.</section>` : '';
+
+  listEl.innerHTML = `
+    ${scanPanel}
+    <section class="stock-in-create">
+      <div class="settings-section-title">Create Receiving Sheet</div>
+      <form id="stock-in-create-form" class="stock-in-form">
+        <label>Supplier <input name="supplier" placeholder="e.g. Bambu Lab"></label>
+        <label>Order ref <input name="order_ref" placeholder="Invoice or PO"></label>
+        <label>Qty <input name="quantity" type="number" min="1" max="100" value="1"></label>
+        <label>Material <input name="material" value="PLA"></label>
+        <label>Brand <input name="brand" placeholder="Brand" value="Bambu Lab"></label>
+        <label>Type <input name="subtype" placeholder="Basic, Silk, Matte"></label>
+        <label>Colour name <input name="color_name" placeholder="Magenta"></label>
+        <label>Colour <input name="color_hex" type="color" value="#808080"></label>
+        <label>Label weight <input name="label_weight_g" type="number" min="0" step="1" value="${defaultWeight}"></label>
+        <label>Tare <input name="empty_spool_weight_g" type="number" min="0" step="1" placeholder="Optional"></label>
+        <label>Home shelf <select name="storage_location_id">${_stockInLocationOptions()}</select></label>
+        <label class="stock-in-notes">Notes <input name="notes" placeholder="Optional notes"></label>
+        <button class="button primary" type="submit">Create sheet</button>
+      </form>
+    </section>
+    <section class="stock-in-orders">
+      <div class="settings-section-title">Recent Stock In</div>
+      ${orderRows}
+    </section>`;
+
+  listEl.querySelector('#stock-in-create-form')?.addEventListener('submit', async e => {
+    e.preventDefault();
+    const fd = new FormData(e.currentTarget);
+    const numberOrNull = name => {
+      const v = String(fd.get(name) || '').trim();
+      return v === '' ? null : Number(v);
+    };
+    const body = {
+      supplier: String(fd.get('supplier') || '').trim() || null,
+      order_ref: String(fd.get('order_ref') || '').trim() || null,
+      notes: String(fd.get('notes') || '').trim() || null,
+      lines: [{
+        quantity: Number(fd.get('quantity') || 1),
+        material: String(fd.get('material') || '').trim(),
+        brand: String(fd.get('brand') || '').trim(),
+        subtype: String(fd.get('subtype') || '').trim() || null,
+        color_name: String(fd.get('color_name') || '').trim() || null,
+        color_hex: String(fd.get('color_hex') || '#808080'),
+        label_weight_g: Number(fd.get('label_weight_g') || defaultWeight),
+        empty_spool_weight_g: numberOrNull('empty_spool_weight_g'),
+        storage_location_id: numberOrNull('storage_location_id'),
+      }],
+    };
+    const r = await fetch('/api/stock-in/orders', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    if (!r.ok) return showToast('Stock-in failed', (await r.json()).detail || 'Could not create sheet', 'error');
+    const order = await r.json();
+    showToast('Receiving sheet created', `${order.rolls?.length || 0} roll QR codes ready`, 'success');
+    await _renderStockInView(listEl);
+    _printStockInSheet(order);
+  });
+
+  listEl.querySelector('.stock-in-receive-form')?.addEventListener('submit', async e => {
+    e.preventDefault();
+    const form = e.currentTarget;
+    const fd = new FormData(form);
+    const num = name => {
+      const v = String(fd.get(name) || '').trim();
+      return v === '' ? null : Number(v);
+    };
+    const body = {
+      storage_location_id: num('storage_location_id'),
+      remaining_g: num('remaining_g'),
+      label_weight_g: num('label_weight_g'),
+      empty_spool_weight_g: num('empty_spool_weight_g'),
+      notes: String(fd.get('notes') || '').trim() || null,
+      print_label: !!fd.get('print_label'),
+    };
+    const r = await fetch(`/api/stock-in/rolls/${encodeURIComponent(form.dataset.token)}/receive`, {
+      method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body),
+    });
+    if (!r.ok) return showToast('Receive failed', (await r.json()).detail || 'Could not receive roll', 'error');
+    const result = await r.json();
+    const spoolId = result.spool?.id;
+    showToast(`Spool #${spoolId} created`, result.label_printed ? 'Label printed' : (result.label_error || 'Label not printed'), result.label_error ? 'warn' : 'success');
+    location.hash = `#/spool/${spoolId}`;
+  });
+
+  listEl.querySelectorAll('[data-stock-print]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const order = orders.find(o => String(o.id) === String(btn.dataset.stockPrint));
+      if (order) _printStockInSheet(order);
+    });
+  });
+}
+
+function _printStockInSheet(order) {
+  const win = window.open('', '_blank');
+  if (!win) return showToast('Print sheet blocked', 'Allow popups to print the QR sheet.', 'warn');
+  const rolls = order.rolls || [];
+  const rows = rolls.map((roll, idx) => `
+    <div class="qr-roll">
+      <img src="/api/stock-in/rolls/${encodeURIComponent(roll.token)}/qr.png">
+      <div>
+        <h2>Roll ${idx + 1} of ${rolls.length}</h2>
+        <strong>${esc(_stockInRollLabel(roll))}</strong>
+        <p>${esc(roll.color_name || roll.color_hex || '')} · ${Math.round(Number(roll.label_weight_g || 0))}g · ${esc(roll.storage_location_name || 'No shelf set')}</p>
+        <small>${esc(roll.token)}</small>
+      </div>
+    </div>`).join('');
+  win.document.write(`<!doctype html><html><head><title>Flightdeck Stock In #${order.id}</title>
+    <style>
+      body{font-family:Arial,sans-serif;margin:24px;color:#111} h1{margin:0 0 4px} .meta{color:#555;margin-bottom:18px}
+      .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+      .qr-roll{border:1px solid #ccc;border-radius:8px;padding:12px;display:grid;grid-template-columns:120px 1fr;gap:12px;break-inside:avoid}
+      img{width:120px;height:120px} h2{font-size:14px;margin:0 0 8px} p{margin:8px 0;color:#333} small{color:#666}
+      @media print{body{margin:12mm}.qr-roll{page-break-inside:avoid}}
+    </style></head><body>
+    <h1>Flightdeck Stock In #${order.id}</h1>
+    <div class="meta">${esc(order.supplier || 'Supplier not set')} ${order.order_ref ? `· ${esc(order.order_ref)}` : ''}</div>
+    <div class="grid">${rows}</div>
+    <script>setTimeout(()=>print(),400)</script>
+    </body></html>`);
+  win.document.close();
+}
+
 function _renderSpoolList(el) {
   const listEl = el.querySelector('#spool-list');
   if (!listEl) return;
+  if (_spoolsViewMode === 'incoming') {
+    listEl.className = 'stock-in-view';
+    listEl.innerHTML = `<div class="detail-placeholder" style="min-height:8rem">Loading stock-in…</div>`;
+    _renderStockInView(listEl);
+    return;
+  }
   if (_spoolsViewMode === 'catalogue') {
     listEl.className = 'spool-catalogue-settings';
     listEl.innerHTML = _filamentCategoryHtml(_spoolsFilamentSummary, _spoolsFilamentCosts);
@@ -11181,6 +11371,7 @@ function _spoolsCategoryHtml(spools, summary, costs, intelligence = {}) {
           <button class="spool-view-btn${_spoolsViewMode==='cards'?' active':''}" data-view="cards">Cards</button>
           <button class="spool-view-btn${_spoolsViewMode==='table'?' active':''}" data-view="table">Table</button>
           <button class="spool-view-btn${_spoolsViewMode==='cabinet'?' active':''}" data-view="cabinet">Cabinet</button>
+          <button class="spool-view-btn${_spoolsViewMode==='incoming'?' active':''}" data-view="incoming">Stock In</button>
           <button class="spool-view-btn${_spoolsViewMode==='catalogue'?' active':''}" data-view="catalogue">Filament catalogue</button>
         </div>
         <div class="spool-chips spool-toolbar-chips">
@@ -12870,7 +13061,7 @@ async function _renderSpoolsContent(el) {
   }
   if (params.has('view')) {
     const view = params.get('view');
-    if (['cards', 'table', 'cabinet', 'catalogue'].includes(view)) _spoolsViewMode = view;
+    if (['cards', 'table', 'cabinet', 'incoming', 'catalogue'].includes(view)) _spoolsViewMode = view;
   }
   _spoolsFilter.printer = params.get('printer') || '';
   const [spools, summary, costs, filamentSummary, locations, intelligence] = await Promise.all([
