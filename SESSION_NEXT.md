@@ -6,9 +6,10 @@ Latest GitHub/Pi state:
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
-- Refresh cachebust currently: ?cachebust=364
+- Refresh cachebust currently: ?cachebust=365
 
 Recent work:
+- Print Watch focus now preserves the active camera image while refreshing status/HUD text, preventing the double flash when the same printer stays selected.
 - Printer health now excludes prints marked no-stats/Flightdeck testing from 14d failure totals, early-failure counts, cancelled totals, and success-rate math.
 - Fleet Wall added with Small/Medium/Large modes.
 - Fleet Wall now uses Live-view style AMS visuals.
@@ -33,6 +34,11 @@ Likely next items:
 - Continue stock-in QR/label workflow.
 - Make Windows installer/update flow smoother.
 
+## What was fixed - Session 28.238 (Print Watch focus flash - 7 June)
+- Print Watch no longer rebuilds the focused camera image when the selected printer/camera is unchanged.
+- The focus header, pin state, status chip, HUD copy, progress bar, and temperature chips still refresh in place.
+- Bumped static cache to `app.js?v=365`; frontend refresh required.
+
 ## What was fixed - Session 28.237 (No-stats printer health - 7 June)
 - Printer health now follows Print Memory's trusted-stats rule: prints with `exclude_from_stats` set are ignored for 14d health totals, early-failure counts, cancelled counts, and success-rate warnings.
 - This fixes H2D staying in attention because Flightdeck testing/no-stats failures were still counted as `4 failed prints in 14d`.
@@ -48,7 +54,7 @@ Likely next items:
 - Print Watch has a large rotating focus camera, pins to the first printer needing attention, and resumes cycling once attention clears.
 - Print Watch no longer auto-pins just because a printer is intentionally on hold; the `Pinned` chip is now a manual pin/unpin control, and unpinning an auto-pinned feed pauses auto-pin until attention clears.
 - Camera URL fetches are shared across Fleet Wall/Print Watch and camera retry handlers are attached once per image.
-- Demo shell now loads current `app.js?v=364`; main and demo shells load `style.css?v=295`.
+- Demo shell now loads current `app.js?v=365`; main and demo shells load `style.css?v=295`.
 - Static-only change; frontend refresh required.
 
 

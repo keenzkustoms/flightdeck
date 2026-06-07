@@ -7657,8 +7657,8 @@ function _printWatchSummaryHtml(printers) {
     ${_fleetWallMetric('Mode', pinned ? 'Hold' : 'Cycle')}`;
 }
 
-function _printWatchFocusHtml(printers, sim = false) {
-  const p = _printWatchFocusPrinter(printers);
+function _printWatchFocusHtml(printers, sim = false, focusPrinter = null) {
+  const p = focusPrinter || _printWatchFocusPrinter(printers);
   if (!p) return `<section class="print-watch-focus"><div class="detail-placeholder">Connecting...</div></section>`;
   const cameraId = p._camera_id || p.id;
   const camSrc = _cameraStreamSrc(cameraId);
@@ -7673,7 +7673,7 @@ function _printWatchFocusHtml(printers, sim = false) {
   const feed = (camSrc && p.state !== 'offline')
     ? `<img src="${camSrc}" alt="${esc(_printerPrimaryLabel(p))} print watch camera" data-camera-id="${esc(cameraId)}" loading="eager" fetchpriority="high">`
     : _cameraOfflineContent(p, 'print-watch-offline');
-  return `<section class="print-watch-focus ${pinned ? 'print-watch-focus-pinned' : ''}" data-print-watch-focus="${esc(p.id)}">
+  return `<section class="print-watch-focus ${pinned ? 'print-watch-focus-pinned' : ''}" data-print-watch-focus="${esc(p.id)}" data-print-watch-camera="${esc(cameraId)}">
     <div class="print-watch-focus-head">
       <div class="printer-identity">
         <div class="printer-icon">${getIcon(p.icon)}</div>
@@ -7721,7 +7721,41 @@ function _togglePrintWatchPin(printerId) {
 function _renderPrintWatchFocus(printers, sim = false) {
   const host = document.getElementById('print-watch-focus-host');
   if (!host) return;
-  host.innerHTML = _printWatchFocusHtml(printers, sim);
+  const p = _printWatchFocusPrinter(printers);
+  const cameraId = p ? (p._camera_id || p.id) : '';
+  const existing = host.querySelector('[data-print-watch-focus]');
+  if (!existing || !p || existing.dataset.printWatchFocus !== String(p.id) || existing.dataset.printWatchCamera !== String(cameraId)) {
+    host.innerHTML = _printWatchFocusHtml(printers, sim, p);
+    _attachCameraRetries(host);
+    return;
+  }
+
+  const next = document.createElement('div');
+  next.innerHTML = _printWatchFocusHtml(printers, sim, p);
+  const nextFocus = next.firstElementChild;
+  if (!nextFocus) return;
+
+  existing.className = nextFocus.className;
+  existing.dataset.printWatchFocus = nextFocus.dataset.printWatchFocus || '';
+  existing.dataset.printWatchCamera = nextFocus.dataset.printWatchCamera || '';
+
+  const currentHead = existing.querySelector('.print-watch-focus-head');
+  const nextHead = nextFocus.querySelector('.print-watch-focus-head');
+  if (currentHead && nextHead) currentHead.innerHTML = nextHead.innerHTML;
+
+  const currentHud = existing.querySelector('.print-watch-hud');
+  const nextHud = nextFocus.querySelector('.print-watch-hud');
+  if (currentHud && nextHud) currentHud.innerHTML = nextHud.innerHTML;
+
+  const currentFeed = existing.querySelector('.print-watch-feed');
+  const nextFeed = nextFocus.querySelector('.print-watch-feed');
+  if (currentFeed && nextFeed) {
+    currentFeed.href = nextFeed.getAttribute('href') || currentFeed.href;
+    currentFeed.dataset.printerId = nextFeed.dataset.printerId || '';
+    const currentIsImg = !!currentFeed.querySelector('img[data-camera-id]');
+    const nextIsImg = !!nextFeed.querySelector('img[data-camera-id]');
+    if (currentIsImg !== nextIsImg) currentFeed.innerHTML = nextFeed.innerHTML;
+  }
   _attachCameraRetries(host);
 }
 
