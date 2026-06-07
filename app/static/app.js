@@ -3798,10 +3798,12 @@ function _objectMapHtml(id, data) {
     : '';
   const rotation = Number(data?.map_rotation || 0);
   const imageRotation = Number(data?.map_image_rotation || 0);
+  const imageOffsetX = Number(data?.map_image_offset_x || 0);
+  const imageOffsetY = Number(data?.map_image_offset_y || 0);
   const rotated = rotation > 0 || imageRotation > 0;
   const classes = `obj-map${hasGeometry ? ' obj-map-has-geometry' : ' obj-map-no-geometry'}${rotated ? ' obj-map-transformed' : ''}${rotation > 0 ? ' obj-map-overlay-rotated' : ''}${imageRotation > 0 ? ' obj-map-image-rotated' : ''}`;
   const rotationStyle = rotated
-    ? ` style="--obj-map-rotation:${rotation.toFixed(2)}deg;--obj-map-image-rotation:${imageRotation.toFixed(2)}deg;--obj-map-counter-rotation:${(-rotation).toFixed(2)}deg;--obj-map-plane-scale:${rotation === 90 ? '177.78%' : '135%'};--obj-map-image-scale:${imageRotation === 90 ? '177.78%' : '135%'}"`
+    ? ` style="--obj-map-rotation:${rotation.toFixed(2)}deg;--obj-map-image-rotation:${imageRotation.toFixed(2)}deg;--obj-map-image-offset-x:${imageOffsetX.toFixed(2)}%;--obj-map-image-offset-y:${imageOffsetY.toFixed(2)}%;--obj-map-counter-rotation:${(-rotation).toFixed(2)}deg;--obj-map-plane-scale:${rotation === 90 ? '177.78%' : '135%'};--obj-map-image-scale:${imageRotation === 90 ? '177.78%' : '135%'}"`
     : '';
   const helper = hasGeometry
     ? 'Tap the failed part on the plate map.'
@@ -3830,9 +3832,11 @@ function _largeObjectMapHtml(id, data) {
     : '<div class="object-map-missing">No thumbnail available</div>';
   const rotation = Number(data?.map_rotation || 0);
   const imageRotation = Number(data?.map_image_rotation || 0);
+  const imageOffsetX = Number(data?.map_image_offset_x || 0);
+  const imageOffsetY = Number(data?.map_image_offset_y || 0);
   const rotated = rotation > 0 || imageRotation > 0;
   const rotationStyle = rotated
-    ? ` style="--obj-map-rotation:${rotation.toFixed(2)}deg;--obj-map-image-rotation:${imageRotation.toFixed(2)}deg;--obj-map-counter-rotation:${(-rotation).toFixed(2)}deg;--obj-map-plane-scale:${rotation === 90 ? '177.78%' : '135%'};--obj-map-image-scale:${imageRotation === 90 ? '177.78%' : '135%'}"`
+    ? ` style="--obj-map-rotation:${rotation.toFixed(2)}deg;--obj-map-image-rotation:${imageRotation.toFixed(2)}deg;--obj-map-image-offset-x:${imageOffsetX.toFixed(2)}%;--obj-map-image-offset-y:${imageOffsetY.toFixed(2)}%;--obj-map-counter-rotation:${(-rotation).toFixed(2)}deg;--obj-map-plane-scale:${rotation === 90 ? '177.78%' : '135%'};--obj-map-image-scale:${imageRotation === 90 ? '177.78%' : '135%'}"`
     : '';
   const buttons = objects.map(obj => {
     const isExcluded = obj.state === 'excluded';

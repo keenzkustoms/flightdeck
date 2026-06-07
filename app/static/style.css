@@ -6616,7 +6616,12 @@ button.live-route-node:hover {
 
 .obj-map-image-rotated .obj-map-image-plane {
   width: var(--obj-map-image-scale, 135%);
-  transform: translate(-50%, -50%) rotate(var(--obj-map-image-rotation, 45deg));
+  transform:
+    translate(
+      calc(-50% + var(--obj-map-image-offset-x, 0%)),
+      calc(-50% + var(--obj-map-image-offset-y, 0%))
+    )
+    rotate(var(--obj-map-image-rotation, 45deg));
 }
 
 .obj-map-overlay-rotated .obj-chip-id {
