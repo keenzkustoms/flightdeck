@@ -6355,11 +6355,6 @@ button.live-route-node:hover {
 /* ── Object exclusion panel ── */
 #detail-objects:empty { display: none; }
 
-.obj-list {
-  display: flex;
-  flex-direction: column;
-}
-
 .obj-panel-subtitle {
   display: flex;
   flex-direction: column;
@@ -6553,75 +6548,6 @@ button.live-route-node:hover {
   color: var(--muted);
   font-size: 0.66rem;
 }
-
-.obj-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  padding: 0.4rem 0;
-  border-bottom: 0.5px solid var(--border);
-}
-
-.obj-row:last-child { border-bottom: none; }
-
-.obj-label {
-  display: flex;
-  flex-direction: column;
-  gap: 0.14rem;
-  flex: 1;
-  min-width: 0;
-}
-
-.obj-name {
-  font-size: 0.8125rem;
-  font-family: monospace;
-  color: var(--text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.obj-meta {
-  color: var(--muted);
-  font-size: 0.64rem;
-  font-family: monospace;
-}
-
-.obj-id-pill {
-  align-self: flex-start;
-  border: 1px solid rgba(96,165,250,0.42);
-  border-radius: 999px;
-  padding: 0.04rem 0.32rem;
-  background: rgba(37,99,235,0.16);
-  color: #bfdbfe;
-  font-weight: 900;
-}
-
-.obj-row-excluded .obj-name {
-  color: var(--muted);
-  text-decoration: line-through;
-}
-
-.obj-actions {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.45rem;
-  flex-shrink: 0;
-}
-
-.obj-state {
-  min-width: 3.6rem;
-  font-size: 0.66rem;
-  font-weight: 800;
-  flex-shrink: 0;
-  text-align: right;
-  text-transform: uppercase;
-}
-
-.obj-state-current  { color: var(--printing); }
-.obj-state-excluded { color: var(--error); }
-.obj-state-ready { color: var(--muted); }
 
 .obj-exclude-btn {
   border: 1px solid rgba(239,68,68,0.42);

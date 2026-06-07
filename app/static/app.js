@@ -3581,33 +3581,7 @@ function _detailObjectsPanel(id, data) {
   const title = `<div class="detail-panel-title">Objects</div>
     <div class="obj-panel-subtitle"><strong>${esc(modeLabel)}</strong><span>${esc(detail)}</span></div>`;
   const mapHtml = _objectMapHtml(id, data);
-  const rows = objects.map(obj => {
-    const isExcluded = obj.state === 'excluded';
-    const isCurrent = obj.state === 'current';
-    const rawName = obj.name || `Object ${obj.id ?? ''}`;
-    const shortName = (obj.label || rawName).replace(/.*[/\\]/, '');
-    const safeName = rawName.replace(/"/g, '&quot;');
-    const safeId = obj.id ?? '';
-    const stateHtml = isCurrent
-      ? `<span class="obj-state obj-state-current">Current</span>`
-      : isExcluded
-        ? `<span class="obj-state obj-state-excluded">Excluded</span>`
-        : `<span class="obj-state obj-state-ready">Ready</span>`;
-    return `<div class="obj-row${isExcluded ? ' obj-row-excluded' : ''}${isCurrent ? ' obj-row-current' : ''}">
-      <div class="obj-label">
-        <span class="obj-name" title="${safeName}">${shortName}</span>
-        ${safeId !== '' ? `<span class="obj-meta obj-id-pill">ID #${esc(safeId)}</span>` : ''}
-      </div>
-      <div class="obj-actions">
-        ${stateHtml}
-        <button type="button" class="obj-exclude-btn"
-          data-obj-name="${safeName}" data-printer-id="${id}"
-          data-obj-id="${safeId}"
-          ${isExcluded ? 'disabled' : ''}>Exclude</button>
-      </div>
-    </div>`;
-  }).join('');
-  return `<div class="detail-panel">${title}${mapHtml}<div class="obj-list">${rows}</div></div>`;
+  return `<div class="detail-panel">${title}${mapHtml}</div>`;
 }
 
 function _detailObjectsUnavailablePanel(data) {

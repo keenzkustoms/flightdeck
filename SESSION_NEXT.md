@@ -1,5 +1,11 @@
 # Flightdeck — next session brief
-_Last updated 7 June 2026 (Session 28.217 Enlarged object selector)_
+_Last updated 7 June 2026 (Session 28.218 Object panel list removal)_
+
+## What was changed - Session 28.218 (Object panel list removal - 7 June)
+- Removed the duplicate long object row list from the live Objects panel.
+- The panel now keeps the thumbnail/map plus compact ID selector, with the enlarged selector handling detailed selection.
+- Removed stale object-list CSS from the frontend.
+- Bumped static cache to `app.js?v=335` and `style.css?v=266`; frontend refresh required.
 
 ## What was added - Session 28.217 (Enlarged object selector - 7 June)
 - Clicking the object thumbnail now opens a larger skip-object selector modal.
