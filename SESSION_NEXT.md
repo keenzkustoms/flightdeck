@@ -1,5 +1,11 @@
 # Flightdeck — next session brief
-_Last updated 7 June 2026 (Session 28.213 Object exclude ID readability)_
+_Last updated 7 June 2026 (Session 28.214 Object exclude map simplification)_
+
+## What was improved - Session 28.214 (Object exclude map simplification - 7 June)
+- Simplified the object exclusion map after the first readability pass became too busy.
+- Approximate object map markers now show only the slicer/printer ID over the thumbnail; labels stay in the list below.
+- Added map-specific button styling so the generic red Exclude button style does not bleed into plate markers.
+- Bumped static cache to `app.js?v=331` and `style.css?v=262`; frontend refresh required.
 
 ## What was improved - Session 28.213 (Object exclude ID readability - 7 June)
 - Object exclusion maps now keep the plate thumbnail clearer and put the slicer/printer object ID in a larger, brighter overlay.

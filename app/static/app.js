@@ -3625,7 +3625,6 @@ function _objectMapHtml(id, data) {
     const safeId = obj.id ?? '';
     const shortName = (obj.label || rawName).replace(/.*[/\\]/, '');
     const displayId = safeId !== '' ? `#${esc(safeId)}` : esc(shortName);
-    const displayLabel = safeId !== '' ? esc(shortName) : '';
     if (hasGeometry && obj.bbox) {
       const left = ((obj.bbox.x - bounds.x) / bounds.w) * 100;
       const top = ((obj.bbox.y - bounds.y) / bounds.h) * 100;
@@ -3643,7 +3642,7 @@ function _objectMapHtml(id, data) {
     return `<button type="button" class="obj-map-chip obj-exclude-btn${isExcluded ? ' is-excluded' : ''}${isCurrent ? ' is-current' : ''}"
       style="left:${left.toFixed(2)}%;top:${top.toFixed(2)}%;"
       data-obj-name="${safeName}" data-obj-label="${esc(shortName)}" data-printer-id="${id}" data-obj-id="${safeId}" ${isExcluded ? 'disabled' : ''}
-      title="${esc(shortName)}"><span class="obj-chip-id">${displayId}</span>${displayLabel ? `<span class="obj-chip-label">${displayLabel}</span>` : ''}</button>`;
+      title="${esc(shortName)}"><span class="obj-chip-id">${displayId}</span></button>`;
   }).join('');
   const image = data?.plate_image_url
     ? `<img src="${esc(data.plate_image_url)}?map=${Date.now()}" alt="Plate object map" loading="lazy">`
