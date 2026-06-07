@@ -1,5 +1,10 @@
 # Flightdeck — next session brief
-_Last updated 7 June 2026 (Session 28.220 AMS loadout alignment)_
+_Last updated 7 June 2026 (Session 28.221 AMS slot centering)_
+
+## What was fixed - Session 28.221 (AMS slot centering - 7 June)
+- Centered normal AMS slot groups inside their loadout bay.
+- Kept AMS HT’s single spool bay left-aligned inside its side-rail layout.
+- Bumped static cache to `style.css?v=269`; frontend refresh required.
 
 ## What was improved - Session 28.220 (AMS loadout alignment - 7 June)
 - Normal AMS headers now reserve a consistent header band so their slot row starts cleanly.
