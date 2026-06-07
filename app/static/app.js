@@ -755,6 +755,7 @@ function _commandItem({
 function _commandStaticItems() {
   const nav = [
     ['Dashboard', '#/', 'Overview and printer cards'],
+    ['Fleet Wall', '#/fleet', 'Shop-floor camera and printer wall'],
     ['Flight Tower', '#/mission', 'Dispatch and queue intelligence'],
     ['Telemetry', '#/stats', 'Stats, RH, utilisation'],
     ['Cameras', '#/cameras', 'All live feeds'],
@@ -2499,6 +2500,7 @@ function parseRoute() {
   if (hash === '#/cameras' || hash.startsWith('#/cameras?')) return { view: 'cameras' };
   if (hash === '#/stats' || hash.startsWith('#/stats?')) return { view: 'stats' };
   if (hash === '#/queue') return { view: 'queue' };
+  if (hash === '#/fleet') return { view: 'fleet' };
   if (hash === '#/files') return { view: 'files' };
   if (hash === '#/memory' || hash.startsWith('#/memory?')) return { view: 'memory' };
   if (hash === '#/failures' || hash.startsWith('#/failures?')) return { view: 'failures' };
@@ -2543,6 +2545,10 @@ function router() {
     document.querySelectorAll('#cameras-grid img').forEach(img => { img.src = ''; });
     _camerasFull = false;
   }
+  if (route.view !== 'fleet') {
+    document.querySelectorAll('#fleet-wall-page img').forEach(img => { img.src = ''; });
+    _fleetWallSignature = '';
+  }
   const wasOnSettings = _onSettings;
   const wasOnFailures = _onFailures;
   const wasOnSpools = _onSpools;
@@ -2562,6 +2568,7 @@ function router() {
 
   document.getElementById('view-dashboard').hidden = route.view !== 'dashboard';
   document.getElementById('view-mission').hidden   = route.view !== 'mission';
+  document.getElementById('view-fleet').hidden     = route.view !== 'fleet';
   document.getElementById('view-stats').hidden     = route.view !== 'stats';
   document.getElementById('view-printer').hidden   = route.view !== 'printer';
   document.getElementById('view-spool').hidden     = route.view !== 'spool';
@@ -2580,6 +2587,7 @@ function router() {
     const printerTabActive = route.view === 'printer' && href === `#/printer/${route.id}`;
     tab.classList.toggle('active',
       (route.view === 'dashboard' && href === '#/') ||
+      (route.view === 'fleet'     && href === '#/fleet') ||
       (route.view === 'mission'   && href === '#/mission') ||
       (route.view === 'stats'     && href === '#/stats') ||
       printerTabActive ||
@@ -2600,6 +2608,7 @@ function router() {
   });
 
   if (route.view === 'printer') renderPrinterDetail(route.id, route.subtab);
+  if (route.view === 'fleet') renderFleetWall();
   if (route.view === 'mission') renderMissionControl();
   if (route.view === 'stats') renderStatsView();
   if (route.view === 'spool' && wasSpoolDetailId !== route.id) {
@@ -2644,6 +2653,7 @@ function buildTabs(printers) {
   }).join('');
   nav.innerHTML = [
     `<a class="tab" href="#/">Dashboard</a>`,
+    `<a class="tab" href="#/fleet">Fleet Wall</a>`,
     `<a class="tab" href="#/cameras">Cameras</a>`,
     `<a class="tab" href="#/mission">Flight Tower</a>`,
     `<a class="tab" href="#/stats">Telemetry</a>`,
@@ -7442,6 +7452,8 @@ async function _queueHandleAction(e) {
 
 // ── Cameras grid ──────────────────────────────────────────────────────────
 
+let _fleetWallSignature = '';
+
 function _camHeaderInner(p) {
   const badgeLabel = p.state === 'finished' ? 'complete' : p.state;
   return `<div class="printer-identity">
@@ -7491,6 +7503,245 @@ function _camTileFeedHtml(p) {
   return (camSrc && p.state !== 'offline')
     ? `<img src="${camSrc}" alt="${p.custom_name}" data-camera-id="${cameraId}">`
     : _cameraOfflineContent(p, 'cam-tile-offline');
+}
+
+function _fleetWallTone(p) {
+  if (_printerPrintLocked(p)) return 'locked';
+  if (p.state === 'error' || p.state === 'estop') return 'critical';
+  if (p.state === 'paused' || p.state === 'offline' || _healthIsActionable(p.health)) return 'watch';
+  if (p.state === 'printing') return 'active';
+  return 'ready';
+}
+
+function _fleetWallMetric(label, value, tone = '') {
+  return `<div class="fleet-wall-metric ${tone ? `fleet-wall-metric-${tone}` : ''}">
+    <span>${esc(label)}</span>
+    <strong>${esc(value || '—')}</strong>
+  </div>`;
+}
+
+function _fleetWallJob(p) {
+  const job = p.job || {};
+  const active = _activePrinterJob(p);
+  const name = active ? jobDisplayName(job) : p.state === 'finished' && job.filename ? jobDisplayName(job) : _dashboardIssueText(p);
+  const pct = job.progress != null ? Math.max(0, Math.min(100, Math.round(job.progress * 100))) : (p.state === 'finished' ? 100 : 0);
+  const eta = job.eta_seconds != null
+    ? formatEta(p.eta_calibration?.ratio != null ? Math.round(job.eta_seconds * p.eta_calibration.ratio) : job.eta_seconds)
+    : '';
+  const layers = job.layer_current != null && job.layer_total != null ? `${job.layer_current}/${job.layer_total}` : '';
+  const meta = [
+    p.state === 'printing' || p.state === 'paused' ? `${pct}%` : _liveStateLabel(p.state || 'idle'),
+    eta ? `ETA ${eta}` : '',
+    layers ? `Layer ${layers}` : '',
+  ].filter(Boolean).join(' · ');
+  return `<div class="fleet-wall-job">
+    <div class="fleet-wall-job-title" title="${esc(name || '')}">${esc(name || 'Standing by')}</div>
+    <div class="fleet-wall-progress"><span style="width:${pct}%"></span></div>
+    <div class="fleet-wall-job-meta">${esc(meta || fmtLastSeen(p.last_seen))}</div>
+  </div>`;
+}
+
+function _fleetWallWarnings(p) {
+  const loaded = _latestSpoolsByPrinter[p.id] || [];
+  const warnings = [];
+  if (_printerPrintLocked(p)) warnings.push(`Locked: ${_printerLockoutReason(p)}`);
+  if (p.state === 'error' || p.state === 'estop') warnings.push(p.error || _liveStateLabel(p.state));
+  if (p.state === 'offline') warnings.push(fmtLastSeen(p.last_seen));
+  if (p.state === 'paused') warnings.push(p.error || 'Paused');
+  if (_healthIsActionable(p.health) && p.health?.reasons?.[0]?.message) warnings.push(p.health.reasons[0].message);
+  _amsMismatchSignals(p, loaded).slice(0, 2).forEach(w => warnings.push(w.label || w.title || 'AMS review'));
+  loaded
+    .filter(s => !s.archived_at && Number(s.label_weight_g || 0) > 0)
+    .map(s => ({ s, pct: Math.round(Number(s.remaining_g || 0) * 100 / Number(s.label_weight_g || 1)) }))
+    .filter(x => x.pct < _latestLowStockPct)
+    .slice(0, 2)
+    .forEach(({ s }) => warnings.push(`Low spool #${s.id}: ${Math.round(Number(s.remaining_g || 0))}g`));
+  if (!warnings.length) return `<div class="fleet-wall-clear">No active warnings</div>`;
+  return `<div class="fleet-wall-warnings">${warnings.slice(0, 4).map(w => `<span>${esc(w)}</span>`).join('')}</div>`;
+}
+
+function _fleetWallSpools(p) {
+  const loaded = (_latestSpoolsByPrinter[p.id] || []).filter(s => !s.archived_at).slice(0, 8);
+  if (!loaded.length) return `<div class="fleet-wall-spools-empty">No loaded spools tracked</div>`;
+  return `<div class="fleet-wall-spools">${loaded.map(s => {
+    const pct = Number(s.label_weight_g || 0) > 0
+      ? Math.round(Number(s.remaining_g || 0) * 100 / Number(s.label_weight_g || 1))
+      : null;
+    const low = pct != null && pct < _latestLowStockPct;
+    const tc = _spoolTextColor(s.color_hex || '#808080');
+    const loc = s.location_slot != null ? _amsSlotLabel(p, Number(s.location_slot)) : 'Loaded';
+    return `<a class="fleet-wall-spool ${low ? 'fleet-wall-spool-low' : ''}" href="#/spool/${s.id}" style="${_spoolColorStyle(s)};color:${tc}" title="${esc(`${loc} · ${s.material || ''} ${s.color_name || ''}`)}">
+      <strong>#${s.id}</strong>
+      <span>${esc(s.color_name || s.material || loc)}</span>
+    </a>`;
+  }).join('')}</div>`;
+}
+
+function _fleetWallAmsStrip(p) {
+  const units = p.ams || [];
+  if (!units.length) return '';
+  const rows = units.slice(0, 3).map(unit => {
+    const slots = (unit.slots || []).slice(0, 6);
+    const label = unit.label || unit.name || 'AMS';
+    return `<div class="fleet-wall-ams-unit">
+      <span>${esc(label)}</span>
+      <div>${slots.map(slot => {
+        const rawColour = String(slot.color || slot.colour || slot.color_hex || '').trim().replace(/^#?([0-9a-fA-F]{6}).*$/, '#$1');
+        const colour = _safeCssHex(rawColour, '#2f3440');
+        const empty = slot.empty || slot.status === 'empty';
+        const active = !!(slot.active || slot.current || slot.in_use);
+        return `<button class="fleet-wall-ams-dot${empty ? ' is-empty' : ''}${active ? ' is-active' : ''}"
+          data-slot-edit data-printer-id="${esc(p.id)}" data-slot-index="${Number(slot.flat_index ?? slot.idx ?? 0)}" data-slot-label="${esc(slot.label || `S${Number(slot.idx || 0) + 1}`)}"
+          style="--dot:${esc(colour)}" title="${esc(slot.material || slot.label || 'AMS slot')}"></button>`;
+      }).join('')}</div>
+    </div>`;
+  }).join('');
+  return `<div class="fleet-wall-ams">${rows}</div>`;
+}
+
+function _fleetWallFeedHtml(p) {
+  const cameraId = p._camera_id || p.id;
+  const camSrc = _cameraStreamSrc(cameraId);
+  return camSrc && p.state !== 'offline'
+    ? `<img src="${camSrc}" alt="${esc(_printerPrimaryLabel(p))} live camera" data-camera-id="${cameraId}">`
+    : `<div class="fleet-wall-camera-fallback">
+        <div class="fleet-wall-printer-glyph">${getIcon(p.icon)}</div>
+        <strong>${esc(_printerPrimaryLabel(p))}</strong>
+        <span>${esc(p.state === 'offline' ? fmtLastSeen(p.last_seen) : 'No camera feed')}</span>
+      </div>`;
+}
+
+function _fleetWallCardBody(p) {
+  const tone = _fleetWallTone(p);
+  const temps = p.temps || {};
+  const hotend = temps.hotend_l || temps.hotend || temps.hotend_r || {};
+  const bed = temps.bed || {};
+  const chamber = temps.chamber || {};
+  const activeJob = _activePrinterJob(p);
+  return `
+    <div class="fleet-wall-card-main">
+      <div class="fleet-wall-status-row">
+        <span class="fleet-wall-state fleet-wall-state-${tone}">${esc(_liveStateLabel(p.state || 'idle'))}</span>
+        ${_printerPrintLocked(p) ? '<span class="fleet-wall-state fleet-wall-state-locked">Print disabled</span>' : ''}
+      </div>
+      ${_fleetWallJob(p)}
+      <div class="fleet-wall-metrics">
+        ${_fleetWallMetric('Hotend', hotend.actual != null ? `${_toDisplayTemp(hotend.actual)}${_tempUnitLabel()}` : '—', hotend.actual >= 180 ? 'hot' : '')}
+        ${_fleetWallMetric('Bed', bed.actual != null ? `${_toDisplayTemp(bed.actual)}${_tempUnitLabel()}` : '—', bed.actual >= 50 ? 'warm' : '')}
+        ${_fleetWallMetric('Chamber', chamber.actual != null ? `${_toDisplayTemp(chamber.actual)}${_tempUnitLabel()}` : '—')}
+        ${_fleetWallMetric('Mode', activeJob ? 'In flight' : (_printerPrintLocked(p) ? 'Locked' : 'Available'))}
+      </div>
+      ${_fleetWallWarnings(p)}
+      ${_fleetWallSpools(p)}
+      ${_fleetWallAmsStrip(p)}
+    </div>
+    <div class="fleet-wall-actions">
+      <a href="#/printer/${esc(p.id)}">Live</a>
+      <a href="#/printer/${esc(p.id)}/bay">Bay</a>
+      <a href="#/printer/${esc(p.id)}/history">History</a>
+    </div>`;
+}
+
+function _fleetWallHeadHtml(p) {
+  return `<div class="printer-identity">
+    <div class="printer-icon">${getIcon(p.icon)}</div>
+    ${connDot(p.last_seen)}
+    <div class="printer-names">
+      <span class="printer-custom">${esc(_printerPrimaryLabel(p))}</span>
+      ${_printerModelHtml(p)}
+    </div>
+  </div>
+  <span class="fleet-wall-kind">${esc(p.kind || p.connection?.type || 'printer')}</span>`;
+}
+
+function _fleetWallCardHtml(p) {
+  return `<article class="fleet-wall-card fleet-wall-card-${_fleetWallTone(p)}" data-printer-id="${esc(p.id)}">
+    <div class="fleet-wall-card-head">
+      ${_fleetWallHeadHtml(p)}
+    </div>
+    <a class="fleet-wall-feed" href="#/printer/${esc(p.id)}" data-fleet-feed="${esc(p.id)}">
+      ${_fleetWallFeedHtml(p)}
+    </a>
+    <div class="fleet-wall-card-body">${_fleetWallCardBody(p)}</div>
+  </article>`;
+}
+
+async function _ensureFleetWallCameraUrls(printers) {
+  await Promise.all((printers || []).map(async p => {
+    if (_cameraUrlCache[p.id] !== undefined) return;
+    try {
+      const r = await fetch(`/api/printers/${p.id}/camera`);
+      const body = r.ok ? await r.json() : null;
+      _cameraUrlCache[p.id] = body?.url || null;
+    } catch {
+      _cameraUrlCache[p.id] = null;
+    }
+  }));
+}
+
+async function renderFleetWall() {
+  const el = document.getElementById('fleet-wall-page');
+  const printers = [...(_latestPrinters || [])].sort((a, b) =>
+    _dashboardStateRank(a) - _dashboardStateRank(b) ||
+    _dashboardPrinterName(a).localeCompare(_dashboardPrinterName(b))
+  );
+  if (!printers.length) {
+    el.innerHTML = `<div class="fleet-wall-empty">
+      <strong>No printers on the wall yet</strong>
+      <a href="#/settings/printers">Add printer</a>
+    </div>`;
+    _fleetWallSignature = '';
+    return;
+  }
+
+  await _ensureFleetWallCameraUrls(printers);
+
+  const signature = printers.map(p => `${p.id}:${_cameraUrlCache[p.id] ? 'cam' : 'nocam'}`).join('|');
+  if (_fleetWallSignature !== signature || !el.querySelector('.fleet-wall-grid')) {
+    const active = printers.filter(p => ['printing', 'paused'].includes(p.state)).length;
+    const attention = printers.filter(p => _printerWarningTarget(p) || _printerPrintLocked(p)).length;
+    el.innerHTML = `<div class="fleet-wall-hero">
+      <div>
+        <span>Fleet Wall</span>
+        <h1>Shop floor live</h1>
+      </div>
+      <div class="fleet-wall-summary">
+        ${_fleetWallMetric('Printers', String(printers.length))}
+        ${_fleetWallMetric('Active', String(active), active ? 'warm' : '')}
+        ${_fleetWallMetric('Attention', String(attention), attention ? 'hot' : '')}
+      </div>
+    </div>
+    <div class="fleet-wall-grid">
+      ${printers.map(_fleetWallCardHtml).join('')}
+    </div>`;
+    _fleetWallSignature = signature;
+    _attachCameraRetries(el);
+  } else {
+    printers.forEach(p => {
+      const card = el.querySelector(`.fleet-wall-card[data-printer-id="${CSS.escape(p.id)}"]`);
+      if (!card) return;
+      card.className = `fleet-wall-card fleet-wall-card-${_fleetWallTone(p)}`;
+      const head = card.querySelector('.fleet-wall-card-head');
+      if (head) head.innerHTML = _fleetWallHeadHtml(p);
+      const body = card.querySelector('.fleet-wall-card-body');
+      if (body) body.innerHTML = _fleetWallCardBody(p);
+      const feed = card.querySelector('[data-fleet-feed]');
+      const hasImg = !!feed?.querySelector('img[data-camera-id]');
+      const shouldImg = !!_cameraStreamSrc(p.id) && p.state !== 'offline';
+      if (feed && hasImg !== shouldImg) feed.innerHTML = _fleetWallFeedHtml(p);
+    });
+  }
+
+  const active = printers.filter(p => ['printing', 'paused'].includes(p.state)).length;
+  const attention = printers.filter(p => _printerWarningTarget(p) || _printerPrintLocked(p)).length;
+  const summary = el.querySelector('.fleet-wall-summary');
+  if (summary) {
+    summary.innerHTML = `
+      ${_fleetWallMetric('Printers', String(printers.length))}
+      ${_fleetWallMetric('Active', String(active), active ? 'warm' : '')}
+      ${_fleetWallMetric('Attention', String(attention), attention ? 'hot' : '')}`;
+  }
+  _attachCameraRetries(el);
 }
 
 async function renderCamerasView() {
