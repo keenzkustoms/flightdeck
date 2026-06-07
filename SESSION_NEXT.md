@@ -1,5 +1,11 @@
 # Flightdeck — next session brief
-_Last updated 7 June 2026 (Session 28.218 Object panel list removal)_
+_Last updated 7 June 2026 (Session 28.219 AMS HT side rail layout)_
+
+## What was improved - Session 28.219 (AMS HT side rail layout - 7 June)
+- AMS HT live loadout now moves bay/status/dry information into a side rail beside the spool.
+- AMS HT spool visual keeps the same slot size language as normal AMS slots instead of being squeezed by stacked text.
+- Normal multi-slot AMS layout remains unchanged.
+- Bumped static cache to `app.js?v=336` and `style.css?v=267`; frontend refresh required.
 
 ## What was changed - Session 28.218 (Object panel list removal - 7 June)
 - Removed the duplicate long object row list from the live Objects panel.

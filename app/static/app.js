@@ -2826,14 +2826,15 @@ function _detailLiveAmsLoadoutRows(p) {
         </span>
       </button>`;
     }).join('');
-    return `<div class="ams-loadout-unit${_isAmsHtUnit(unit) ? ' ams-loadout-unit-ht' : ''}">
+    const isHt = _isAmsHtUnit(unit);
+    return `<div class="ams-loadout-unit${isHt ? ' ams-loadout-unit-ht' : ''}">
       <div class="ams-loadout-head">
         <div>
           <strong>${esc(unit.label ?? `AMS ${unit.unit + 1}`)}</strong>
           ${meta ? `<span>${esc(meta)}</span>` : ''}
         </div>
         <div class="ams-loadout-actions">
-          <small>${_isAmsHtUnit(unit) ? 'High-temp bay' : `${(unit.slots || []).length} slot loadout`}</small>
+          <small>${isHt ? 'High-temp bay' : `${(unit.slots || []).length} slot loadout`}</small>
           ${dryControl}
         </div>
       </div>

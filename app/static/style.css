@@ -4513,7 +4513,15 @@ button.live-route-node:hover {
 }
 
 .ams-loadout-unit-ht {
-  width: min(100%, 11rem);
+  width: min(100%, 13.8rem);
+  display: grid;
+  grid-template-columns: minmax(4.6rem, 6.2rem) minmax(4.8rem, 1fr);
+  grid-template-areas: "slots head";
+  gap: 0.5rem;
+  align-items: stretch;
+  background:
+    linear-gradient(90deg, rgba(148,163,184,0.12) 0 6.9rem, rgba(2,6,23,0.12) 6.9rem 100%),
+    linear-gradient(90deg, rgba(15,23,42,0.96), rgba(8,13,26,0.98));
 }
 
 .ams-loadout-head {
@@ -4534,6 +4542,26 @@ button.live-route-node:hover {
 .ams-loadout-head small {
   color: #7f98bc;
   font-size: 0.66rem;
+}
+
+.ams-loadout-unit-ht .ams-loadout-head {
+  grid-area: head;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.45rem;
+  margin-bottom: 0;
+  min-width: 0;
+}
+
+.ams-loadout-unit-ht .ams-loadout-head > div {
+  min-width: 0;
+}
+
+.ams-loadout-unit-ht .ams-loadout-actions {
+  align-items: flex-start;
+  flex-direction: column;
+  justify-content: flex-start;
 }
 
 .ams-loadout-actions {
@@ -4559,7 +4587,9 @@ button.live-route-node:hover {
 }
 
 .ams-loadout-unit-ht .ams-loadout-slots {
+  grid-area: slots;
   grid-template-columns: minmax(4.6rem, 6.2rem);
+  padding: 0.42rem;
 }
 
 .ams-loadout-slot {
@@ -4834,6 +4864,10 @@ button.live-route-node:hover {
   .ams-loadout-unit:not(.ams-loadout-unit-ht),
   .ams-loadout-unit-ht {
     width: 100%;
+  }
+
+  .ams-loadout-unit-ht {
+    grid-template-columns: minmax(4.6rem, 6.2rem) minmax(4.8rem, 1fr);
   }
 
   .ams-loadout-slots {
