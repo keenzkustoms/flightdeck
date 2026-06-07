@@ -4094,6 +4094,23 @@ class IncomingStockReceive(BaseModel):
     notes: Optional[str] = None
     print_label: bool = True
 
+class IncomingStockRollUpdate(BaseModel):
+    material: Optional[str] = None
+    brand: Optional[str] = None
+    subtype: Optional[str] = None
+    color_hex: Optional[str] = None
+    color_name: Optional[str] = None
+    color_hex_2: Optional[str] = None
+    color_hex_3: Optional[str] = None
+    color_scheme: Optional[str] = None
+    label_weight_g: Optional[float] = None
+    empty_spool_weight_g: Optional[float] = None
+    storage_location_id: Optional[int] = None
+    notes: Optional[str] = None
+
+class IncomingStockCancel(BaseModel):
+    reason: Optional[str] = None
+
 @app.get("/api/spools/summary")
 async def get_spools_summary():
     return db.get_spools_summary()
@@ -4125,6 +4142,31 @@ async def create_incoming_stock_order(body: IncomingStockOrderCreate):
 @app.get("/api/stock-in/rolls/{token}")
 async def get_incoming_stock_roll(token: str):
     roll = db.get_incoming_stock_roll(token)
+    if not roll:
+        raise HTTPException(status_code=404, detail="Incoming roll not found")
+    return roll
+
+@app.put("/api/stock-in/rolls/{token}")
+async def update_incoming_stock_roll(token: str, body: IncomingStockRollUpdate):
+    fields = body.model_dump(exclude_unset=True)
+    if "material" in fields and not (fields.get("material") or "").strip():
+        raise HTTPException(status_code=400, detail="Material required")
+    if "brand" in fields and not (fields.get("brand") or "").strip():
+        raise HTTPException(status_code=400, detail="Brand required")
+    try:
+        roll = db.update_incoming_stock_roll(token, fields)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if not roll:
+        raise HTTPException(status_code=404, detail="Incoming roll not found")
+    return roll
+
+@app.post("/api/stock-in/rolls/{token}/cancel")
+async def cancel_incoming_stock_roll(token: str, body: IncomingStockCancel):
+    try:
+        roll = db.cancel_incoming_stock_roll(token, body.reason)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if not roll:
         raise HTTPException(status_code=404, detail="Incoming roll not found")
     return roll

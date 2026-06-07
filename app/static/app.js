@@ -11136,9 +11136,13 @@ async function _renderStockInView(listEl) {
         <td><span class="stock-in-swatch" style="background:${esc(roll.color_hex || '#808080')}"></span></td>
         <td>${esc(_stockInRollLabel(roll))}<small>${esc(roll.storage_location_name || 'No shelf set')}</small></td>
         <td>${Math.round(Number(roll.label_weight_g || 0))}g</td>
-        <td>${roll.status === 'received' ? `<a href="#/spool/${roll.spool_id}">Spool #${roll.spool_id}</a>` : '<span class="badge">Pending</span>'}</td>
+        <td>${roll.status === 'received' ? `<a href="#/spool/${roll.spool_id}">Spool #${roll.spool_id}</a>` : roll.status === 'cancelled' ? '<span class="badge stock-cancelled">Cancelled</span>' : '<span class="badge">Pending</span>'}</td>
         <td class="stock-in-row-actions">
-          <a class="tiny-btn" href="#/spools?view=incoming&token=${encodeURIComponent(roll.token)}">Receive</a>
+          ${roll.status === 'pending' ? `
+            <button class="tiny-btn" data-stock-edit="${esc(roll.token)}">Edit</button>
+            <button class="tiny-btn danger" data-stock-clear="${esc(roll.token)}">Clear</button>
+            <a class="tiny-btn" href="#/spools?view=incoming&token=${encodeURIComponent(roll.token)}">Receive</a>
+          ` : roll.status === 'received' ? `<a class="tiny-btn" href="#/spool/${roll.spool_id}">Open spool</a>` : `<small>${esc(roll.cancel_reason || 'Cleared')}</small>`}
         </td>
       </tr>`).join('');
     return `<section class="stock-in-order" data-order-id="${order.id}">
@@ -11301,13 +11305,37 @@ async function _renderStockInView(listEl) {
       if (order) _openStockInSheet(order);
     });
   });
+  listEl.querySelectorAll('[data-stock-edit]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const roll = orders.flatMap(o => o.rolls || []).find(r => r.token === btn.dataset.stockEdit);
+      if (roll) _openStockInRollEdit(roll, () => _renderStockInView(listEl));
+    });
+  });
+  listEl.querySelectorAll('[data-stock-clear]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const reason = await _inputModal({
+        title: 'Clear incoming roll',
+        message: 'Use this for damaged stock, wrong details, or a bad scan.',
+        value: 'Damaged or incorrect',
+        okLabel: 'Clear',
+      });
+      if (reason === null) return;
+      const r = await fetch(`/api/stock-in/rolls/${encodeURIComponent(btn.dataset.stockClear)}/cancel`, {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ reason: reason.trim() || 'Cleared' }),
+      });
+      if (!r.ok) return showToast('Clear failed', (await r.json()).detail || 'Could not clear roll', 'error');
+      showToast('Incoming roll cleared', reason.trim() || 'Cleared', 'success');
+      await _renderStockInView(listEl);
+    });
+  });
 }
 
 function _stockInSheetBodyHtml(order) {
   const rolls = order.rolls || [];
   const rows = rolls.map((roll, idx) => {
     const status = roll.status === 'received' ? `Spool #${roll.spool_id}` : 'Pending';
-    return `<div class="stock-sheet-row">
+    return `<div class="stock-sheet-row${roll.status === 'cancelled' ? ' stock-sheet-row-cancelled' : ''}">
       <div class="stock-sheet-index">${idx + 1}</div>
       <img src="/api/stock-in/rolls/${encodeURIComponent(roll.token)}/qr.png">
       <div class="stock-sheet-roll">
@@ -11320,7 +11348,13 @@ function _stockInSheetBodyHtml(order) {
         </div>
         <small>${esc(roll.token)}</small>
       </div>
-      <a class="tiny-btn" href="#/spools?view=incoming&token=${encodeURIComponent(roll.token)}">Receive</a>
+      <div class="stock-sheet-row-actions">
+        ${roll.status === 'pending' ? `
+          <button class="tiny-btn" data-stock-edit="${esc(roll.token)}">Edit</button>
+          <button class="tiny-btn danger" data-stock-clear="${esc(roll.token)}">Clear</button>
+          <a class="tiny-btn" href="#/spools?view=incoming&token=${encodeURIComponent(roll.token)}">Receive</a>
+        ` : roll.status === 'received' ? `<a class="tiny-btn" href="#/spool/${roll.spool_id}">Open spool</a>` : `<small>${esc(roll.cancel_reason || 'Cleared')}</small>`}
+      </div>
     </div>`;
   }).join('');
   return `<div class="stock-sheet">
@@ -11357,6 +11391,96 @@ function _openStockInSheet(order) {
   overlay.querySelector('[data-stock-sheet-close]')?.addEventListener('click', () => overlay.remove());
   overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
   overlay.querySelector('[data-stock-sheet-print]')?.addEventListener('click', () => _printStockInSheet(order));
+  overlay.querySelectorAll('[data-stock-edit]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const roll = (order.rolls || []).find(r => r.token === btn.dataset.stockEdit);
+      if (roll) _openStockInRollEdit(roll, async () => {
+        const fresh = await fetch('/api/stock-in/orders').then(r => r.json()).catch(() => []);
+        const freshOrder = fresh.find(o => String(o.id) === String(order.id));
+        if (freshOrder) _openStockInSheet(freshOrder);
+      });
+    });
+  });
+  overlay.querySelectorAll('[data-stock-clear]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const reason = await _inputModal({
+        title: 'Clear incoming roll',
+        message: 'Use this for damaged stock, wrong details, or a bad scan.',
+        value: 'Damaged or incorrect',
+        okLabel: 'Clear',
+      });
+      if (reason === null) return;
+      const r = await fetch(`/api/stock-in/rolls/${encodeURIComponent(btn.dataset.stockClear)}/cancel`, {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ reason: reason.trim() || 'Cleared' }),
+      });
+      if (!r.ok) return showToast('Clear failed', (await r.json()).detail || 'Could not clear roll', 'error');
+      const fresh = await fetch('/api/stock-in/orders').then(r => r.json()).catch(() => []);
+      const freshOrder = fresh.find(o => String(o.id) === String(order.id));
+      showToast('Incoming roll cleared', reason.trim() || 'Cleared', 'success');
+      if (freshOrder) _openStockInSheet(freshOrder);
+    });
+  });
+}
+
+function _openStockInRollEdit(roll, onSaved) {
+  if (roll.status !== 'pending') return showToast('Cannot edit roll', 'Only pending incoming rolls can be edited.', 'warn');
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay stock-edit-overlay';
+  overlay.innerHTML = `<div class="stock-edit-modal">
+    <div class="stock-sheet-modal-head">
+      <div>
+        <div class="settings-section-title">Edit Incoming Roll</div>
+        <strong>${esc(_stockInRollLabel(roll))}</strong>
+      </div>
+      <button type="button" class="button" data-stock-edit-close>Close</button>
+    </div>
+    <form class="stock-edit-form">
+      <label>Material <input name="material" value="${esc(roll.material || '')}"></label>
+      <label>Brand <input name="brand" value="${esc(roll.brand || '')}"></label>
+      <label>Type <input name="subtype" value="${esc(roll.subtype || '')}"></label>
+      <label>Colour name <input name="color_name" value="${esc(roll.color_name || '')}"></label>
+      <label>Colour <input name="color_hex" type="color" value="${esc(roll.color_hex || '#808080')}"></label>
+      <label>Label weight <input name="label_weight_g" type="number" min="0" step="1" value="${Math.round(Number(roll.label_weight_g || 0))}"></label>
+      <label>Tare <input name="empty_spool_weight_g" type="number" min="0" step="1" value="${roll.empty_spool_weight_g ?? ''}"></label>
+      <label>Home shelf <select name="storage_location_id">${_stockInLocationOptions(roll.storage_location_id || '')}</select></label>
+      <label class="stock-in-notes">Notes <input name="notes" value="${esc(roll.notes || '')}" placeholder="Optional notes"></label>
+      <div class="stock-edit-actions">
+        <button type="button" class="button" data-stock-edit-close>Cancel</button>
+        <button class="button primary" type="submit">Save roll</button>
+      </div>
+    </form>
+  </div>`;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  overlay.querySelectorAll('[data-stock-edit-close]').forEach(btn => btn.addEventListener('click', close));
+  overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+  overlay.querySelector('.stock-edit-form')?.addEventListener('submit', async e => {
+    e.preventDefault();
+    const fd = new FormData(e.currentTarget);
+    const num = name => {
+      const v = String(fd.get(name) || '').trim();
+      return v === '' ? null : Number(v);
+    };
+    const body = {
+      material: String(fd.get('material') || '').trim(),
+      brand: String(fd.get('brand') || '').trim(),
+      subtype: String(fd.get('subtype') || '').trim() || null,
+      color_name: String(fd.get('color_name') || '').trim() || null,
+      color_hex: String(fd.get('color_hex') || '#808080'),
+      label_weight_g: num('label_weight_g') ?? roll.label_weight_g,
+      empty_spool_weight_g: num('empty_spool_weight_g'),
+      storage_location_id: num('storage_location_id'),
+      notes: String(fd.get('notes') || '').trim() || null,
+    };
+    const r = await fetch(`/api/stock-in/rolls/${encodeURIComponent(roll.token)}`, {
+      method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body),
+    });
+    if (!r.ok) return showToast('Save failed', (await r.json()).detail || 'Could not update roll', 'error');
+    close();
+    showToast('Incoming roll updated', `${body.color_name || body.material} saved`, 'success');
+    if (onSaved) await onSaved();
+  });
 }
 
 function _printStockInSheet(order) {

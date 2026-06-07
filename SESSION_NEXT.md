@@ -1,5 +1,13 @@
 # Flightdeck — next session brief
-_Last updated 7 June 2026 (Session 28.210 On-screen stock-in sheets)_
+_Last updated 7 June 2026 (Session 28.211 Stock-in edit and clear)_
+
+## What was added - Session 28.211 (Stock-in edit and clear - 7 June)
+- Pending incoming stock rolls can now be edited before they become real spool records.
+- Pending incoming stock rolls can be cleared/cancelled with a reason for damaged stock, wrong details, or bad scans.
+- Received incoming rolls are locked from stock-in edits; use the normal spool edit path after receipt.
+- Stock In list rows and on-screen sheets now show `Edit`, `Clear`, and `Receive` actions for pending rolls.
+- Cleared rows remain visible as cancelled with their reason, so the receiving sheet still explains what happened.
+- Bumped static cache to `app.js?v=326` and `style.css?v=256`; backend restart required for new edit/clear endpoints.
 
 ## What was added - Session 28.210 (On-screen stock-in sheets - 7 June)
 - Stock In orders now have separate `Open sheet` and `Print / PDF` actions.

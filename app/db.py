@@ -285,6 +285,8 @@ def init() -> None:
             "ALTER TABLE spools ADD COLUMN color_scheme TEXT NOT NULL DEFAULT 'solid'",
             "ALTER TABLE spools ADD COLUMN color_hex_2 TEXT",
             "ALTER TABLE spools ADD COLUMN color_hex_3 TEXT",
+            "ALTER TABLE incoming_stock_rolls ADD COLUMN cancelled_at TEXT",
+            "ALTER TABLE incoming_stock_rolls ADD COLUMN cancel_reason TEXT",
             "ALTER TABLE print_queue ADD COLUMN filament_colors TEXT",
         ):
             try:
@@ -2123,6 +2125,59 @@ def get_incoming_stock_roll(token: str) -> Optional[dict]:
             (token,),
         ).fetchone()
     return _incoming_roll_from_row(row) if row else None
+
+
+def update_incoming_stock_roll(token: str, fields: dict) -> Optional[dict]:
+    roll = get_incoming_stock_roll(token)
+    if not roll:
+        return None
+    if roll.get("status") != "pending":
+        raise ValueError("Only pending incoming rolls can be edited")
+    allowed = {
+        "material", "brand", "subtype", "color_hex", "color_name",
+        "color_scheme", "color_hex_2", "color_hex_3", "label_weight_g",
+        "empty_spool_weight_g", "storage_location_id", "notes",
+    }
+    updates = {}
+    for key, value in fields.items():
+        if key not in allowed:
+            continue
+        if key == "color_scheme":
+            value = _clean_spool_color_scheme(value)
+        if key in {"color_hex_2", "color_hex_3"}:
+            value = _clean_optional_hex(value)
+        if key in {"material", "brand"} and isinstance(value, str):
+            value = value.strip()
+        updates[key] = value
+    if not updates:
+        return roll
+    assignments = ", ".join(f"{key} = ?" for key in updates)
+    with _conn() as conn:
+        conn.execute(
+            f"UPDATE incoming_stock_rolls SET {assignments} WHERE token = ?",
+            [*updates.values(), token],
+        )
+    log_decision("system", "stock_in_roll_updated", f"Incoming roll {token} updated")
+    return get_incoming_stock_roll(token)
+
+
+def cancel_incoming_stock_roll(token: str, reason: Optional[str] = None) -> Optional[dict]:
+    roll = get_incoming_stock_roll(token)
+    if not roll:
+        return None
+    if roll.get("status") == "received":
+        raise ValueError("Received incoming rolls cannot be cancelled")
+    if roll.get("status") == "cancelled":
+        return roll
+    with _conn() as conn:
+        conn.execute(
+            """UPDATE incoming_stock_rolls
+               SET status = 'cancelled', cancelled_at = datetime('now'), cancel_reason = ?
+               WHERE token = ?""",
+            (reason, token),
+        )
+    log_decision("system", "stock_in_roll_cancelled", f"Incoming roll {token} cancelled: {reason or 'no reason'}")
+    return get_incoming_stock_roll(token)
 
 
 def receive_incoming_stock_roll(
