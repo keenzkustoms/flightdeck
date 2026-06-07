@@ -85,6 +85,10 @@ def _simulated_entry(printer_id: str) -> Optional[tuple[str, str, str, str, str,
     return None
 
 
+def _active_printer_ids() -> set[str]:
+    return {pid for (pid, *_rest) in _moonraker} | {p.id for p in _bambu} | {pid for (pid, *_rest) in _simulated}
+
+
 async def _gather_all() -> list[dict]:
     global _latest_printers_at, _gather_lock
     if _gather_lock is None:
@@ -617,6 +621,9 @@ async def _send_ntfy(title: str, message: str, tags: list[str], priority: int = 
 
 
 def _notify(level: str, title: str, message: str = "", *, printer_id: Optional[str] = None, print_id: Optional[int] = None, link: Optional[str] = None) -> None:
+    if printer_id and printer_id not in _active_printer_ids():
+        log.info("dropping notification for removed printer %s: %s", printer_id, title)
+        return
     try:
         db.add_notification(level, title, message, printer_id=printer_id, print_id=print_id, link=link)
     except Exception as exc:
@@ -2703,6 +2710,7 @@ async def remove_printer(printer_id: str):
 
     _prev_states.pop(printer_id, None)
     _latest_printers.pop(printer_id, None)
+    db.clear_notifications_for_printer(printer_id)
 
     cfg = load()
     cfg.printers = [e for e in cfg.printers if e.id != printer_id]
@@ -3414,6 +3422,7 @@ async def put_slicer_profile_defaults(printer_id: str, body: SlicerProfileDefaul
 @app.get("/api/notifications")
 async def get_notifications(limit: int = 50):
     limit = max(1, min(limit, 100))
+    db.clear_notifications_for_missing_printers(_active_printer_ids())
     return {
         "unread": db.unread_notification_count(),
         "items": db.list_notifications(limit=limit),

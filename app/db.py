@@ -5,7 +5,7 @@ import json
 import secrets
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Iterable, Optional
 
 from .paths import DB_PATH, UPLOADS_DIR
 
@@ -1533,6 +1533,42 @@ def clear_all_notifications() -> int:
                    read_at = COALESCE(read_at, datetime('now'))
                WHERE cleared_at IS NULL"""
         )
+    return cur.rowcount
+
+
+def clear_notifications_for_printer(printer_id: str) -> int:
+    with _conn() as conn:
+        cur = conn.execute(
+            """UPDATE notifications
+               SET cleared_at = COALESCE(cleared_at, datetime('now')),
+                   read_at = COALESCE(read_at, datetime('now'))
+               WHERE cleared_at IS NULL AND printer_id = ?""",
+            (printer_id,),
+        )
+    return cur.rowcount
+
+
+def clear_notifications_for_missing_printers(valid_printer_ids: Iterable[str]) -> int:
+    valid = [str(pid) for pid in valid_printer_ids if pid]
+    with _conn() as conn:
+        if valid:
+            placeholders = ",".join("?" for _ in valid)
+            cur = conn.execute(
+                f"""UPDATE notifications
+                    SET cleared_at = COALESCE(cleared_at, datetime('now')),
+                        read_at = COALESCE(read_at, datetime('now'))
+                    WHERE cleared_at IS NULL
+                      AND printer_id IS NOT NULL
+                      AND printer_id NOT IN ({placeholders})""",
+                tuple(valid),
+            )
+        else:
+            cur = conn.execute(
+                """UPDATE notifications
+                   SET cleared_at = COALESCE(cleared_at, datetime('now')),
+                       read_at = COALESCE(read_at, datetime('now'))
+                   WHERE cleared_at IS NULL AND printer_id IS NOT NULL"""
+            )
     return cur.rowcount
 
 
