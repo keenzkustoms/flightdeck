@@ -2,13 +2,14 @@
 
 Latest GitHub/Pi state:
 - Branch: main
-- Latest commit: current HEAD after this handoff (`Lock Bambu skip overlay unrotated`)
+- Latest commit: current HEAD after this handoff (`Rotate Bambu skip thumbnail under locked overlay`)
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
-- Refresh cachebust currently: ?cachebust=370
+- Refresh cachebust currently: ?cachebust=371
 
 Recent work:
+- Bambu skip-object red overlay remains locked unrotated/axis-aligned. The thumbnail image is now on a separate layer underneath and currently rotates 45 degrees to try to bring the left spoon/keeper shape into the `#148` box without moving the red boxes.
 - Bambu skip-object map rotation is now locked at `0` so the red overlay stays axis-aligned like the user's second reference image: `#148/#463` vertical on the left, `#417` bottom-left, and `#439` across the right. Do not rotate or move the red overlay in future thumbnail alignment work.
 - Restored the Bambu skip-object overlay to the user-approved 45-degree shared thumbnail/box rotation and removed the separate image-layer experiment again. The red overlay should match the screenshot target with `#148/#463` left, `#417` bottom-left, and `#439` right.
 - Reverted the image-only rotation trial because it made the H2D skip-object map worse; Flightdeck is back to the better 45-degree shared thumbnail/box rotation.
@@ -89,6 +90,13 @@ Likely next items:
 - Treat the red overlay as source of truth: `#148/#463` vertical on the left, `#417` bottom-left, `#439` across the right.
 - Future visual alignment should not move/rotate these red boxes.
 - Backend restart required.
+
+## What was changed - Session 28.249 (Bambu skip-object thumbnail-only rotation - 7 June)
+- Reintroduced separate thumbnail and overlay layers, with the red overlay locked unrotated and axis-aligned.
+- H2D/Bambu maps now report `map_rotation=0` and `map_image_rotation=45`.
+- The frontend applies `map_image_rotation` only to the thumbnail layer underneath the red boxes.
+- The red boxes must remain untouched: only image rotation/scale/translation should change from here.
+- Static cache bumped to `app.js?v=371` and `style.css?v=300`; backend restart and frontend refresh required.
 
 ## What was fixed - Session 28.240 (Generic AMS auto-claim guard - 7 June)
 - Generic Bambu AMS reports now only auto-claim the exact recent spool remembered for that slot.

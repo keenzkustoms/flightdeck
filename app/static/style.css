@@ -6561,9 +6561,21 @@ button.live-route-node:hover {
   background-size: 1.2rem 1.2rem;
 }
 
-.obj-map-plane {
+.obj-map-plane,
+.obj-map-image-plane {
   position: relative;
   width: 100%;
+}
+
+.obj-map-plane {
+  aspect-ratio: 16 / 9;
+  z-index: 1;
+}
+
+.obj-map-image-plane {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
 }
 
 .obj-map-open {
@@ -6584,21 +6596,30 @@ button.live-route-node:hover {
   inset: 0;
 }
 
-.obj-map-rotated .obj-map-stage,
-.object-map-modal-stage.obj-map-rotated {
+.obj-map-overlay-rotated .obj-map-stage,
+.object-map-modal-stage.obj-map-overlay-rotated {
   aspect-ratio: 1 / 1;
 }
 
-.obj-map-rotated .obj-map-plane {
+.obj-map-transformed .obj-map-image-plane,
+.obj-map-overlay-rotated .obj-map-plane {
   position: absolute;
   left: 50%;
   top: 50%;
-  width: var(--obj-map-plane-scale, 135%);
-  transform: translate(-50%, -50%) rotate(var(--obj-map-rotation, 45deg));
   transform-origin: center;
 }
 
-.obj-map-rotated .obj-chip-id {
+.obj-map-overlay-rotated .obj-map-plane {
+  width: var(--obj-map-plane-scale, 135%);
+  transform: translate(-50%, -50%) rotate(var(--obj-map-rotation, 45deg));
+}
+
+.obj-map-image-rotated .obj-map-image-plane {
+  width: var(--obj-map-image-scale, 135%);
+  transform: translate(-50%, -50%) rotate(var(--obj-map-image-rotation, 45deg));
+}
+
+.obj-map-overlay-rotated .obj-chip-id {
   transform: rotate(var(--obj-map-counter-rotation, -45deg));
 }
 
@@ -9401,7 +9422,7 @@ button.live-route-node:hover {
   background-size: 1.2rem 1.2rem;
 }
 
-.object-map-modal-stage.obj-map-rotated {
+.object-map-modal-stage.obj-map-transformed {
   max-height: 65vh;
 }
 
