@@ -259,6 +259,23 @@ function getIcon(key) {
   return ICONS[key] ?? ICONS.generic;
 }
 
+function _setCameraReturnTarget(printerId, hash) {
+  _cameraReturnTarget = { printerId: String(printerId || ''), hash };
+  try { window.sessionStorage?.setItem('flightdeck.cameraReturnTarget', JSON.stringify(_cameraReturnTarget)); } catch {}
+}
+
+function _consumeCameraReturnTarget(printerId) {
+  const wanted = String(printerId || '');
+  let target = _cameraReturnTarget;
+  if (!target) {
+    try { target = JSON.parse(window.sessionStorage?.getItem('flightdeck.cameraReturnTarget') || 'null'); } catch {}
+  }
+  if (!target || target.printerId !== wanted || !target.hash) return '';
+  _cameraReturnTarget = null;
+  try { window.sessionStorage?.removeItem('flightdeck.cameraReturnTarget'); } catch {}
+  return target.hash;
+}
+
 
 let _latestPrinters = [];
 let _tabsBuilt = false;
@@ -278,6 +295,7 @@ const _dayPrintsCache = {};     // `${printerId}:${dateStr}` → prints[]
 let _camerasFull = false;       // true once cameras grid has been fully rendered
 let _camerasMode = 'live';       // live | sim30
 let _camZoom = 0;               // 0=normal, 1=wide, 2=fullscreen
+let _cameraReturnTarget = null; // { printerId, hash } when Fleet Wall opened Live camera
 let _onSettings = false;        // true while settings view is active
 let _onFailures = false;        // true while failure review is active
 let _onSpools = false;          // true while spool inventory is active
@@ -1132,9 +1150,13 @@ function attachCardEvents(card) {
 }
 
 document.addEventListener('fullscreenchange', () => {
-  if (!document.fullscreenElement && _camZoom === 2) {
+  const body = document.querySelector('.detail-body');
+  if (document.fullscreenElement?.classList?.contains('camera-hero')) {
+    _camZoom = 2;
+    body?.classList.remove('cam-wide');
+  } else if (_camZoom === 2) {
     _camZoom = 0;
-    document.querySelector('.detail-body')?.classList.remove('cam-wide');
+    body?.classList.remove('cam-wide');
   }
 });
 
@@ -2062,7 +2084,8 @@ document.addEventListener('click', e => {
   if (fleetLive) {
     e.preventDefault();
     e.stopPropagation();
-    location.hash = `#/printer/${encodeURIComponent(fleetLive.dataset.fleetLive)}`;
+    _setCameraReturnTarget(fleetLive.dataset.fleetLive, '#/fleet');
+    location.hash = `#/printer/${encodeURIComponent(fleetLive.dataset.fleetLive)}?from=fleet`;
     return;
   }
 
@@ -2502,7 +2525,7 @@ async function renderDemoView() {
 
 function parseRoute() {
   const hash = location.hash || '#/';
-  const printerMatch = hash.match(/^#\/printer\/([^/]+)(?:\/(bay|history|failures|maintenance))?/);
+  const printerMatch = hash.match(/^#\/printer\/([^/?]+)(?:\/(bay|history|failures|maintenance))?(?:\?.*)?$/);
   if (printerMatch) return { view: 'printer', id: printerMatch[1], subtab: printerMatch[2] || 'live' };
   const spoolMatch = hash.match(/^#\/spool\/(\d+)/);
   if (spoolMatch) return { view: 'spool', id: parseInt(spoolMatch[1], 10) };
@@ -5531,6 +5554,15 @@ async function renderPrinterDetail(id, subtab = 'live') {
         if (_tempModal.isOpen()) { _tempModal.close(); return; }
         const body = hero.closest('.detail-body');
         if (!body) return;
+        if (document.fullscreenElement === hero || _camZoom === 2) {
+          _camZoom = 0;
+          body.classList.remove('cam-wide');
+          if (document.fullscreenElement) document.exitFullscreen?.();
+          const fromFleet = _routeParams(`#/printer/${encodeURIComponent(id)}`).get('from') === 'fleet';
+          const returnHash = _consumeCameraReturnTarget(id) || (fromFleet ? '#/fleet' : '');
+          if (returnHash) location.hash = returnHash;
+          return;
+        }
         const isMobile = window.innerWidth <= 900;
         if (isMobile) {
           if (_camZoom === 0) {

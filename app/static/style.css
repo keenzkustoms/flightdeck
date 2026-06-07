@@ -8544,7 +8544,13 @@ button.live-route-node:hover {
 
 .fleet-wall-ams-visual {
   min-width: 0;
-  overflow: hidden;
+  --fleet-ams-normal-width: 20.4rem;
+  --fleet-ams-ht-width: 13.2rem;
+  --fleet-ams-side-width: 3.85rem;
+  --fleet-ams-slot-min: 3rem;
+  --fleet-ams-ht-slot-min: 3.3rem;
+  overflow-x: hidden;
+  overflow-y: visible;
 }
 
 .fleet-wall-ams-visual .ams-loadout-deck {
@@ -8552,29 +8558,27 @@ button.live-route-node:hover {
 }
 
 .fleet-wall-ams-visual .ams-loadout-units {
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   gap: 0.5rem;
   align-items: stretch;
-  overflow-x: auto;
-  overflow-y: hidden;
+  overflow: visible;
   padding-bottom: 0.08rem;
-  scrollbar-width: thin;
 }
 
 .fleet-wall-ams-visual .ams-loadout-unit {
-  grid-template-columns: minmax(0, 1fr) 3.85rem;
+  grid-template-columns: minmax(0, 1fr) var(--fleet-ams-side-width);
   gap: 0.36rem;
   border-radius: 0.52rem;
   padding: 0.42rem 0.44rem 0.48rem;
 }
 
 .fleet-wall-ams-visual .ams-loadout-unit:not(.ams-loadout-unit-ht) {
-  width: 20.4rem;
+  width: min(100%, var(--fleet-ams-normal-width));
 }
 
 .fleet-wall-ams-visual .ams-loadout-unit-ht {
-  width: 13.2rem;
-  grid-template-columns: minmax(5.7rem, 1fr) 3.85rem;
+  width: min(100%, var(--fleet-ams-ht-width));
+  grid-template-columns: minmax(5.7rem, 1fr) var(--fleet-ams-side-width);
 }
 
 .fleet-wall-ams-visual .ams-loadout-head {
@@ -8597,13 +8601,13 @@ button.live-route-node:hover {
 }
 
 .fleet-wall-ams-visual .ams-loadout-slots {
-  grid-template-columns: repeat(4, minmax(3rem, 1fr));
+  grid-template-columns: repeat(4, minmax(var(--fleet-ams-slot-min), 1fr));
   gap: 0.3rem;
   padding: 0.36rem;
 }
 
 .fleet-wall-ams-visual .ams-loadout-unit-ht .ams-loadout-slots {
-  grid-template-columns: minmax(3.3rem, 4.2rem);
+  grid-template-columns: minmax(var(--fleet-ams-ht-slot-min), 4.2rem);
   padding: 0.32rem;
 }
 
@@ -8749,6 +8753,14 @@ button.live-route-node:hover {
   aspect-ratio: 16 / 10;
 }
 
+.fleet-wall-medium .fleet-wall-ams-visual {
+  --fleet-ams-normal-width: 18.8rem;
+  --fleet-ams-ht-width: 12.2rem;
+  --fleet-ams-side-width: 3.45rem;
+  --fleet-ams-slot-min: 2.72rem;
+  --fleet-ams-ht-slot-min: 3.05rem;
+}
+
 .fleet-wall-large .fleet-wall-grid {
   grid-template-columns: 1fr;
   gap: 1.15rem;
@@ -8830,20 +8842,27 @@ button.live-route-node:hover {
   padding: 0.42rem 0.55rem;
 }
 
+.fleet-wall-large .fleet-wall-ams-visual {
+  --fleet-ams-normal-width: 24.2rem;
+  --fleet-ams-ht-width: 17rem;
+  --fleet-ams-slot-min: 3.75rem;
+  --fleet-ams-ht-slot-min: 4rem;
+}
+
 .fleet-wall-large .fleet-wall-ams-visual .ams-loadout-unit:not(.ams-loadout-unit-ht) {
-  width: min(100%, 24.2rem);
+  width: min(100%, var(--fleet-ams-normal-width));
 }
 
 .fleet-wall-large .fleet-wall-ams-visual .ams-loadout-unit-ht {
-  width: min(100%, 17rem);
+  width: min(100%, var(--fleet-ams-ht-width));
 }
 
 .fleet-wall-large .fleet-wall-ams-visual .ams-loadout-slots {
-  grid-template-columns: repeat(4, minmax(3.75rem, 1fr));
+  grid-template-columns: repeat(4, minmax(var(--fleet-ams-slot-min), 1fr));
 }
 
 .fleet-wall-large .fleet-wall-ams-visual .ams-loadout-unit-ht .ams-loadout-slots {
-  grid-template-columns: minmax(4rem, 5rem);
+  grid-template-columns: minmax(var(--fleet-ams-ht-slot-min), 5rem);
 }
 
 .fleet-wall-large .fleet-wall-actions a {
@@ -8889,6 +8908,12 @@ button.live-route-node:hover {
   .fleet-wall-large .fleet-wall-card-body {
     border-left: 0;
   }
+  .fleet-wall-ams-visual {
+    --fleet-ams-normal-width: 100%;
+    --fleet-ams-ht-width: 100%;
+    --fleet-ams-side-width: 3.6rem;
+    --fleet-ams-slot-min: 2.5rem;
+  }
 }
 
 @media (max-width: 520px) {
@@ -8906,6 +8931,19 @@ button.live-route-node:hover {
   }
   .fleet-wall-head-right {
     justify-content: flex-start;
+  }
+  .fleet-wall-ams-visual {
+    --fleet-ams-side-width: 3.2rem;
+    --fleet-ams-slot-min: 2.1rem;
+    --fleet-ams-ht-slot-min: 2.65rem;
+  }
+  .fleet-wall-ams-visual .ams-loadout-unit,
+  .fleet-wall-ams-visual .ams-loadout-unit-ht {
+    grid-template-columns: minmax(0, 1fr) var(--fleet-ams-side-width);
+  }
+  .fleet-wall-ams-visual .ams-loadout-slots {
+    gap: 0.24rem;
+    padding: 0.28rem;
   }
 }
 
