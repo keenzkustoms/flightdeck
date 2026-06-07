@@ -4534,6 +4534,11 @@ button.live-route-node:hover {
   min-height: var(--ams-loadout-head-space);
 }
 
+.ams-loadout-head > div:first-child {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
 .ams-loadout-head strong {
   display: block;
   color: #dbeafe;
@@ -4544,6 +4549,14 @@ button.live-route-node:hover {
 .ams-loadout-head small {
   color: #7f98bc;
   font-size: 0.66rem;
+}
+
+.ams-loadout-head span {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .ams-loadout-unit-ht .ams-loadout-head {
@@ -4573,6 +4586,7 @@ button.live-route-node:hover {
   justify-content: flex-end;
   gap: 0.35rem;
   flex-wrap: wrap;
+  flex: 0 0 auto;
   padding-top: 0.02rem;
 }
 

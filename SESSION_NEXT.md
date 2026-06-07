@@ -1,5 +1,10 @@
 # Flightdeck — next session brief
-_Last updated 7 June 2026 (Session 28.221 AMS slot centering)_
+_Last updated 7 June 2026 (Session 28.222 AMS header wrap fix)_
+
+## What was fixed - Session 28.222 (AMS header wrap fix - 7 June)
+- AMS loadout metadata now stays on one clipped line instead of wrapping a final word onto its own row.
+- Header text area now owns remaining width while the action buttons keep their fixed space.
+- Bumped static cache to `style.css?v=270`; frontend refresh required.
 
 ## What was fixed - Session 28.221 (AMS slot centering - 7 June)
 - Centered normal AMS slot groups inside their loadout bay.
