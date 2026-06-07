@@ -6586,6 +6586,8 @@ button.live-route-node:hover {
   opacity: 0.96;
   filter: brightness(1.08) contrast(1.08);
   pointer-events: none;
+  transform: rotate(10deg);
+  transform-origin: center;
 }
 
 .obj-map-open {

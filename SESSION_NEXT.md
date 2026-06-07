@@ -2,13 +2,14 @@
 
 Latest GitHub/Pi state:
 - Branch: main
-- Latest commit: current HEAD after this handoff (`Render Bambu skip thumbnail per object`)
+- Latest commit: current HEAD after this handoff (`Rotate Bambu skip object slices`)
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
-- Refresh cachebust currently: ?cachebust=375
+- Refresh cachebust currently: ?cachebust=375 / style.css?v=305
 
 Recent work:
+- Bambu per-object thumbnail slices currently use `transform: rotate(10deg)` on `.obj-map-image-piece` as a visual trial. This rotates only the white object slices, not the red overlay.
 - Bambu skip-object maps now support `map_image_mode=per_object`, which slices the thumbnail by each object's bbox and renders that image piece inside its own locked red overlay box. This keeps the red boxes as source of truth and avoids moving the whole bed thumbnail as one layer.
 - Bambu skip-object thumbnail offsets are now both `0` so the thumbnail sits flat under the locked red overlay. Current trial is red overlay locked, thumbnail angle `45deg`, `x=0%`, `y=0%`.
 - Reverted the Bambu/H2D plate underlay because it made the skip-object map worse. Current map is back to the previous best: locked red overlay, thumbnail image `45deg`, `x=5%`, `y=-92%`.
@@ -126,6 +127,12 @@ Likely next items:
 - This treats each red box as the object's home instead of moving the entire bed thumbnail as a single layer.
 - Current H2D values: `map_rotation=0`, `map_image_rotation=0`, offsets `0,0`, `map_image_mode=per_object`.
 - Static cache bumped to `app.js?v=375` and `style.css?v=304`; backend restart and frontend refresh required.
+
+## What was changed - Session 28.254 (Bambu skip-object slice rotation trial - 8 June)
+- Added `transform: rotate(10deg)` to `.obj-map-image-piece`.
+- This rotates each white thumbnail slice independently inside its locked red box.
+- Red overlay boxes remain untouched.
+- Static cache bumped to `style.css?v=305`; frontend refresh required.
 
 ## What was fixed - Session 28.240 (Generic AMS auto-claim guard - 7 June)
 - Generic Bambu AMS reports now only auto-claim the exact recent spool remembered for that slot.
