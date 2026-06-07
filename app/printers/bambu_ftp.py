@@ -96,9 +96,10 @@ def _parse_3mf(buf: io.BytesIO, plate_number: Optional[int] = None) -> BambuPrev
     filament_type = filament_el.get("type") if filament_el is not None else None
     filaments = []
     objects = []
-    object_boxes, plate_bounds = _extract_plate_object_boxes(plate_json)
+    object_boxes, object_boxes_by_name, plate_bounds = _extract_plate_object_boxes(plate_json)
     if plate is not None:
         name_counts: dict[str, int] = {}
+        name_box_counts: dict[str, int] = {}
         for el in plate.findall("filament"):
             color = el.get("color")
             used_g = el.get("used_g")
@@ -118,12 +119,19 @@ def _parse_3mf(buf: io.BytesIO, plate_number: Optional[int] = None) -> BambuPrev
                 identify_id = None
             base = name.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
             name_counts[base] = name_counts.get(base, 0) + 1
+            box = object_boxes.get(identify_id) if identify_id is not None else None
+            if box is None:
+                name_box_counts[base] = name_box_counts.get(base, 0) + 1
+                matching_boxes = object_boxes_by_name.get(base) or []
+                box_index = name_box_counts[base] - 1
+                if box_index < len(matching_boxes):
+                    box = matching_boxes[box_index]
             objects.append({
                 "id": identify_id,
                 "name": base,
                 "label": f"{base} #{name_counts[base]}" if name_counts[base] > 1 else base,
                 "state": "excluded" if el.get("skipped", "false").lower() == "true" else "available",
-                **({"bbox": object_boxes[identify_id]} if identify_id in object_boxes else {}),
+                **({"bbox": box} if box else {}),
             })
 
     if not plate_bounds and object_boxes:
@@ -190,8 +198,9 @@ def _bounds_for_boxes(boxes) -> Optional[dict]:
     return {"x": min_x, "y": min_y, "w": max_x - min_x, "h": max_y - min_y}
 
 
-def _extract_plate_object_boxes(data) -> tuple[dict[int, dict], Optional[dict]]:
+def _extract_plate_object_boxes(data) -> tuple[dict[int, dict], dict[str, list[dict]], Optional[dict]]:
     boxes: dict[int, dict] = {}
+    boxes_by_name: dict[str, list[dict]] = {}
     plate_bounds = None
 
     def walk(node):
@@ -216,6 +225,10 @@ def _extract_plate_object_boxes(data) -> tuple[dict[int, dict], Optional[dict]]:
                 obj_id = None
             if obj_id is not None and bbox:
                 boxes[obj_id] = bbox
+            raw_name = node.get("name")
+            if isinstance(raw_name, str) and bbox:
+                base = raw_name.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+                boxes_by_name.setdefault(base, []).append(bbox)
             for value in node.values():
                 walk(value)
         elif isinstance(node, list):
@@ -223,7 +236,7 @@ def _extract_plate_object_boxes(data) -> tuple[dict[int, dict], Optional[dict]]:
                 walk(value)
 
     walk(data)
-    return boxes, plate_bounds
+    return boxes, boxes_by_name, plate_bounds
 
 
 def friendly_bambu_ftp_error(exc: Exception) -> str:
