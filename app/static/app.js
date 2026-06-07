@@ -11072,11 +11072,11 @@ function _applySpoolFilters(spools) {
 }
 
 function _stockInLocationOptions(selected = '', opts = {}) {
-  const locs = _spoolLocations.length ? _spoolLocations : [{ id: '', name: 'Shelf #1' }];
+  const locs = _spoolLocations.length ? _spoolLocations : [];
   const selectedValue = opts.defaultFirst && String(selected ?? '') === '' && locs[0]?.id
     ? String(locs[0].id)
     : String(selected ?? '');
-  return `<option value="">No shelf set</option>` + locs.map(loc =>
+  return `<option value="">Select location</option>` + locs.map(loc =>
     `<option value="${loc.id}"${selectedValue === String(loc.id) ? ' selected' : ''}>${esc(loc.name)}</option>`
   ).join('');
 }
@@ -11109,7 +11109,7 @@ function _stockInLineHtml(index, defaultWeight) {
       </label>
       <label>Label weight <input name="label_weight_g" type="number" min="0" step="1" value="${defaultWeight}"></label>
       <label>Tare <input name="empty_spool_weight_g" type="number" min="0" step="1" placeholder="Optional"></label>
-      <label>Home shelf <select name="storage_location_id">${_stockInLocationOptions('', { defaultFirst: true })}</select></label>
+      <label>Location <select name="storage_location_id">${_stockInLocationOptions('', { defaultFirst: true })}</select></label>
       <label class="stock-in-notes">Notes <input name="notes" placeholder="Optional notes"></label>
     </div>
   </div>`;
@@ -11137,7 +11137,7 @@ async function _renderStockInView(listEl) {
     const rollRows = rolls.map(roll => `
       <tr>
         <td><span class="stock-in-swatch" style="background:${esc(roll.color_hex || '#808080')}"></span></td>
-        <td>${esc(_stockInRollLabel(roll))}<small>${esc(roll.storage_location_name || 'No shelf set')}</small></td>
+        <td>${esc(_stockInRollLabel(roll))}<small>${esc(roll.storage_location_name || 'Select location')}</small></td>
         <td>${Math.round(Number(roll.label_weight_g || 0))}g</td>
         <td>${roll.status === 'received' ? `<a href="#/spool/${roll.spool_id}">Spool #${roll.spool_id}</a>` : roll.status === 'cancelled' ? '<span class="badge stock-cancelled">Cancelled</span>' : '<span class="badge">Pending</span>'}</td>
         <td class="stock-in-row-actions">
@@ -11172,7 +11172,7 @@ async function _renderStockInView(listEl) {
       <div class="stock-in-received">Already received as <a href="#/spool/${scanRoll.spool_id}">Spool #${scanRoll.spool_id}</a></div>
     ` : `
       <form class="stock-in-receive-form" data-token="${esc(scanRoll.token)}">
-        <label>Storage <select name="storage_location_id">${_stockInLocationOptions(scanRoll.storage_location_id || '', { defaultFirst: true })}</select></label>
+        <label>Location <select name="storage_location_id">${_stockInLocationOptions(scanRoll.storage_location_id || '', { defaultFirst: true })}</select></label>
         <label>Remaining <input name="remaining_g" type="number" min="0" step="1" value="${Math.round(Number(scanRoll.label_weight_g || defaultWeight))}"></label>
         <label>Label weight <input name="label_weight_g" type="number" min="0" step="1" value="${Math.round(Number(scanRoll.label_weight_g || defaultWeight))}"></label>
         <label>Tare <input name="empty_spool_weight_g" type="number" min="0" step="1" value="${scanRoll.empty_spool_weight_g ?? ''}"></label>
@@ -11346,7 +11346,7 @@ function _stockInSheetBodyHtml(order) {
         <div class="stock-sheet-meta">
           <span><i class="stock-in-swatch" style="background:${esc(roll.color_hex || '#808080')}"></i>${esc(roll.color_name || roll.color_hex || '')}</span>
           <span>${Math.round(Number(roll.label_weight_g || 0))}g</span>
-          <span>${esc(roll.storage_location_name || 'No shelf set')}</span>
+          <span>${esc(roll.storage_location_name || 'Select location')}</span>
           <span>${esc(status)}</span>
         </div>
         <small>${esc(roll.token)}</small>
@@ -11446,7 +11446,7 @@ function _openStockInRollEdit(roll, onSaved) {
       <label>Colour <input name="color_hex" type="color" value="${esc(roll.color_hex || '#808080')}"></label>
       <label>Label weight <input name="label_weight_g" type="number" min="0" step="1" value="${Math.round(Number(roll.label_weight_g || 0))}"></label>
       <label>Tare <input name="empty_spool_weight_g" type="number" min="0" step="1" value="${roll.empty_spool_weight_g ?? ''}"></label>
-      <label>Home shelf <select name="storage_location_id">${_stockInLocationOptions(roll.storage_location_id || '')}</select></label>
+      <label>Location <select name="storage_location_id">${_stockInLocationOptions(roll.storage_location_id || '')}</select></label>
       <label class="stock-in-notes">Notes <input name="notes" value="${esc(roll.notes || '')}" placeholder="Optional notes"></label>
       <div class="stock-edit-actions">
         <button type="button" class="button" data-stock-edit-close>Cancel</button>
