@@ -1,5 +1,9 @@
 # Flightdeck — next session brief
-_Last updated 7 June 2026 (Session 28.224 AMS dryer side rails)_
+_Last updated 7 June 2026 (Session 28.225 AMS side rail centering)_
+
+## What was fixed - Session 28.225 (AMS side rail centering - 7 June)
+- Centered AMS dryer/status side-rail contents horizontally and vertically in the RHS column.
+- Bumped static cache to `style.css?v=273`; frontend refresh required.
 
 ## What was changed - Session 28.224 (AMS dryer side rails - 7 June)
 - Reworked AMS live loadout cards into a left visual area and a right dryer/status rail.
