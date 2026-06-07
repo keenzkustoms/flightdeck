@@ -896,10 +896,12 @@ def standalone_demo():
     )
 
 
+@app.get("/health")
 @app.get("/healthz")
 def healthz():
     return {
         "status": "ok",
+        "version": APP_VERSION,
         "ws_clients": len(_ws_clients),
         "broadcast_running": bool(_broadcast_task and not _broadcast_task.done()),
     }

@@ -1,5 +1,10 @@
 # Flightdeck — next session brief
-_Last updated 7 June 2026 (Session 28.230 Upload size guardrails)_
+_Last updated 7 June 2026 (Session 28.231 Health endpoint alias)_
+
+## What was added - Session 28.231 (Health endpoint alias - 7 June)
+- Added conventional `/health` alongside the existing `/healthz` endpoint.
+- Health response now includes the Flightdeck version plus websocket/broadcast status for simple external monitors.
+- Backend restart required.
 
 ## What was hardened - Session 28.230 (Upload size guardrails - 7 June)
 - Added shared backend size/read helpers for files entering Flightdeck.
