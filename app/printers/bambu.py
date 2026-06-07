@@ -906,7 +906,6 @@ class BambuPrinter:
             "plate_bounds": preview.plate_bounds,
             "plate_image_url": f"/api/printers/{self.id}/thumbnail",
             "map_rotation": 45,
-            "map_image_rotation": 45,
             "detail": "Bambu object exclusion uses the printer skip-object list.",
         }
 
