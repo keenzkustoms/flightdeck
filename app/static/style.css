@@ -4616,9 +4616,9 @@ button.live-route-node:hover {
 }
 
 .ams-loadout-unit-ht .ams-loadout-slots {
-  grid-template-columns: minmax(4.4rem, 5.8rem);
+  grid-template-columns: minmax(4.35rem, 5.15rem);
   justify-content: center;
-  padding: 0.52rem;
+  padding: 0.42rem;
 }
 
 .ams-loadout-slot {
