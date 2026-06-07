@@ -2,14 +2,14 @@
 
 Latest GitHub/Pi state:
 - Branch: main
-- Latest commit: current HEAD after this handoff (`Map Bambu skip objects by name fallback`)
+- Latest commit: current HEAD after this handoff (`Flip Bambu skip object map Y axis`)
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
 - Refresh cachebust currently: ?cachebust=366
 
 Recent work:
-- Bambu/H2D skip-object maps now fall back to matching plate-layout boxes by object name and occurrence when Bambu's plate JSON uses different internal IDs from the MQTT skip IDs. BigBoy's current `Filament Keeper`/`Spool Holder` job now yields real clickable bed regions for skip object.
+- Bambu/H2D skip-object maps now fall back to matching plate-layout boxes by object name and occurrence when Bambu's plate JSON uses different internal IDs from the MQTT skip IDs, and the Y axis is flipped to match the Bambu screen/thumbnail orientation. BigBoy's current small front `Spool Holder` cylinder is object `#417`.
 - AMS slot indexing now uses one canonical rule across backend/frontend: regular AMS slots stay `unit*4+slot`, AMS HT uses Bambu tray ids `128+slot`, with legacy `512` accepted during transition.
 - Generic Bambu AMS/AMS HT reports now only auto-claim the exact recently remembered spool for that slot; if that spool is unavailable, Flightdeck leaves the slot for manual confirmation instead of grabbing a similar spool.
 - Bambu printer-side/operator Stop now records as `CANCELLED` when the printer reports `FAILED` with no alarm/error code, instead of polluting reliability stats as `ERROR`.
@@ -49,6 +49,12 @@ Likely next items:
 - H2D/Bambu skip-object metadata can expose MQTT skip IDs in `slice_info.config` while the plate layout JSON uses different internal object IDs.
 - The 3MF parser now still uses exact ID matches when available, but falls back to matching object-layout boxes by basename and occurrence order.
 - Verified against BigBoy's active `Filament Keeper v1_ASA_3h12m` 3MF: object IDs `148`, `463`, `417`, and `439` now include bed bounding boxes for the clickable skip-object map.
+- Backend restart required.
+
+## What was fixed - Session 28.243 (Bambu skip-object map Y axis - 7 June)
+- Bambu plate layout boxes are now flipped vertically into the thumbnail/screen orientation before Flightdeck renders the skip-object map.
+- This keeps the left/right positions unchanged while moving the front/bottom parts to the bottom of Flightdeck's map.
+- Verified against BigBoy's current job: small front `Spool Holder v3.step` object `#417` now maps near the bottom/front instead of the top.
 - Backend restart required.
 
 ## What was fixed - Session 28.240 (Generic AMS auto-claim guard - 7 June)

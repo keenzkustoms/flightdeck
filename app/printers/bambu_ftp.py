@@ -97,6 +97,12 @@ def _parse_3mf(buf: io.BytesIO, plate_number: Optional[int] = None) -> BambuPrev
     filaments = []
     objects = []
     object_boxes, object_boxes_by_name, plate_bounds = _extract_plate_object_boxes(plate_json)
+    if plate_bounds:
+        object_boxes = {k: _flip_bbox_y(v, plate_bounds) for k, v in object_boxes.items()}
+        object_boxes_by_name = {
+            k: [_flip_bbox_y(v, plate_bounds) for v in vals]
+            for k, vals in object_boxes_by_name.items()
+        }
     if plate is not None:
         name_counts: dict[str, int] = {}
         name_box_counts: dict[str, int] = {}
@@ -196,6 +202,15 @@ def _bounds_for_boxes(boxes) -> Optional[dict]:
     max_x = max(b["x"] + b["w"] for b in vals)
     max_y = max(b["y"] + b["h"] for b in vals)
     return {"x": min_x, "y": min_y, "w": max_x - min_x, "h": max_y - min_y}
+
+
+def _flip_bbox_y(box: dict, bounds: dict) -> dict:
+    bounds_y = float(bounds["y"])
+    bounds_max_y = bounds_y + float(bounds["h"])
+    return {
+        **box,
+        "y": bounds_y + (bounds_max_y - (float(box["y"]) + float(box["h"]))),
+    }
 
 
 def _extract_plate_object_boxes(data) -> tuple[dict[int, dict], dict[str, list[dict]], Optional[dict]]:
