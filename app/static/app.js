@@ -2725,7 +2725,7 @@ function _detailLiveHeader(p, printerColor, bannerTextColor) {
         <input type="checkbox"
           data-live-print-enabled
           data-printer-id="${p.id}"
-          data-printer-name="${esc(shop)}"
+          data-printer-name="${esc(primary)}"
           data-print-note="${esc(p.print_enabled_note || '')}"
           ${p.print_enabled ?? true ? 'checked' : ''}>
         Print enabled
