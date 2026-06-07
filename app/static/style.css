@@ -3761,14 +3761,31 @@ button.briefing-row {
 .live-op-slider {
   display: inline-flex;
   align-items: center;
-  width: 5.8rem;
+  width: 8.4rem;
   min-height: 2.1rem;
   padding: 0 0.35rem;
+  background:
+    repeating-linear-gradient(90deg, transparent 0 calc(10% - 1px), rgba(226,232,240,0.28) calc(10% - 1px) 10%);
+  border-radius: 0.45rem;
 }
 
 .live-op-slider input {
   width: 100%;
-  accent-color: var(--accent);
+  accent-color: var(--printing);
+}
+
+.live-op-slider-off input {
+  accent-color: var(--danger);
+}
+
+.live-op-fan-value {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 2.8rem;
+  color: var(--text);
+  font-size: 0.72rem;
+  font-weight: 900;
 }
 
 .live-op-slider input:disabled {

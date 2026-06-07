@@ -1942,15 +1942,17 @@ function _detailLiveOps(p) {
           const raw = p.fan_speeds?.[channel] ?? (channel === 'part' ? p.fan_speed : null);
           const pct = Number.isFinite(Number(raw)) ? Math.round(Number(raw) * 100) : null;
           const value = pct == null ? 0 : Math.max(0, Math.min(100, pct));
+          const roundedValue = Math.round(value / 10) * 10;
+          const datalistId = `fan-ticks-${esc(p.id)}-${esc(channel)}`;
           return `<div class="live-op-fan-row">
-            <span class="live-op-group-label">${esc(label)} ${pct == null ? '--' : pct}%</span>
-            ${[0, 50, 100].map(speed => `<button class="live-op-btn live-op-mini" type="button"
-              data-fan-speed="${speed}" data-fan-channel="${esc(channel)}" data-printer-id="${esc(p.id)}" ${canFan ? '' : 'disabled'}>
-              <span>${speed === 0 ? 'Off' : speed}</span><small>${speed === 0 ? 'fan' : '%'}</small>
-            </button>`).join('')}
-            <label class="live-op-slider" title="${esc(label)} fan fine control">
-              <input type="range" min="0" max="100" step="5" value="${value}" data-fan-slider data-fan-channel="${esc(channel)}" data-printer-id="${esc(p.id)}" ${canFan ? '' : 'disabled'}>
+            <span class="live-op-group-label">${esc(label)}</span>
+            <label class="live-op-slider ${roundedValue > 0 ? 'live-op-slider-on' : 'live-op-slider-off'}" title="${esc(label)} fan fine control">
+              <input type="range" min="0" max="100" step="10" value="${roundedValue}" list="${datalistId}" data-fan-slider data-fan-channel="${esc(channel)}" data-printer-id="${esc(p.id)}" ${canFan ? '' : 'disabled'}>
+              <datalist id="${datalistId}">
+                ${[0,10,20,30,40,50,60,70,80,90,100].map(speed => `<option value="${speed}"></option>`).join('')}
+              </datalist>
             </label>
+            <span class="live-op-fan-value">${pct == null ? '--' : `${roundedValue}%`}</span>
           </div>`;
         }).join('')}
       </div>`
