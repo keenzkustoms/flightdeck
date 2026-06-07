@@ -7523,7 +7523,16 @@ function _fleetWallMetric(label, value, tone = '') {
 function _fleetWallJob(p) {
   const job = p.job || {};
   const active = _activePrinterJob(p);
-  const name = active ? jobDisplayName(job) : p.state === 'finished' && job.filename ? jobDisplayName(job) : _dashboardIssueText(p);
+  const faultStates = ['offline', 'error', 'estop', 'paused'];
+  const name = active
+    ? jobDisplayName(job)
+    : p.state === 'finished' && job.filename
+      ? jobDisplayName(job)
+      : _printerPrintLocked(p)
+        ? 'Dispatch locked'
+        : faultStates.includes(p.state)
+          ? _dashboardIssueText(p)
+          : 'Ready for dispatch';
   const pct = job.progress != null ? Math.max(0, Math.min(100, Math.round(job.progress * 100))) : (p.state === 'finished' ? 100 : 0);
   const eta = job.eta_seconds != null
     ? formatEta(p.eta_calibration?.ratio != null ? Math.round(job.eta_seconds * p.eta_calibration.ratio) : job.eta_seconds)
