@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Annotated, Literal, Optional, Union
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from .paths import PRINTERS_CONFIG_PATH
 
@@ -84,10 +84,27 @@ class PrintersConfig(BaseModel):
     printers: list[PrinterEntry]
     ntfy: Optional[NtfyConfig] = None
 
+    @model_validator(mode="after")
+    def validate_unique_printer_ids(self) -> "PrintersConfig":
+        seen: set[str] = set()
+        duplicates: set[str] = set()
+        for printer in self.printers:
+            if printer.id in seen:
+                duplicates.add(printer.id)
+            seen.add(printer.id)
+        if duplicates:
+            names = ", ".join(sorted(duplicates))
+            raise ValueError(f"Duplicate printer id in printers.yaml: {names}")
+        return self
+
 
 def load() -> PrintersConfig:
+    if not CONFIG_PATH.exists():
+        return PrintersConfig(printers=[])
     with open(CONFIG_PATH) as f:
         data = yaml.safe_load(f)
+    if data is None:
+        data = {"printers": []}
     return PrintersConfig.model_validate(data)
 
 

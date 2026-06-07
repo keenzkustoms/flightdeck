@@ -1,5 +1,10 @@
 # Flightdeck — next session brief
-_Last updated 7 June 2026 (Session 28.231 Health endpoint alias)_
+_Last updated 7 June 2026 (Session 28.232 Printer config startup guard)_
+
+## What was improved - Session 28.232 (Printer config startup guard - 7 June)
+- Flightdeck now starts with an empty fleet if `printers.yaml` is missing or empty, which helps fresh Windows/Pi installs reach the Add Printer screen.
+- Duplicate printer IDs in `printers.yaml` now fail validation with a clear `Duplicate printer id` message instead of producing confusing runtime behavior.
+- Backend restart required.
 
 ## What was added - Session 28.231 (Health endpoint alias - 7 June)
 - Added conventional `/health` alongside the existing `/healthz` endpoint.
