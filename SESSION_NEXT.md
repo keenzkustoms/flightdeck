@@ -1,5 +1,12 @@
 # Flightdeck — next session brief
-_Last updated 7 June 2026 (Session 28.209 Mixed stock-in receiving sheets)_
+_Last updated 7 June 2026 (Session 28.210 On-screen stock-in sheets)_
+
+## What was added - Session 28.210 (On-screen stock-in sheets - 7 June)
+- Stock In orders now have separate `Open sheet` and `Print / PDF` actions.
+- Creating a receiving sheet opens an in-app sheet viewer instead of immediately launching print.
+- The sheet viewer shows QR rows with roll number, colour swatch/name, weight, shelf, pending/received state, and receive links.
+- The sheet viewer has `Print / Save PDF`, which uses the browser print dialog so operators can print paper or save as PDF.
+- Bumped static cache to `app.js?v=325` and `style.css?v=255`; frontend refresh required.
 
 ## What was added - Session 28.209 (Mixed stock-in receiving sheets - 7 June)
 - Stock In receiving sheets now support multiple roll-type lines in one batch.

@@ -11148,7 +11148,8 @@ async function _renderStockInView(listEl) {
           <p>${esc(order.supplier || 'Supplier not set')} ${order.order_ref ? `· ${esc(order.order_ref)}` : ''}</p>
         </div>
         <div class="stock-in-counts">${order.received_count || 0}/${rolls.length} received</div>
-        <button class="button" data-stock-print="${order.id}">Print QR sheet</button>
+        <button class="button" data-stock-sheet="${order.id}">Open sheet</button>
+        <button class="button" data-stock-print="${order.id}">Print / PDF</button>
       </div>
       <table class="stock-in-table"><tbody>${rollRows}</tbody></table>
     </section>`;
@@ -11233,7 +11234,7 @@ async function _renderStockInView(listEl) {
     const order = await r.json();
     showToast('Receiving sheet created', `${order.rolls?.length || 0} roll QR codes ready`, 'success');
     await _renderStockInView(listEl);
-    _printStockInSheet(order);
+    _openStockInSheet(order);
   });
 
   const createForm = listEl.querySelector('#stock-in-create-form');
@@ -11294,33 +11295,86 @@ async function _renderStockInView(listEl) {
       if (order) _printStockInSheet(order);
     });
   });
+  listEl.querySelectorAll('[data-stock-sheet]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const order = orders.find(o => String(o.id) === String(btn.dataset.stockSheet));
+      if (order) _openStockInSheet(order);
+    });
+  });
+}
+
+function _stockInSheetBodyHtml(order) {
+  const rolls = order.rolls || [];
+  const rows = rolls.map((roll, idx) => {
+    const status = roll.status === 'received' ? `Spool #${roll.spool_id}` : 'Pending';
+    return `<div class="stock-sheet-row">
+      <div class="stock-sheet-index">${idx + 1}</div>
+      <img src="/api/stock-in/rolls/${encodeURIComponent(roll.token)}/qr.png">
+      <div class="stock-sheet-roll">
+        <strong>${esc(_stockInRollLabel(roll))}</strong>
+        <div class="stock-sheet-meta">
+          <span><i class="stock-in-swatch" style="background:${esc(roll.color_hex || '#808080')}"></i>${esc(roll.color_name || roll.color_hex || '')}</span>
+          <span>${Math.round(Number(roll.label_weight_g || 0))}g</span>
+          <span>${esc(roll.storage_location_name || 'No shelf set')}</span>
+          <span>${esc(status)}</span>
+        </div>
+        <small>${esc(roll.token)}</small>
+      </div>
+      <a class="tiny-btn" href="#/spools?view=incoming&token=${encodeURIComponent(roll.token)}">Receive</a>
+    </div>`;
+  }).join('');
+  return `<div class="stock-sheet">
+    <div class="stock-sheet-head">
+      <div>
+        <h1>Flightdeck Stock In #${order.id}</h1>
+        <p>${esc(order.supplier || 'Supplier not set')} ${order.order_ref ? `· ${esc(order.order_ref)}` : ''}</p>
+      </div>
+      <div class="stock-sheet-count">${rolls.length} rolls</div>
+    </div>
+    <div class="stock-sheet-table">${rows}</div>
+  </div>`;
+}
+
+function _openStockInSheet(order) {
+  const existing = document.querySelector('.stock-sheet-overlay');
+  if (existing) existing.remove();
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay stock-sheet-overlay';
+  overlay.innerHTML = `<div class="stock-sheet-modal">
+    <div class="stock-sheet-modal-head">
+      <div>
+        <div class="settings-section-title">Receiving Sheet</div>
+        <strong>Stock In #${order.id}</strong>
+      </div>
+      <div class="stock-sheet-actions">
+        <button type="button" class="button" data-stock-sheet-print>Print / Save PDF</button>
+        <button type="button" class="button" data-stock-sheet-close>Close</button>
+      </div>
+    </div>
+    ${_stockInSheetBodyHtml(order)}
+  </div>`;
+  document.body.appendChild(overlay);
+  overlay.querySelector('[data-stock-sheet-close]')?.addEventListener('click', () => overlay.remove());
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+  overlay.querySelector('[data-stock-sheet-print]')?.addEventListener('click', () => _printStockInSheet(order));
 }
 
 function _printStockInSheet(order) {
   const win = window.open('', '_blank');
-  if (!win) return showToast('Print sheet blocked', 'Allow popups to print the QR sheet.', 'warn');
-  const rolls = order.rolls || [];
-  const rows = rolls.map((roll, idx) => `
-    <div class="qr-roll">
-      <img src="/api/stock-in/rolls/${encodeURIComponent(roll.token)}/qr.png">
-      <div>
-        <h2>Roll ${idx + 1} of ${rolls.length}</h2>
-        <strong>${esc(_stockInRollLabel(roll))}</strong>
-        <p>${esc(roll.color_name || roll.color_hex || '')} · ${Math.round(Number(roll.label_weight_g || 0))}g · ${esc(roll.storage_location_name || 'No shelf set')}</p>
-        <small>${esc(roll.token)}</small>
-      </div>
-    </div>`).join('');
+  if (!win) return showToast('Print sheet blocked', 'Allow popups to print or save PDF.', 'warn');
   win.document.write(`<!doctype html><html><head><title>Flightdeck Stock In #${order.id}</title>
     <style>
-      body{font-family:Arial,sans-serif;margin:24px;color:#111} h1{margin:0 0 4px} .meta{color:#555;margin-bottom:18px}
-      .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
-      .qr-roll{border:1px solid #ccc;border-radius:8px;padding:12px;display:grid;grid-template-columns:120px 1fr;gap:12px;break-inside:avoid}
-      img{width:120px;height:120px} h2{font-size:14px;margin:0 0 8px} p{margin:8px 0;color:#333} small{color:#666}
-      @media print{body{margin:12mm}.qr-roll{page-break-inside:avoid}}
+      body{font-family:Arial,sans-serif;margin:24px;color:#111}
+      h1{margin:0 0 4px;font-size:24px}.stock-sheet-head{display:flex;justify-content:space-between;gap:16px;margin-bottom:18px}
+      .stock-sheet-head p{margin:0;color:#555}.stock-sheet-count{font-weight:700}
+      .stock-sheet-table{display:grid;gap:10px}.stock-sheet-row{border:1px solid #ccc;border-radius:8px;padding:10px;display:grid;grid-template-columns:34px 96px 1fr;gap:12px;align-items:center;break-inside:avoid}
+      img{width:96px;height:96px}.stock-sheet-index{font-size:18px;font-weight:700}.stock-sheet-roll strong{display:block;margin-bottom:6px}
+      .stock-sheet-meta{display:flex;flex-wrap:wrap;gap:8px 14px;color:#333;font-size:13px}.stock-sheet-meta span{white-space:nowrap}
+      .stock-in-swatch{border:1px solid #aaa;border-radius:999px;display:inline-block;height:12px;margin-right:5px;vertical-align:-1px;width:12px}
+      small{display:block;color:#666;margin-top:6px}.tiny-btn{display:none}
+      @media print{body{margin:12mm}.stock-sheet-row{page-break-inside:avoid}}
     </style></head><body>
-    <h1>Flightdeck Stock In #${order.id}</h1>
-    <div class="meta">${esc(order.supplier || 'Supplier not set')} ${order.order_ref ? `· ${esc(order.order_ref)}` : ''}</div>
-    <div class="grid">${rows}</div>
+    ${_stockInSheetBodyHtml(order)}
     <script>setTimeout(()=>print(),400)</script>
     </body></html>`);
   win.document.close();
