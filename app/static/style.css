@@ -6584,22 +6584,22 @@ button.live-route-node:hover {
   inset: 0;
 }
 
-.obj-map-rotate-cw .obj-map-stage,
-.object-map-modal-stage.obj-map-rotate-cw {
-  aspect-ratio: 9 / 16;
+.obj-map-rotated .obj-map-stage,
+.object-map-modal-stage.obj-map-rotated {
+  aspect-ratio: 1 / 1;
 }
 
-.obj-map-rotate-cw .obj-map-plane {
+.obj-map-rotated .obj-map-plane {
   position: absolute;
   left: 50%;
   top: 50%;
-  width: 177.78%;
-  transform: translate(-50%, -50%) rotate(90deg);
+  width: var(--obj-map-plane-scale, 135%);
+  transform: translate(-50%, -50%) rotate(var(--obj-map-rotation, 45deg));
   transform-origin: center;
 }
 
-.obj-map-rotate-cw .obj-chip-id {
-  transform: rotate(-90deg);
+.obj-map-rotated .obj-chip-id {
+  transform: rotate(var(--obj-map-counter-rotation, -45deg));
 }
 
 .obj-map-region {
@@ -9401,7 +9401,7 @@ button.live-route-node:hover {
   background-size: 1.2rem 1.2rem;
 }
 
-.object-map-modal-stage.obj-map-rotate-cw {
+.object-map-modal-stage.obj-map-rotated {
   max-height: 65vh;
 }
 
