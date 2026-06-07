@@ -6561,7 +6561,8 @@ button.live-route-node:hover {
   background-size: 1.2rem 1.2rem;
 }
 
-.obj-map-plane {
+.obj-map-plane,
+.obj-map-image-plane {
   position: relative;
   width: 100%;
 }
@@ -6589,13 +6590,22 @@ button.live-route-node:hover {
   aspect-ratio: 1 / 1;
 }
 
-.obj-map-rotated .obj-map-plane {
+.obj-map-rotated .obj-map-plane,
+.obj-map-rotated .obj-map-image-plane {
   position: absolute;
   left: 50%;
   top: 50%;
+  transform-origin: center;
+}
+
+.obj-map-rotated .obj-map-plane {
   width: var(--obj-map-plane-scale, 135%);
   transform: translate(-50%, -50%) rotate(var(--obj-map-rotation, 45deg));
-  transform-origin: center;
+}
+
+.obj-map-rotated .obj-map-image-plane {
+  width: var(--obj-map-image-scale, 135%);
+  transform: translate(-50%, -50%) rotate(var(--obj-map-image-rotation, 45deg));
 }
 
 .obj-map-rotated .obj-chip-id {

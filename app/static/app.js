@@ -3797,18 +3797,21 @@ function _objectMapHtml(id, data) {
     ? `<img src="${esc(data.plate_image_url)}?map=${encodeURIComponent(imageVersion)}" alt="Plate object map" loading="lazy">`
     : '';
   const rotation = Number(data?.map_rotation || 0);
+  const imageRotation = Number(data?.map_image_rotation ?? rotation);
   const rotated = rotation > 0;
   const classes = `obj-map${hasGeometry ? ' obj-map-has-geometry' : ' obj-map-no-geometry'}${rotated ? ' obj-map-rotated' : ''}`;
   const rotationStyle = rotated
-    ? ` style="--obj-map-rotation:${rotation.toFixed(2)}deg;--obj-map-counter-rotation:${(-rotation).toFixed(2)}deg;--obj-map-plane-scale:${rotation === 90 ? '177.78%' : '135%'}"`
+    ? ` style="--obj-map-rotation:${rotation.toFixed(2)}deg;--obj-map-image-rotation:${imageRotation.toFixed(2)}deg;--obj-map-counter-rotation:${(-rotation).toFixed(2)}deg;--obj-map-plane-scale:${rotation === 90 ? '177.78%' : '135%'};--obj-map-image-scale:${imageRotation === 90 ? '177.78%' : '135%'}"`
     : '';
   const helper = hasGeometry
     ? 'Tap the failed part on the plate map.'
     : `No bed positions in this 3MF; use the object ID shown on the printer screen. Bambu/Orca IDs can be high. ${availableObjects.length} objects still available.`;
   return `<div class="${classes}"${rotationStyle}>
     <div class="obj-map-stage obj-map-open" data-printer-id="${esc(id)}" title="Open large object selector">
-      <div class="obj-map-plane">
+      <div class="obj-map-image-plane">
         ${image}
+      </div>
+      <div class="obj-map-plane">
         ${hasGeometry ? `<div class="obj-map-overlay">${mapButtons}</div>` : ''}
       </div>
     </div>
@@ -3826,9 +3829,10 @@ function _largeObjectMapHtml(id, data) {
     ? `<img src="${esc(data.plate_image_url)}?map=${encodeURIComponent(imageVersion)}" alt="Large plate preview" loading="eager">`
     : '<div class="object-map-missing">No thumbnail available</div>';
   const rotation = Number(data?.map_rotation || 0);
+  const imageRotation = Number(data?.map_image_rotation ?? rotation);
   const rotated = rotation > 0;
   const rotationStyle = rotated
-    ? ` style="--obj-map-rotation:${rotation.toFixed(2)}deg;--obj-map-counter-rotation:${(-rotation).toFixed(2)}deg;--obj-map-plane-scale:${rotation === 90 ? '177.78%' : '135%'}"`
+    ? ` style="--obj-map-rotation:${rotation.toFixed(2)}deg;--obj-map-image-rotation:${imageRotation.toFixed(2)}deg;--obj-map-counter-rotation:${(-rotation).toFixed(2)}deg;--obj-map-plane-scale:${rotation === 90 ? '177.78%' : '135%'};--obj-map-image-scale:${imageRotation === 90 ? '177.78%' : '135%'}"`
     : '';
   const buttons = objects.map(obj => {
     const isExcluded = obj.state === 'excluded';
@@ -3857,8 +3861,10 @@ function _largeObjectMapHtml(id, data) {
     : 'This file has no bed-position metadata. Match the object ID shown on the printer screen, then select it below.';
   return `<div class="object-map-modal-body">
     <div class="object-map-modal-stage${hasGeometry ? ' has-geometry' : ''}${rotated ? ' obj-map-rotated' : ''}"${rotationStyle}>
-      <div class="obj-map-plane">
+      <div class="obj-map-image-plane">
         ${image}
+      </div>
+      <div class="obj-map-plane">
         ${hasGeometry ? `<div class="obj-map-overlay">${buttons}</div>` : ''}
       </div>
     </div>

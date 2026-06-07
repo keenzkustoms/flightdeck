@@ -2,13 +2,14 @@
 
 Latest GitHub/Pi state:
 - Branch: main
-- Latest commit: current HEAD after this handoff (`Preview Bambu skip map at 45 degrees`)
+- Latest commit: current HEAD after this handoff (`Separate Bambu skip map image rotation`)
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
-- Refresh cachebust currently: ?cachebust=368
+- Refresh cachebust currently: ?cachebust=369
 
 Recent work:
+- Bambu skip-object map rendering now treats the red object boxes as the source-of-truth overlay and rotates/scales the thumbnail image underneath independently. Current settings: object boxes at 45 degrees clockwise, background image at 90 degrees clockwise.
 - Bambu skip-object map display rotation is currently set to 45 degrees clockwise as a user-requested visual check after the full 90-degree version looked too far.
 - Bambu skip-object maps now render the thumbnail/object overlay as a 90-degree clockwise display rotation while preserving the underlying skip IDs. This is to match the H2D touchscreen orientation from the user's photo.
 - Bambu/H2D skip-object maps now fall back to matching plate-layout boxes by object name and occurrence when Bambu's plate JSON uses different internal IDs from the MQTT skip IDs, and the Y axis is flipped to match the Bambu screen/thumbnail orientation. BigBoy's current small front `Spool Holder` cylinder is object `#417`.
@@ -68,6 +69,13 @@ Likely next items:
 - Bambu object maps now send `map_rotation=45` for a user-requested visual check between the unrotated/flipped map and the full 90-degree clockwise screen orientation.
 - Frontend object maps now use CSS rotation variables, so the thumbnail/hit regions and counter-rotated labels can support non-90-degree rotations.
 - Static cache bumped to `app.js?v=368` and `style.css?v=297`; backend restart and frontend refresh required.
+
+## What was changed - Session 28.246 (Bambu skip-object image-only adjustment - 7 June)
+- Bambu skip-object maps now expose separate `map_rotation` and `map_image_rotation` values.
+- The frontend renders the thumbnail image and red object hit boxes on separate transform layers.
+- The red boxes remain the source-of-truth overlay, while the background image can be rotated/scaled underneath to line the white object shapes up with those boxes.
+- Current H2D trial values: boxes `45deg`, image `90deg`.
+- Static cache bumped to `app.js?v=369` and `style.css?v=298`; backend restart and frontend refresh required.
 
 ## What was fixed - Session 28.240 (Generic AMS auto-claim guard - 7 June)
 - Generic Bambu AMS reports now only auto-claim the exact recent spool remembered for that slot.
