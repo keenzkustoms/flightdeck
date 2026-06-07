@@ -9074,7 +9074,9 @@ function _attachSlicerEvents(el) {
         const data = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Slicer check failed');
         const label = kind === 'api' ? 'Slicer API' : (kind === 'worker' ? 'Slicer worker' : 'Browser Orca');
-        const detail = data.version ? `${label} reachable · ${data.version}` : `${label} reachable`;
+        const detail = data.auth_required
+          ? `${label} reachable · sign-in required`
+          : data.version ? `${label} reachable · ${data.version}` : `${label} reachable`;
         if (status) {
           status.textContent = detail;
           status.dataset.tone = 'ok';

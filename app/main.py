@@ -1594,7 +1594,8 @@ async def check_slicer_connection(body: SlicerConnectionCheckRequest):
             resp = await client.get(target)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Could not reach {kind} URL: {exc}") from exc
-    if resp.status_code >= 400:
+    auth_required = kind == "browser" and resp.status_code in {401, 403}
+    if resp.status_code >= 400 and not auth_required:
         raise HTTPException(status_code=resp.status_code, detail=f"{kind} URL returned HTTP {resp.status_code}")
 
     payload = None
@@ -1611,6 +1612,7 @@ async def check_slicer_connection(body: SlicerConnectionCheckRequest):
         "url": target,
         "status": resp.status_code,
         "version": version,
+        "auth_required": auth_required,
     }
 
 
