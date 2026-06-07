@@ -2,14 +2,14 @@
 
 Latest GitHub/Pi state:
 - Branch: main
-- Latest commit: current HEAD after this handoff (`Add Bambu plate underlay to skip map`)
+- Latest commit: current HEAD after this handoff (`Undo Bambu plate underlay`)
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
-- Refresh cachebust currently: ?cachebust=373
+- Refresh cachebust currently: ?cachebust=374
 
 Recent work:
-- Bambu skip-object maps now draw an H2D/Bambu-style plate frame underlay behind the thumbnail image to better match the printer touchscreen context, without moving the locked red overlay.
+- Reverted the Bambu/H2D plate underlay because it made the skip-object map worse. Current map is back to the previous best: locked red overlay, thumbnail image `45deg`, `x=5%`, `y=-92%`.
 - Bambu skip-object thumbnail layer now supports image-only X/Y offsets; current H2D trial keeps the red overlay locked and moves the rotated thumbnail by `x=5%`, `y=-92%` to bring the star down inside `#439` and move the spoon shapes left into `#148/#463`.
 - Bambu skip-object red overlay remains locked unrotated/axis-aligned. The thumbnail image is now on a separate layer underneath and currently rotates 45 degrees to try to bring the left spoon/keeper shape into the `#148` box without moving the red boxes.
 - Bambu skip-object map rotation is now locked at `0` so the red overlay stays axis-aligned like the user's second reference image: `#148/#463` vertical on the left, `#417` bottom-left, and `#439` across the right. Do not rotate or move the red overlay in future thumbnail alignment work.
@@ -107,10 +107,10 @@ Likely next items:
 - Red boxes remain locked and must not be moved.
 - Static cache bumped to `app.js?v=372` and `style.css?v=301`; backend restart and frontend refresh required.
 
-## What was added - Session 28.251 (Bambu skip-object plate underlay - 8 June)
-- Added a Bambu/H2D-style plate underlay behind the object thumbnail layer so Flightdeck's map more closely resembles the printer touchscreen plate.
-- The underlay is visual only and does not affect object hit regions, red overlay coordinates, skip IDs, or thumbnail transforms.
-- Static cache bumped to `app.js?v=373` and `style.css?v=302`; frontend refresh required.
+## What was reverted - Session 28.251 (Bambu skip-object plate underlay - 8 June)
+- Reverted the Bambu/H2D-style plate underlay because it made the object map worse.
+- Current live target is back to the previous best state: locked red overlay, thumbnail `45deg`, `map_image_offset_x=5`, `map_image_offset_y=-92`.
+- Static cache bumped to `app.js?v=374` and `style.css?v=303`; frontend refresh required.
 
 ## What was fixed - Session 28.240 (Generic AMS auto-claim guard - 7 June)
 - Generic Bambu AMS reports now only auto-claim the exact recent spool remembered for that slot.

@@ -6583,8 +6583,6 @@ button.live-route-node:hover {
 }
 
 .obj-map-stage img {
-  position: relative;
-  z-index: 1;
   display: block;
   width: 100%;
   aspect-ratio: 16 / 9;
@@ -6592,38 +6590,6 @@ button.live-route-node:hover {
   opacity: 0.96;
   filter: brightness(1.08) contrast(1.08);
 }
-
-.obj-bambu-plate-underlay {
-  position: absolute;
-  inset: 2.5% 2.5% 10% 2.5%;
-  z-index: 0;
-  border: 2px solid rgba(203,213,225,0.28);
-  border-radius: 0.45rem;
-  background:
-    linear-gradient(135deg, transparent 0 7%, rgba(15,23,42,0.58) 7% 13%, transparent 13%) top left / 44% 22% no-repeat,
-    linear-gradient(225deg, transparent 0 7%, rgba(15,23,42,0.58) 7% 13%, transparent 13%) top right / 44% 22% no-repeat,
-    linear-gradient(45deg, transparent 0 8%, rgba(15,23,42,0.64) 8% 15%, transparent 15%) bottom left / 44% 24% no-repeat,
-    linear-gradient(315deg, transparent 0 8%, rgba(15,23,42,0.64) 8% 15%, transparent 15%) bottom right / 44% 24% no-repeat,
-    #6f7885;
-  box-shadow:
-    inset 0 0 0 1px rgba(15,23,42,0.35),
-    inset 0 -1.2rem 0 rgba(31,41,55,0.5);
-}
-
-.obj-bambu-plate-underlay::before,
-.obj-bambu-plate-underlay::after {
-  content: "";
-  position: absolute;
-  bottom: 3.2%;
-  width: 13%;
-  height: 4%;
-  border-radius: 0.12rem;
-  background: rgba(226,232,240,0.68);
-  box-shadow: inset 0 -2px 0 rgba(15,23,42,0.32);
-}
-
-.obj-bambu-plate-underlay::before { left: 3.5%; }
-.obj-bambu-plate-underlay::after { right: 3.5%; }
 
 .obj-map-overlay {
   position: absolute;
