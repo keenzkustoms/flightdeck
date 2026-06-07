@@ -3614,10 +3614,14 @@ function _objectMapHtml(id, data) {
   const objects = data?.objects || [];
   const bounds = data?.plate_bounds;
   const hasGeometry = bounds && bounds.w > 0 && bounds.h > 0 && objects.some(o => o.bbox);
-  const mapButtons = objects.map(obj => {
+  const availableObjects = objects.filter(o => o.state !== 'excluded');
+  const pseudoCols = Math.max(1, Math.ceil(Math.sqrt(objects.length)));
+  const pseudoRows = Math.max(1, Math.ceil(objects.length / pseudoCols));
+  const mapButtons = objects.map((obj, index) => {
     const isExcluded = obj.state === 'excluded';
+    const isCurrent = obj.state === 'current';
     const rawName = obj.name || `Object ${obj.id ?? ''}`;
-    const safeName = rawName.replace(/"/g, '&quot;');
+    const safeName = esc(rawName);
     const safeId = obj.id ?? '';
     const shortName = (obj.label || rawName).replace(/.*[/\\]/, '');
     if (hasGeometry && obj.bbox) {
@@ -3625,22 +3629,27 @@ function _objectMapHtml(id, data) {
       const top = ((obj.bbox.y - bounds.y) / bounds.h) * 100;
       const width = (obj.bbox.w / bounds.w) * 100;
       const height = (obj.bbox.h / bounds.h) * 100;
-      return `<button type="button" class="obj-map-region obj-exclude-btn${isExcluded ? ' is-excluded' : ''}"
+      return `<button type="button" class="obj-map-region obj-exclude-btn${isExcluded ? ' is-excluded' : ''}${isCurrent ? ' is-current' : ''}"
         style="left:${left.toFixed(2)}%;top:${top.toFixed(2)}%;width:${Math.max(width, 5).toFixed(2)}%;height:${Math.max(height, 5).toFixed(2)}%"
-        data-obj-name="${safeName}" data-printer-id="${id}" data-obj-id="${safeId}" ${isExcluded ? 'disabled' : ''}
+        data-obj-name="${safeName}" data-obj-label="${esc(shortName)}" data-printer-id="${id}" data-obj-id="${safeId}" ${isExcluded ? 'disabled' : ''}
         title="${esc(shortName)}">${esc(safeId || shortName)}</button>`;
     }
-    return `<button type="button" class="obj-map-chip obj-exclude-btn${isExcluded ? ' is-excluded' : ''}"
-      data-obj-name="${safeName}" data-printer-id="${id}" data-obj-id="${safeId}" ${isExcluded ? 'disabled' : ''}
+    const col = index % pseudoCols;
+    const row = Math.floor(index / pseudoCols);
+    const left = 8 + ((col + 0.5) / pseudoCols) * 84;
+    const top = 16 + ((row + 0.5) / pseudoRows) * 68;
+    return `<button type="button" class="obj-map-chip obj-exclude-btn${isExcluded ? ' is-excluded' : ''}${isCurrent ? ' is-current' : ''}"
+      style="left:${left.toFixed(2)}%;top:${top.toFixed(2)}%;"
+      data-obj-name="${safeName}" data-obj-label="${esc(shortName)}" data-printer-id="${id}" data-obj-id="${safeId}" ${isExcluded ? 'disabled' : ''}
       title="${esc(shortName)}">${safeId !== '' ? `#${esc(safeId)}` : esc(shortName)}</button>`;
   }).join('');
   const image = data?.plate_image_url
     ? `<img src="${esc(data.plate_image_url)}?map=${Date.now()}" alt="Plate object map" loading="lazy">`
     : '';
-  const classes = `obj-map${hasGeometry ? ' obj-map-has-geometry' : ' obj-map-no-geometry'}`;
+  const classes = `obj-map${hasGeometry ? ' obj-map-has-geometry' : ' obj-map-no-geometry obj-map-approx'}`;
   const helper = hasGeometry
     ? 'Tap the failed part on the plate map.'
-    : 'No object positions in this 3MF; match the object ID shown on the printer screen.';
+    : `Approximate selector: match the object ID shown on the printer screen. ${availableObjects.length} objects still available.`;
   return `<div class="${classes}">
     <div class="obj-map-stage">
       ${image}
@@ -3693,9 +3702,10 @@ document.getElementById('view-printer').addEventListener('click', e => {
   const id = btn.dataset.printerId;
   const objectId = btn.dataset.objId;
   if (!name || !id) return;
-  const shortName = name.replace(/.*[/\\]/, '');
+  const shortName = btn.dataset.objLabel || name.replace(/.*[/\\]/, '');
+  const idText = objectId !== undefined && objectId !== '' ? ` #${objectId}` : '';
   _modal.show(
-    `Exclude "${shortName}" from this print? The printer will skip this object.`,
+    `Exclude "${shortName}"${idText} from this print? The printer will skip this object and Flightdeck cannot un-skip it mid-print.`,
     () => sendExcludeObject(id, name, objectId)
   );
 });

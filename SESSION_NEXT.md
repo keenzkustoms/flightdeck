@@ -1,5 +1,12 @@
 # Flightdeck — next session brief
-_Last updated 7 June 2026 (Session 28.211 Stock-in edit and clear)_
+_Last updated 7 June 2026 (Session 28.212 Exclude object map fallback)_
+
+## What was improved - Session 28.212 (Exclude object map fallback - 7 June)
+- Bambu/Klipper Objects panel now presents no-geometry object IDs as an approximate plate selector instead of a loose chip pile.
+- Exact object geometry still wins when the active 3MF exposes object bounding boxes.
+- The approximate selector is labelled honestly and reminds operators to match the object ID shown on the printer screen.
+- Exclude confirmation now includes the object label/ID and warns that Flightdeck cannot un-skip the object mid-print.
+- Bumped static cache to `app.js?v=329` and `style.css?v=260`; frontend refresh required.
 
 ## What was added - Session 28.211 (Stock-in edit and clear - 7 June)
 - Pending incoming stock rolls can now be edited before they become real spool records.
