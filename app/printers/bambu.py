@@ -550,15 +550,17 @@ class BambuPrinter:
                 # reliability failure.
                 job_key = self._current_job_key
                 err_msg = alarm_message or (f"Bambu error: {err_code}" if err_code else "Print failed")
-                if self._cancel_requested:
+                operator_cancel = self._cancel_requested or _bambu_failed_is_operator_cancel(err_code, alarm_message)
+                if operator_cancel:
                     print_id = db.on_print_ended(
                         self.id, job_key,
                         final_state="CANCELLED",
                         layers_completed=job.layer_current if job else None,
                     )
                     if print_id:
+                        detail = "User-initiated cancel" if self._cancel_requested else "Printer-side operator cancel"
                         db.log_decision(self.id, "cancel_resolved",
-                                       f"User-initiated cancel confirmed from Bambu FAILED state ({err_msg})",
+                                       f"{detail} confirmed from Bambu FAILED state ({err_msg})",
                                        print_id=print_id)
                         if self._ams_slot_snapshot_print_id == print_id:
                             db.log_decision(self.id, "spool_no_deduction_cancelled",
@@ -613,19 +615,30 @@ class BambuPrinter:
             # Pre-existing failure not yet in DB — close it and show error once.
             if job_key:
                 err_msg = alarm_message or (f"Bambu error: {err_code}" if err_code else "Print failed")
+                operator_cancel = _bambu_failed_is_operator_cancel(err_code, alarm_message)
                 print_id = db.on_print_ended(
                     self.id, job_key,
-                    final_state="ERROR",
+                    final_state="CANCELLED" if operator_cancel else "ERROR",
                     layers_completed=job.layer_current if job else None,
-                    error_message=err_msg,
+                    error_message=None if operator_cancel else err_msg,
                 )
+                if print_id:
+                    if operator_cancel:
+                        db.log_decision(self.id, "cancel_resolved",
+                                       "Printer-side operator cancel seen after service start",
+                                       print_id=print_id)
+                    else:
+                        db.log_decision(self.id, "error_resolved",
+                                       f"Stale error at service start: {err_msg}",
+                                       print_id=print_id)
+                if operator_cancel:
+                    self._error_job_key = None
+                    self._error_print_id = None
+                    self._error_seen_at = 0.0
+                    return "idle"
                 self._error_job_key = job_key
                 self._error_print_id = print_id
                 self._error_seen_at = time.monotonic()
-                if print_id:
-                    db.log_decision(self.id, "error_resolved",
-                                   f"Stale error at service start: {err_msg}",
-                                   print_id=print_id)
             return "error"
 
         return "offline"  # UNKNOWN or anything unexpected
@@ -1245,6 +1258,11 @@ def _bambu_alarm_message(print_data: dict) -> Optional[str]:
     for code in candidates:
         return f"Bambu alarm {_format_bambu_display_code(code)}"
     return None
+
+
+def _bambu_failed_is_operator_cancel(err_code, alarm_message: Optional[str]) -> bool:
+    """Bambu reports printer-screen Stop as FAILED, usually without an error code."""
+    return not alarm_message and not _normalise_bambu_alarm_code(err_code)
 
 
 def _split_ams_slot(slot: int) -> tuple[int, int]:

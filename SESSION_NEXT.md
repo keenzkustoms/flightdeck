@@ -2,13 +2,14 @@
 
 Latest GitHub/Pi state:
 - Branch: main
-- Latest commit: current HEAD after this handoff (`Filter no-stats prints from health`)
+- Latest commit: current HEAD after this handoff (`Treat code-free Bambu failed as cancel`)
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
 - Refresh cachebust currently: ?cachebust=365
 
 Recent work:
+- Bambu printer-side/operator Stop now records as `CANCELLED` when the printer reports `FAILED` with no alarm/error code, instead of polluting reliability stats as `ERROR`.
 - Print Watch focus now preserves the active camera image while refreshing status/HUD text, preventing the double flash when the same printer stays selected.
 - Printer health now excludes prints marked no-stats/Flightdeck testing from 14d failure totals, early-failure counts, cancelled totals, and success-rate math.
 - Fleet Wall added with Small/Medium/Large modes.
@@ -33,6 +34,12 @@ Likely next items:
 - Continue slicer/API integration and profile filtering.
 - Continue stock-in QR/label workflow.
 - Make Windows installer/update flow smoother.
+
+## What was fixed - Session 28.239 (Bambu operator cancel stats - 7 June)
+- Bambu printer-side/operator Stop now maps code-free `FAILED` reports to `CANCELLED`.
+- Alarm-coded Bambu failures still record as `ERROR`, so real failures such as AMS mapping errors remain visible.
+- Existing H2D generic `Print failed` rows from this session were corrected on the Pi from `ERROR` to `CANCELLED`.
+- Backend restart required.
 
 ## What was fixed - Session 28.238 (Print Watch focus flash - 7 June)
 - Print Watch no longer rebuilds the focused camera image when the selected printer/camera is unchanged.
