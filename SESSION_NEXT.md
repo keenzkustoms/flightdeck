@@ -6,11 +6,12 @@ Latest GitHub/Pi state:
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
-- Refresh cachebust currently: ?cachebust=376 / style.css?v=306
+- Refresh cachebust currently: ?cachebust=376 / style.css?v=307
 
 Recent work:
+- Bambu per-object thumbnail slices currently use `transform: rotate(25deg)` on `.obj-map-image-piece` as the latest visual trial. This rotates only the white object slices, not the red overlay.
 - Bambu/Klipper live fan controls no longer show Off/50/100 preset buttons; each fan now uses one 10%-step percentage slider with a visible percent readout and red/green off/on styling.
-- Bambu per-object thumbnail slices currently use `transform: rotate(10deg)` on `.obj-map-image-piece` as a visual trial. This rotates only the white object slices, not the red overlay.
+- Previous Bambu per-object thumbnail slice trial used `transform: rotate(10deg)` on `.obj-map-image-piece`.
 - Bambu skip-object maps now support `map_image_mode=per_object`, which slices the thumbnail by each object's bbox and renders that image piece inside its own locked red overlay box. This keeps the red boxes as source of truth and avoids moving the whole bed thumbnail as one layer.
 - Bambu skip-object thumbnail offsets are now both `0` so the thumbnail sits flat under the locked red overlay. Current trial is red overlay locked, thumbnail angle `45deg`, `x=0%`, `y=0%`.
 - Reverted the Bambu/H2D plate underlay because it made the skip-object map worse. Current map is back to the previous best: locked red overlay, thumbnail image `45deg`, `x=5%`, `y=-92%`.
