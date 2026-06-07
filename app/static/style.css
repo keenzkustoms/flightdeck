@@ -8534,6 +8534,41 @@ select optgroup {
   flex: 1;
 }
 
+.theme-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.theme-preset {
+  min-height: 2rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.42rem;
+  border: 1px solid var(--border);
+  border-radius: 0.45rem;
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+  padding: 0.35rem 0.6rem;
+  cursor: pointer;
+}
+
+.theme-preset span {
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: 999px;
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.18);
+}
+
+.theme-preset:hover,
+.theme-preset-active {
+  color: var(--text);
+  border-color: var(--printing);
+  background: rgba(59,130,246,0.08);
+}
+
 .accent-swatches {
   display: flex;
   gap: 0.625rem;

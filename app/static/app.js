@@ -9485,11 +9485,20 @@ function _attachFilamentEvents(el, refresh = () => _renderSettingsContent('filam
 
 const _ACCENT_COLORS = [
   { label: 'Blue',   value: '#3b82f6' },
+  { label: 'Red',    value: '#ef4444' },
   { label: 'Purple', value: '#8b5cf6' },
   { label: 'Teal',   value: '#14b8a6' },
   { label: 'Green',  value: '#22c55e' },
   { label: 'Orange', value: '#f59e0b' },
   { label: 'Pink',   value: '#ec4899' },
+];
+
+const _THEME_PRESETS = [
+  { label: 'Flightdeck Blue', value: '#3b82f6' },
+  { label: 'Flightdeck Red', value: '#ef4444' },
+  { label: 'Workshop Green', value: '#22c55e' },
+  { label: 'Amber Bench', value: '#f59e0b' },
+  { label: 'Purple Lab', value: '#8b5cf6' },
 ];
 
 function _settingToggle(key, options, current) {
@@ -9997,6 +10006,12 @@ function _attachPreferencesEvents(el) {
 
 function _appearanceCategoryHtml() {
   const accent = (_serverSettings.accent ?? '#3b82f6').trim();
+  const presets = _THEME_PRESETS.map(t =>
+    `<button class="theme-preset${t.value === accent ? ' theme-preset-active' : ''}"
+      data-accent="${t.value}" type="button">
+      <span style="background:${t.value}"></span>${esc(t.label)}
+    </button>`
+  ).join('');
   const swatches = _ACCENT_COLORS.map(c =>
     `<button class="accent-swatch${c.value === accent ? ' accent-swatch-active' : ''}"
       style="background:${c.value}" data-accent="${c.value}" title="${c.label}"></button>`
@@ -10007,9 +10022,13 @@ function _appearanceCategoryHtml() {
 
   return `
     <div class="settings-section">
-      <div class="settings-section-title">Accent Color</div>
+      <div class="settings-section-title">Theme</div>
       <div class="settings-form-row">
-        <label class="settings-label">Theme colour</label>
+        <label class="settings-label">Preset</label>
+        <div class="theme-presets">${presets}</div>
+      </div>
+      <div class="settings-form-row">
+        <label class="settings-label">Custom accent</label>
         <div class="accent-swatches">${swatches}</div>
       </div>
     </div>
@@ -10031,9 +10050,7 @@ function _appearanceCategoryHtml() {
 }
 
 function _attachAppearanceEvents(el) {
-  el.querySelectorAll('.accent-swatch').forEach(swatch => {
-    swatch.addEventListener('click', () => {
-      const color = swatch.dataset.accent;
+  const selectAccent = color => {
       document.documentElement.style.setProperty('--printing', color);
       _serverSettings.accent = color;
       fetch('/api/settings/accent', {
@@ -10042,8 +10059,16 @@ function _attachAppearanceEvents(el) {
         body: JSON.stringify({ value: color }),
       }).catch(() => {});
       el.querySelectorAll('.accent-swatch').forEach(s =>
-        s.classList.toggle('accent-swatch-active', s === swatch)
+        s.classList.toggle('accent-swatch-active', s.dataset.accent === color)
       );
+      el.querySelectorAll('.theme-preset').forEach(p =>
+        p.classList.toggle('theme-preset-active', p.dataset.accent === color)
+      );
+  };
+
+  el.querySelectorAll('.accent-swatch, .theme-preset').forEach(swatch => {
+    swatch.addEventListener('click', () => {
+      selectAccent(swatch.dataset.accent);
     });
   });
 
