@@ -9629,6 +9629,32 @@ const _SIDEBAR_TEXT_COLORS = [
   { label: 'Amber', value: '#fcd34d' },
 ];
 
+function _themeFavourites() {
+  try {
+    const parsed = JSON.parse(_serverSettings.theme_favourites || '[]');
+    return Array.isArray(parsed) ? parsed.filter(f => f && f.name) : [];
+  } catch {
+    return [];
+  }
+}
+
+function _themeFavouritePayload(name = '') {
+  return {
+    id: `theme-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
+    name: name.trim() || 'Theme favourite',
+    accent: _safeCssHex(_serverSettings.accent, '#3b82f6'),
+    theme_background: (_serverSettings.theme_background || 'classic').replace(/[^a-z0-9_-]/gi, '') || 'classic',
+    theme_background_color: _safeCssHex(_serverSettings.theme_background_color, '#0a0a0f'),
+    sidebar_text_color: _safeCssHex(_serverSettings.sidebar_text_color, '#8fa8c8'),
+  };
+}
+
+function _themeFavouriteDefaultName() {
+  const bg = (_serverSettings.theme_background || 'classic').replace(/[^a-z0-9_-]/gi, '') || 'classic';
+  const background = _BACKGROUND_THEMES.find(t => t.value === bg)?.label || (bg === 'custom' ? 'Custom' : 'Theme');
+  return `${background} Flightdeck`;
+}
+
 function _settingToggle(key, options, current) {
   return options.map(({ value, label }) =>
     `<button class="setting-toggle-btn${current === value ? ' setting-toggle-active' : ''}"
@@ -10157,6 +10183,15 @@ function _appearanceCategoryHtml() {
     `<button class="accent-swatch sidebar-text-swatch${c.value === sidebarText ? ' accent-swatch-active' : ''}"
       style="background:${c.value}" data-sidebar-text="${c.value}" title="${c.label}"></button>`
   ).join('');
+  const favouriteRows = _themeFavourites().map(f => {
+    const bg = f.theme_background === 'custom' ? _safeCssHex(f.theme_background_color, '#0a0a0f') : (_BACKGROUND_THEMES.find(t => t.value === f.theme_background)?.swatch || '#0a0a0f');
+    return `<div class="theme-favourite-row" data-theme-favourite="${esc(f.id)}">
+      <span class="theme-favourite-preview" style="--fav-bg:${esc(bg)};--fav-side:${esc(_safeCssHex(f.sidebar_text_color, '#8fa8c8'))};--fav-accent:${esc(_safeCssHex(f.accent, '#3b82f6'))}"></span>
+      <strong>${esc(f.name)}</strong>
+      <button class="theme-favourite-apply" type="button">Apply</button>
+      <button class="theme-favourite-delete" type="button" title="Delete favourite">Delete</button>
+    </div>`;
+  }).join('');
 
   const tempUnit = _serverSettings.temp_unit ?? 'C';
   const timeFormat = _serverSettings.time_format ?? '24h';
@@ -10189,6 +10224,16 @@ function _appearanceCategoryHtml() {
           <input class="settings-color-input" type="color" value="${esc(sidebarText)}" data-sidebar-text-custom>
         </div>
       </div>
+      <div class="settings-form-row">
+        <label class="settings-label">Favourites</label>
+        <div class="theme-favourites">
+          <div class="theme-favourite-save">
+            <input class="settings-input theme-favourite-name" data-theme-favourite-name value="${esc(_themeFavouriteDefaultName())}" placeholder="Theme name">
+            <button class="settings-save-btn" type="button" data-theme-favourite-save>Save current</button>
+          </div>
+          <div class="theme-favourite-list">${favouriteRows || '<div class="settings-empty">No saved theme favourites yet.</div>'}</div>
+        </div>
+      </div>
     </div>
     <div class="settings-section">
       <div class="settings-section-title">Units &amp; Format</div>
@@ -10208,6 +10253,11 @@ function _appearanceCategoryHtml() {
 }
 
 function _attachAppearanceEvents(el) {
+  const refreshAppearancePanel = () => {
+    el.innerHTML = _appearanceCategoryHtml();
+    _attachAppearanceEvents(el);
+  };
+
   const selectAccent = color => {
       document.documentElement.style.setProperty('--printing', color);
       _serverSettings.accent = color;
@@ -10273,6 +10323,33 @@ function _attachAppearanceEvents(el) {
     }
   };
 
+  const applyFavourite = async fav => {
+    if (!fav) return;
+    _serverSettings.accent = _safeCssHex(fav.accent, '#3b82f6');
+    _serverSettings.theme_background = (fav.theme_background || 'classic').replace(/[^a-z0-9_-]/gi, '') || 'classic';
+    _serverSettings.theme_background_color = _safeCssHex(fav.theme_background_color, '#0a0a0f');
+    _serverSettings.sidebar_text_color = _safeCssHex(fav.sidebar_text_color, '#8fa8c8');
+    _applyAppearanceSettings();
+    try {
+      await Promise.all([
+        _saveSetting('accent', _serverSettings.accent),
+        _saveSetting('theme_background', _serverSettings.theme_background),
+        _saveSetting('theme_background_color', _serverSettings.theme_background_color),
+        _saveSetting('sidebar_text_color', _serverSettings.sidebar_text_color),
+      ]);
+      refreshAppearancePanel();
+      showToast('Theme applied', fav.name, 'success');
+    } catch (err) {
+      showToast('Theme apply failed', err.message || '', 'error');
+    }
+  };
+
+  const saveFavourites = async favourites => {
+    const json = JSON.stringify(favourites);
+    _serverSettings.theme_favourites = json;
+    await _saveSetting('theme_favourites', json);
+  };
+
   el.querySelectorAll('.accent-swatch, .theme-preset[data-accent]').forEach(swatch => {
     swatch.addEventListener('click', () => {
       selectAccent(swatch.dataset.accent);
@@ -10301,6 +10378,36 @@ function _attachAppearanceEvents(el) {
 
   el.querySelector('[data-sidebar-text-custom]')?.addEventListener('change', e => {
     selectSidebarText(e.target.value, true);
+  });
+
+  el.querySelector('[data-theme-favourite-save]')?.addEventListener('click', async () => {
+    const input = el.querySelector('[data-theme-favourite-name]');
+    const favourite = _themeFavouritePayload(input?.value || _themeFavouriteDefaultName());
+    const favourites = _themeFavourites();
+    favourites.unshift(favourite);
+    try {
+      await saveFavourites(favourites.slice(0, 12));
+      refreshAppearancePanel();
+      showToast('Theme favourite saved', favourite.name, 'success');
+    } catch (err) {
+      showToast('Theme favourite save failed', err.message || '', 'error');
+    }
+  });
+
+  el.querySelectorAll('[data-theme-favourite]').forEach(row => {
+    const id = row.dataset.themeFavourite;
+    row.querySelector('.theme-favourite-apply')?.addEventListener('click', () => {
+      applyFavourite(_themeFavourites().find(f => f.id === id));
+    });
+    row.querySelector('.theme-favourite-delete')?.addEventListener('click', async () => {
+      const favourites = _themeFavourites().filter(f => f.id !== id);
+      try {
+        await saveFavourites(favourites);
+        refreshAppearancePanel();
+      } catch (err) {
+        showToast('Theme favourite delete failed', err.message || '', 'error');
+      }
+    });
   });
 
   el.querySelectorAll('.setting-toggle-btn').forEach(btn => {
