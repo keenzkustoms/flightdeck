@@ -13,6 +13,10 @@ import json
 log = logging.getLogger(__name__)
 
 
+class BambuFtpError(RuntimeError):
+    """Operator-facing Bambu FTP/FTPS error."""
+
+
 @dataclass
 class BambuPreview:
     image_png: bytes
@@ -222,6 +226,24 @@ def _extract_plate_object_boxes(data) -> tuple[dict[int, dict], Optional[dict]]:
     return boxes, plate_bounds
 
 
+def friendly_bambu_ftp_error(exc: Exception) -> str:
+    text = str(exc).strip() or exc.__class__.__name__
+    lowered = text.lower()
+    if "426" in lowered or "partial" in lowered or "partial file" in lowered:
+        return (
+            "Bambu storage rejected the upload before it completed. "
+            "Check the printer USB/SD storage is inserted, formatted, and not full, then try again."
+        )
+    if "550" in lowered or "no such file" in lowered or "not found" in lowered:
+        return (
+            "Bambu storage path is not available. "
+            "Check the printer USB/SD storage and refresh the Print Bay before retrying."
+        )
+    if "timed out" in lowered or "timeout" in lowered or "connection" in lowered:
+        return "Could not reach the Bambu FTP service. Check the printer is online and LAN access is enabled."
+    return f"Bambu FTP upload failed: {text}"
+
+
 def fetch_bambu_preview(ip: str, access_code: str, subtask_name: str, plate_number: Optional[int] = None) -> Optional[BambuPreview]:
     """Download the .3mf for the current job and extract thumbnail + metadata."""
     ftp = _ImplicitFTP_TLS()
@@ -276,6 +298,8 @@ def upload_bambu_file(ip: str, access_code: str, filename: str, data: bytes) -> 
         ftp.set_pasv(True)
         buf.seek(0)
         ftp.storbinary(f"STOR /{filename}", buf)
+    except Exception as exc:
+        raise BambuFtpError(friendly_bambu_ftp_error(exc)) from exc
     finally:
         try:
             ftp.quit()

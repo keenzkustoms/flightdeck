@@ -1,5 +1,10 @@
 # Flightdeck — next session brief
-_Last updated 7 June 2026 (Session 28.234 Slicer connection diagnostics)_
+_Last updated 7 June 2026 (Session 28.235 Bambu FTP error hints)_
+
+## What was improved - Session 28.235 (Bambu FTP error hints - 7 June)
+- Bambu FTPS upload failures now raise operator-facing messages instead of raw FTP codes.
+- The `426 partial file` case now points operators at USB/SD storage being missing, unformatted, full, or otherwise rejected by the printer.
+- Backend restart required.
 
 ## What was added - Session 28.234 (Slicer connection diagnostics - 7 June)
 - Added `POST /api/slicer/check` so Flightdeck can test Browser Orca, Slicer API, and Worker URLs from the host running Flightdeck.
