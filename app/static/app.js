@@ -3785,10 +3785,10 @@ function _detailObjectsUnavailablePanel(data) {
 function _objectMapHtml(id, data) {
   const objects = data?.objects || [];
   const bounds = data?.plate_bounds;
-  const hasGeometry = bounds && bounds.w > 0 && bounds.h > 0 && objects.some(o => o.bbox);
-  const availableObjects = objects.filter(o => o.state !== 'excluded');
-  const mappedAvailableObjects = hasGeometry ? availableObjects.filter(o => o.bbox) : availableObjects;
   const topDown = _objectMapIsTopDown(data);
+  const hasGeometry = bounds && bounds.w > 0 && bounds.h > 0 && objects.some(o => o.bbox || (topDown && _objectMapHasPoint(o)));
+  const availableObjects = objects.filter(o => o.state !== 'excluded');
+  const mappedAvailableObjects = hasGeometry ? availableObjects.filter(o => o.bbox || (topDown && _objectMapHasPoint(o))) : availableObjects;
   const mapButtons = objects.map(obj => {
     const isExcluded = obj.state === 'excluded';
     const isCurrent = obj.state === 'current';
@@ -3797,8 +3797,9 @@ function _objectMapHtml(id, data) {
     const safeId = obj.id ?? '';
     const shortName = (obj.label || rawName).replace(/.*[/\\]/, '');
     const displayId = safeId !== '' ? `#${esc(safeId)}` : esc(shortName);
-    if (hasGeometry && obj.bbox) {
-      const geom = _objectMapBoxStyle(bounds, obj.bbox, data);
+    const pointGeometry = topDown && _objectMapHasPoint(obj);
+    if (hasGeometry && (obj.bbox || pointGeometry)) {
+      const geom = pointGeometry ? _objectMapPointHitStyle(bounds, obj) : _objectMapBoxStyle(bounds, obj.bbox, data);
       return `<button type="button" class="obj-map-region obj-exclude-btn${isExcluded ? ' is-excluded' : ''}${isCurrent ? ' is-current' : ''}"
         style="${geom}"
         data-obj-name="${safeName}" data-obj-label="${esc(shortName)}" data-printer-id="${id}" data-obj-id="${safeId}" ${isExcluded ? 'disabled' : ''}
@@ -3888,6 +3889,21 @@ function _objectMapIsTopDown(data) {
   return data?.map_image_mode === 'top_down' || data?.map_view === 'top_down';
 }
 
+function _objectMapHasPoint(obj) {
+  return Number.isFinite(Number(obj?.x)) && Number.isFinite(Number(obj?.y));
+}
+
+function _objectMapPointPosition(bounds, obj) {
+  const padding = 8;
+  const contentArea = 100 - (padding * 2);
+  const yMax = Number(bounds.y) + Number(bounds.h);
+  let x = padding + ((Number(obj.x) - Number(bounds.x)) / Number(bounds.w)) * contentArea;
+  let y = padding + ((yMax - Number(obj.y)) / Number(bounds.h)) * contentArea;
+  x = Math.max(5, Math.min(95, x));
+  y = Math.max(5, Math.min(95, y));
+  return { x, y };
+}
+
 function _objectMapTransformPoint(bounds, x, y, data = {}) {
   let px = ((Number(x) - bounds.x) / bounds.w) * 100;
   let py = ((Number(y) - bounds.y) / bounds.h) * 100;
@@ -3944,18 +3960,32 @@ function _objectMapMarkerStyle(bounds, box, data = {}) {
   return `left:${centerX.toFixed(2)}%;top:${centerY.toFixed(2)}%`;
 }
 
+function _objectMapPointMarkerStyle(bounds, obj) {
+  const p = _objectMapPointPosition(bounds, obj);
+  return `left:${p.x.toFixed(2)}%;top:${p.y.toFixed(2)}%`;
+}
+
+function _objectMapPointHitStyle(bounds, obj) {
+  const p = _objectMapPointPosition(bounds, obj);
+  const size = 12;
+  return `left:${Math.max(0, p.x - (size / 2)).toFixed(2)}%;top:${Math.max(0, p.y - (size / 2)).toFixed(2)}%;width:${size.toFixed(2)}%;height:${size.toFixed(2)}%`;
+}
+
 function _objectMapTopDownObjects(data) {
   const objects = data?.objects || [];
   const bounds = data?.plate_bounds;
   if (!bounds || bounds.w <= 0 || bounds.h <= 0) return '';
-  return objects.filter(obj => obj.bbox).map(obj => {
+  return objects.filter(obj => obj.bbox || _objectMapHasPoint(obj)).map(obj => {
     const isExcluded = obj.state === 'excluded';
     const isCurrent = obj.state === 'current';
     const rawName = obj.name || `Object ${obj.id ?? ''}`;
     const shortName = (obj.label || rawName).replace(/.*[/\\]/, '');
     const displayId = obj.id !== undefined && obj.id !== null ? `#${obj.id}` : '?';
+    const style = _objectMapHasPoint(obj)
+      ? _objectMapPointMarkerStyle(bounds, obj)
+      : _objectMapMarkerStyle(bounds, obj.bbox, data);
     return `<div class="obj-map-top-object${isExcluded ? ' is-excluded' : ''}${isCurrent ? ' is-current' : ''}"
-      style="${_objectMapMarkerStyle(bounds, obj.bbox, data)}"
+      style="${style}"
       title="${esc(shortName)}" aria-hidden="true"><span class="obj-map-top-block"></span><span class="obj-map-id-dot">${esc(displayId)}</span></div>`;
   }).join('');
 }
@@ -4009,11 +4039,11 @@ function _objectMapStyleVars(bounds, rotated, rotation, imageRotation, imageOffs
 function _largeObjectMapHtml(id, data) {
   const objects = data?.objects || [];
   const bounds = data?.plate_bounds;
-  const hasGeometry = bounds && bounds.w > 0 && bounds.h > 0 && objects.some(o => o.bbox);
-  const availableObjects = objects.filter(o => o.state !== 'excluded');
-  const mappedAvailableObjects = hasGeometry ? availableObjects.filter(o => o.bbox) : availableObjects;
-  const imageVersion = objects.map(o => `${o.id ?? ''}:${o.state ?? ''}`).join('-') || 'current';
   const topDown = _objectMapIsTopDown(data);
+  const hasGeometry = bounds && bounds.w > 0 && bounds.h > 0 && objects.some(o => o.bbox || (topDown && _objectMapHasPoint(o)));
+  const availableObjects = objects.filter(o => o.state !== 'excluded');
+  const mappedAvailableObjects = hasGeometry ? availableObjects.filter(o => o.bbox || (topDown && _objectMapHasPoint(o))) : availableObjects;
+  const imageVersion = objects.map(o => `${o.id ?? ''}:${o.state ?? ''}`).join('-') || 'current';
   const image = data?.plate_image_url
     ? `<img class="${topDown ? 'obj-map-preview-image' : ''}" src="${esc(data.plate_image_url)}?map=${encodeURIComponent(imageVersion)}" alt="Large plate preview" loading="eager">`
     : '<div class="object-map-missing">No thumbnail available</div>';
@@ -4032,9 +4062,10 @@ function _largeObjectMapHtml(id, data) {
     const safeId = obj.id ?? '';
     const shortName = (obj.label || rawName).replace(/.*[/\\]/, '');
     const displayId = safeId !== '' ? `#${esc(safeId)}` : esc(shortName);
-    if (hasGeometry && obj.bbox) {
+    const pointGeometry = topDown && _objectMapHasPoint(obj);
+    if (hasGeometry && (obj.bbox || pointGeometry)) {
       return `<button type="button" class="obj-map-region obj-exclude-btn${isExcluded ? ' is-excluded' : ''}${isCurrent ? ' is-current' : ''}"
-        style="${_objectMapBoxStyle(bounds, obj.bbox, data)}"
+        style="${pointGeometry ? _objectMapPointHitStyle(bounds, obj) : _objectMapBoxStyle(bounds, obj.bbox, data)}"
         data-obj-name="${safeName}" data-obj-label="${esc(shortName)}" data-printer-id="${id}" data-obj-id="${safeId}" ${isExcluded ? 'disabled' : ''}
         title="${esc(shortName)}"><span class="obj-chip-id">${displayId}</span></button>`;
     }

@@ -6,9 +6,10 @@ Latest GitHub/Pi state:
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
-- Refresh cachebust currently: ?cachebust=392 / style.css?v=321
+- Refresh cachebust currently: ?cachebust=393 / style.css?v=321
 
 Recent work:
+- Bambu skip-object ID pins now use the same source as Bambuddy: `slice_info.config` provides the skip ID/name and `Metadata/plate_N.json` provides that object's bbox center by name. This fixes cases like Can Opener where G-code object-label IDs made `701` appear on the wrong thumbnail footprint.
 - Camera stream caching/stale-connection handling has been tightened. `/api/camera/*` responses now send stronger no-store/no-buffer headers, and the frontend quietly refreshes visible live camera `<img>` streams after 2 minutes or when the browser tab becomes visible again.
 - Bambu skip-object maps now use the active 3MF/print thumbnail as the visible plate preview behind the Bambuddy-style object IDs. The old top-down diagnostic grid/exploded shape view is no longer the primary visual; transparent hit regions and the ID/name skip list still use the original Bambu object IDs.
 - Bambu skip-object map bounds now preserve the 3MF plate/preview bounds when available instead of replacing them with the tight recovered G-code object bounds. This avoids the skip-object map appearing exploded compared with the print-detail/top-preview layout.
@@ -126,6 +127,13 @@ Likely next items:
 - Added a frontend stale-connection refresh for visible camera images: each visible stream gets a fresh timestamped URL after 2 minutes, and all visible streams refresh when the browser tab becomes visible again.
 - This targets browser/MJPEG stale connections without changing the configured camera frame rates: Bambu remains 5 fps via ffmpeg; Voron/Greyhound remains pass-through from Crowsnest.
 - Static cache bumped to `app.js?v=392`; backend restart and frontend refresh required.
+
+## What was fixed - Session 28.267 (Bambu skip-object ID pin mapping - 8 June)
+- Fixed Bambu skip-object IDs being attached to the wrong visual footprint on plates where G-code object-label IDs do not match the `slice_info.config` object order.
+- The backend now matches each `slice_info.config` skip ID/name to the center of the same object name in `Metadata/plate_N.json`, following Bambuddy's source-of-truth approach.
+- The frontend now prefers those plate JSON `x/y` centers for Bambu top-down pin and click-target placement, falling back to bboxes only when no point exists.
+- Verified against the active Can Opener H2D plate: `701` now maps to the upper-left hook area instead of the lower-left footprint.
+- Static cache bumped to `app.js?v=393`; backend restart and frontend refresh required.
 
 ## What was fixed - Session 28.241 (AMS HT slot canonicalization - 7 June)
 - Regular AMS slots continue to use `unit*4 + slot` indexes.

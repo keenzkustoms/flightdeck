@@ -102,7 +102,7 @@ def _parse_3mf(buf: io.BytesIO, plate_number: Optional[int] = None) -> BambuPrev
     filament_type = filament_el.get("type") if filament_el is not None else None
     filaments = []
     objects = []
-    object_boxes, object_boxes_by_name, plate_bounds = _extract_plate_object_boxes(plate_json)
+    object_boxes, object_boxes_by_name, object_points_by_name, plate_bounds = _extract_plate_object_boxes(plate_json)
     if plate_bounds:
         object_boxes = {k: _flip_bbox_y(v, plate_bounds) for k, v in object_boxes.items()}
         object_boxes_by_name = {
@@ -116,6 +116,7 @@ def _parse_3mf(buf: io.BytesIO, plate_number: Optional[int] = None) -> BambuPrev
     if plate is not None:
         name_counts: dict[str, int] = {}
         name_box_counts: dict[str, int] = {}
+        name_point_counts: dict[str, int] = {}
         for el in plate.findall("filament"):
             color = el.get("color")
             used_g = el.get("used_g")
@@ -142,11 +143,19 @@ def _parse_3mf(buf: io.BytesIO, plate_number: Optional[int] = None) -> BambuPrev
                 box_index = name_box_counts[base] - 1
                 if box_index < len(matching_boxes):
                     box = matching_boxes[box_index]
+            point = None
+            matching_points = object_points_by_name.get(name) or object_points_by_name.get(base) or []
+            if matching_points:
+                name_point_counts[base] = name_point_counts.get(base, 0) + 1
+                point_index = name_point_counts[base] - 1
+                if point_index < len(matching_points):
+                    point = matching_points[point_index]
             objects.append({
                 "id": identify_id,
                 "name": base,
                 "label": f"{base} #{name_counts[base]}" if name_counts[base] > 1 else base,
                 "state": "excluded" if el.get("skipped", "false").lower() == "true" else "available",
+                **({"x": point["x"], "y": point["y"]} if point else {}),
                 **({"bbox": box} if box else {}),
                 **({"shape": gcode_object_shapes[identify_id]} if identify_id in gcode_object_shapes else {}),
             })
@@ -224,9 +233,10 @@ def _flip_bbox_y(box: dict, bounds: dict) -> dict:
     }
 
 
-def _extract_plate_object_boxes(data) -> tuple[dict[int, dict], dict[str, list[dict]], Optional[dict]]:
+def _extract_plate_object_boxes(data) -> tuple[dict[int, dict], dict[str, list[dict]], dict[str, list[dict]], Optional[dict]]:
     boxes: dict[int, dict] = {}
     boxes_by_name: dict[str, list[dict]] = {}
+    points_by_name: dict[str, list[dict]] = {}
     plate_bounds = None
 
     def walk(node):
@@ -255,6 +265,13 @@ def _extract_plate_object_boxes(data) -> tuple[dict[int, dict], dict[str, list[d
             if isinstance(raw_name, str) and bbox:
                 base = raw_name.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
                 boxes_by_name.setdefault(base, []).append(bbox)
+                point = {
+                    "x": float(bbox["x"]) + (float(bbox["w"]) / 2),
+                    "y": float(bbox["y"]) + (float(bbox["h"]) / 2),
+                }
+                points_by_name.setdefault(raw_name, []).append(point)
+                if base != raw_name:
+                    points_by_name.setdefault(base, []).append(point)
             for value in node.values():
                 walk(value)
         elif isinstance(node, list):
@@ -262,7 +279,7 @@ def _extract_plate_object_boxes(data) -> tuple[dict[int, dict], dict[str, list[d
                 walk(value)
 
     walk(data)
-    return boxes, boxes_by_name, plate_bounds
+    return boxes, boxes_by_name, points_by_name, plate_bounds
 
 
 def _extract_gcode_object_geometry(gcode: str) -> tuple[dict[int, dict], dict[int, dict]]:
