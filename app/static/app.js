@@ -1914,7 +1914,7 @@ function _detailLiveOps(p) {
   const isMoonraker = p.kind === 'moonraker';
   const isBambu = p.kind === 'bambu';
   const canFan = (isMoonraker || isBambu) && !['offline', 'error', 'estop'].includes(p.state || '');
-  const canJog = (isMoonraker || isBambu) && !['offline', 'printing', 'paused', 'finished', 'error', 'estop'].includes(p.state || '');
+  const canJog = (isMoonraker || isBambu) && !['offline', 'printing', 'finished', 'error', 'estop'].includes(p.state || '');
   const canHome = (isMoonraker || isBambu) && !['offline', 'printing', 'paused', 'finished', 'error', 'estop'].includes(p.state || '');
   const presets = _preheatPresets(p);
   const preheatButtons = presets.map(row => `<button class="live-op-btn" type="button"

@@ -6,9 +6,10 @@ Latest GitHub/Pi state:
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
-- Refresh cachebust currently: ?cachebust=396 / style.css?v=322
+- Refresh cachebust currently: ?cachebust=397 / style.css?v=322
 
 Recent work:
+- Live Ops jog controls now allow paused printers, which is needed for recovery cases like the H2D reporting `paused` with a Bambu alarm. Jog still stays disabled for active printing, finished, offline, error, and estop states.
 - Bambu XYZ jog is now wired through the installed Bambu package's validated `gcode_line` route (`G91`, bounded `G1 X/Y/Z`, `G90`). The Live Ops jog pad enables for idle/safe Bambu printers instead of showing "Jog unavailable"; Bambu Home All still uses the existing `home_printer()` path.
 - Klipper/Moonraker printers have a compact XYZ jog pad in Live Ops. X/Y jogs are 10mm steps, Z jogs are 1mm steps, XY home sits in the pad centre, and backend `/api/printers/{id}/jog` keeps X/Y capped at 50mm and Z capped at 10mm.
 - Windows desktop installer shortcuts now use a packaged `app/static/flightdeck.ico` file for the Flightdeck icon. Both fresh installs and the standalone desktop-shortcut helper prefer the `.ico` and fall back to the PNG if it is missing.
@@ -168,6 +169,11 @@ Likely next items:
 - Enabled the same bounded XYZ jog endpoint for Bambu printers using the Bambu package's validated `Printer.gcode()` / MQTT `gcode_line` path.
 - Bambu Live Ops jog buttons now enable when the printer is in a safe idle state; printing, paused, error, finished, offline, and estop states still disable jog.
 - Static cache bumped to `app.js?v=396`; backend restart and frontend refresh required.
+
+## What was fixed - Session 28.273 (Paused printer jog enablement - 8 June)
+- Live Ops jog controls now remain enabled for paused printers so recovery/clearance moves are possible.
+- Jog is still disabled during active printing, finished, offline, error, and estop states.
+- Static cache bumped to `app.js?v=397`; frontend refresh required.
 
 ## What was fixed - Session 28.241 (AMS HT slot canonicalization - 7 June)
 - Regular AMS slots continue to use `unit*4 + slot` indexes.
