@@ -6,9 +6,10 @@ Latest GitHub/Pi state:
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
-- Refresh cachebust currently: ?cachebust=406 / style.css?v=332
+- Refresh cachebust currently: ?cachebust=407 / style.css?v=333
 
 Recent work:
+- Snapmaker U1 setup camera defaults were corrected after live UI review: choosing Snapmaker U1 now replaces the old generic Moonraker `/webcam/?action=stream|snapshot` defaults with U1-style `/webcam/stream.mjpg` and `/webcam/snapshot.jpg` paths, and the placeholders match those paths.
 - Ported Steve/keenzkustoms' Snapmaker U1 ecosystem support from his fork as a narrow Flightdeck-main change. Flightdeck now accepts `connection.type: snapmaker_u1`, polls U1 as a Moonraker-family printer with four independent toolheads (`T0`-`T3`), shows a Snapmaker U1 toolhead loadout/selected-tool route on Live, exposes Snapmaker U1 in printer setup with default MJPEG/snapshot paths, and documents the config shape in `printers.yaml.example`. Deliberately not ported from Steve's fork yet: adaptive snapshot/WebRTC camera experiments or broad polling/camera changes.
   - Deploy note: GitHub was pushed and the Pi repo pulled the change via `/api/update` to commit `731562f`, but the updater reported `restart_required: true`. SSH restart from this Windows session still failed with public-key auth, so the running Pi backend needs a Flightdeck service restart before the new `snapmaker_u1` config parser is active.
 - Fleet Wall Medium now uses a compact AMS feed-route strip instead of the full AMS bay visual. It reuses the Live-page route truth, shows active/ready filament paths to Left/Right nozzle or toolhead, and falls back to loaded spool chips when nothing is actively feeding.

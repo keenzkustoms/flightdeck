@@ -120,6 +120,11 @@ function _snapmakerSnapshotUrl(host) {
   return clean ? `http://${clean}/webcam/snapshot.jpg` : '';
 }
 
+function _isGenericMjpegUrl(value, mode) {
+  const path = mode === 'snapshot' ? 'snapshot' : 'stream';
+  return !value || new RegExp(`/webcam/\\?action=${path}$`, 'i').test(String(value).trim());
+}
+
 function _bambuLightWordHtml(p) {
   const lightState = _effectiveLightState(p);
   const lit = lightState === 'on';
@@ -9534,14 +9539,14 @@ function _printersCategoryHtml(printers) {
             <div class="settings-form-row">
               <label class="settings-label" for="p-stream-url">Stream URL</label>
               <input class="settings-input" id="p-stream-url" type="text"
-                placeholder="http://192.168.1.100/webcam/?action=stream">
+                placeholder="http://192.168.1.100/webcam/stream.mjpg">
             </div>
             <div class="settings-form-row">
               <label class="settings-label" for="p-snap-url">
                 Snapshot URL <span class="settings-hint">(optional)</span>
               </label>
               <input class="settings-input" id="p-snap-url" type="text"
-                placeholder="http://192.168.1.100/webcam/?action=snapshot">
+                placeholder="http://192.168.1.100/webcam/snapshot.jpg">
             </div>
           </div>
         </div>
@@ -9639,8 +9644,8 @@ function _attachPrintersEvents(el) {
       const stream = el.querySelector('#p-stream-url');
       const snapshot = el.querySelector('#p-snap-url');
       const host = el.querySelector('#p-host')?.value;
-      if (stream && !stream.value) stream.value = _snapmakerMjpegUrl(host);
-      if (snapshot && !snapshot.value) snapshot.value = _snapmakerSnapshotUrl(host);
+      if (stream && _isGenericMjpegUrl(stream.value, 'stream')) stream.value = _snapmakerMjpegUrl(host);
+      if (snapshot && _isGenericMjpegUrl(snapshot.value, 'snapshot')) snapshot.value = _snapmakerSnapshotUrl(host);
     } else if (connType === 'simulated') {
       el.querySelector('input[name="icon"][value="generic"]').checked = true;
     }
@@ -9657,10 +9662,10 @@ function _attachPrintersEvents(el) {
     if (connType !== 'snapmaker_u1') return;
     const stream = el.querySelector('#p-stream-url');
     const snapshot = el.querySelector('#p-snap-url');
-    if (stream && (!stream.value || /\/webcam\/stream\.mjpg$/i.test(stream.value))) {
+    if (stream && (_isGenericMjpegUrl(stream.value, 'stream') || /\/webcam\/stream\.mjpg$/i.test(stream.value))) {
       stream.value = _snapmakerMjpegUrl(el.querySelector('#p-host')?.value);
     }
-    if (snapshot && (!snapshot.value || /\/webcam\/snapshot\.jpg$/i.test(snapshot.value))) {
+    if (snapshot && (_isGenericMjpegUrl(snapshot.value, 'snapshot') || /\/webcam\/snapshot\.jpg$/i.test(snapshot.value))) {
       snapshot.value = _snapmakerSnapshotUrl(el.querySelector('#p-host')?.value);
     }
   });
