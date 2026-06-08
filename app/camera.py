@@ -96,6 +96,14 @@ class BambuCameraProxy:
         if self._clients == 0:
             await self.stop()
 
+    async def stop_when_idle(self, delay: float = 0.75) -> bool:
+        """Stop ffmpeg shortly after the browser has released its image stream."""
+        await asyncio.sleep(delay)
+        if self._clients == 0:
+            await self.stop()
+            return True
+        return False
+
     async def _watchdog(self) -> None:
         """Kill ffmpeg if no frames arrive — covers both stale streams and stuck reconnects.
         Also recycles the RTSP session periodically: H2D firmware silently freezes

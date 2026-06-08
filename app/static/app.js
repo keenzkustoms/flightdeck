@@ -2597,6 +2597,32 @@ function _routeParams(prefix) {
   return new URLSearchParams(qs);
 }
 
+function _releaseCameraStreams(cameraIds) {
+  if (FLIGHTDECK_DEMO) return;
+  const ids = [...new Set((cameraIds || []).filter(Boolean).map(String))];
+  ids.forEach(id => {
+    const url = `/api/camera/${encodeURIComponent(id)}/release`;
+    try {
+      if (navigator.sendBeacon) {
+        navigator.sendBeacon(url, new Blob([], { type: 'text/plain' }));
+        return;
+      }
+    } catch {}
+    fetch(url, { method: 'POST', keepalive: true }).catch(() => {});
+  });
+}
+
+function _stopCameraImages(selector) {
+  const ids = [];
+  document.querySelectorAll(selector).forEach(img => {
+    const id = img.dataset.cameraId;
+    if (id && img.getAttribute('src')) ids.push(id);
+    img.removeAttribute('src');
+    img.dataset.stopped = '1';
+  });
+  _releaseCameraStreams(ids);
+}
+
 function router() {
   const route = parseRoute();
   if (route.legacyFilament) {
@@ -2612,12 +2638,9 @@ function router() {
 
   // Abort MJPEG streams when leaving their view — mobile browsers don't close
   // orphaned <img> connections automatically, which exhausts connection pool slots.
-  if (route.view !== 'printer') {
-    const img = document.querySelector('#detail-cam-img');
-    if (img) { img.src = ''; img.dataset.stopped = '1'; }
-  }
+  if (route.view !== 'printer' || route.subtab !== 'live') _stopCameraImages('#detail-cam-img');
   if (route.view !== 'cameras') {
-    document.querySelectorAll('#cameras-grid img').forEach(img => { img.src = ''; });
+    _stopCameraImages('#cameras-grid img');
     _camerasFull = false;
     if (_printWatchTimer) {
       clearInterval(_printWatchTimer);
@@ -2625,7 +2648,7 @@ function router() {
     }
   }
   if (route.view !== 'fleet') {
-    document.querySelectorAll('#fleet-wall-page img').forEach(img => { img.src = ''; });
+    _stopCameraImages('#fleet-wall-page img');
     _fleetWallSignature = '';
   }
   const wasOnSettings = _onSettings;
