@@ -7854,7 +7854,7 @@ let _fleetWallSignature = '';
 let _fleetWallMode = localStorage.getItem('fleetWallMode') || 'medium';
 
 function _safeFleetWallMode(mode) {
-  return ['xsmall', 'medium', 'large'].includes(mode) ? mode : 'medium';
+  return ['xsmall', 'small', 'medium', 'large'].includes(mode) ? mode : 'medium';
 }
 
 function _fleetWallModeControls() {
@@ -7862,6 +7862,7 @@ function _fleetWallModeControls() {
   return `<div class="fleet-wall-mode" role="group" aria-label="Fleet Wall size">
     ${[
       ['xsmall', 'XS'],
+      ['small', 'Small'],
       ['medium', 'Medium'],
       ['large', 'Large'],
     ].map(([mode, label]) => `<button type="button"

@@ -2,15 +2,16 @@
 
 Latest GitHub/Pi state:
 - Branch: main
-- Latest commit: current HEAD after this handoff (`Remove Camera Wall and map Small to XS`)
+- Latest commit: current HEAD after this handoff (`Restore Small and shrink Fleet Wall XS`)
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
-- Refresh cachebust currently: ?cachebust=400 / style.css?v=324
+- Refresh cachebust currently: ?cachebust=401 / style.css?v=325
 
 Recent work:
+- Restored Fleet Wall `Small` as its own mode. `XS` is now the extra-small camera-wall-sized mode with capped non-stretching columns (`minmax(18rem, 24rem)`) so three printers do not expand to Medium-sized cards.
 - Camera Wall has been removed from command search and the top nav. Legacy `#/cameras` URLs now route back to Fleet Wall.
-- Fleet Wall no longer exposes a separate Small mode; the `XS` button now uses the previous Small camera-only wall layout (`minmax(280px)`, hidden body panels, 16:10 camera tiles).
+- Fleet Wall `XS` keeps normal live camera URLs, hides body panels, and uses compact 16:10 camera tiles.
 - The active camera release endpoint/ffmpeg kill attempt was removed because it could race shared Bambu streams and make the wall black again. Camera pages are back to clearing `<img>` sources only, leaving the existing proxy idle cleanup to handle workers.
 - Fleet Wall now has an `XS` mode that keeps the normal live camera URLs but strips the body panels down to a compact camera-first wall, closer to the original camera view.
 - Reverted the Fleet Wall live-camera cap / `profile=fleet&fps=2` attempt because it made the live Fleet Wall camera areas black on the real 3-printer Pi view. Do not reapply that approach as-is; next camera-load attempt should preserve normal Fleet Wall stream URLs and first verify actual image rendering on the live Pi.
