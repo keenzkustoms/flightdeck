@@ -3134,11 +3134,22 @@ function _slotRouteActive(p, unit, slot) {
     const nozzles = _h2dNozzleActivity(p);
     const hasNozzleSignal = nozzles.left || nozzles.right;
     const isHt = _isAmsHtUnit(unit);
+    if (isHt) return true;
     if (hasNozzleSignal) {
-      if (isHt) return nozzles.right;
       if (nozzles.right && !nozzles.left) return false;
       return nozzles.left && !!slot.active;
     }
+  }
+  return !!slot.active;
+}
+
+function _slotRouteFed(p, unit, slot) {
+  if (!slot || slot.empty) return false;
+  if (_isH2dPrinter(p)) {
+    const nozzles = _h2dNozzleActivity(p);
+    const hasNozzleSignal = nozzles.left || nozzles.right;
+    const isHt = _isAmsHtUnit(unit);
+    if (hasNozzleSignal) return isHt ? nozzles.right : (nozzles.left && !!slot.active);
   }
   return !!slot.active;
 }
@@ -3165,28 +3176,31 @@ function _detailFilamentRoute(p) {
         ? `#${spool.id} ${[spool.color_name, spool.material].filter(Boolean).join(' · ')}`
         : _slotProfileLabel(slot) || slot.type || 'Loaded filament';
       const dest = _routeDestinationLabel(p, unit);
-      const title = `${slotLabel} feeding ${dest}${spoolLabel ? ' · ' + spoolLabel : ''}`;
+      const fedNow = _slotRouteFed(p, unit, slot);
+      const routeClass = fedNow ? '' : ' live-filament-route-idle';
+      const routeBadge = fedNow ? 'Fed now' : 'Ready';
+      const title = `${slotLabel} ${fedNow ? 'feeding' : 'ready for'} ${dest}${spoolLabel ? ' · ' + spoolLabel : ''}`;
       if (FLIGHTDECK_DEMO) {
-        routes.push(`<div class="demo-filament-route${_isAmsHtUnit(unit) ? ' demo-filament-route-ht' : ''}" style="--route-colour:${colour};--route-text:${textColour};--route-slot:${Number(slot.idx || 0)}" title="${esc(title)}">
+        routes.push(`<div class="demo-filament-route${routeClass}${_isAmsHtUnit(unit) ? ' demo-filament-route-ht' : ''}" style="--route-colour:${colour};--route-text:${textColour};--route-slot:${Number(slot.idx || 0)}" title="${esc(title)}">
           <span class="demo-route-port" aria-hidden="true"></span>
           <span class="demo-route-line" aria-hidden="true"></span>
           <span class="live-route-node live-route-destination">
             <span class="live-route-nozzle" aria-hidden="true"></span>
             <span><strong>${esc(dest)}</strong><em>${esc(slotLabel)} · ${esc(spoolLabel)}</em></span>
           </span>
-          <span class="demo-route-fed">Fed now</span>
+          <span class="demo-route-fed">${esc(routeBadge)}</span>
         </div>`);
       } else {
-        routes.push(`<div class="live-filament-route" style="--route-colour:${colour};--route-text:${textColour}" title="${esc(title)}">
+        routes.push(`<div class="live-filament-route${routeClass}" style="--route-colour:${colour};--route-text:${textColour}" title="${esc(title)}">
           <button class="live-route-node live-route-source" data-slot-edit data-printer-id="${p.id}" data-slot-index="${flatSlot}" data-slot-label="${esc(slotLabel)}">
             <span class="live-route-swatch"></span>
             <span><strong>${esc(slotLabel)}</strong><em>${esc(spoolLabel)}</em></span>
-            <b class="live-route-fed">Fed now</b>
+            <b class="live-route-fed">${esc(routeBadge)}</b>
           </button>
           <span class="live-route-line" aria-hidden="true"></span>
           <span class="live-route-node live-route-destination">
             <span class="live-route-nozzle" aria-hidden="true"></span>
-            <span><strong>${esc(dest)}</strong><em>Filament fed</em></span>
+            <span><strong>${esc(dest)}</strong><em>${fedNow ? 'Filament fed' : 'Filament ready'}</em></span>
           </span>
         </div>`);
       }
