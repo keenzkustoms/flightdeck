@@ -8311,6 +8311,49 @@ function _fleetWallAmsVisual(p) {
   return `<div class="fleet-wall-ams-visual">${_detailLiveAmsLoadoutRows(p)}</div>`;
 }
 
+function _fleetWallAmsRouteStrip(p) {
+  const loaded = (_latestSpoolsByPrinter[p.id] || []).filter(s => !s.archived_at);
+  const routes = [];
+  for (const unit of (p.ams || [])) {
+    for (const slot of (unit.slots || [])) {
+      if (!_slotRouteActive(p, unit, slot)) continue;
+      const flatSlot = _amsFlatSlot(unit, slot);
+      const spool = loaded.find(s => Number(s.location_slot) === flatSlot);
+      const colour = spool?.color_hex || slot.color || '#22c55e';
+      const slotLabel = _amsSlotLabel(p, flatSlot);
+      const spoolLabel = spool
+        ? `#${spool.id} ${[spool.color_name, spool.material].filter(Boolean).join(' · ')}`
+        : _slotProfileLabel(slot) || slot.type || 'Filament';
+      const dest = _routeDestinationLabel(p, unit);
+      const fedNow = _slotRouteFed(p, unit, slot);
+      routes.push(`<button class="fleet-wall-route${fedNow ? ' is-fed' : ' is-ready'}" data-slot-edit data-printer-id="${esc(p.id)}" data-slot-index="${flatSlot}" data-slot-label="${esc(slotLabel)}" style="--route-colour:${esc(colour)}" title="${esc(`${slotLabel} ${fedNow ? 'feeding' : 'ready for'} ${dest} · ${spoolLabel}`)}">
+        <span class="fleet-wall-route-source">
+          <span class="fleet-wall-route-swatch"></span>
+          <strong>${esc(slotLabel)}</strong>
+          <em>${esc(spoolLabel)}</em>
+        </span>
+        <span class="fleet-wall-route-line" aria-hidden="true"></span>
+        <span class="fleet-wall-route-dest">${esc(dest)}</span>
+      </button>`);
+    }
+  }
+  if (routes.length) {
+    return `<div class="fleet-wall-route-strip" aria-label="AMS filament routes">
+      <span class="fleet-wall-route-title">Feed route</span>
+      ${routes.slice(0, 2).join('')}
+    </div>`;
+  }
+  if (!loaded.length) return `<div class="fleet-wall-route-empty">No loaded spools tracked</div>`;
+  return `<div class="fleet-wall-route-strip fleet-wall-route-strip-idle" aria-label="Loaded AMS spools">
+    <span class="fleet-wall-route-title">Loaded</span>
+    <div class="fleet-wall-route-chips">${loaded.slice(0, 4).map(s => {
+      const loc = s.location_slot != null ? _amsSlotLabel(p, Number(s.location_slot)) : 'Loaded';
+      const label = `#${s.id} ${s.color_name || s.material || loc}`;
+      return `<a class="fleet-wall-route-chip" href="#/spool/${s.id}" style="${_spoolColorStyle(s)};color:${_spoolTextColor(s.color_hex || '#808080')}" title="${esc(`${loc} · ${s.material || ''} ${s.color_name || ''}`)}">${esc(label)}</a>`;
+    }).join('')}</div>
+  </div>`;
+}
+
 function _fleetWallFeedHtml(p) {
   const cameraId = p._camera_id || p.id;
   const camSrc = _cameraStreamSrc(cameraId);
@@ -8344,7 +8387,7 @@ function _fleetWallCardBody(p) {
         ${_fleetWallMetric('Mode', activeJob ? 'In flight' : (_printerPrintLocked(p) ? 'On hold' : 'Available'))}
       </div>
       ${_fleetWallWarnings(p)}
-      ${_fleetWallAmsVisual(p)}
+      ${_fleetWallMode === 'medium' ? _fleetWallAmsRouteStrip(p) : _fleetWallAmsVisual(p)}
       ${_fleetWallMode === 'large' ? `<div class="fleet-wall-extra">
         <span><b>Signal</b>${esc(fmtLastSeen(p.last_seen))}</span>
         <span><b>ID</b>${esc(p.id)}</span>
