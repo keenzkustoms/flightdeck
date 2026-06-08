@@ -233,6 +233,16 @@ cd flightdeck
 
 The Windows bootstrap checks for Python, Git, and ffmpeg, installs missing dependencies through `winget` when available, creates a local venv, stores live data under `%LOCALAPPDATA%\Flightdeck`, and adds Flightdeck-branded Desktop/Startup shortcuts that run the tray launcher through `pythonw.exe`. Flightdeck then lives in the Windows hidden icons / notification area with menu actions for opening the dashboard, updating from GitHub, restarting, viewing logs, and exiting.
 
+To install Windows with existing Flightdeck data, create a Pi backup archive and pass it to the installer:
+
+```bash
+INCLUDE_PRINT_LIBRARY=1 ./scripts/backup-flightdeck-data.sh
+```
+
+```powershell
+.\scripts\windows\bootstrap-install.ps1 -DataArchive "C:\path\to\flightdeck-backup-YYYYmmdd-HHMMSS.tar.gz"
+```
+
 By default the installer stores live data in `~/flightdeck-data`:
 
 - `flightdeck.db`

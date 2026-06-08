@@ -14,7 +14,7 @@ if errorlevel 1 (
 
 echo Starting Flightdeck Windows installer...
 echo.
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\windows\bootstrap-install.ps1"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\windows\bootstrap-install.ps1" %*
 set "EXITCODE=%ERRORLEVEL%"
 echo.
 if not "%EXITCODE%"=="0" (

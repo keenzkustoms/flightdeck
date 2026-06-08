@@ -9,6 +9,8 @@ Latest GitHub/Pi state:
 - Refresh cachebust currently: ?cachebust=397 / style.css?v=322
 
 Recent work:
+- Windows installer can now import an existing Flightdeck backup archive via `-DataArchive`. The bootstrap passes the archive through, the install script extracts the standard `flightdeck-data` backup shape into `%LOCALAPPDATA%\Flightdeck`, and it creates a `restore-safety-*` copy first if Windows already has data.
+- Fresh all-data Pi backup for Windows install: `/home/flightdeck/windows-install-backups/flightdeck-backup-20260608-182118.tar.gz` (37 MB, SHA256 `5ff17fa0819f54d4d4588253e7ea4a254a067e0a66336c7fe584df001d240c49`). It was also pushed to the private backup repo.
 - Live Ops jog controls now allow paused printers, which is needed for recovery cases like the H2D reporting `paused` with a Bambu alarm. Jog still stays disabled for active printing, finished, offline, error, and estop states.
 - Bambu XYZ jog is now wired through the installed Bambu package's validated `gcode_line` route (`G91`, bounded `G1 X/Y/Z`, `G90`). The Live Ops jog pad enables for idle/safe Bambu printers instead of showing "Jog unavailable"; Bambu Home All still uses the existing `home_printer()` path.
 - Klipper/Moonraker printers have a compact XYZ jog pad in Live Ops. X/Y jogs are 10mm steps, Z jogs are 1mm steps, XY home sits in the pad centre, and backend `/api/printers/{id}/jog` keeps X/Y capped at 50mm and Z capped at 10mm.
@@ -174,6 +176,14 @@ Likely next items:
 - Live Ops jog controls now remain enabled for paused printers so recovery/clearance moves are possible.
 - Jog is still disabled during active printing, finished, offline, error, and estop states.
 - Static cache bumped to `app.js?v=397`; frontend refresh required.
+
+## What was added - Session 28.274 (Windows install with data archive - 8 June)
+- Added `-DataArchive` support to `scripts/windows/bootstrap-install.ps1` and `scripts/windows/install-windows.ps1`.
+- `Install-Flightdeck-Windows.cmd` now passes command-line arguments through to the bootstrap, so a data archive path can be supplied from the root installer too.
+- The Windows install restores the normal Pi backup archive layout into `%LOCALAPPDATA%\Flightdeck` and creates a `restore-safety-*` copy first when existing Windows data is present.
+- README/INSTALL now document making a Pi backup with `INCLUDE_PRINT_LIBRARY=1` and passing it to the Windows installer.
+- Created current all-data Pi archive for Windows install: `/home/flightdeck/windows-install-backups/flightdeck-backup-20260608-182118.tar.gz`; SHA256 `5ff17fa0819f54d4d4588253e7ea4a254a067e0a66336c7fe584df001d240c49`.
+- No backend restart required for installer-only changes.
 
 ## What was fixed - Session 28.241 (AMS HT slot canonicalization - 7 June)
 - Regular AMS slots continue to use `unit*4 + slot` indexes.
