@@ -10900,7 +10900,7 @@ function _setupVersionHtml(version) {
       <div class="setup-version-actions">
         <span class="setup-health-badge setup-ready-${updateClass}" id="setup-update-state">${esc(updateText)}</span>
         <button type="button" class="settings-save-btn" id="setup-check-update">Check</button>
-        <button type="button" class="settings-save-btn" id="setup-run-update" ${version?.dirty ? 'disabled' : ''}>Update</button>
+        <button type="button" class="settings-save-btn" id="setup-run-update">Update</button>
       </div>
     </div>
     <div class="setup-version-meta">
@@ -11010,7 +11010,10 @@ function _attachSetupEvents(el) {
           ? `Update available ${data.remote_commit ? `· ${data.remote_commit}` : ''}`
           : data.fetch_ok === false ? 'GitHub check failed' : 'Up to date';
       }
-      setMessage(data.behind ? 'A newer GitHub build is available.' : (data.fetch_detail || 'Flightdeck is up to date.'), data.behind ? 'warn' : 'ok');
+      setMessage(data.dirty
+        ? 'Local changes are present. Update is blocked until they are committed, stashed, or removed.'
+        : data.behind ? 'A newer GitHub build is available.' : (data.fetch_detail || 'Flightdeck is up to date.'),
+        (data.dirty || data.behind) ? 'warn' : 'ok');
     } catch (err) {
       setMessage(err.message || 'Update check failed', 'warn');
     }
