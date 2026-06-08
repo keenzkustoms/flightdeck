@@ -6,9 +6,10 @@ Latest GitHub/Pi state:
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
-- Refresh cachebust currently: ?cachebust=402 / style.css?v=327
+- Refresh cachebust currently: ?cachebust=402 / style.css?v=328
 
 Recent work:
+- Fixed the first-pass live-control rail camera collapse: `.live-main-deck` now has a viewport-based minimum height so the camera hero cannot compute to 0px high beside the new rail.
 - Live printer controls now sit in a vertical left-side rail beside the camera instead of spanning across the top. The printer/status/transport header stays above the camera, while preheat, fan, jog, home, and Klipper controls move into `#detail-live-ops` inside `.live-control-rail`.
 - Camera wide mode hides the new live-control rail and live strip so the camera can expand cleanly; mobile stacks the rail above the camera.
 - Fleet Wall `XS` headers now use a two-row compact layout so printer identity and warning chips do not crowd each other. Names truncate cleanly, icons are smaller, and warning chips move under the printer name instead of fighting for the same row.
