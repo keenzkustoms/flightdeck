@@ -1914,7 +1914,7 @@ function _detailLiveOps(p) {
   const isMoonraker = p.kind === 'moonraker';
   const isBambu = p.kind === 'bambu';
   const canFan = (isMoonraker || isBambu) && !['offline', 'error', 'estop'].includes(p.state || '');
-  const canJog = isMoonraker && !['offline', 'printing', 'paused', 'finished', 'error', 'estop'].includes(p.state || '');
+  const canJog = (isMoonraker || isBambu) && !['offline', 'printing', 'paused', 'finished', 'error', 'estop'].includes(p.state || '');
   const canHome = (isMoonraker || isBambu) && !['offline', 'printing', 'paused', 'finished', 'error', 'estop'].includes(p.state || '');
   const presets = _preheatPresets(p);
   const preheatButtons = presets.map(row => `<button class="live-op-btn" type="button"
@@ -1961,10 +1961,9 @@ function _detailLiveOps(p) {
   const pos = Array.isArray(p.toolhead_position) ? p.toolhead_position.map(v => Number(v)) : [];
   const posParts = ['X', 'Y', 'Z'].map((axis, idx) => Number.isFinite(pos[idx]) ? `${axis}${pos[idx].toFixed(idx === 2 ? 1 : 0)}` : `${axis}--`);
   const posLabel = posParts.join(' ');
-  const jogVisible = isMoonraker || isBambu;
-  const jog = jogVisible
+  const jog = (isMoonraker || isBambu)
     ? `<div class="live-op-group live-op-jog" aria-label="XYZ movement">
-        <span class="live-op-group-label">${isMoonraker ? `Jog ${esc(posLabel)}` : 'Jog unavailable'}</span>
+        <span class="live-op-group-label">Jog ${esc(posLabel)}</span>
         <div class="jog-pad" aria-label="XY jog controls">
           <span></span>
           <button class="live-op-btn live-op-mini jog-btn" type="button" data-jog-axis="y" data-jog-distance="10" data-printer-id="${esc(p.id)}" ${canJog ? '' : 'disabled'}>
@@ -1975,7 +1974,7 @@ function _detailLiveOps(p) {
             <span>X-</span><small>10</small>
           </button>
           <button class="live-op-btn live-op-mini jog-btn jog-home-center" type="button" data-home-axes="xy" data-printer-id="${esc(p.id)}" ${isMoonraker && canHome ? '' : 'disabled'}>
-            <span>${isMoonraker ? 'XY' : '--'}</span><small>${isMoonraker ? 'home' : 'Bambu'}</small>
+            <span>XY</span><small>${isMoonraker ? 'home' : '--'}</small>
           </button>
           <button class="live-op-btn live-op-mini jog-btn" type="button" data-jog-axis="x" data-jog-distance="10" data-printer-id="${esc(p.id)}" ${canJog ? '' : 'disabled'}>
             <span>X+</span><small>10</small>

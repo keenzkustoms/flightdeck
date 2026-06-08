@@ -2202,7 +2202,11 @@ async def jog_printer_axis(printer_id: str, req: JogRequest):
 
     for p in _bambu:
         if p.id == printer_id:
-            raise HTTPException(status_code=422, detail="XYZ jog is only available for Klipper/Moonraker printers")
+            try:
+                await asyncio.to_thread(p.jog_axis, axis, req.distance, req.speed)
+            except Exception as exc:
+                raise HTTPException(status_code=502, detail=str(exc))
+            return {"ok": True}
 
     for (id, *_) in _simulated:
         if id == printer_id:

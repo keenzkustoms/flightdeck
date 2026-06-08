@@ -6,10 +6,11 @@ Latest GitHub/Pi state:
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
-- Refresh cachebust currently: ?cachebust=395 / style.css?v=322
+- Refresh cachebust currently: ?cachebust=396 / style.css?v=322
 
 Recent work:
-- Klipper/Moonraker printers now have a compact XYZ jog pad in Live Ops. X/Y jogs are 10mm steps, Z jogs are 1mm steps, XY home sits in the pad centre, and backend `/api/printers/{id}/jog` keeps X/Y capped at 50mm and Z capped at 10mm. Bambu pages show the jog pad as unavailable because the current Bambu wrapper only exposes safe Home All, not a proven axis-jog command.
+- Bambu XYZ jog is now wired through the installed Bambu package's validated `gcode_line` route (`G91`, bounded `G1 X/Y/Z`, `G90`). The Live Ops jog pad enables for idle/safe Bambu printers instead of showing "Jog unavailable"; Bambu Home All still uses the existing `home_printer()` path.
+- Klipper/Moonraker printers have a compact XYZ jog pad in Live Ops. X/Y jogs are 10mm steps, Z jogs are 1mm steps, XY home sits in the pad centre, and backend `/api/printers/{id}/jog` keeps X/Y capped at 50mm and Z capped at 10mm.
 - Windows desktop installer shortcuts now use a packaged `app/static/flightdeck.ico` file for the Flightdeck icon. Both fresh installs and the standalone desktop-shortcut helper prefer the `.ico` and fall back to the PNG if it is missing.
 - Flightdeck shortcut icons are now explicit in the live app, demo app, and GitHub Pages site. The app pages link the SVG plus PNG favicon fallback, and `docs/assets/flightdeck-icon-192.png` gives the GitHub Pages page a PNG shortcut icon fallback.
 - Bambu skip-object maps now use the 3MF `Metadata/top_N.png` top-down plate image as the visual background when available, while Print Details keeps using the normal `Metadata/plate_N.png` preview thumbnail. This should keep the current Bambuddy-style ID coordinate mapping but make the tags line up against a true top-down bed image instead of the angled preview.
@@ -162,6 +163,11 @@ Likely next items:
 - Existing `/jog-z` remains available for compatibility.
 - Bambu pages show the jog pad as unavailable and still expose Home All separately; no Bambu axis jog is enabled until the MQTT/control path is proven safe.
 - Static cache bumped to `app.js?v=395` and `style.css?v=322`; backend restart and frontend refresh required.
+
+## What was fixed - Session 28.272 (Bambu XYZ jog controls - 8 June)
+- Enabled the same bounded XYZ jog endpoint for Bambu printers using the Bambu package's validated `Printer.gcode()` / MQTT `gcode_line` path.
+- Bambu Live Ops jog buttons now enable when the printer is in a safe idle state; printing, paused, error, finished, offline, and estop states still disable jog.
+- Static cache bumped to `app.js?v=396`; backend restart and frontend refresh required.
 
 ## What was fixed - Session 28.241 (AMS HT slot canonicalization - 7 June)
 - Regular AMS slots continue to use `unit*4 + slot` indexes.
