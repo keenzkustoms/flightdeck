@@ -783,7 +783,7 @@ function _commandStaticItems() {
     ['Fleet Wall', '#/fleet', 'Shop-floor camera and printer wall'],
     ['Flight Tower', '#/mission', 'Dispatch and queue intelligence'],
     ['Telemetry', '#/stats', 'Stats, RH, utilisation'],
-    ['Print Watch', '#/cameras', 'Rotating camera watch'],
+    ['Camera Wall', '#/cameras', 'Compact camera grid'],
     ['Queue', '#/queue', 'Pending print jobs'],
     ['Global Print Bay', '#/files', 'Files, printer storage, and reprint staging'],
     ['Spools', '#/spools', 'Spool inventory'],
@@ -2421,7 +2421,7 @@ async function renderManualView() {
         '<strong>Telemetry</strong><span>Printer hours, print count, RH, and host health belong on Telemetry for the long view.</span>',
       ])}
       ${_manualSection('Tester Notes', 'For a demo or friend testing pass, give them these rails so they can explore without breaking the story.', [
-        '<strong>Try read-only first</strong><span>Dashboard, Print Watch, Telemetry, History, Failures, and Flight Manual are safe places to browse.</span>',
+        '<strong>Try read-only first</strong><span>Dashboard, Camera Wall, Telemetry, History, Failures, and Flight Manual are safe places to browse.</span>',
         '<strong>Ask before destructive controls</strong><span>Cancel, E-stop, SD cleanup, delete, and archive actions should be deliberate.</span>',
         '<strong>Report exact screen</strong><span>When something looks wrong, note the page name, printer, and whether the printer screen agrees.</span>',
       ])}
@@ -2597,30 +2597,11 @@ function _routeParams(prefix) {
   return new URLSearchParams(qs);
 }
 
-function _releaseCameraStreams(cameraIds) {
-  if (FLIGHTDECK_DEMO) return;
-  const ids = [...new Set((cameraIds || []).filter(Boolean).map(String))];
-  ids.forEach(id => {
-    const url = `/api/camera/${encodeURIComponent(id)}/release`;
-    try {
-      if (navigator.sendBeacon) {
-        navigator.sendBeacon(url, new Blob([], { type: 'text/plain' }));
-        return;
-      }
-    } catch {}
-    fetch(url, { method: 'POST', keepalive: true }).catch(() => {});
-  });
-}
-
 function _stopCameraImages(selector) {
-  const ids = [];
   document.querySelectorAll(selector).forEach(img => {
-    const id = img.dataset.cameraId;
-    if (id && img.getAttribute('src')) ids.push(id);
     img.removeAttribute('src');
     img.dataset.stopped = '1';
   });
-  _releaseCameraStreams(ids);
 }
 
 function router() {
@@ -2757,7 +2738,7 @@ function buildTabs(printers) {
   nav.innerHTML = [
     `<a class="tab" href="#/">Dashboard</a>`,
     `<a class="tab" href="#/fleet">Fleet Wall</a>`,
-    `<a class="tab" href="#/cameras">Print Watch</a>`,
+    `<a class="tab" href="#/cameras">Camera Wall</a>`,
     `<a class="tab" href="#/mission">Flight Tower</a>`,
     `<a class="tab" href="#/stats">Telemetry</a>`,
     `<div class="tab-section">Printers</div>`,
@@ -7876,15 +7857,20 @@ let _fleetWallSignature = '';
 let _fleetWallMode = localStorage.getItem('fleetWallMode') || 'medium';
 
 function _safeFleetWallMode(mode) {
-  return ['small', 'medium', 'large'].includes(mode) ? mode : 'medium';
+  return ['xsmall', 'small', 'medium', 'large'].includes(mode) ? mode : 'medium';
 }
 
 function _fleetWallModeControls() {
   _fleetWallMode = _safeFleetWallMode(_fleetWallMode);
   return `<div class="fleet-wall-mode" role="group" aria-label="Fleet Wall size">
-    ${['small', 'medium', 'large'].map(mode => `<button type="button"
+    ${[
+      ['xsmall', 'XS'],
+      ['small', 'Small'],
+      ['medium', 'Medium'],
+      ['large', 'Large'],
+    ].map(([mode, label]) => `<button type="button"
       class="${_fleetWallMode === mode ? 'active' : ''}"
-      data-fleet-wall-mode="${mode}">${mode[0].toUpperCase()}${mode.slice(1)}</button>`).join('')}
+      data-fleet-wall-mode="${mode}">${label}</button>`).join('')}
   </div>`;
 }
 
@@ -8505,7 +8491,6 @@ async function renderCamerasView() {
     : sourcePrinters;
 
   if (_camerasFull && _camerasMode === mode) {
-    _renderPrintWatchFocus(cameraPrinters, sim);
     const summary = el.querySelector('.print-watch-summary');
     if (summary) summary.innerHTML = _printWatchSummaryHtml(cameraPrinters);
     cameraPrinters.forEach(p => {
@@ -8534,17 +8519,16 @@ async function renderCamerasView() {
   _ensurePrintWatchCameraUrls(cameraPrinters);
 
   el.classList.toggle('cameras-grid-sim', sim);
-  el.innerHTML = `<div class="print-watch-page">
+  el.innerHTML = `<div class="print-watch-page print-watch-page-parked">
     <div class="print-watch-hero">
       <div>
-        <span>Print Watch</span>
-        <h1>${sim ? 'Simulated camera watch' : 'Rotating print watch'}</h1>
+        <span>Camera Wall</span>
+        <h1>${sim ? 'Simulated camera grid' : 'Camera grid'}</h1>
       </div>
       <div class="print-watch-summary">
         ${_printWatchSummaryHtml(cameraPrinters)}
       </div>
     </div>
-    <div id="print-watch-focus-host">${_printWatchFocusHtml(cameraPrinters, sim)}</div>
     <div class="print-watch-grid">${cameraPrinters.map(_camTileHtml).join('')}</div>
   </div>`;
   _attachCameraRetries(el);
@@ -8561,7 +8545,6 @@ async function renderCamerasView() {
 
   _camerasFull = true;
   _camerasMode = mode;
-  _startPrintWatchCycle(cameraPrinters, sim);
 }
 
 // ── Tab title ─────────────────────────────────────────────────────────────

@@ -2,14 +2,16 @@
 
 Latest GitHub/Pi state:
 - Branch: main
-- Latest commit: current HEAD after this handoff (`Release camera workers when leaving views`)
+- Latest commit: current HEAD after this handoff (`Park Print Watch and add XS Fleet Wall`)
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
-- Refresh cachebust currently: ?cachebust=398 / style.css?v=322
+- Refresh cachebust currently: ?cachebust=399 / style.css?v=323
 
 Recent work:
-- Camera views now actively release streams when the operator leaves them. The router removes camera image `src` values for Live, Print Watch, and Fleet Wall, then posts `/api/camera/{id}/release`; Bambu proxies stop ffmpeg as soon as the browser disconnect has landed instead of waiting the normal idle timeout.
+- The active camera release endpoint/ffmpeg kill attempt was removed because it could race shared Bambu streams and make the wall black again. Camera pages are back to clearing `<img>` sources only, leaving the existing proxy idle cleanup to handle workers.
+- Print Watch is parked for now: `#/cameras` is labelled Camera Wall and renders the simple camera grid without the rotating large focus feed or cycling timer.
+- Fleet Wall now has an `XS` mode that keeps the normal live camera URLs but strips the body panels down to a compact camera-first wall, closer to the original camera view.
 - Reverted the Fleet Wall live-camera cap / `profile=fleet&fps=2` attempt because it made the live Fleet Wall camera areas black on the real 3-printer Pi view. Do not reapply that approach as-is; next camera-load attempt should preserve normal Fleet Wall stream URLs and first verify actual image rendering on the live Pi.
 - Windows uninstall is now a root `Uninstall-Flightdeck-Windows.cmd` plus hardened `scripts/windows/uninstall-windows.ps1`. It stops Flightdeck tray/backend processes for this checkout, removes Desktop and Startup shortcuts, keeps `%LOCALAPPDATA%\Flightdeck` by default, and only deletes restored data when `-RemoveData` is passed.
 - Windows installer can now import an existing Flightdeck backup archive via `-DataArchive`. The bootstrap passes the archive through, the install script extracts the standard `flightdeck-data` backup shape into `%LOCALAPPDATA%\Flightdeck`, and it creates a `restore-safety-*` copy first if Windows already has data.

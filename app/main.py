@@ -2508,14 +2508,6 @@ async def camera_stream(printer_id: str):
     )
 
 
-@app.post("/api/camera/{printer_id}/release")
-async def release_camera_stream(printer_id: str):
-    proxy = _cam_proxies.get(printer_id)
-    if proxy is not None:
-        asyncio.create_task(proxy.stop_when_idle())
-    return {"ok": True}
-
-
 @app.get("/api/printers/{printer_id}/prints/{print_id}/snapshot")
 async def get_failure_snapshot(printer_id: str, print_id: int):
     _assert_printer(printer_id)
