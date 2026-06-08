@@ -2,13 +2,38 @@
 
 Latest GitHub/Pi state:
 - Branch: main
-- Latest commit: current HEAD after this handoff (`Add slice action for queued STEP files`)
+- Latest commit: current HEAD after this handoff (`Preserve Bambu skip-object plate bounds`)
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
-- Refresh cachebust currently: ?cachebust=378 / style.css?v=309
+- Refresh cachebust currently: ?cachebust=397 / style.css?v=322
 
 Recent work:
+- Windows installer can now import an existing Flightdeck backup archive via `-DataArchive`. The bootstrap passes the archive through, the install script extracts the standard `flightdeck-data` backup shape into `%LOCALAPPDATA%\Flightdeck`, and it creates a `restore-safety-*` copy first if Windows already has data.
+- Fresh all-data Pi backup for Windows install: `/home/flightdeck/windows-install-backups/flightdeck-backup-20260608-182118.tar.gz` (37 MB, SHA256 `5ff17fa0819f54d4d4588253e7ea4a254a067e0a66336c7fe584df001d240c49`). It was also pushed to the private backup repo.
+- Live Ops jog controls now allow paused printers, which is needed for recovery cases like the H2D reporting `paused` with a Bambu alarm. Jog still stays disabled for active printing, finished, offline, error, and estop states.
+- Bambu XYZ jog is now wired through the installed Bambu package's validated `gcode_line` route (`G91`, bounded `G1 X/Y/Z`, `G90`). The Live Ops jog pad enables for idle/safe Bambu printers instead of showing "Jog unavailable"; Bambu Home All still uses the existing `home_printer()` path.
+- Klipper/Moonraker printers have a compact XYZ jog pad in Live Ops. X/Y jogs are 10mm steps, Z jogs are 1mm steps, XY home sits in the pad centre, and backend `/api/printers/{id}/jog` keeps X/Y capped at 50mm and Z capped at 10mm.
+- Windows desktop installer shortcuts now use a packaged `app/static/flightdeck.ico` file for the Flightdeck icon. Both fresh installs and the standalone desktop-shortcut helper prefer the `.ico` and fall back to the PNG if it is missing.
+- Flightdeck shortcut icons are now explicit in the live app, demo app, and GitHub Pages site. The app pages link the SVG plus PNG favicon fallback, and `docs/assets/flightdeck-icon-192.png` gives the GitHub Pages page a PNG shortcut icon fallback.
+- Bambu skip-object maps now use the 3MF `Metadata/top_N.png` top-down plate image as the visual background when available, while Print Details keeps using the normal `Metadata/plate_N.png` preview thumbnail. This should keep the current Bambuddy-style ID coordinate mapping but make the tags line up against a true top-down bed image instead of the angled preview.
+- Bambu skip-object ID pins now use the same source as Bambuddy: `slice_info.config` provides the skip ID/name and `Metadata/plate_N.json` provides that object's bbox center by name. This fixes cases like Can Opener where G-code object-label IDs made `701` appear on the wrong thumbnail footprint.
+- Camera stream caching/stale-connection handling has been tightened. `/api/camera/*` responses now send stronger no-store/no-buffer headers, and the frontend quietly refreshes visible live camera `<img>` streams after 2 minutes or when the browser tab becomes visible again.
+- Bambu skip-object maps now use the active 3MF/print thumbnail as the visible plate preview behind the Bambuddy-style object IDs. The old top-down diagnostic grid/exploded shape view is no longer the primary visual; transparent hit regions and the ID/name skip list still use the original Bambu object IDs.
+- Bambu skip-object map bounds now preserve the 3MF plate/preview bounds when available instead of replacing them with the tight recovered G-code object bounds. This avoids the skip-object map appearing exploded compared with the print-detail/top-preview layout.
+- Bambu skip-object maps now follow the Bambuddy-style ID workflow: a clean positional map with small red object markers, blue ID dots, active count, and a compact ID/name skip list. The raw G-code extrusion path is no longer shown as the main object shape.
+- The vertical Bambu skip-object `Front` marker now sits just outside the map area on the far right.
+- The Bambu top-down skip-object `Front` marker is now vertical and sits on the far right-hand side of the map.
+- Bambu top-down skip-object maps now show a small `Front` marker at the right-hand centre of the map. It is a visual-only overlay and does not affect red regions, object outlines, or skip IDs.
+- Bambu top-down skip-object maps now apply mirror flags plus `map_coordinate_rotation=-90` through coordinate math, so the whole red overlay and SVG footprint layout rotates left together. On the X1C 6-object map, skipped object `#96` now lands where `#115` was previously.
+- Bambu top-down skip-object maps now expose `map_mirror_y=true` and `map_mirror_x=false`; this keeps the skipped X1C object `#96` in the top-right corner while preserving raw Bambu object IDs for skip commands.
+- Bambu top-down skip maps now draw a footprint shape for each object instead of only a generic rectangle. The parser sends a simplified convex footprint plus extrusion strokes from object-labelled gcode; X1C's 6-Benchy print parsed with 14-point footprints and 29 strokes for each skip ID.
+- Bambu skip-object maps now render as a Mainsail-style top-down bed map instead of using the angled Bambu plate thumbnail. The parser now recovers per-object top-down bboxes from `Metadata/plate_*.gcode` object-label extrusion moves, which fixes repeated-copy jobs like the X1C 6-Benchy print where `plate_1.json` only exposed one combined bbox.
+- Bambu/H2D camera proxy no longer restarts ffmpeg just because frames are byte-identical for 8 seconds; that false-positive could make the Live view appear frozen during quiet parts of a print. It still restarts when no frames arrive, the initial frame never appears, or the 15-minute H2D RTSP session lifetime is reached.
+- H2D/AMS HT loaded filament now keeps a visible route to `Right nozzle` even when the HT slot is parked/idle; idle routes show `Ready` instead of pretending filament is actively fed. Demo AMS HT spool data now uses canonical slot `128` instead of legacy `512`.
+- Queue STEP slice dialogs now hide `Slice in Flightdeck` and explain the Orca GUI handoff because the Orca background CLI/API rejects STEP imports (`Unknown file format... must have .stl, .obj, .amf`). STEP items still provide Download/Open Orca/Copy output/Check vault actions.
+- Slicer API runs no longer require Orca installed on the Pi just to load profile JSON. If local Orca profile files are unavailable, Flightdeck fetches the selected profile JSONs from the synced Orca profile catalog paths.
+- Queue/API slicing now falls back to the configured Slicer API URL when the configured Worker URL is unreachable. Live diagnosis showed `orcaslicer_worker_url=http://100.112.171.88:8000` timing out while `orcaslicer_api_url=http://100.112.171.88:3003` was healthy.
 - Queued `.step` / `.stp` source-model items now show a `Slice` button that opens the existing slicer dialog for that queue item and target printer.
 - Printer queues now accept `.step` and `.stp` uploads as source-model cue items. They appear in the queue with a STEP marker, but queue preflight blocks dispatch until the model is sliced into a printer-ready job.
 - Bambu per-object thumbnail slices currently use `transform: rotate(25deg)` on `.obj-map-image-piece` as the latest visual trial. This rotates only the white object slices, not the red overlay.
@@ -47,12 +72,118 @@ Recent work:
 - Sim printer stale notifications cleaned up.
 
 Likely next items:
+- If the rotated Bambu object map looks correct on the X1C/H2D, keep `map_mirror_y=true` plus `map_coordinate_rotation=-90`; if the target changes, adjust only the display transform flags without changing the object parser or skip IDs.
 - Keep polishing Fleet Wall layout and AMS sizing.
 - Recheck BigBoy AMS HT assignment after any physical spool moves; HT should now show as slot `128` rather than legacy `512`.
 - Recheck Fleet Wall click/zoom behaviour after real use.
 - Continue slicer/API integration and profile filtering.
 - Continue stock-in QR/label workflow.
 - Make Windows installer/update flow smoother.
+
+## What was changed - Session 28.257 (Bambu skip-object map mirror - 8 June)
+- Bambu object maps now send `map_mirror_x=true` for the top-down skip-object view.
+- The frontend mirrors object overlay coordinates and SVG footprint outlines from that flag, so the red hit regions and white object shapes move together visually.
+- Raw Bambu object IDs are unchanged; skip commands still send the original printer/MQTT object IDs.
+- Static cache bumped to `app.js?v=384` and `style.css?v=313`; backend restart and frontend refresh required.
+
+## What was changed - Session 28.258 (Bambu skip-object top-right orientation - 8 June)
+- Switched the Bambu top-down skip-object map from X mirror to Y mirror: `map_mirror_x=false`, `map_mirror_y=true`.
+- This orientation puts the skipped X1C object `#96` in the top-right corner while keeping the same object outlines and raw skip IDs.
+- Backend restart required; static cache remains `app.js?v=384` and `style.css?v=313`.
+
+## What was changed - Session 28.259 (Bambu skip-object left rotation - 8 June)
+- Added `map_coordinate_rotation=-90` for Bambu top-down object maps.
+- Frontend map rendering now applies mirror/rotation transforms to the actual object coordinates and SVG footprint points, so the red regions and white outlines rotate together as one layout.
+- Coordinate check against live X1C data puts skipped `#96` at `left=0.00%, top=0.00%`, matching the previous `#115` corner.
+- Static cache bumped to `app.js?v=385` and `style.css?v=314`; backend restart and frontend refresh required.
+
+## What was changed - Session 28.260 (Bambu skip-object front marker - 8 June)
+- Added a small `Front` marker at the right-hand centre of Bambu top-down skip-object maps.
+- The marker is visual only, rendered above the map with `pointer-events: none`, and does not affect object regions, outlines, or skip commands.
+- Static cache bumped to `app.js?v=386` and `style.css?v=315`; frontend refresh required.
+
+## What was changed - Session 28.261 (Bambu vertical front marker - 8 June)
+- Changed the Bambu top-down skip-object `Front` marker to vertical text on the far right-hand side.
+- Static cache bumped to `style.css?v=316`; frontend refresh required.
+
+## What was changed - Session 28.262 (Bambu front marker outside map - 8 June)
+- Moved the vertical Bambu top-down skip-object `Front` marker just outside the map area on the far right.
+- Static cache bumped to `style.css?v=317`; frontend refresh required.
+
+## What was changed - Session 28.263 (Bambuddy-style skip-object map - 8 June)
+- Reworked the Bambu skip-object map presentation to match Bambuddy's simpler operator workflow.
+- The visible map now uses compact red object markers with blue ID dots and an active count, while the raw G-code extrusion path is no longer shown as the main visual shape.
+- Added a compact object ID/name list below the map; map regions and list rows still send the original Bambu skip IDs.
+- Static cache bumped to `app.js?v=387` and `style.css?v=318`; frontend refresh required.
+
+## What was fixed - Session 28.264 (Bambu skip-object plate bounds - 8 June)
+- Fixed the skip-object map looking exploded compared with the print-detail preview.
+- The parser now preserves 3MF plate/preview bounds when they exist and only falls back to tight G-code object bounds when no plate bounds are available.
+- Clarified the Bambu object detail text: skip state comes from MQTT, object positions come from 3MF metadata.
+- Static cache bumped to `app.js?v=388`; backend restart and frontend refresh required.
+
+## What was changed - Session 28.265 (Bambuddy plate preview for skip objects - 8 June)
+- Replaced the visible Bambu top-down skip-object grid/exploded marker presentation with a Bambuddy-style plate preview: the active 3MF thumbnail is now shown under compact red object pins with blue ID badges.
+- The transparent clickable red-box/hit regions are still generated from the preserved 3MF plate bounds and still send the raw Bambu object IDs; the ID/name list remains available below the map.
+- The map badge now reports mapped pins when the skip list has objects without plate bboxes, so list-only IDs do not make the plate count look wrong.
+- List-only Bambu IDs without bed bboxes no longer render as loose buttons on top of the plate preview; they remain available in the ID/name list.
+- Removed the previous `transform: rotate(25deg)` thumbnail-slice visual trial from `.obj-map-image-piece`.
+- Static cache bumped to `app.js?v=391` and `style.css?v=321`; frontend refresh required.
+
+## What was changed - Session 28.266 (Camera stale stream cleanup - 8 June)
+- Strengthened `/api/camera/*` stream headers to `no-store, no-cache, must-revalidate, max-age=0` with `Pragma`, `Expires`, and `X-Accel-Buffering: no`.
+- Added a frontend stale-connection refresh for visible camera images: each visible stream gets a fresh timestamped URL after 2 minutes, and all visible streams refresh when the browser tab becomes visible again.
+- This targets browser/MJPEG stale connections without changing the configured camera frame rates: Bambu remains 5 fps via ffmpeg; Voron/Greyhound remains pass-through from Crowsnest.
+- Static cache bumped to `app.js?v=392`; backend restart and frontend refresh required.
+
+## What was fixed - Session 28.267 (Bambu skip-object ID pin mapping - 8 June)
+- Fixed Bambu skip-object IDs being attached to the wrong visual footprint on plates where G-code object-label IDs do not match the `slice_info.config` object order.
+- The backend now matches each `slice_info.config` skip ID/name to the center of the same object name in `Metadata/plate_N.json`, following Bambuddy's source-of-truth approach.
+- The frontend now prefers those plate JSON `x/y` centers for Bambu top-down pin and click-target placement, falling back to bboxes only when no point exists.
+- Verified against the active Can Opener H2D plate: `701` now maps to the upper-left hook area instead of the lower-left footprint.
+- Static cache bumped to `app.js?v=393`; backend restart and frontend refresh required.
+
+## What was fixed - Session 28.268 (Bambu skip-object top image - 8 June)
+- Bambu 3MF parsing now keeps `Metadata/top_N.png` alongside the normal plate preview.
+- `/api/printers/{id}/thumbnail?view=top` serves that top-down image for Bambu printers when available, falling back to the normal thumbnail behavior otherwise.
+- The skip-object map now uses the top-down image URL for top-down object maps, while Print Details and other thumbnail uses remain on the regular angled `plate_N.png` preview.
+- Static cache bumped to `app.js?v=394`; backend restart and frontend refresh required.
+
+## What was changed - Session 28.269 (Flightdeck shortcut icon - 8 June)
+- Added explicit `shortcut icon` and PNG favicon fallback links to the live app and demo HTML heads.
+- Added `docs/assets/flightdeck-icon-192.png` and linked it from the GitHub Pages `docs/index.html` page so the GitHub-hosted project page has the Flightdeck shortcut icon fallback as well as the SVG icon.
+- No backend restart required; frontend/page refresh enough.
+
+## What was changed - Session 28.270 (Windows installer icon - 8 June)
+- Added packaged `app/static/flightdeck.ico` generated from the existing Flightdeck app icon.
+- Windows install and desktop shortcut scripts now use the `.ico` for Desktop/Startup shortcut icons, with the existing PNG as fallback.
+- README/INSTALL now describe the Windows shortcuts as Flightdeck-branded.
+- No backend restart required.
+
+## What was added - Session 28.271 (Klipper XYZ jog controls - 8 June)
+- Added `/api/printers/{id}/jog` for Klipper/Moonraker printers with bounded X/Y/Z relative motion.
+- Live Ops now shows a compact XYZ jog pad: X/Y use 10mm steps, Z uses 1mm steps, and the centre button homes XY.
+- Existing `/jog-z` remains available for compatibility.
+- Bambu pages show the jog pad as unavailable and still expose Home All separately; no Bambu axis jog is enabled until the MQTT/control path is proven safe.
+- Static cache bumped to `app.js?v=395` and `style.css?v=322`; backend restart and frontend refresh required.
+
+## What was fixed - Session 28.272 (Bambu XYZ jog controls - 8 June)
+- Enabled the same bounded XYZ jog endpoint for Bambu printers using the Bambu package's validated `Printer.gcode()` / MQTT `gcode_line` path.
+- Bambu Live Ops jog buttons now enable when the printer is in a safe idle state; printing, paused, error, finished, offline, and estop states still disable jog.
+- Static cache bumped to `app.js?v=396`; backend restart and frontend refresh required.
+
+## What was fixed - Session 28.273 (Paused printer jog enablement - 8 June)
+- Live Ops jog controls now remain enabled for paused printers so recovery/clearance moves are possible.
+- Jog is still disabled during active printing, finished, offline, error, and estop states.
+- Static cache bumped to `app.js?v=397`; frontend refresh required.
+
+## What was added - Session 28.274 (Windows install with data archive - 8 June)
+- Added `-DataArchive` support to `scripts/windows/bootstrap-install.ps1` and `scripts/windows/install-windows.ps1`.
+- `Install-Flightdeck-Windows.cmd` now passes command-line arguments through to the bootstrap, so a data archive path can be supplied from the root installer too.
+- The Windows install restores the normal Pi backup archive layout into `%LOCALAPPDATA%\Flightdeck` and creates a `restore-safety-*` copy first when existing Windows data is present.
+- README/INSTALL now document making a Pi backup with `INCLUDE_PRINT_LIBRARY=1` and passing it to the Windows installer.
+- Created current all-data Pi archive for Windows install: `/home/flightdeck/windows-install-backups/flightdeck-backup-20260608-182118.tar.gz`; SHA256 `5ff17fa0819f54d4d4588253e7ea4a254a067e0a66336c7fe584df001d240c49`.
+- No backend restart required for installer-only changes.
 
 ## What was fixed - Session 28.241 (AMS HT slot canonicalization - 7 June)
 - Regular AMS slots continue to use `unit*4 + slot` indexes.

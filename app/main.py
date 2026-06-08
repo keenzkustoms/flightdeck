@@ -1669,6 +1669,7 @@ async def plan_slice_from_file_desk(body: SlicePlanRequest):
     ext = _queue_file_extension(filename)
     if filename.lower().endswith(".gcode.3mf") or ext not in _SOURCE_MODEL_EXT:
         raise HTTPException(status_code=422, detail="Only source model files can be sliced")
+    is_step_source = ext in {".step", ".stp"}
 
     settings = db.get_all_settings()
     browser_url = (settings.get("orcaslicer_docker_url") or "").strip().rstrip("/")
@@ -1683,10 +1684,13 @@ async def plan_slice_from_file_desk(body: SlicePlanRequest):
         "filament": settings.get(_slicer_profile_key(printer_id, "filament"), ""),
     }
     missing_profiles = [label for label, value in profiles.items() if not str(value or "").strip()]
-    can_slice = bool(worker_url or api_url or _orca_executable()) and not missing_profiles
+    can_slice = bool(worker_url or api_url or _orca_executable()) and not missing_profiles and not is_step_source
+    can_handoff = is_step_source and not missing_profiles
     return {
         "ok": True,
-        "ready": can_slice,
+        "ready": can_slice or can_handoff,
+        "can_background_slice": can_slice,
+        "manual_handoff": can_handoff,
         "sidecar_url": browser_url,
         "browser_url": browser_url,
         "api_url": api_url,
@@ -1717,6 +1721,8 @@ async def plan_slice_from_file_desk(body: SlicePlanRequest):
         "plate": body.plate or "auto",
         "all_plates": bool(body.all_plates),
         "message": (
+            "STEP models need Orca GUI import; use Download model/Open Orca, then export the sliced job back to the Print Vault."
+            if can_handoff else
             "Slicer API configured. Flightdeck can slice this in the background."
             if api_url and can_slice else
             "Slicer worker configured. Flightdeck can slice this in the background."
@@ -1913,16 +1919,33 @@ async def run_slice_from_file_desk(body: SliceRunRequest):
             async with httpx.AsyncClient(timeout=httpx.Timeout(connect=10.0, read=900.0, write=30.0, pool=10.0)) as client:
                 resp = await client.post(f"{worker_url}/api/slicer/worker/slice", data=form, files=files)
         except Exception as exc:
-            raise HTTPException(status_code=502, detail=f"Slicer worker unreachable: {exc}") from exc
-        if resp.status_code >= 400:
-            try:
-                detail = resp.json().get("detail")
-            except Exception:
-                detail = resp.text
-            raise HTTPException(status_code=resp.status_code, detail=detail or "Slicer worker failed")
-        sliced_name = resp.headers.get("X-Flightdeck-Sliced-Filename") or output_filename
-        sliced_data = resp.content
-        _enforce_file_size(len(sliced_data), label="Sliced output")
+            if not sidecar_url:
+                detail = str(exc).strip() or "connection timed out"
+                raise HTTPException(status_code=502, detail=f"Slicer worker unreachable: {detail}") from exc
+            log.warning("slicer worker unreachable, falling back to API: %s", exc)
+            sliced_name, sliced_data, _log = await asyncio.to_thread(
+                _run_orca_slice_sidecar,
+                sidecar_url=sidecar_url,
+                filename=filename,
+                data=data,
+                profiles=profiles,
+                output_kind=output_kind,
+                output_filename=output_filename,
+                plate=body.plate or "1",
+                all_plates=bool(body.all_plates),
+                arrange=arrange,
+                bed_type=body.bed_type or "Textured PEI Plate",
+            )
+        else:
+            if resp.status_code >= 400:
+                try:
+                    detail = resp.json().get("detail")
+                except Exception:
+                    detail = resp.text
+                raise HTTPException(status_code=resp.status_code, detail=detail or "Slicer worker failed")
+            sliced_name = resp.headers.get("X-Flightdeck-Sliced-Filename") or output_filename
+            sliced_data = resp.content
+            _enforce_file_size(len(sliced_data), label="Sliced output")
     elif sidecar_url:
         sliced_name, sliced_data, _log = await asyncio.to_thread(
             _run_orca_slice_sidecar,
@@ -2206,6 +2229,12 @@ class JogZRequest(BaseModel):
     distance: float
 
 
+class JogRequest(BaseModel):
+    axis: str
+    distance: float
+    speed: int | None = None
+
+
 class HomeRequest(BaseModel):
     axes: str
 
@@ -2300,6 +2329,42 @@ async def jog_printer_z(printer_id: str, req: JogZRequest):
     for p in _bambu:
         if p.id == printer_id:
             raise HTTPException(status_code=422, detail="Z jog is only available for Klipper/Moonraker printers")
+
+    for (id, *_) in _simulated:
+        if id == printer_id:
+            raise HTTPException(status_code=422, detail="simulated printer does not accept hardware movement commands")
+
+    raise HTTPException(status_code=404, detail="printer not found")
+
+
+@app.post("/api/printers/{printer_id}/jog")
+async def jog_printer_axis(printer_id: str, req: JogRequest):
+    axis = req.axis.lower().strip()
+    if axis not in ("x", "y", "z"):
+        raise HTTPException(status_code=400, detail="invalid jog axis")
+    if abs(req.distance) < 0.01:
+        raise HTTPException(status_code=400, detail="distance must be non-zero")
+    limit = 50 if axis in ("x", "y") else 10
+    if not (-limit <= req.distance <= limit):
+        raise HTTPException(status_code=400, detail=f"{axis.upper()} jog out of range (-{limit} to {limit}mm)")
+    if req.speed is not None and not (60 <= req.speed <= 6000):
+        raise HTTPException(status_code=400, detail="jog speed out of range (60-6000mm/min)")
+
+    for (id, model_name, custom_name, icon, url, _kind, _toolhead_count) in _moonraker:
+        if id == printer_id:
+            try:
+                await moonraker.jog_axis(url, axis, req.distance, req.speed)
+            except Exception as exc:
+                raise HTTPException(status_code=502, detail=str(exc))
+            return {"ok": True}
+
+    for p in _bambu:
+        if p.id == printer_id:
+            try:
+                await asyncio.to_thread(p.jog_axis, axis, req.distance, req.speed)
+            except Exception as exc:
+                raise HTTPException(status_code=502, detail=str(exc))
+            return {"ok": True}
 
     for (id, *_) in _simulated:
         if id == printer_id:
@@ -2584,8 +2649,17 @@ async def simulated_camera(printer_id: str):
     return Response(
         content=svg,
         media_type="image/svg+xml",
-        headers={"Cache-Control": "no-cache, no-store"},
+        headers=_camera_stream_headers(),
     )
+
+
+def _camera_stream_headers() -> dict:
+    return {
+        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Accel-Buffering": "no",
+    }
 
 
 async def _mjpeg_direct_response(url: str) -> StreamingResponse:
@@ -2612,7 +2686,7 @@ async def _mjpeg_direct_response(url: str) -> StreamingResponse:
     return StreamingResponse(
         chunks(),
         media_type=content_type,
-        headers={"Cache-Control": "no-cache, no-store"},
+        headers=_camera_stream_headers(),
     )
 
 
@@ -2720,7 +2794,7 @@ async def camera_stream(printer_id: str):
     return StreamingResponse(
         proxy.stream(),
         media_type="multipart/x-mixed-replace; boundary=frame",
-        headers={"Cache-Control": "no-cache, no-store"},
+        headers=_camera_stream_headers(),
     )
 
 
@@ -3167,7 +3241,7 @@ async def post_exclude_object(printer_id: str, req: ExcludeObjectRequest):
 
 
 @app.get("/api/printers/{printer_id}/thumbnail")
-async def get_printer_thumbnail(printer_id: str):
+async def get_printer_thumbnail(printer_id: str, view: str | None = None):
     for (id, model_name, custom_name, icon, url, kind, toolhead_count) in _moonraker:
         if id == printer_id:
             status = await moonraker.fetch(id, model_name, custom_name, icon, url, kind=kind, toolhead_count=toolhead_count)
@@ -3180,6 +3254,8 @@ async def get_printer_thumbnail(printer_id: str):
     for p in _bambu:
         if p.id == printer_id:
             preview = await asyncio.to_thread(p.get_preview)
+            if view == "top" and preview and preview.top_image_png:
+                return Response(content=preview.top_image_png, media_type="image/png")
             if preview and preview.image_png:
                 return Response(content=preview.image_png, media_type="image/png")
             raise HTTPException(status_code=404, detail="no thumbnail")
@@ -3461,6 +3537,42 @@ def _orca_profile_file(profile_name: str, category: str, exe: Path | None = None
     raise HTTPException(status_code=422, detail=f"Orca {category} profile not found on worker: {name}")
 
 
+def _slicer_catalog_profile_blob(profile_name: str, category: str) -> tuple[str, bytes]:
+    name = (profile_name or "").strip()
+    if not name:
+        raise HTTPException(status_code=422, detail=f"{category} profile is not set")
+    bucket = {"machine": "machines", "process": "processes", "filament": "filaments"}.get(category)
+    if not bucket:
+        raise HTTPException(status_code=422, detail=f"Unknown slicer profile category: {category}")
+
+    for vendor in db.get_slicer_profile_vendors():
+        vendor_key = str(vendor.get("vendor") or vendor.get("name") or "").strip()
+        for row in vendor.get(bucket) or []:
+            if str(row.get("name") or "").strip().lower() != name.lower():
+                continue
+            rel_path = str(row.get("path") or "").strip()
+            if not vendor_key or not rel_path:
+                continue
+            url = f"{_ORCA_PROFILE_BASE}/{urllib.parse.quote(vendor_key, safe='')}/{urllib.parse.quote(rel_path, safe='/')}"
+            try:
+                with urllib.request.urlopen(url, timeout=15) as resp:
+                    data = resp.read()
+            except Exception as exc:
+                raise HTTPException(status_code=502, detail=f"Could not fetch Orca {category} profile {name}: {exc}") from exc
+            if not data:
+                raise HTTPException(status_code=502, detail=f"Downloaded Orca {category} profile {name} was empty")
+            return Path(rel_path).name, data
+    raise HTTPException(status_code=422, detail=f"Orca {category} profile not found in synced catalog: {name}")
+
+
+def _slicer_profile_blob(profile_name: str, category: str, exe: Path | None = None) -> tuple[str, bytes]:
+    try:
+        path = _orca_profile_file(profile_name, category, exe)
+        return path.name, path.read_bytes()
+    except HTTPException:
+        return _slicer_catalog_profile_blob(profile_name, category)
+
+
 def _content_disposition_filename(value: str) -> str:
     for part in (value or "").split(";"):
         key, _, raw = part.strip().partition("=")
@@ -3479,6 +3591,8 @@ def _friendly_slicer_error(detail: str) -> str:
             "Slicer could not map the selected filament to the target printer. "
             "Try the slicer API sidecar, or choose matching printer/process/filament profiles."
         )
+    if "unknown file format" in lowered and ".step" in lowered:
+        return "Orca background slicing cannot import STEP files. Use Open Orca/Download model, or export the source as STL/3MF first."
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     important = [
         line for line in lines
@@ -3514,11 +3628,9 @@ def _run_orca_slice_sidecar(
     bed_type: str = "Textured PEI Plate",
 ) -> tuple[str, bytes, str]:
     exe = _orca_executable()
-    if not exe:
-        raise HTTPException(status_code=503, detail="OrcaSlicer executable not found on this worker")
-    machine = _orca_profile_file(str(profiles.get("printer") or ""), "machine", exe)
-    process = _orca_profile_file(str(profiles.get("process") or ""), "process", exe)
-    filament = _orca_profile_file(str(profiles.get("filament") or ""), "filament", exe)
+    machine_name, machine_data = _slicer_profile_blob(str(profiles.get("printer") or ""), "machine", exe)
+    process_name, process_data = _slicer_profile_blob(str(profiles.get("process") or ""), "process", exe)
+    filament_name, filament_data = _slicer_profile_blob(str(profiles.get("filament") or ""), "filament", exe)
 
     safe_source = _safe_basename(filename, "flightdeck-model.stl")
     requested = _safe_basename(output_filename, f"{_file_archive_key(safe_source)}.gcode.3mf")
@@ -3528,9 +3640,9 @@ def _run_orca_slice_sidecar(
 
     files = [
         ("file", (safe_source, data, _slicer_model_mime(safe_source))),
-        ("printerProfile", (machine.name, machine.read_bytes(), "application/json")),
-        ("presetProfile", (process.name, process.read_bytes(), "application/json")),
-        ("filamentProfile", (filament.name, filament.read_bytes(), "application/json")),
+        ("printerProfile", (machine_name, machine_data, "application/json")),
+        ("presetProfile", (process_name, process_data, "application/json")),
+        ("filamentProfile", (filament_name, filament_data, "application/json")),
     ]
     form = {
         "plate": "0" if all_plates else str(plate or "1"),

@@ -470,11 +470,22 @@ async def set_fan(base_url: str, speed_percent: int) -> None:
     await run_gcode(base_url, f"M106 S{pwm}")
 
 
-async def jog_z(base_url: str, distance: float) -> None:
-    dz = max(-10.0, min(10.0, float(distance)))
-    if abs(dz) < 0.01:
+async def jog_axis(base_url: str, axis: str, distance: float, speed: int | float | None = None) -> None:
+    axis_key = str(axis or "").strip().lower()
+    if axis_key not in {"x", "y", "z"}:
+        raise ValueError("invalid jog axis")
+    limit = 50.0 if axis_key in {"x", "y"} else 10.0
+    delta = max(-limit, min(limit, float(distance)))
+    if abs(delta) < 0.01:
         raise ValueError("distance must be non-zero")
-    await run_gcode(base_url, f"G91\nG1 Z{dz:.2f} F600\nG90")
+    default_speed = 3000 if axis_key in {"x", "y"} else 600
+    feed = int(speed or default_speed)
+    feed = max(60, min(6000, feed))
+    await run_gcode(base_url, f"G91\nG1 {axis_key.upper()}{delta:.2f} F{feed}\nG90")
+
+
+async def jog_z(base_url: str, distance: float) -> None:
+    await jog_axis(base_url, "z", distance, 600)
 
 
 async def home_axes(base_url: str, axes: str) -> None:

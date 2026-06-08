@@ -847,6 +847,25 @@ class BambuPrinter:
         if not self._printer.home_printer():
             raise RuntimeError("Bambu home command was not accepted")
 
+    def jog_axis(self, axis: str, distance: float, speed: int | float | None = None) -> None:
+        axis_key = str(axis or "").strip().lower()
+        if axis_key not in {"x", "y", "z"}:
+            raise ValueError("invalid jog axis")
+        limit = 50.0 if axis_key in {"x", "y"} else 10.0
+        delta = max(-limit, min(limit, float(distance)))
+        if abs(delta) < 0.01:
+            raise ValueError("distance must be non-zero")
+        default_speed = 3000 if axis_key in {"x", "y"} else 600
+        feed = int(speed or default_speed)
+        feed = max(60, min(6000, feed))
+        ok = self._printer.gcode([
+            "G91",
+            f"G1 {axis_key.upper()}{delta:.2f} F{feed}",
+            "G90",
+        ])
+        if not ok:
+            raise RuntimeError(f"Bambu {axis_key.upper()} jog command was not accepted")
+
     def get_preview(self):
         """Return cached BambuPreview, fetching via FTP if the job changed."""
         if not self._connected:
@@ -905,12 +924,16 @@ class BambuPrinter:
             "excluded_ids": sorted(skipped),
             "plate_bounds": preview.plate_bounds,
             "plate_image_url": f"/api/printers/{self.id}/thumbnail",
+            "plate_top_image_url": f"/api/printers/{self.id}/thumbnail?view=top",
             "map_rotation": 0,
             "map_image_rotation": 0,
             "map_image_offset_x": 0,
             "map_image_offset_y": 0,
-            "map_image_mode": "per_object",
-            "detail": "Bambu object exclusion uses the printer skip-object list.",
+            "map_image_mode": "top_down",
+            "map_mirror_x": False,
+            "map_mirror_y": True,
+            "map_coordinate_rotation": -90,
+            "detail": "Bambu object exclusion uses the printer skip-object list and 3MF object positions.",
         }
 
     def skip_object(self, object_id: int) -> bool:

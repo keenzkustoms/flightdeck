@@ -1,5 +1,6 @@
 param(
     [int]$Port = 8000,
+    [string]$DataArchive = "",
     [switch]$NoStartup,
     [switch]$NoDesktopShortcut
 )
@@ -123,6 +124,7 @@ if ($FfmpegPath) {
 Write-Step "Installing Flightdeck"
 $InstallScript = Join-Path $ScriptDir "install-windows.ps1"
 $Args = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $InstallScript, "-Port", $Port, "-PythonCommand", $PythonCommand)
+if ($DataArchive) { $Args += @("-DataArchive", $DataArchive) }
 if ($NoStartup) { $Args += "-NoStartup" }
 if ($NoDesktopShortcut) { $Args += "-NoDesktopShortcut" }
 

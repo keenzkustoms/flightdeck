@@ -74,6 +74,21 @@ PowerShell install, if you prefer running it manually:
 .\scripts\windows\bootstrap-install.ps1
 ```
 
+Install with an existing Flightdeck data backup:
+
+```powershell
+.\scripts\windows\bootstrap-install.ps1 -DataArchive "C:\Users\you\Downloads\flightdeck-backup-YYYYmmdd-HHMMSS.tar.gz"
+```
+
+To make that archive from the Pi with printer history, spools, uploads, and the print vault included:
+
+```bash
+cd /home/flightdeck/flightdeck
+INCLUDE_PRINT_LIBRARY=1 ./scripts/backup-flightdeck-data.sh
+```
+
+The restore writes into `%LOCALAPPDATA%\Flightdeck` and creates a `restore-safety-YYYYmmdd-HHMMSS` folder first if Windows already has Flightdeck data there.
+
 The installer creates:
 
 ```text
@@ -83,7 +98,7 @@ The installer creates:
 %LOCALAPPDATA%\Flightdeck\logs
 ```
 
-It also creates a Startup shortcut named `Flightdeck Tray`, using `pythonw.exe` so no terminal window stays open. After login, Flightdeck appears in the Windows hidden icons / notification area. The tray menu can open the dashboard, update from GitHub, restart Flightdeck, and open logs.
+It also creates Flightdeck-branded Desktop and Startup shortcuts, using `pythonw.exe` so no terminal window stays open. After login, Flightdeck appears in the Windows hidden icons / notification area. The tray menu can open the dashboard, update from GitHub, restart Flightdeck, and open logs.
 
 Start it immediately without logging out:
 

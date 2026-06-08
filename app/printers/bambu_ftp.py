@@ -9,8 +9,10 @@ import logging
 from dataclasses import dataclass
 from typing import Optional
 import json
+import re
 
 log = logging.getLogger(__name__)
+_MAX_OBJECT_SHAPE_SEGMENTS = 260
 
 
 class BambuFtpError(RuntimeError):
@@ -23,6 +25,7 @@ class BambuPreview:
     estimated_total_seconds: Optional[int]
     filament_weight_g: Optional[float]
     filament_type: Optional[str]
+    top_image_png: Optional[bytes] = None
     filament_colors: Optional[str] = None
     objects: Optional[list[dict]] = None
     plate_bounds: Optional[dict] = None
@@ -65,15 +68,27 @@ def _parse_3mf(buf: io.BytesIO, plate_number: Optional[int] = None) -> BambuPrev
             except KeyError:
                 image_png = None
         try:
+            top_image_png: Optional[bytes] = z.read(f"Metadata/top_{plate_number}.png")
+        except KeyError:
+            try:
+                top_image_png = z.read("Metadata/top_1.png")
+            except KeyError:
+                top_image_png = None
+        try:
             slice_xml = z.read("Metadata/slice_info.config").decode()
         except KeyError:
             return BambuPreview(image_png=image_png, estimated_total_seconds=None,
+                                top_image_png=top_image_png,
                                 filament_weight_g=None, filament_type=None, filament_colors=None,
                                 objects=None)
         try:
             plate_json = json.loads(z.read(f"Metadata/plate_{plate_number}.json").decode())
         except Exception:
             plate_json = None
+        try:
+            plate_gcode = z.read(f"Metadata/plate_{plate_number}.gcode").decode("utf-8", "ignore")
+        except Exception:
+            plate_gcode = ""
 
     root_el = ET.fromstring(slice_xml)
     plates = root_el.findall("plate")
@@ -96,16 +111,21 @@ def _parse_3mf(buf: io.BytesIO, plate_number: Optional[int] = None) -> BambuPrev
     filament_type = filament_el.get("type") if filament_el is not None else None
     filaments = []
     objects = []
-    object_boxes, object_boxes_by_name, plate_bounds = _extract_plate_object_boxes(plate_json)
+    object_boxes, object_boxes_by_name, object_points_by_name, plate_bounds = _extract_plate_object_boxes(plate_json)
     if plate_bounds:
         object_boxes = {k: _flip_bbox_y(v, plate_bounds) for k, v in object_boxes.items()}
         object_boxes_by_name = {
             k: [_flip_bbox_y(v, plate_bounds) for v in vals]
             for k, vals in object_boxes_by_name.items()
         }
+    gcode_object_boxes, gcode_object_shapes = _extract_gcode_object_geometry(plate_gcode)
+    if gcode_object_boxes:
+        object_boxes.update(gcode_object_boxes)
+        plate_bounds = plate_bounds or _bounds_for_boxes(gcode_object_boxes.values())
     if plate is not None:
         name_counts: dict[str, int] = {}
         name_box_counts: dict[str, int] = {}
+        name_point_counts: dict[str, int] = {}
         for el in plate.findall("filament"):
             color = el.get("color")
             used_g = el.get("used_g")
@@ -132,12 +152,21 @@ def _parse_3mf(buf: io.BytesIO, plate_number: Optional[int] = None) -> BambuPrev
                 box_index = name_box_counts[base] - 1
                 if box_index < len(matching_boxes):
                     box = matching_boxes[box_index]
+            point = None
+            matching_points = object_points_by_name.get(name) or object_points_by_name.get(base) or []
+            if matching_points:
+                name_point_counts[base] = name_point_counts.get(base, 0) + 1
+                point_index = name_point_counts[base] - 1
+                if point_index < len(matching_points):
+                    point = matching_points[point_index]
             objects.append({
                 "id": identify_id,
                 "name": base,
                 "label": f"{base} #{name_counts[base]}" if name_counts[base] > 1 else base,
                 "state": "excluded" if el.get("skipped", "false").lower() == "true" else "available",
+                **({"x": point["x"], "y": point["y"]} if point else {}),
                 **({"bbox": box} if box else {}),
+                **({"shape": gcode_object_shapes[identify_id]} if identify_id in gcode_object_shapes else {}),
             })
 
     if not plate_bounds and object_boxes:
@@ -145,6 +174,7 @@ def _parse_3mf(buf: io.BytesIO, plate_number: Optional[int] = None) -> BambuPrev
 
     return BambuPreview(
         image_png=image_png,
+        top_image_png=top_image_png,
         estimated_total_seconds=int(pred) if pred else None,
         filament_weight_g=float(weight) if weight else None,
         filament_type=filament_type,
@@ -213,9 +243,10 @@ def _flip_bbox_y(box: dict, bounds: dict) -> dict:
     }
 
 
-def _extract_plate_object_boxes(data) -> tuple[dict[int, dict], dict[str, list[dict]], Optional[dict]]:
+def _extract_plate_object_boxes(data) -> tuple[dict[int, dict], dict[str, list[dict]], dict[str, list[dict]], Optional[dict]]:
     boxes: dict[int, dict] = {}
     boxes_by_name: dict[str, list[dict]] = {}
+    points_by_name: dict[str, list[dict]] = {}
     plate_bounds = None
 
     def walk(node):
@@ -244,6 +275,13 @@ def _extract_plate_object_boxes(data) -> tuple[dict[int, dict], dict[str, list[d
             if isinstance(raw_name, str) and bbox:
                 base = raw_name.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
                 boxes_by_name.setdefault(base, []).append(bbox)
+                point = {
+                    "x": float(bbox["x"]) + (float(bbox["w"]) / 2),
+                    "y": float(bbox["y"]) + (float(bbox["h"]) / 2),
+                }
+                points_by_name.setdefault(raw_name, []).append(point)
+                if base != raw_name:
+                    points_by_name.setdefault(base, []).append(point)
             for value in node.values():
                 walk(value)
         elif isinstance(node, list):
@@ -251,7 +289,109 @@ def _extract_plate_object_boxes(data) -> tuple[dict[int, dict], dict[str, list[d
                 walk(value)
 
     walk(data)
-    return boxes, boxes_by_name, plate_bounds
+    return boxes, boxes_by_name, points_by_name, plate_bounds
+
+
+def _extract_gcode_object_geometry(gcode: str) -> tuple[dict[int, dict], dict[int, dict]]:
+    """Recover top-down per-object footprints from Bambu/Orca object label markers."""
+    if not gcode:
+        return {}, {}
+    start_re = re.compile(r";\s*start printing object,\s*unique label id:\s*(\d+)", re.IGNORECASE)
+    stop_re = re.compile(r";\s*stop printing object,\s*unique label id", re.IGNORECASE)
+    move_re = re.compile(r"^G[01]\b([^;]*)")
+    coord_re = re.compile(r"\b([XYE])(-?\d+(?:\.\d+)?)")
+    raw_boxes: dict[int, list[float]] = {}
+    raw_shapes: dict[int, list[list[float]]] = {}
+    current_id: Optional[int] = None
+    last_x: Optional[float] = None
+    last_y: Optional[float] = None
+
+    for raw_line in gcode.splitlines():
+        line = raw_line.strip()
+        start = start_re.search(line)
+        if start:
+            current_id = int(start.group(1))
+            raw_boxes.setdefault(current_id, [float("inf"), float("inf"), float("-inf"), float("-inf")])
+            raw_shapes.setdefault(current_id, [])
+            continue
+        if stop_re.search(line):
+            current_id = None
+            continue
+        move = move_re.match(line)
+        if not move:
+            continue
+        values = {
+            axis: float(value)
+            for axis, value in coord_re.findall(move.group(1))
+        }
+        old_x, old_y = last_x, last_y
+        if "X" in values:
+            last_x = values["X"]
+        if "Y" in values:
+            last_y = values["Y"]
+        if current_id is None or last_x is None or last_y is None:
+            continue
+        if values.get("E", 0.0) <= 0:
+            continue
+        box = raw_boxes[current_id]
+        segment_points = []
+        for x, y in ((old_x, old_y), (last_x, last_y)):
+            if x is None or y is None:
+                continue
+            segment_points.append((x, y))
+            box[0] = min(box[0], x)
+            box[1] = min(box[1], y)
+            box[2] = max(box[2], x)
+            box[3] = max(box[3], y)
+        if (
+            len(segment_points) == 2
+            and len(raw_shapes[current_id]) < _MAX_OBJECT_SHAPE_SEGMENTS
+        ):
+            (x1, y1), (x2, y2) = segment_points
+            raw_shapes[current_id].append([
+                round(x1, 3),
+                round(y1, 3),
+                round(x2, 3),
+                round(y2, 3),
+            ])
+
+    boxes: dict[int, dict] = {}
+    for obj_id, (min_x, min_y, max_x, max_y) in raw_boxes.items():
+        if max_x > min_x and max_y > min_y:
+            boxes[obj_id] = {"x": min_x, "y": min_y, "w": max_x - min_x, "h": max_y - min_y}
+    shapes = {}
+    for obj_id, segments in raw_shapes.items():
+        if not segments or obj_id not in boxes:
+            continue
+        shape = {"segments": segments}
+        hull = _convex_hull([(seg[0], seg[1]) for seg in segments] + [(seg[2], seg[3]) for seg in segments])
+        if len(hull) >= 3:
+            shape["polygon"] = [[round(x, 3), round(y, 3)] for x, y in hull]
+        shapes[obj_id] = shape
+    return boxes, shapes
+
+
+def _convex_hull(points: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    unique = sorted(set(points))
+    if len(unique) <= 2:
+        return unique
+
+    def cross(origin, a, b) -> float:
+        return (a[0] - origin[0]) * (b[1] - origin[1]) - (a[1] - origin[1]) * (b[0] - origin[0])
+
+    lower: list[tuple[float, float]] = []
+    for point in unique:
+        while len(lower) >= 2 and cross(lower[-2], lower[-1], point) <= 0:
+            lower.pop()
+        lower.append(point)
+
+    upper: list[tuple[float, float]] = []
+    for point in reversed(unique):
+        while len(upper) >= 2 and cross(upper[-2], upper[-1], point) <= 0:
+            upper.pop()
+        upper.append(point)
+
+    return lower[:-1] + upper[:-1]
 
 
 def friendly_bambu_ftp_error(exc: Exception) -> str:

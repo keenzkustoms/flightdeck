@@ -312,6 +312,7 @@ let _missionRenderInFlight = false;
 let _missionLastHtml = '';
 const _cameraUrlCache = {};     // printer_id -> url string or null
 const _cameraMetaCache = {};    // printer_id -> camera metadata
+const _CAMERA_STREAM_REFRESH_MS = 120000;
 let _renderedDetailId = null;
 let _renderedDetailSubtab = null;
 let _renderedDetailOk = false;
@@ -1943,7 +1944,7 @@ function _detailLiveOps(p) {
   const isMoonraker = _isMoonrakerFamily(p);
   const isBambu = p.kind === 'bambu';
   const canFan = (isMoonraker || isBambu) && !['offline', 'error', 'estop'].includes(p.state || '');
-  const canJog = isMoonraker && !['offline', 'printing', 'paused', 'finished', 'error', 'estop'].includes(p.state || '');
+  const canJog = (isMoonraker || isBambu) && !['offline', 'printing', 'finished', 'error', 'estop'].includes(p.state || '');
   const canHome = (isMoonraker || isBambu) && !['offline', 'printing', 'paused', 'finished', 'error', 'estop'].includes(p.state || '');
   const presets = _preheatPresets(p);
   const preheatButtons = presets.map(row => `<button class="live-op-btn" type="button"
@@ -1987,17 +1988,41 @@ function _detailLiveOps(p) {
         }).join('')}
       </div>`
     : '';
-  const pos = Array.isArray(p.toolhead_position) ? Number(p.toolhead_position[2]) : NaN;
-  const zLabel = Number.isFinite(pos) ? `Z ${pos.toFixed(1)}` : 'Z --';
-  const jog = isMoonraker
-    ? `<div class="live-op-group" aria-label="Bed and Z movement">
-        <span class="live-op-group-label">Bed / ${zLabel}</span>
-        <button class="live-op-btn live-op-mini" type="button" data-jog-z="-1" data-printer-id="${esc(p.id)}" ${canJog ? '' : 'disabled'}>
-          <span>Z -1</span><small>mm</small>
-        </button>
-        <button class="live-op-btn live-op-mini" type="button" data-jog-z="1" data-printer-id="${esc(p.id)}" ${canJog ? '' : 'disabled'}>
-          <span>Z +1</span><small>mm</small>
-        </button>
+  const pos = Array.isArray(p.toolhead_position) ? p.toolhead_position.map(v => Number(v)) : [];
+  const posParts = ['X', 'Y', 'Z'].map((axis, idx) => Number.isFinite(pos[idx]) ? `${axis}${pos[idx].toFixed(idx === 2 ? 1 : 0)}` : `${axis}--`);
+  const posLabel = posParts.join(' ');
+  const jog = (isMoonraker || isBambu)
+    ? `<div class="live-op-group live-op-jog" aria-label="XYZ movement">
+        <span class="live-op-group-label">Jog ${esc(posLabel)}</span>
+        <div class="jog-pad" aria-label="XY jog controls">
+          <span></span>
+          <button class="live-op-btn live-op-mini jog-btn" type="button" data-jog-axis="y" data-jog-distance="10" data-printer-id="${esc(p.id)}" ${canJog ? '' : 'disabled'}>
+            <span>Y+</span><small>10</small>
+          </button>
+          <span></span>
+          <button class="live-op-btn live-op-mini jog-btn" type="button" data-jog-axis="x" data-jog-distance="-10" data-printer-id="${esc(p.id)}" ${canJog ? '' : 'disabled'}>
+            <span>X-</span><small>10</small>
+          </button>
+          <button class="live-op-btn live-op-mini jog-btn jog-home-center" type="button" data-home-axes="xy" data-printer-id="${esc(p.id)}" ${isMoonraker && canHome ? '' : 'disabled'}>
+            <span>XY</span><small>${isMoonraker ? 'home' : '--'}</small>
+          </button>
+          <button class="live-op-btn live-op-mini jog-btn" type="button" data-jog-axis="x" data-jog-distance="10" data-printer-id="${esc(p.id)}" ${canJog ? '' : 'disabled'}>
+            <span>X+</span><small>10</small>
+          </button>
+          <span></span>
+          <button class="live-op-btn live-op-mini jog-btn" type="button" data-jog-axis="y" data-jog-distance="-10" data-printer-id="${esc(p.id)}" ${canJog ? '' : 'disabled'}>
+            <span>Y-</span><small>10</small>
+          </button>
+          <span></span>
+        </div>
+        <div class="jog-z-stack" aria-label="Z jog controls">
+          <button class="live-op-btn live-op-mini jog-btn" type="button" data-jog-axis="z" data-jog-distance="1" data-printer-id="${esc(p.id)}" ${canJog ? '' : 'disabled'}>
+            <span>Z+</span><small>1</small>
+          </button>
+          <button class="live-op-btn live-op-mini jog-btn" type="button" data-jog-axis="z" data-jog-distance="-1" data-printer-id="${esc(p.id)}" ${canJog ? '' : 'disabled'}>
+            <span>Z-</span><small>1</small>
+          </button>
+        </div>
       </div>`
     : '';
   const homeAxes = isBambu ? [['all', 'All']] : isMoonraker ? [['xy', 'XY'], ['z', 'Z'], ['all', 'All']] : [];
@@ -2216,16 +2241,17 @@ document.getElementById('view-printer').addEventListener('click', e => {
     return;
   }
 
-  const jogBtn = e.target.closest('[data-jog-z]');
+  const jogBtn = e.target.closest('[data-jog-axis], [data-jog-z]');
   if (jogBtn && !jogBtn.disabled) {
     const id = jogBtn.dataset.printerId;
-    const distance = Number(jogBtn.dataset.jogZ || 0);
+    const axis = (jogBtn.dataset.jogAxis || 'z').toUpperCase();
+    const distance = Number(jogBtn.dataset.jogDistance ?? jogBtn.dataset.jogZ ?? 0);
     const old = jogBtn.innerHTML;
     jogBtn.disabled = true;
-    jogBtn.innerHTML = `<span>Moving</span><small>${distance > 0 ? '+' : ''}${distance}mm</small>`;
-    sendJogZ(id, distance)
-      .then(() => showToast('Z jog sent', `${distance > 0 ? '+' : ''}${distance}mm`, 'success'))
-      .catch(err => showToast('Z jog failed', err.message || '', 'error'))
+    jogBtn.innerHTML = `<span>Moving</span><small>${axis} ${distance > 0 ? '+' : ''}${distance}</small>`;
+    sendJog(id, axis, distance)
+      .then(() => showToast(`${axis} jog sent`, `${distance > 0 ? '+' : ''}${distance}mm`, 'success'))
+      .catch(err => showToast(`${axis} jog failed`, err.message || '', 'error'))
       .finally(() => {
         jogBtn.disabled = false;
         jogBtn.innerHTML = old;
@@ -3210,11 +3236,22 @@ function _slotRouteActive(p, unit, slot) {
     const nozzles = _h2dNozzleActivity(p);
     const hasNozzleSignal = nozzles.left || nozzles.right;
     const isHt = _isAmsHtUnit(unit);
+    if (isHt) return true;
     if (hasNozzleSignal) {
-      if (isHt) return nozzles.right;
       if (nozzles.right && !nozzles.left) return false;
       return nozzles.left && !!slot.active;
     }
+  }
+  return !!slot.active;
+}
+
+function _slotRouteFed(p, unit, slot) {
+  if (!slot || slot.empty) return false;
+  if (_isH2dPrinter(p)) {
+    const nozzles = _h2dNozzleActivity(p);
+    const hasNozzleSignal = nozzles.left || nozzles.right;
+    const isHt = _isAmsHtUnit(unit);
+    if (hasNozzleSignal) return isHt ? nozzles.right : (nozzles.left && !!slot.active);
   }
   return !!slot.active;
 }
@@ -3270,28 +3307,31 @@ function _detailFilamentRoute(p) {
         ? `#${spool.id} ${[spool.color_name, spool.material].filter(Boolean).join(' · ')}`
         : _slotProfileLabel(slot) || slot.type || 'Loaded filament';
       const dest = _routeDestinationLabel(p, unit);
-      const title = `${slotLabel} feeding ${dest}${spoolLabel ? ' · ' + spoolLabel : ''}`;
+      const fedNow = _slotRouteFed(p, unit, slot);
+      const routeClass = fedNow ? '' : ' live-filament-route-idle';
+      const routeBadge = fedNow ? 'Fed now' : 'Ready';
+      const title = `${slotLabel} ${fedNow ? 'feeding' : 'ready for'} ${dest}${spoolLabel ? ' · ' + spoolLabel : ''}`;
       if (FLIGHTDECK_DEMO) {
-        routes.push(`<div class="demo-filament-route${_isAmsHtUnit(unit) ? ' demo-filament-route-ht' : ''}" style="--route-colour:${colour};--route-text:${textColour};--route-slot:${Number(slot.idx || 0)}" title="${esc(title)}">
+        routes.push(`<div class="demo-filament-route${routeClass}${_isAmsHtUnit(unit) ? ' demo-filament-route-ht' : ''}" style="--route-colour:${colour};--route-text:${textColour};--route-slot:${Number(slot.idx || 0)}" title="${esc(title)}">
           <span class="demo-route-port" aria-hidden="true"></span>
           <span class="demo-route-line" aria-hidden="true"></span>
           <span class="live-route-node live-route-destination">
             <span class="live-route-nozzle" aria-hidden="true"></span>
             <span><strong>${esc(dest)}</strong><em>${esc(slotLabel)} · ${esc(spoolLabel)}</em></span>
           </span>
-          <span class="demo-route-fed">Fed now</span>
+          <span class="demo-route-fed">${esc(routeBadge)}</span>
         </div>`);
       } else {
-        routes.push(`<div class="live-filament-route" style="--route-colour:${colour};--route-text:${textColour}" title="${esc(title)}">
+        routes.push(`<div class="live-filament-route${routeClass}" style="--route-colour:${colour};--route-text:${textColour}" title="${esc(title)}">
           <button class="live-route-node live-route-source" data-slot-edit data-printer-id="${p.id}" data-slot-index="${flatSlot}" data-slot-label="${esc(slotLabel)}">
             <span class="live-route-swatch"></span>
             <span><strong>${esc(slotLabel)}</strong><em>${esc(spoolLabel)}</em></span>
-            <b class="live-route-fed">Fed now</b>
+            <b class="live-route-fed">${esc(routeBadge)}</b>
           </button>
           <span class="live-route-line" aria-hidden="true"></span>
           <span class="live-route-node live-route-destination">
             <span class="live-route-nozzle" aria-hidden="true"></span>
-            <span><strong>${esc(dest)}</strong><em>Filament fed</em></span>
+            <span><strong>${esc(dest)}</strong><em>${fedNow ? 'Filament fed' : 'Filament ready'}</em></span>
           </span>
         </div>`);
       }
@@ -3539,6 +3579,22 @@ async function sendJogZ(id, distance) {
   if (!resp.ok) {
     const data = await resp.json().catch(() => ({}));
     throw new Error(data.detail || 'Z jog failed');
+  }
+}
+
+async function sendJog(id, axis, distance) {
+  const axisKey = String(axis || '').toLowerCase();
+  const limit = axisKey === 'z' ? 10 : 50;
+  const delta = Math.max(-limit, Math.min(limit, Number(distance)));
+  const speed = axisKey === 'z' ? 600 : 3000;
+  const resp = await fetch(`/api/printers/${id}/jog`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ axis: axisKey, distance: delta, speed }),
+  });
+  if (!resp.ok) {
+    const data = await resp.json().catch(() => ({}));
+    throw new Error(data.detail || 'Jog command failed');
   }
 }
 
@@ -3880,8 +3936,10 @@ function _detailObjectsUnavailablePanel(data) {
 function _objectMapHtml(id, data) {
   const objects = data?.objects || [];
   const bounds = data?.plate_bounds;
-  const hasGeometry = bounds && bounds.w > 0 && bounds.h > 0 && objects.some(o => o.bbox);
+  const topDown = _objectMapIsTopDown(data);
+  const hasGeometry = bounds && bounds.w > 0 && bounds.h > 0 && objects.some(o => o.bbox || (topDown && _objectMapHasPoint(o)));
   const availableObjects = objects.filter(o => o.state !== 'excluded');
+  const mappedAvailableObjects = hasGeometry ? availableObjects.filter(o => o.bbox || (topDown && _objectMapHasPoint(o))) : availableObjects;
   const mapButtons = objects.map(obj => {
     const isExcluded = obj.state === 'excluded';
     const isCurrent = obj.state === 'current';
@@ -3890,49 +3948,74 @@ function _objectMapHtml(id, data) {
     const safeId = obj.id ?? '';
     const shortName = (obj.label || rawName).replace(/.*[/\\]/, '');
     const displayId = safeId !== '' ? `#${esc(safeId)}` : esc(shortName);
-    if (hasGeometry && obj.bbox) {
-      const left = ((obj.bbox.x - bounds.x) / bounds.w) * 100;
-      const top = ((obj.bbox.y - bounds.y) / bounds.h) * 100;
-      const width = (obj.bbox.w / bounds.w) * 100;
-      const height = (obj.bbox.h / bounds.h) * 100;
+    const pointGeometry = topDown && _objectMapHasPoint(obj);
+    if (hasGeometry && (obj.bbox || pointGeometry)) {
+      const geom = pointGeometry ? _objectMapPointHitStyle(bounds, obj) : _objectMapBoxStyle(bounds, obj.bbox, data);
       return `<button type="button" class="obj-map-region obj-exclude-btn${isExcluded ? ' is-excluded' : ''}${isCurrent ? ' is-current' : ''}"
-        style="left:${left.toFixed(2)}%;top:${top.toFixed(2)}%;width:${Math.max(width, 5).toFixed(2)}%;height:${Math.max(height, 5).toFixed(2)}%"
+        style="${geom}"
         data-obj-name="${safeName}" data-obj-label="${esc(shortName)}" data-printer-id="${id}" data-obj-id="${safeId}" ${isExcluded ? 'disabled' : ''}
         title="${esc(shortName)}"><span class="obj-chip-id">${displayId}</span></button>`;
     }
+    if (hasGeometry && topDown) return '';
     return `<button type="button" class="obj-id-select obj-exclude-btn${isExcluded ? ' is-excluded' : ''}${isCurrent ? ' is-current' : ''}"
       data-obj-name="${safeName}" data-obj-label="${esc(shortName)}" data-printer-id="${id}" data-obj-id="${safeId}" ${isExcluded ? 'disabled' : ''}
       title="${esc(shortName)}"><span class="obj-chip-id">${displayId}</span></button>`;
   }).join('');
   const imageVersion = objects.map(o => `${o.id ?? ''}:${o.state ?? ''}`).join('-') || 'current';
-  const image = data?.plate_image_url
-    ? `<img src="${esc(data.plate_image_url)}?map=${encodeURIComponent(imageVersion)}" alt="Plate object map" loading="lazy">`
+  const plateImageUrl = _objectMapPlateImageUrl(data, topDown);
+  const imageSrc = _objectMapImageSrc(plateImageUrl, imageVersion);
+  const image = imageSrc
+    ? `<img class="${topDown ? 'obj-map-preview-image' : ''}" src="${esc(imageSrc)}" alt="Plate object map" loading="lazy">`
     : '';
-  const objectImages = _objectMapImagePieces(data, imageVersion);
+  const objectImages = topDown ? _objectMapTopDownObjects(data) : _objectMapImagePieces(data, imageVersion);
   const rotation = Number(data?.map_rotation || 0);
   const imageRotation = Number(data?.map_image_rotation || 0);
   const imageOffsetX = Number(data?.map_image_offset_x || 0);
   const imageOffsetY = Number(data?.map_image_offset_y || 0);
   const rotated = rotation > 0 || imageRotation > 0;
-  const classes = `obj-map${hasGeometry ? ' obj-map-has-geometry' : ' obj-map-no-geometry'}${rotated ? ' obj-map-transformed' : ''}${rotation > 0 ? ' obj-map-overlay-rotated' : ''}${imageRotation > 0 ? ' obj-map-image-rotated' : ''}`;
-  const rotationStyle = rotated
-    ? ` style="--obj-map-rotation:${rotation.toFixed(2)}deg;--obj-map-image-rotation:${imageRotation.toFixed(2)}deg;--obj-map-image-offset-x:${imageOffsetX.toFixed(2)}%;--obj-map-image-offset-y:${imageOffsetY.toFixed(2)}%;--obj-map-counter-rotation:${(-rotation).toFixed(2)}deg;--obj-map-plane-scale:${rotation === 90 ? '177.78%' : '135%'};--obj-map-image-scale:${imageRotation === 90 ? '177.78%' : '135%'}"`
-    : '';
+  const classes = `obj-map${hasGeometry ? ' obj-map-has-geometry' : ' obj-map-no-geometry'}${topDown ? ' obj-map-topdown' : ''}${rotated ? ' obj-map-transformed' : ''}${rotation > 0 ? ' obj-map-overlay-rotated' : ''}${imageRotation > 0 ? ' obj-map-image-rotated' : ''}`;
+  const rotationStyle = _objectMapStyleVars(bounds, rotated, rotation, imageRotation, imageOffsetX, imageOffsetY);
   const helper = hasGeometry
-    ? 'Tap the failed part on the plate map.'
+    ? 'Match the ID to the printer screen, then tap the map or list.'
     : `No bed positions in this 3MF; use the object ID shown on the printer screen. Bambu/Orca IDs can be high. ${availableObjects.length} objects still available.`;
+  const objectList = _objectMapObjectList(id, objects, hasGeometry);
+  const activeBadge = mappedAvailableObjects.length === availableObjects.length
+    ? `${availableObjects.length} active`
+    : `${mappedAvailableObjects.length} mapped`;
   return `<div class="${classes}"${rotationStyle}>
     <div class="obj-map-stage obj-map-open" data-printer-id="${esc(id)}" title="Open large object selector">
       <div class="obj-map-image-plane">
-        ${objectImages || image}
+        ${topDown ? image : ''}
+        ${objectImages || (topDown ? '' : image)}
       </div>
       <div class="obj-map-plane">
         ${hasGeometry ? `<div class="obj-map-overlay">${mapButtons}</div>` : ''}
       </div>
+      ${topDown ? '<div class="obj-map-front-marker" aria-hidden="true">Front</div>' : ''}
+      ${topDown ? `<div class="obj-map-active-count">${esc(activeBadge)}</div>` : ''}
     </div>
-    ${hasGeometry ? '' : `<div class="obj-id-selector"><span>Printer object IDs</span><div>${mapButtons}</div></div>`}
+    ${objectList || (hasGeometry ? '' : `<div class="obj-id-selector"><span>Printer object IDs</span><div>${mapButtons}</div></div>`)}
     <div class="obj-map-helper">${esc(helper)}</div>
   </div>`;
+}
+
+function _objectMapObjectList(id, objects, hasGeometry) {
+  if (!hasGeometry || !objects?.length) return '';
+  const rows = objects.map(obj => {
+    const isExcluded = obj.state === 'excluded';
+    const isCurrent = obj.state === 'current';
+    const rawName = obj.name || `Object ${obj.id ?? ''}`;
+    const safeId = obj.id ?? '';
+    const shortName = (obj.label || rawName).replace(/.*[/\\]/, '');
+    return `<button type="button" class="obj-map-list-row obj-exclude-btn${isExcluded ? ' is-excluded' : ''}${isCurrent ? ' is-current' : ''}"
+      data-obj-name="${esc(rawName)}" data-obj-label="${esc(shortName)}" data-printer-id="${esc(id)}" data-obj-id="${esc(safeId)}" ${isExcluded ? 'disabled' : ''}
+      title="${esc(shortName)}">
+      <span class="obj-map-list-id">${safeId !== '' ? esc(safeId) : '?'}</span>
+      <span class="obj-map-list-name">${esc(shortName)}</span>
+      <span class="obj-map-list-action">${isExcluded ? 'Skipped' : 'Skip'}</span>
+    </button>`;
+  }).join('');
+  return `<div class="obj-map-list"><div class="obj-map-list-title">Object IDs</div>${rows}</div>`;
 }
 
 function _objectMapImagePieces(data, imageVersion) {
@@ -3955,23 +4038,187 @@ function _objectMapImagePieces(data, imageVersion) {
   }).join('');
 }
 
+function _objectMapPlateImageUrl(data, topDown = false) {
+  if (!data) return '';
+  return topDown ? (data.plate_top_image_url || data.plate_image_url || '') : (data.plate_image_url || '');
+}
+
+function _objectMapImageSrc(src, imageVersion) {
+  if (!src) return '';
+  return `${src}${src.includes('?') ? '&' : '?'}map=${encodeURIComponent(imageVersion)}`;
+}
+
+function _objectMapIsTopDown(data) {
+  return data?.map_image_mode === 'top_down' || data?.map_view === 'top_down';
+}
+
+function _objectMapHasPoint(obj) {
+  return Number.isFinite(Number(obj?.x)) && Number.isFinite(Number(obj?.y));
+}
+
+function _objectMapPointPosition(bounds, obj) {
+  const padding = 8;
+  const contentArea = 100 - (padding * 2);
+  const yMax = Number(bounds.y) + Number(bounds.h);
+  let x = padding + ((Number(obj.x) - Number(bounds.x)) / Number(bounds.w)) * contentArea;
+  let y = padding + ((yMax - Number(obj.y)) / Number(bounds.h)) * contentArea;
+  x = Math.max(5, Math.min(95, x));
+  y = Math.max(5, Math.min(95, y));
+  return { x, y };
+}
+
+function _objectMapTransformPoint(bounds, x, y, data = {}) {
+  let px = ((Number(x) - bounds.x) / bounds.w) * 100;
+  let py = ((Number(y) - bounds.y) / bounds.h) * 100;
+  if (data?.map_mirror_x) px = 100 - px;
+  if (data?.map_mirror_y) py = 100 - py;
+  const rotation = Number(data?.map_coordinate_rotation || 0);
+  if (rotation === -90 || rotation === 270) {
+    const nextX = py;
+    const nextY = 100 - px;
+    px = nextX;
+    py = nextY;
+  } else if (rotation === 90 || rotation === -270) {
+    const nextX = 100 - py;
+    const nextY = px;
+    px = nextX;
+    py = nextY;
+  } else if (Math.abs(rotation) === 180) {
+    px = 100 - px;
+    py = 100 - py;
+  }
+  return { x: px, y: py };
+}
+
+function _objectMapBoxParts(bounds, box, data = {}) {
+  const points = [
+    _objectMapTransformPoint(bounds, box.x, box.y, data),
+    _objectMapTransformPoint(bounds, box.x + box.w, box.y, data),
+    _objectMapTransformPoint(bounds, box.x + box.w, box.y + box.h, data),
+    _objectMapTransformPoint(bounds, box.x, box.y + box.h, data),
+  ];
+  const xs = points.map(p => p.x);
+  const ys = points.map(p => p.y);
+  const left = Math.min(...xs);
+  const top = Math.min(...ys);
+  const width = Math.max(...xs) - left;
+  const height = Math.max(...ys) - top;
+  return {
+    left,
+    top,
+    width: Math.max(width, 5),
+    height: Math.max(height, 5),
+  };
+}
+
+function _objectMapBoxStyle(bounds, box, data = {}) {
+  const p = _objectMapBoxParts(bounds, box, data);
+  return `left:${p.left.toFixed(2)}%;top:${p.top.toFixed(2)}%;width:${p.width.toFixed(2)}%;height:${p.height.toFixed(2)}%`;
+}
+
+function _objectMapMarkerStyle(bounds, box, data = {}) {
+  const p = _objectMapBoxParts(bounds, box, data);
+  const centerX = Math.max(0, Math.min(100, p.left + (p.width / 2)));
+  const centerY = Math.max(0, Math.min(100, p.top + (p.height / 2)));
+  return `left:${centerX.toFixed(2)}%;top:${centerY.toFixed(2)}%`;
+}
+
+function _objectMapPointMarkerStyle(bounds, obj) {
+  const p = _objectMapPointPosition(bounds, obj);
+  return `left:${p.x.toFixed(2)}%;top:${p.y.toFixed(2)}%`;
+}
+
+function _objectMapPointHitStyle(bounds, obj) {
+  const p = _objectMapPointPosition(bounds, obj);
+  const size = 12;
+  return `left:${Math.max(0, p.x - (size / 2)).toFixed(2)}%;top:${Math.max(0, p.y - (size / 2)).toFixed(2)}%;width:${size.toFixed(2)}%;height:${size.toFixed(2)}%`;
+}
+
+function _objectMapTopDownObjects(data) {
+  const objects = data?.objects || [];
+  const bounds = data?.plate_bounds;
+  if (!bounds || bounds.w <= 0 || bounds.h <= 0) return '';
+  return objects.filter(obj => obj.bbox || _objectMapHasPoint(obj)).map(obj => {
+    const isExcluded = obj.state === 'excluded';
+    const isCurrent = obj.state === 'current';
+    const rawName = obj.name || `Object ${obj.id ?? ''}`;
+    const shortName = (obj.label || rawName).replace(/.*[/\\]/, '');
+    const displayId = obj.id !== undefined && obj.id !== null ? `#${obj.id}` : '?';
+    const style = _objectMapHasPoint(obj)
+      ? _objectMapPointMarkerStyle(bounds, obj)
+      : _objectMapMarkerStyle(bounds, obj.bbox, data);
+    return `<div class="obj-map-top-object${isExcluded ? ' is-excluded' : ''}${isCurrent ? ' is-current' : ''}"
+      style="${style}"
+      title="${esc(shortName)}" aria-hidden="true"><span class="obj-map-top-block"></span><span class="obj-map-id-dot">${esc(displayId)}</span></div>`;
+  }).join('');
+}
+
+function _objectMapShapeSvg(obj, bounds, data = {}) {
+  const box = obj?.bbox;
+  const segments = Array.isArray(obj?.shape?.segments) ? obj.shape.segments : [];
+  const polygon = Array.isArray(obj?.shape?.polygon) ? obj.shape.polygon : [];
+  if (!bounds || !box || (!segments.length && !polygon.length) || box.w <= 0 || box.h <= 0) return '';
+  const view = _objectMapBoxParts(bounds, box, data);
+  const point = pt => {
+    if (!Array.isArray(pt) || pt.length < 2) return null;
+    const transformed = _objectMapTransformPoint(bounds, pt[0], pt[1], data);
+    if (!Number.isFinite(transformed.x) || !Number.isFinite(transformed.y)) return null;
+    return transformed;
+  };
+  const polygonHtml = polygon.length >= 3
+    ? `<polygon points="${polygon.map(point).filter(Boolean).map(pt => `${pt.x.toFixed(3)},${pt.y.toFixed(3)}`).join(' ')}"></polygon>`
+    : '';
+  const lines = segments.slice(0, 260).map(seg => {
+    if (!Array.isArray(seg) || seg.length < 4) return '';
+    const a = point([seg[0], seg[1]]);
+    const b = point([seg[2], seg[3]]);
+    if (!a || !b) return '';
+    return `<line x1="${a.x.toFixed(3)}" y1="${a.y.toFixed(3)}" x2="${b.x.toFixed(3)}" y2="${b.y.toFixed(3)}"></line>`;
+  }).join('');
+  if (!lines && !polygonHtml) return '';
+  return `<svg class="obj-map-shape" viewBox="${view.left.toFixed(3)} ${view.top.toFixed(3)} ${view.width.toFixed(3)} ${view.height.toFixed(3)}" preserveAspectRatio="none" focusable="false">${polygonHtml}${lines}</svg>`;
+}
+
+function _objectMapStyleVars(bounds, rotated, rotation, imageRotation, imageOffsetX, imageOffsetY) {
+  const vars = [];
+  if (bounds && bounds.w > 0 && bounds.h > 0) {
+    const aspect = Math.max(0.65, Math.min(1.85, Number(bounds.w) / Number(bounds.h)));
+    vars.push(`--obj-map-aspect:${aspect.toFixed(4)}`);
+  }
+  if (rotated) {
+    vars.push(
+      `--obj-map-rotation:${rotation.toFixed(2)}deg`,
+      `--obj-map-image-rotation:${imageRotation.toFixed(2)}deg`,
+      `--obj-map-image-offset-x:${imageOffsetX.toFixed(2)}%`,
+      `--obj-map-image-offset-y:${imageOffsetY.toFixed(2)}%`,
+      `--obj-map-counter-rotation:${(-rotation).toFixed(2)}deg`,
+      `--obj-map-plane-scale:${rotation === 90 ? '177.78%' : '135%'}`,
+      `--obj-map-image-scale:${imageRotation === 90 ? '177.78%' : '135%'}`,
+    );
+  }
+  return vars.length ? ` style="${vars.join(';')}"` : '';
+}
+
 function _largeObjectMapHtml(id, data) {
   const objects = data?.objects || [];
   const bounds = data?.plate_bounds;
-  const hasGeometry = bounds && bounds.w > 0 && bounds.h > 0 && objects.some(o => o.bbox);
+  const topDown = _objectMapIsTopDown(data);
+  const hasGeometry = bounds && bounds.w > 0 && bounds.h > 0 && objects.some(o => o.bbox || (topDown && _objectMapHasPoint(o)));
+  const availableObjects = objects.filter(o => o.state !== 'excluded');
+  const mappedAvailableObjects = hasGeometry ? availableObjects.filter(o => o.bbox || (topDown && _objectMapHasPoint(o))) : availableObjects;
   const imageVersion = objects.map(o => `${o.id ?? ''}:${o.state ?? ''}`).join('-') || 'current';
-  const image = data?.plate_image_url
-    ? `<img src="${esc(data.plate_image_url)}?map=${encodeURIComponent(imageVersion)}" alt="Large plate preview" loading="eager">`
+  const plateImageUrl = _objectMapPlateImageUrl(data, topDown);
+  const imageSrc = _objectMapImageSrc(plateImageUrl, imageVersion);
+  const image = imageSrc
+    ? `<img class="${topDown ? 'obj-map-preview-image' : ''}" src="${esc(imageSrc)}" alt="Large plate preview" loading="eager">`
     : '<div class="object-map-missing">No thumbnail available</div>';
-  const objectImages = _objectMapImagePieces(data, imageVersion);
+  const objectImages = topDown ? _objectMapTopDownObjects(data) : _objectMapImagePieces(data, imageVersion);
   const rotation = Number(data?.map_rotation || 0);
   const imageRotation = Number(data?.map_image_rotation || 0);
   const imageOffsetX = Number(data?.map_image_offset_x || 0);
   const imageOffsetY = Number(data?.map_image_offset_y || 0);
   const rotated = rotation > 0 || imageRotation > 0;
-  const rotationStyle = rotated
-    ? ` style="--obj-map-rotation:${rotation.toFixed(2)}deg;--obj-map-image-rotation:${imageRotation.toFixed(2)}deg;--obj-map-image-offset-x:${imageOffsetX.toFixed(2)}%;--obj-map-image-offset-y:${imageOffsetY.toFixed(2)}%;--obj-map-counter-rotation:${(-rotation).toFixed(2)}deg;--obj-map-plane-scale:${rotation === 90 ? '177.78%' : '135%'};--obj-map-image-scale:${imageRotation === 90 ? '177.78%' : '135%'}"`
-    : '';
+  const rotationStyle = _objectMapStyleVars(bounds, rotated, rotation, imageRotation, imageOffsetX, imageOffsetY);
   const buttons = objects.map(obj => {
     const isExcluded = obj.state === 'excluded';
     const isCurrent = obj.state === 'current';
@@ -3980,34 +4227,39 @@ function _largeObjectMapHtml(id, data) {
     const safeId = obj.id ?? '';
     const shortName = (obj.label || rawName).replace(/.*[/\\]/, '');
     const displayId = safeId !== '' ? `#${esc(safeId)}` : esc(shortName);
-    if (hasGeometry && obj.bbox) {
-      const left = ((obj.bbox.x - bounds.x) / bounds.w) * 100;
-      const top = ((obj.bbox.y - bounds.y) / bounds.h) * 100;
-      const width = (obj.bbox.w / bounds.w) * 100;
-      const height = (obj.bbox.h / bounds.h) * 100;
+    const pointGeometry = topDown && _objectMapHasPoint(obj);
+    if (hasGeometry && (obj.bbox || pointGeometry)) {
       return `<button type="button" class="obj-map-region obj-exclude-btn${isExcluded ? ' is-excluded' : ''}${isCurrent ? ' is-current' : ''}"
-        style="left:${left.toFixed(2)}%;top:${top.toFixed(2)}%;width:${Math.max(width, 5).toFixed(2)}%;height:${Math.max(height, 5).toFixed(2)}%"
+        style="${pointGeometry ? _objectMapPointHitStyle(bounds, obj) : _objectMapBoxStyle(bounds, obj.bbox, data)}"
         data-obj-name="${safeName}" data-obj-label="${esc(shortName)}" data-printer-id="${id}" data-obj-id="${safeId}" ${isExcluded ? 'disabled' : ''}
         title="${esc(shortName)}"><span class="obj-chip-id">${displayId}</span></button>`;
     }
+    if (hasGeometry && topDown) return '';
     return `<button type="button" class="obj-id-select obj-exclude-btn${isExcluded ? ' is-excluded' : ''}${isCurrent ? ' is-current' : ''}"
       data-obj-name="${safeName}" data-obj-label="${esc(shortName)}" data-printer-id="${id}" data-obj-id="${safeId}" ${isExcluded ? 'disabled' : ''}
       title="${esc(shortName)}"><span class="obj-chip-id">${displayId}</span><span>${esc(shortName)}</span></button>`;
   }).join('');
   const helper = hasGeometry
-    ? 'Tap the failed object on the enlarged bed map.'
+    ? 'Match the ID to the printer screen, then tap the map or list.'
     : 'This file has no bed-position metadata. Match the object ID shown on the printer screen, then select it below.';
+  const objectList = _objectMapObjectList(id, objects, hasGeometry);
+  const activeBadge = mappedAvailableObjects.length === availableObjects.length
+    ? `${availableObjects.length} active`
+    : `${mappedAvailableObjects.length} mapped`;
   return `<div class="object-map-modal-body">
-    <div class="object-map-modal-stage${hasGeometry ? ' has-geometry' : ''}${rotated ? ' obj-map-transformed' : ''}${rotation > 0 ? ' obj-map-overlay-rotated' : ''}${imageRotation > 0 ? ' obj-map-image-rotated' : ''}"${rotationStyle}>
+    <div class="object-map-modal-stage${hasGeometry ? ' has-geometry' : ''}${topDown ? ' obj-map-topdown' : ''}${rotated ? ' obj-map-transformed' : ''}${rotation > 0 ? ' obj-map-overlay-rotated' : ''}${imageRotation > 0 ? ' obj-map-image-rotated' : ''}"${rotationStyle}>
       <div class="obj-map-image-plane">
-        ${objectImages || image}
+        ${topDown ? image : ''}
+        ${objectImages || (topDown ? '' : image)}
       </div>
       <div class="obj-map-plane">
         ${hasGeometry ? `<div class="obj-map-overlay">${buttons}</div>` : ''}
       </div>
+      ${topDown ? '<div class="obj-map-front-marker" aria-hidden="true">Front</div>' : ''}
+      ${topDown ? `<div class="obj-map-active-count">${esc(activeBadge)}</div>` : ''}
     </div>
     <div class="obj-map-helper">${esc(helper)}</div>
-    ${hasGeometry ? '' : `<div class="obj-id-selector object-map-modal-ids"><span>Printer object IDs</span><div>${buttons}</div></div>`}
+    ${objectList || (hasGeometry ? '' : `<div class="obj-id-selector object-map-modal-ids"><span>Printer object IDs</span><div>${buttons}</div></div>`)}
   </div>`;
 }
 
@@ -6130,6 +6382,10 @@ function _pollPrintBayIfVisible() {
 }
 
 setInterval(_pollPrintBayIfVisible, 5000);
+setInterval(_refreshVisibleCameraStreams, 30000);
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) _refreshVisibleCameraStreams(true);
+});
 
 async function renderFileDeskView() {
   const el = document.getElementById('filedesk-page');
@@ -7751,6 +8007,12 @@ function _cameraFeedHtml(cameraId, label, extraClass = '') {
   return `<img class="${extraClass}" src="${camSrc}" alt="${esc(label || 'Live camera')}" data-camera-id="${esc(cameraId)}" loading="eager" fetchpriority="high">`;
 }
 
+function _setCameraImageSrc(img, baseUrl, key = 't') {
+  if (!img || !baseUrl) return;
+  img.src = `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}${key}=${Date.now()}`;
+  img.dataset.streamLoadedAt = String(Date.now());
+}
+
 function _loadCameraUrl(printerId, onResolved) {
   if (!printerId || _cameraUrlCache[printerId] !== undefined) return Promise.resolve(_cameraUrlCache[printerId] || null);
   if (_cameraUrlFetches[printerId]) return _cameraUrlFetches[printerId];
@@ -7777,6 +8039,7 @@ function _attachCameraRetries(root) {
   root.querySelectorAll('img[data-camera-id]').forEach(img => {
     if (img.dataset.retryAttached === '1') return;
     img.dataset.retryAttached = '1';
+    img.dataset.streamLoadedAt = img.dataset.streamLoadedAt || String(Date.now());
     let tries = 0;
     const cameraId = img.dataset.cameraId;
     const meta = _cameraMetaCache[cameraId] || {};
@@ -7799,9 +8062,28 @@ function _attachCameraRetries(root) {
       const url = _cameraUrlCache[cameraId];
       if (!url) return;
       setTimeout(() => {
-        img.src = `${url}${url.includes('?') ? '&' : '?'}retry=${Date.now()}`;
+        _setCameraImageSrc(img, url, 'retry');
       }, 1200 * tries);
     });
+    img.addEventListener('load', () => {
+      tries = 0;
+      img.dataset.streamLoadedAt = String(Date.now());
+    });
+  });
+}
+
+function _refreshVisibleCameraStreams(force = false) {
+  if (FLIGHTDECK_DEMO || document.hidden) return;
+  const now = Date.now();
+  document.querySelectorAll('img[data-camera-id]').forEach(img => {
+    const cameraId = img.dataset.cameraId;
+    const url = _cameraUrlCache[cameraId];
+    if (!url || url.startsWith('data:')) return;
+    const rect = img.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0 || rect.bottom < 0 || rect.right < 0 || rect.top > window.innerHeight || rect.left > window.innerWidth) return;
+    const loadedAt = Number(img.dataset.streamLoadedAt || 0);
+    if (!force && loadedAt && (now - loadedAt) < _CAMERA_STREAM_REFRESH_MS) return;
+    _setCameraImageSrc(img, url, 'refresh');
   });
 }
 
@@ -10725,7 +11007,9 @@ function _openSliceModelDialog({ sourceId, path, file, printers }) {
       if (!r.ok) throw new Error(data.detail || 'Unable to prepare slice');
       errEl.hidden = false;
       errEl.textContent = data.ready
-        ? `Prepare ${data.output?.filename || 'a printer-specific sliced job'} for ${data.target?.custom_name || data.target?.model_name || choice.dataset.printerId}.`
+        ? (data.manual_handoff && data.message
+          ? data.message
+          : `Prepare ${data.output?.filename || 'a printer-specific sliced job'} for ${data.target?.custom_name || data.target?.model_name || choice.dataset.printerId}.`)
         : data.message || 'Set the slicer settings in Settings -> Slicer first.';
       errEl.classList.toggle('filedesk-dialog-ok', !!data.ready);
       if (data.ready && actionsEl) {
@@ -10733,6 +11017,7 @@ function _openSliceModelDialog({ sourceId, path, file, printers }) {
         const browserUrl = data.browser_url || data.sidecar_url || '';
         const outputName = data.output?.filename || 'sliced-output';
         const profiles = data.profiles || {};
+        const canBackgroundSlice = data.can_background_slice !== false;
         const profileRows = [
           ['Printer', profiles.printer],
           ['Process', profiles.process],
@@ -10746,7 +11031,7 @@ function _openSliceModelDialog({ sourceId, path, file, printers }) {
           </div>
           <div class="filedesk-slice-profiles">${profileRows}</div>
           <div class="filedesk-slice-buttons">
-            <button class="filedesk-slice-link filedesk-slice-run" type="button" data-run-slice="${esc(outputName)}" data-printer-id="${esc(data.target?.id || choice.dataset.printerId)}">Slice in Flightdeck</button>
+            ${canBackgroundSlice ? `<button class="filedesk-slice-link filedesk-slice-run" type="button" data-run-slice="${esc(outputName)}" data-printer-id="${esc(data.target?.id || choice.dataset.printerId)}">Slice in Flightdeck</button>` : ''}
             ${sourceUrl ? `<a class="filedesk-slice-link" href="${esc(sourceUrl)}" download>Download model</a>` : ''}
             ${browserUrl ? `<a class="filedesk-slice-link" href="${esc(browserUrl)}" target="_blank" rel="noreferrer">Open Orca</a>` : ''}
             <button class="filedesk-slice-link" type="button" data-copy-slice-name="${esc(outputName)}">Copy output name</button>
