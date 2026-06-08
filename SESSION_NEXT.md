@@ -2,13 +2,14 @@
 
 Latest GitHub/Pi state:
 - Branch: main
-- Latest commit: current HEAD after this handoff (`Rotate Bambu skip object slices`)
+- Latest commit: current HEAD after this handoff (`Add STEP source models to printer queues`)
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
-- Refresh cachebust currently: ?cachebust=376 / style.css?v=307
+- Refresh cachebust currently: ?cachebust=377 / style.css?v=308
 
 Recent work:
+- Printer queues now accept `.step` and `.stp` uploads as source-model cue items. They appear in the queue with a STEP marker, but queue preflight blocks dispatch until the model is sliced into a printer-ready job.
 - Bambu per-object thumbnail slices currently use `transform: rotate(25deg)` on `.obj-map-image-piece` as the latest visual trial. This rotates only the white object slices, not the red overlay.
 - Bambu/Klipper live fan controls no longer show Off/50/100 preset buttons; each fan now uses one 10%-step percentage slider with a visible percent readout and red/green off/on styling.
 - Previous Bambu per-object thumbnail slice trial used `transform: rotate(10deg)` on `.obj-map-image-piece`.

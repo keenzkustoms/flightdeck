@@ -4661,6 +4661,7 @@ async def _sync_bambu_ams_slot(printer_id: str, slot: int, spool: Optional[dict]
 
 _ALLOWED_BAMBU_EXT = {".3mf"}
 _ALLOWED_MOONRAKER_EXT = {".gcode", ".gcode.gz", ".ufp"}
+_QUEUE_SOURCE_MODEL_EXT = {".step", ".stp"}
 
 
 def _printer_kind(printer_id: str) -> Optional[str]:
@@ -4674,6 +4675,10 @@ def _printer_kind(printer_id: str) -> Optional[str]:
         if pid == printer_id:
             return profile
     return None
+
+
+def _is_queue_source_model(filename: str) -> bool:
+    return _queue_file_extension(filename) in _QUEUE_SOURCE_MODEL_EXT
 
 
 async def _printer_status_map() -> dict[str, dict]:
@@ -5013,6 +5018,12 @@ def _queue_preflight(job: dict, printer_status: Optional[dict]) -> dict:
     settings = db.get_all_settings()
     strict_colour = settings.get("queue_strict_colour", "true") == "true"
 
+    if _is_queue_source_model(job.get("filename") or ""):
+        issues.append({
+            "level": "block",
+            "message": "STEP source model queued; slice it to a printer-ready job before dispatch.",
+        })
+
     if not (printer_status or {}).get("print_enabled", db.is_printer_printing_enabled(job["printer_id"])):
         note = (printer_status or {}).get("print_enabled_note") or db.get_printer_printing_note(job["printer_id"])
         suffix = f" Reason: {note}" if note else ""
@@ -5193,17 +5204,8 @@ async def queue_upload(printer_id: str = Form(...), file: UploadFile = File(...)
         raise HTTPException(status_code=422, detail="queueing to simulated printers is not supported yet")
 
     raw_name = _safe_basename(file.filename, "upload")
-    # Resolve multi-part extensions in priority order
-    if raw_name.endswith(".gcode.3mf"):
-        ext = ".3mf"
-    elif raw_name.endswith(".gcode.gz"):
-        ext = ".gcode.gz"
-    elif "." in raw_name:
-        ext = "." + raw_name.rsplit(".", 1)[-1]
-    else:
-        ext = ""
-
-    allowed = _ALLOWED_BAMBU_EXT if kind == "bambu" else _ALLOWED_MOONRAKER_EXT
+    ext = _queue_file_extension(raw_name)
+    allowed = (_ALLOWED_BAMBU_EXT if kind == "bambu" else _ALLOWED_MOONRAKER_EXT) | _QUEUE_SOURCE_MODEL_EXT
     if ext not in allowed:
         raise HTTPException(
             status_code=422,

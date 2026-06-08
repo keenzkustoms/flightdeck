@@ -13070,6 +13070,7 @@ select optgroup {
 }
 .queue-job-thumb-placeholder {
   font-size: 1.4rem;
+  font-weight: 900;
   opacity: 0.35;
 }
 

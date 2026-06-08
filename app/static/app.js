@@ -5745,6 +5745,11 @@ function _fileIsSlicedJob(file) {
   return name.endsWith('.gcode.3mf') || name.endsWith('.gcode') || name.endsWith('.gcode.gz') || name.endsWith('.ufp');
 }
 
+function _queueJobIsSourceModel(job) {
+  const name = String(job?.filename || '').toLowerCase();
+  return name.endsWith('.step') || name.endsWith('.stp');
+}
+
 function _fileCompatiblePrinters(file, sourceTarget = null) {
   if (_fileIsSourceModel(file)) return _latestPrinters.slice();
   const name = String(file?.name || file?.path || '').toLowerCase();
@@ -7373,8 +7378,10 @@ function _queueJobCard(job, isFirst, isLast) {
   const isRecoverable = job.status === 'failed' || job.status === 'cancelled';
   const previewSrc  = job.has_preview ? _mediaUrl(`/api/queue/${job.id}/preview`, job.filename || 'Queued print') : '';
   const preflight = job.preflight;
+  const isSourceModel = _queueJobIsSourceModel(job);
   const canSend = !preflight || preflight.can_start;
   const meta = [
+    isSourceModel ? 'STEP source model' : '',
     job.filament_type || '',
     job.filament_weight_g ? `${Math.round(job.filament_weight_g)}g` : '',
     job.estimated_seconds ? _fmtSeconds(job.estimated_seconds) : '',
@@ -7384,7 +7391,7 @@ function _queueJobCard(job, isFirst, isLast) {
     <div class="queue-job-thumb">
       ${previewSrc
         ? `<img src="${previewSrc}" alt="" loading="lazy">`
-        : `<div class="queue-job-thumb-placeholder">🖨</div>`}
+        : `<div class="queue-job-thumb-placeholder">${isSourceModel ? 'STEP' : '🖨'}</div>`}
     </div>
     <div class="queue-job-body">
       <div class="queue-job-name" title="${job.filename}">${job.filename}</div>
@@ -7412,7 +7419,8 @@ function _queueJobCard(job, isFirst, isLast) {
 }
 
 function _queuePrinterSection(printerId, printerLabel, jobs, kind) {
-  const accept   = kind === 'bambu' ? '.3mf,.gcode.3mf' : '.gcode,.gcode.gz,.ufp';
+  const accept   = kind === 'bambu' ? '.3mf,.gcode.3mf,.step,.stp' : '.gcode,.gcode.gz,.ufp,.step,.stp';
+  const acceptedText = kind === 'bambu' ? '.gcode.3mf / .step' : '.gcode / .step';
   const pending  = jobs.filter(j => j.status === 'pending');
   const active   = jobs.filter(j => j.status === 'printing' || j.status === 'uploading');
   const completed = jobs.filter(j => ['done','failed','cancelled'].includes(j.status));
@@ -7443,7 +7451,7 @@ function _queuePrinterSection(printerId, printerLabel, jobs, kind) {
         <input type="file" class="queue-file-input" accept="${accept}"
                data-printer-id="${printerId}" data-kind="${kind}">
         <span class="queue-upload-icon">⊕</span>
-        <span class="queue-upload-text">Drop ${kind === 'bambu' ? '.gcode.3mf' : '.gcode / .gcode.gz / .ufp'} or click to browse</span>
+        <span class="queue-upload-text">Drop ${acceptedText} or click to browse</span>
       </label>
       <div class="queue-upload-progress" hidden></div>
     </div>
