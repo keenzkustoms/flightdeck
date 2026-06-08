@@ -2832,7 +2832,6 @@ function _detailLiveHeader(p, printerColor, bannerTextColor) {
       </label>
     </div>
     ${_detailTransportControls(p.id, p)}
-    ${_detailLiveOps(p)}
     ${disabledNote ? `<div class="live-lockout-note">
       <strong>Dispatch locked</strong>
       <span>${esc(disabledNote)}</span>
@@ -5853,7 +5852,10 @@ async function renderPrinterDetail(id, subtab = 'live') {
         `<div class="detail-body">
           <div class="detail-left">
             <div id="detail-live-head">${_detailLiveHeader(p, printerColor, bannerTextColor)}</div>
-            <div class="camera-hero">${camHtml}<div class="camera-hud" id="detail-camera-hud">${_detailCameraHud(p)}</div></div>
+            <div class="live-main-deck">
+              <aside class="live-control-rail" id="detail-live-ops">${_detailLiveOps(p)}</aside>
+              <div class="camera-hero">${camHtml}<div class="camera-hud" id="detail-camera-hud">${_detailCameraHud(p)}</div></div>
+            </div>
             <div class="live-strip" id="detail-live-strip">${_detailLiveStrip(p)}</div>
           </div>
           <div class="detail-right">
@@ -5932,6 +5934,8 @@ async function renderPrinterDetail(id, subtab = 'live') {
     const bannerTextColor = p.icon === 'bambu' ? '#22c55e' : p.icon === 'voron' ? '#ef4444' : 'var(--text)';
     const headEl = el.querySelector('#detail-live-head');
     if (headEl) headEl.innerHTML = _detailLiveHeader(p, printerColor, bannerTextColor);
+    const opsEl = el.querySelector('#detail-live-ops');
+    if (opsEl) opsEl.innerHTML = _detailLiveOps(p);
     const hudEl = el.querySelector('#detail-camera-hud');
     if (hudEl) hudEl.innerHTML = _detailCameraHud(p);
     const stripEl = el.querySelector('#detail-live-strip');

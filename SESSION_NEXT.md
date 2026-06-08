@@ -2,13 +2,15 @@
 
 Latest GitHub/Pi state:
 - Branch: main
-- Latest commit: current HEAD after this handoff (`Tidy Fleet Wall XS headers`)
+- Latest commit: current HEAD after this handoff (`Move Live controls into side rail`)
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
-- Refresh cachebust currently: ?cachebust=401 / style.css?v=326
+- Refresh cachebust currently: ?cachebust=402 / style.css?v=327
 
 Recent work:
+- Live printer controls now sit in a vertical left-side rail beside the camera instead of spanning across the top. The printer/status/transport header stays above the camera, while preheat, fan, jog, home, and Klipper controls move into `#detail-live-ops` inside `.live-control-rail`.
+- Camera wide mode hides the new live-control rail and live strip so the camera can expand cleanly; mobile stacks the rail above the camera.
 - Fleet Wall `XS` headers now use a two-row compact layout so printer identity and warning chips do not crowd each other. Names truncate cleanly, icons are smaller, and warning chips move under the printer name instead of fighting for the same row.
 - Restored Fleet Wall `Small` as its own mode. `XS` is now the extra-small camera-wall-sized mode with fixed non-stretching `18rem` columns so three printers do not expand to Medium-sized cards.
 - Camera Wall has been removed from command search and the top nav. Legacy `#/cameras` URLs now route back to Fleet Wall.
