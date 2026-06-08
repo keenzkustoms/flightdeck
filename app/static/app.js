@@ -3819,8 +3819,9 @@ function _objectMapHtml(id, data) {
   const classes = `obj-map${hasGeometry ? ' obj-map-has-geometry' : ' obj-map-no-geometry'}${topDown ? ' obj-map-topdown' : ''}${rotated ? ' obj-map-transformed' : ''}${rotation > 0 ? ' obj-map-overlay-rotated' : ''}${imageRotation > 0 ? ' obj-map-image-rotated' : ''}`;
   const rotationStyle = _objectMapStyleVars(bounds, rotated, rotation, imageRotation, imageOffsetX, imageOffsetY);
   const helper = hasGeometry
-    ? 'Tap the failed part on the plate map.'
+    ? 'Match the ID to the printer screen, then tap the map or list.'
     : `No bed positions in this 3MF; use the object ID shown on the printer screen. Bambu/Orca IDs can be high. ${availableObjects.length} objects still available.`;
+  const objectList = _objectMapObjectList(id, objects, hasGeometry);
   return `<div class="${classes}"${rotationStyle}>
     <div class="obj-map-stage obj-map-open" data-printer-id="${esc(id)}" title="Open large object selector">
       <div class="obj-map-image-plane">
@@ -3830,10 +3831,30 @@ function _objectMapHtml(id, data) {
         ${hasGeometry ? `<div class="obj-map-overlay">${mapButtons}</div>` : ''}
       </div>
       ${topDown ? '<div class="obj-map-front-marker" aria-hidden="true">Front</div>' : ''}
+      ${topDown ? `<div class="obj-map-active-count">${availableObjects.length} active</div>` : ''}
     </div>
-    ${hasGeometry ? '' : `<div class="obj-id-selector"><span>Printer object IDs</span><div>${mapButtons}</div></div>`}
+    ${objectList || (hasGeometry ? '' : `<div class="obj-id-selector"><span>Printer object IDs</span><div>${mapButtons}</div></div>`)}
     <div class="obj-map-helper">${esc(helper)}</div>
   </div>`;
+}
+
+function _objectMapObjectList(id, objects, hasGeometry) {
+  if (!hasGeometry || !objects?.length) return '';
+  const rows = objects.map(obj => {
+    const isExcluded = obj.state === 'excluded';
+    const isCurrent = obj.state === 'current';
+    const rawName = obj.name || `Object ${obj.id ?? ''}`;
+    const safeId = obj.id ?? '';
+    const shortName = (obj.label || rawName).replace(/.*[/\\]/, '');
+    return `<button type="button" class="obj-map-list-row obj-exclude-btn${isExcluded ? ' is-excluded' : ''}${isCurrent ? ' is-current' : ''}"
+      data-obj-name="${esc(rawName)}" data-obj-label="${esc(shortName)}" data-printer-id="${esc(id)}" data-obj-id="${esc(safeId)}" ${isExcluded ? 'disabled' : ''}
+      title="${esc(shortName)}">
+      <span class="obj-map-list-id">${safeId !== '' ? esc(safeId) : '?'}</span>
+      <span class="obj-map-list-name">${esc(shortName)}</span>
+      <span class="obj-map-list-action">${isExcluded ? 'Skipped' : 'Skip'}</span>
+    </button>`;
+  }).join('');
+  return `<div class="obj-map-list"><div class="obj-map-list-title">Object IDs</div>${rows}</div>`;
 }
 
 function _objectMapImagePieces(data, imageVersion) {
@@ -3918,10 +3939,10 @@ function _objectMapTopDownObjects(data) {
     const isCurrent = obj.state === 'current';
     const rawName = obj.name || `Object ${obj.id ?? ''}`;
     const shortName = (obj.label || rawName).replace(/.*[/\\]/, '');
-    const shape = _objectMapShapeSvg(obj, bounds, data);
+    const displayId = obj.id !== undefined && obj.id !== null ? `#${obj.id}` : '?';
     return `<div class="obj-map-top-object${isExcluded ? ' is-excluded' : ''}${isCurrent ? ' is-current' : ''}"
       style="${_objectMapBoxStyle(bounds, obj.bbox, data)}"
-      title="${esc(shortName)}" aria-hidden="true">${shape || '<span></span>'}</div>`;
+      title="${esc(shortName)}" aria-hidden="true"><span class="obj-map-top-block"></span><span class="obj-map-id-dot">${esc(displayId)}</span></div>`;
   }).join('');
 }
 
@@ -4006,8 +4027,9 @@ function _largeObjectMapHtml(id, data) {
       title="${esc(shortName)}"><span class="obj-chip-id">${displayId}</span><span>${esc(shortName)}</span></button>`;
   }).join('');
   const helper = hasGeometry
-    ? 'Tap the failed object on the enlarged bed map.'
+    ? 'Match the ID to the printer screen, then tap the map or list.'
     : 'This file has no bed-position metadata. Match the object ID shown on the printer screen, then select it below.';
+  const objectList = _objectMapObjectList(id, objects, hasGeometry);
   return `<div class="object-map-modal-body">
     <div class="object-map-modal-stage${hasGeometry ? ' has-geometry' : ''}${topDown ? ' obj-map-topdown' : ''}${rotated ? ' obj-map-transformed' : ''}${rotation > 0 ? ' obj-map-overlay-rotated' : ''}${imageRotation > 0 ? ' obj-map-image-rotated' : ''}"${rotationStyle}>
       <div class="obj-map-image-plane">
@@ -4017,9 +4039,10 @@ function _largeObjectMapHtml(id, data) {
         ${hasGeometry ? `<div class="obj-map-overlay">${buttons}</div>` : ''}
       </div>
       ${topDown ? '<div class="obj-map-front-marker" aria-hidden="true">Front</div>' : ''}
+      ${topDown ? `<div class="obj-map-active-count">${objects.filter(o => o.state !== 'excluded').length} active</div>` : ''}
     </div>
     <div class="obj-map-helper">${esc(helper)}</div>
-    ${hasGeometry ? '' : `<div class="obj-id-selector object-map-modal-ids"><span>Printer object IDs</span><div>${buttons}</div></div>`}
+    ${objectList || (hasGeometry ? '' : `<div class="obj-id-selector object-map-modal-ids"><span>Printer object IDs</span><div>${buttons}</div></div>`)}
   </div>`;
 }
 

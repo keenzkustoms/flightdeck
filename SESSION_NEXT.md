@@ -2,13 +2,14 @@
 
 Latest GitHub/Pi state:
 - Branch: main
-- Latest commit: current HEAD after this handoff (`Move Bambu front marker outside map`)
+- Latest commit: current HEAD after this handoff (`Simplify Bambu skip-object map`)
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
-- Refresh cachebust currently: ?cachebust=386 / style.css?v=317
+- Refresh cachebust currently: ?cachebust=387 / style.css?v=318
 
 Recent work:
+- Bambu skip-object maps now follow the Bambuddy-style ID workflow: a clean positional map with small red object markers, blue ID dots, active count, and a compact ID/name skip list. The raw G-code extrusion path is no longer shown as the main object shape.
 - The vertical Bambu skip-object `Front` marker now sits just outside the map area on the far right.
 - The Bambu top-down skip-object `Front` marker is now vertical and sits on the far right-hand side of the map.
 - Bambu top-down skip-object maps now show a small `Front` marker at the right-hand centre of the map. It is a visual-only overlay and does not affect red regions, object outlines, or skip IDs.
@@ -96,6 +97,12 @@ Likely next items:
 ## What was changed - Session 28.262 (Bambu front marker outside map - 8 June)
 - Moved the vertical Bambu top-down skip-object `Front` marker just outside the map area on the far right.
 - Static cache bumped to `style.css?v=317`; frontend refresh required.
+
+## What was changed - Session 28.263 (Bambuddy-style skip-object map - 8 June)
+- Reworked the Bambu skip-object map presentation to match Bambuddy's simpler operator workflow.
+- The visible map now uses compact red object markers with blue ID dots and an active count, while the raw G-code extrusion path is no longer shown as the main visual shape.
+- Added a compact object ID/name list below the map; map regions and list rows still send the original Bambu skip IDs.
+- Static cache bumped to `app.js?v=387` and `style.css?v=318`; frontend refresh required.
 
 ## What was fixed - Session 28.241 (AMS HT slot canonicalization - 7 June)
 - Regular AMS slots continue to use `unit*4 + slot` indexes.
