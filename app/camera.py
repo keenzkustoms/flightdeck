@@ -164,7 +164,7 @@ class BambuCameraProxy:
 
     # ── streaming ──────────────────────────────────────────────────────────
 
-    async def stream(self):
+    async def stream(self, max_fps: float | None = None):
         """Async generator: yields multipart/x-mixed-replace MJPEG frames."""
         if self._idle_task:
             self._idle_task.cancel()
@@ -172,6 +172,13 @@ class BambuCameraProxy:
 
         await self._start()
         self._clients += 1
+        min_interval = 0.0
+        if max_fps:
+            try:
+                fps = max(0.5, min(10.0, float(max_fps)))
+                min_interval = 1.0 / fps
+            except (TypeError, ValueError):
+                min_interval = 0.0
 
         for _ in range(50):
             if self._latest:
@@ -179,11 +186,14 @@ class BambuCameraProxy:
             await asyncio.sleep(0.1)
 
         last_sent = None
+        last_sent_at = 0.0
         try:
             while True:
                 frame = self._latest
-                if frame is not None and frame is not last_sent:
+                now = time.monotonic()
+                if frame is not None and frame is not last_sent and (not min_interval or (now - last_sent_at) >= min_interval):
                     last_sent = frame
+                    last_sent_at = now
                     yield (
                         b"--frame\r\n"
                         b"Content-Type: image/jpeg\r\n"
