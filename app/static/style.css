@@ -9030,15 +9030,58 @@ button.live-route-node:hover {
 }
 
 .fleet-wall-xsmall .fleet-wall-card-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: 0.32rem;
   padding: 0.5rem 0.62rem;
+}
+
+.fleet-wall-xsmall .printer-identity {
+  width: 100%;
+  gap: 0.42rem;
+}
+
+.fleet-wall-xsmall .printer-icon {
+  width: 1.05rem;
+  height: 1.05rem;
+}
+
+.fleet-wall-xsmall .printer-names {
+  min-width: 0;
+  gap: 0.12rem;
 }
 
 .fleet-wall-xsmall .printer-custom {
   font-size: 0.9rem;
+  line-height: 1.05;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .fleet-wall-xsmall .printer-model {
   font-size: 0.7rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fleet-wall-xsmall .fleet-wall-head-right {
+  width: 100%;
+  justify-content: flex-start;
+  gap: 0.22rem;
+}
+
+.fleet-wall-xsmall .fleet-wall-head-flag {
+  max-width: 100%;
+  padding: 0.12rem 0.4rem;
+  font-size: 0.58rem;
+  line-height: 1.1;
+}
+
+.fleet-wall-xsmall .fleet-wall-head-flag:only-child {
+  max-width: 100%;
 }
 
 .fleet-wall-xsmall .fleet-wall-kind,
