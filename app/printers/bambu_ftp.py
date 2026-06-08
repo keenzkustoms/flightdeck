@@ -25,6 +25,7 @@ class BambuPreview:
     estimated_total_seconds: Optional[int]
     filament_weight_g: Optional[float]
     filament_type: Optional[str]
+    top_image_png: Optional[bytes] = None
     filament_colors: Optional[str] = None
     objects: Optional[list[dict]] = None
     plate_bounds: Optional[dict] = None
@@ -67,9 +68,17 @@ def _parse_3mf(buf: io.BytesIO, plate_number: Optional[int] = None) -> BambuPrev
             except KeyError:
                 image_png = None
         try:
+            top_image_png: Optional[bytes] = z.read(f"Metadata/top_{plate_number}.png")
+        except KeyError:
+            try:
+                top_image_png = z.read("Metadata/top_1.png")
+            except KeyError:
+                top_image_png = None
+        try:
             slice_xml = z.read("Metadata/slice_info.config").decode()
         except KeyError:
             return BambuPreview(image_png=image_png, estimated_total_seconds=None,
+                                top_image_png=top_image_png,
                                 filament_weight_g=None, filament_type=None, filament_colors=None,
                                 objects=None)
         try:
@@ -165,6 +174,7 @@ def _parse_3mf(buf: io.BytesIO, plate_number: Optional[int] = None) -> BambuPrev
 
     return BambuPreview(
         image_png=image_png,
+        top_image_png=top_image_png,
         estimated_total_seconds=int(pred) if pred else None,
         filament_weight_g=float(weight) if weight else None,
         filament_type=filament_type,

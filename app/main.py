@@ -2909,7 +2909,7 @@ async def post_exclude_object(printer_id: str, req: ExcludeObjectRequest):
 
 
 @app.get("/api/printers/{printer_id}/thumbnail")
-async def get_printer_thumbnail(printer_id: str):
+async def get_printer_thumbnail(printer_id: str, view: str | None = None):
     for (id, model_name, custom_name, icon, url) in _moonraker:
         if id == printer_id:
             status = await moonraker.fetch(id, model_name, custom_name, icon, url)
@@ -2922,6 +2922,8 @@ async def get_printer_thumbnail(printer_id: str):
     for p in _bambu:
         if p.id == printer_id:
             preview = await asyncio.to_thread(p.get_preview)
+            if view == "top" and preview and preview.top_image_png:
+                return Response(content=preview.top_image_png, media_type="image/png")
             if preview and preview.image_png:
                 return Response(content=preview.image_png, media_type="image/png")
             raise HTTPException(status_code=404, detail="no thumbnail")

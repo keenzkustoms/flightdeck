@@ -905,6 +905,7 @@ class BambuPrinter:
             "excluded_ids": sorted(skipped),
             "plate_bounds": preview.plate_bounds,
             "plate_image_url": f"/api/printers/{self.id}/thumbnail",
+            "plate_top_image_url": f"/api/printers/{self.id}/thumbnail?view=top",
             "map_rotation": 0,
             "map_image_rotation": 0,
             "map_image_offset_x": 0,

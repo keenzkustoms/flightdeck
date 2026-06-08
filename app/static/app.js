@@ -3811,8 +3811,10 @@ function _objectMapHtml(id, data) {
       title="${esc(shortName)}"><span class="obj-chip-id">${displayId}</span></button>`;
   }).join('');
   const imageVersion = objects.map(o => `${o.id ?? ''}:${o.state ?? ''}`).join('-') || 'current';
-  const image = data?.plate_image_url
-    ? `<img class="${topDown ? 'obj-map-preview-image' : ''}" src="${esc(data.plate_image_url)}?map=${encodeURIComponent(imageVersion)}" alt="Plate object map" loading="lazy">`
+  const plateImageUrl = _objectMapPlateImageUrl(data, topDown);
+  const imageSrc = _objectMapImageSrc(plateImageUrl, imageVersion);
+  const image = imageSrc
+    ? `<img class="${topDown ? 'obj-map-preview-image' : ''}" src="${esc(imageSrc)}" alt="Plate object map" loading="lazy">`
     : '';
   const objectImages = topDown ? _objectMapTopDownObjects(data) : _objectMapImagePieces(data, imageVersion);
   const rotation = Number(data?.map_rotation || 0);
@@ -3883,6 +3885,16 @@ function _objectMapImagePieces(data, imageVersion) {
       style="left:${left.toFixed(2)}%;top:${top.toFixed(2)}%;width:${Math.max(width, 5).toFixed(2)}%;height:${Math.max(height, 5).toFixed(2)}%;background-image:url('${esc(src)}?map=${encodeURIComponent(imageVersion)}');background-size:${bgW.toFixed(2)}% ${bgH.toFixed(2)}%;background-position:${Number.isFinite(bgX) ? bgX.toFixed(2) : '50'}% ${Number.isFinite(bgY) ? bgY.toFixed(2) : '50'}%"
       aria-hidden="true"></div>`;
   }).join('');
+}
+
+function _objectMapPlateImageUrl(data, topDown = false) {
+  if (!data) return '';
+  return topDown ? (data.plate_top_image_url || data.plate_image_url || '') : (data.plate_image_url || '');
+}
+
+function _objectMapImageSrc(src, imageVersion) {
+  if (!src) return '';
+  return `${src}${src.includes('?') ? '&' : '?'}map=${encodeURIComponent(imageVersion)}`;
 }
 
 function _objectMapIsTopDown(data) {
@@ -4044,8 +4056,10 @@ function _largeObjectMapHtml(id, data) {
   const availableObjects = objects.filter(o => o.state !== 'excluded');
   const mappedAvailableObjects = hasGeometry ? availableObjects.filter(o => o.bbox || (topDown && _objectMapHasPoint(o))) : availableObjects;
   const imageVersion = objects.map(o => `${o.id ?? ''}:${o.state ?? ''}`).join('-') || 'current';
-  const image = data?.plate_image_url
-    ? `<img class="${topDown ? 'obj-map-preview-image' : ''}" src="${esc(data.plate_image_url)}?map=${encodeURIComponent(imageVersion)}" alt="Large plate preview" loading="eager">`
+  const plateImageUrl = _objectMapPlateImageUrl(data, topDown);
+  const imageSrc = _objectMapImageSrc(plateImageUrl, imageVersion);
+  const image = imageSrc
+    ? `<img class="${topDown ? 'obj-map-preview-image' : ''}" src="${esc(imageSrc)}" alt="Large plate preview" loading="eager">`
     : '<div class="object-map-missing">No thumbnail available</div>';
   const objectImages = topDown ? _objectMapTopDownObjects(data) : _objectMapImagePieces(data, imageVersion);
   const rotation = Number(data?.map_rotation || 0);
