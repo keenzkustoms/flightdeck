@@ -9,6 +9,7 @@ Latest GitHub/Pi state:
 - Refresh cachebust currently: ?cachebust=402 / style.css?v=329
 
 Recent work:
+- H2D/other Bambu Print Bay loading is hardened: Bambu SD/FTP file listing now has a short timeout and a brief successful-target cache so the Print Bay can show vault/reprint content instead of sitting on `Loading Print Bay...` when the printer file store is slow.
 - Live rail fan controls now match the preheat rail width: each fan channel uses a full-width slider row with the label/percent above it, so the controls no longer look squeezed beside the camera.
 - Fixed the first-pass live-control rail camera collapse: `.live-main-deck` now has a viewport-based minimum height so the camera hero cannot compute to 0px high beside the new rail.
 - Live printer controls now sit in a vertical left-side rail beside the camera instead of spanning across the top. The printer/status/transport header stays above the camera, while preheat, fan, jog, home, and Klipper controls move into `#detail-live-ops` inside `.live-control-rail`.

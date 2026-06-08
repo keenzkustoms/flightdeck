@@ -12,6 +12,7 @@ import socket
 import sqlite3
 import subprocess
 import tempfile
+import time
 import urllib.parse
 import urllib.request
 import zipfile
@@ -70,6 +71,9 @@ _label_printer = LabelPrinter()
 _MAX_PRINT_FILE_BYTES = int(os.getenv("FLIGHTDECK_MAX_PRINT_FILE_MB", "2048")) * 1024 * 1024
 _MAX_PROFILE_UPLOAD_BYTES = int(os.getenv("FLIGHTDECK_MAX_PROFILE_UPLOAD_MB", "64")) * 1024 * 1024
 _UPLOAD_READ_CHUNK_BYTES = 1024 * 1024
+_BAMBU_FILE_LIST_TIMEOUT_SECONDS = float(os.getenv("FLIGHTDECK_BAMBU_FILE_LIST_TIMEOUT", "2.5"))
+_FILE_DESK_TARGET_CACHE_SECONDS = float(os.getenv("FLIGHTDECK_FILE_DESK_TARGET_CACHE_SECONDS", "20"))
+_file_desk_target_cache: dict[str, dict] = {}
 
 
 def _dt_default(obj):
@@ -1331,14 +1335,24 @@ async def get_file_desk(printer_id: Optional[str] = None):
         }
 
     async def _bambu_target(p: BambuPrinter) -> dict:
+        cache_key = f"bambu:{p.id}"
+        cached = _file_desk_target_cache.get(cache_key)
+        if cached and (time.monotonic() - cached.get("at", 0)) < _FILE_DESK_TARGET_CACHE_SECONDS:
+            return dict(cached["target"])
         try:
             from .printers.bambu_ftp import list_bambu_files
-            files = await asyncio.to_thread(list_bambu_files, p._ip, p._access_code)
+            files = await asyncio.wait_for(
+                asyncio.to_thread(list_bambu_files, p._ip, p._access_code),
+                timeout=_BAMBU_FILE_LIST_TIMEOUT_SECONDS,
+            )
             error = None
+        except asyncio.TimeoutError:
+            files = []
+            error = "Printer file list timed out; retry in a moment."
         except Exception as exc:
             files = []
             error = str(exc)
-        return {
+        target = {
             "id": p.id,
             "label": p.custom_name or p.model_name,
             "model": p.model_name,
@@ -1347,6 +1361,9 @@ async def get_file_desk(printer_id: Optional[str] = None):
             "error": error,
             "actions": {"format_sd": True, "format_sd_ready": False},
         }
+        if error is None:
+            _file_desk_target_cache[cache_key] = {"at": time.monotonic(), "target": dict(target)}
+        return target
 
     async def _simulated_target(pid: str, model_name: str, custom_name: str, profile: str) -> dict:
         return {
