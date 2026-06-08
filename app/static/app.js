@@ -10467,7 +10467,9 @@ function _openSliceModelDialog({ sourceId, path, file, printers }) {
       if (!r.ok) throw new Error(data.detail || 'Unable to prepare slice');
       errEl.hidden = false;
       errEl.textContent = data.ready
-        ? `Prepare ${data.output?.filename || 'a printer-specific sliced job'} for ${data.target?.custom_name || data.target?.model_name || choice.dataset.printerId}.`
+        ? (data.manual_handoff && data.message
+          ? data.message
+          : `Prepare ${data.output?.filename || 'a printer-specific sliced job'} for ${data.target?.custom_name || data.target?.model_name || choice.dataset.printerId}.`)
         : data.message || 'Set the slicer settings in Settings -> Slicer first.';
       errEl.classList.toggle('filedesk-dialog-ok', !!data.ready);
       if (data.ready && actionsEl) {
