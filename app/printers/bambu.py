@@ -910,7 +910,8 @@ class BambuPrinter:
             "map_image_offset_x": 0,
             "map_image_offset_y": 0,
             "map_image_mode": "top_down",
-            "map_mirror_x": True,
+            "map_mirror_x": False,
+            "map_mirror_y": True,
             "detail": "Bambu object exclusion uses the printer skip-object list and top-down object footprints.",
         }
 
