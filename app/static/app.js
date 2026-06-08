@@ -7407,6 +7407,7 @@ function _queueJobCard(job, isFirst, isLast) {
     ${isPending ? `
         <button class="queue-act-btn" data-action="up"   data-id="${job.id}" title="Move up"   ${isFirst ? 'disabled' : ''}>▲</button>
         <button class="queue-act-btn" data-action="down" data-id="${job.id}" title="Move down" ${isLast  ? 'disabled' : ''}>▼</button>
+        ${isSourceModel ? `<button class="queue-act-btn queue-act-slice" data-action="slice" data-id="${job.id}" data-printer-id="${esc(job.printer_id)}" data-filename="${esc(job.filename || '')}" title="Slice source model">Slice</button>` : ''}
         <button class="queue-act-btn queue-act-send" data-action="send"   data-id="${job.id}" title="${canSend ? 'Send now' : 'Preflight blocked'}" ${canSend ? '' : 'disabled'}>▶</button>
         <button class="queue-act-btn queue-act-check" data-action="check"  data-id="${job.id}" title="Run filament check">FIL</button>
         <button class="queue-act-btn queue-act-del"  data-action="delete" data-id="${job.id}" title="Remove">✕</button>
@@ -7559,6 +7560,17 @@ async function _queueHandleAction(e) {
       });
     } else if (action === 'send') {
       await fetch(`/api/queue/${id}/send`, { method: 'POST' });
+    } else if (action === 'slice') {
+      const printer = _latestPrinters.find(p => p.id === (printerId || btn.dataset.printerId));
+      if (!printer) throw new Error('Target printer not found');
+      btn.disabled = false;
+      _openSliceModelDialog({
+        sourceId: 'queue',
+        path: id,
+        file: { name: btn.dataset.filename || `Queue job #${id}`, path: `Queue job #${id}` },
+        printers: [printer],
+      });
+      return;
     } else if (action === 'check') {
       const r = await fetch(`/api/queue/${id}/preflight`);
       if (!r.ok) throw new Error((await r.json())?.detail || `Queue preflight ${r.status}`);

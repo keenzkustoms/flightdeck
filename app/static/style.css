@@ -13182,6 +13182,8 @@ select optgroup {
 .queue-act-btn:disabled { opacity: 0.25; cursor: default; }
 .queue-act-send { color: var(--accent); border-color: var(--accent); }
 .queue-act-send:hover:not(:disabled) { background: rgba(59,130,246,0.1); }
+.queue-act-slice { color: #4ade80; border-color: #22c55e; }
+.queue-act-slice:hover:not(:disabled) { background: rgba(34,197,94,0.12); }
 .queue-act-del  { color: #f87171; border-color: #f87171; }
 .queue-act-del:hover:not(:disabled)  { background: rgba(239,68,68,0.1); }
 

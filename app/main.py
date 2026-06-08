@@ -950,7 +950,7 @@ def _file_kind(name: str) -> str:
 
 def _file_archive_key(name: str) -> str:
     text = str(name or "").rsplit("/", 1)[-1].rsplit("\\", 1)[-1].lower()
-    for suffix in (".gcode.3mf", ".gcode.gz", ".3mf", ".gcode", ".ufp"):
+    for suffix in (".gcode.3mf", ".gcode.gz", ".3mf", ".gcode", ".ufp", ".step", ".stp", ".stl", ".obj"):
         if text.endswith(suffix):
             text = text[: -len(suffix)]
             break
@@ -1242,6 +1242,28 @@ async def _read_file_desk_source(source_id: str, source_path: str) -> tuple[str,
     source_path = source_path.strip().lstrip("/")
     if not source_path:
         raise HTTPException(status_code=422, detail="File path required")
+
+    if source_id == "queue":
+        try:
+            job_id = int(source_path)
+        except ValueError:
+            raise HTTPException(status_code=422, detail="Queue job id required")
+        job = db.queue_get(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Queue job not found")
+        filename = job["filename"]
+        ext = _queue_file_extension(filename)
+        if ext not in _SOURCE_MODEL_EXT:
+            raise HTTPException(status_code=422, detail="Only source model queue jobs can be sliced")
+        file_path = Path(job["file_path"])
+        if not file_path.is_file():
+            raise HTTPException(status_code=404, detail="Queued source file not found")
+        _enforce_file_size(file_path.stat().st_size, label="Queued source file")
+        data = file_path.read_bytes()
+        if not data:
+            raise HTTPException(status_code=422, detail="Empty file")
+        return filename, data
+
     filename = source_path.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
     ext = _queue_file_extension(filename)
     if ext not in (_ALLOWED_BAMBU_EXT | _ALLOWED_MOONRAKER_EXT | _SOURCE_MODEL_EXT):
