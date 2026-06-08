@@ -3859,13 +3859,42 @@ function _objectMapIsTopDown(data) {
   return data?.map_image_mode === 'top_down' || data?.map_view === 'top_down';
 }
 
+function _objectMapTransformPoint(bounds, x, y, data = {}) {
+  let px = ((Number(x) - bounds.x) / bounds.w) * 100;
+  let py = ((Number(y) - bounds.y) / bounds.h) * 100;
+  if (data?.map_mirror_x) px = 100 - px;
+  if (data?.map_mirror_y) py = 100 - py;
+  const rotation = Number(data?.map_coordinate_rotation || 0);
+  if (rotation === -90 || rotation === 270) {
+    const nextX = py;
+    const nextY = 100 - px;
+    px = nextX;
+    py = nextY;
+  } else if (rotation === 90 || rotation === -270) {
+    const nextX = 100 - py;
+    const nextY = px;
+    px = nextX;
+    py = nextY;
+  } else if (Math.abs(rotation) === 180) {
+    px = 100 - px;
+    py = 100 - py;
+  }
+  return { x: px, y: py };
+}
+
 function _objectMapBoxParts(bounds, box, data = {}) {
-  const width = (box.w / bounds.w) * 100;
-  const height = (box.h / bounds.h) * 100;
-  let left = ((box.x - bounds.x) / bounds.w) * 100;
-  let top = ((box.y - bounds.y) / bounds.h) * 100;
-  if (data?.map_mirror_x) left = 100 - left - width;
-  if (data?.map_mirror_y) top = 100 - top - height;
+  const points = [
+    _objectMapTransformPoint(bounds, box.x, box.y, data),
+    _objectMapTransformPoint(bounds, box.x + box.w, box.y, data),
+    _objectMapTransformPoint(bounds, box.x + box.w, box.y + box.h, data),
+    _objectMapTransformPoint(bounds, box.x, box.y + box.h, data),
+  ];
+  const xs = points.map(p => p.x);
+  const ys = points.map(p => p.y);
+  const left = Math.min(...xs);
+  const top = Math.min(...ys);
+  const width = Math.max(...xs) - left;
+  const height = Math.max(...ys) - top;
   return {
     left,
     top,
@@ -3888,30 +3917,37 @@ function _objectMapTopDownObjects(data) {
     const isCurrent = obj.state === 'current';
     const rawName = obj.name || `Object ${obj.id ?? ''}`;
     const shortName = (obj.label || rawName).replace(/.*[/\\]/, '');
-    const shape = _objectMapShapeSvg(obj);
-    const mirrorClass = `${data?.map_mirror_x ? ' is-mirrored-x' : ''}${data?.map_mirror_y ? ' is-mirrored-y' : ''}`;
-    return `<div class="obj-map-top-object${mirrorClass}${isExcluded ? ' is-excluded' : ''}${isCurrent ? ' is-current' : ''}"
+    const shape = _objectMapShapeSvg(obj, bounds, data);
+    return `<div class="obj-map-top-object${isExcluded ? ' is-excluded' : ''}${isCurrent ? ' is-current' : ''}"
       style="${_objectMapBoxStyle(bounds, obj.bbox, data)}"
       title="${esc(shortName)}" aria-hidden="true">${shape || '<span></span>'}</div>`;
   }).join('');
 }
 
-function _objectMapShapeSvg(obj) {
+function _objectMapShapeSvg(obj, bounds, data = {}) {
   const box = obj?.bbox;
   const segments = Array.isArray(obj?.shape?.segments) ? obj.shape.segments : [];
   const polygon = Array.isArray(obj?.shape?.polygon) ? obj.shape.polygon : [];
-  if (!box || (!segments.length && !polygon.length) || box.w <= 0 || box.h <= 0) return '';
+  if (!bounds || !box || (!segments.length && !polygon.length) || box.w <= 0 || box.h <= 0) return '';
+  const view = _objectMapBoxParts(bounds, box, data);
+  const point = pt => {
+    if (!Array.isArray(pt) || pt.length < 2) return null;
+    const transformed = _objectMapTransformPoint(bounds, pt[0], pt[1], data);
+    if (!Number.isFinite(transformed.x) || !Number.isFinite(transformed.y)) return null;
+    return transformed;
+  };
   const polygonHtml = polygon.length >= 3
-    ? `<polygon points="${polygon.map(pt => Array.isArray(pt) && pt.length >= 2 ? `${Number(pt[0]).toFixed(3)},${Number(pt[1]).toFixed(3)}` : '').filter(Boolean).join(' ')}"></polygon>`
+    ? `<polygon points="${polygon.map(point).filter(Boolean).map(pt => `${pt.x.toFixed(3)},${pt.y.toFixed(3)}`).join(' ')}"></polygon>`
     : '';
   const lines = segments.slice(0, 260).map(seg => {
     if (!Array.isArray(seg) || seg.length < 4) return '';
-    const nums = seg.slice(0, 4).map(Number);
-    if (nums.some(n => !Number.isFinite(n))) return '';
-    return `<line x1="${nums[0].toFixed(3)}" y1="${nums[1].toFixed(3)}" x2="${nums[2].toFixed(3)}" y2="${nums[3].toFixed(3)}"></line>`;
+    const a = point([seg[0], seg[1]]);
+    const b = point([seg[2], seg[3]]);
+    if (!a || !b) return '';
+    return `<line x1="${a.x.toFixed(3)}" y1="${a.y.toFixed(3)}" x2="${b.x.toFixed(3)}" y2="${b.y.toFixed(3)}"></line>`;
   }).join('');
   if (!lines && !polygonHtml) return '';
-  return `<svg class="obj-map-shape" viewBox="${Number(box.x).toFixed(3)} ${Number(box.y).toFixed(3)} ${Number(box.w).toFixed(3)} ${Number(box.h).toFixed(3)}" preserveAspectRatio="none" focusable="false">${polygonHtml}${lines}</svg>`;
+  return `<svg class="obj-map-shape" viewBox="${view.left.toFixed(3)} ${view.top.toFixed(3)} ${view.width.toFixed(3)} ${view.height.toFixed(3)}" preserveAspectRatio="none" focusable="false">${polygonHtml}${lines}</svg>`;
 }
 
 function _objectMapStyleVars(bounds, rotated, rotation, imageRotation, imageOffsetX, imageOffsetY) {

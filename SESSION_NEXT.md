@@ -2,13 +2,14 @@
 
 Latest GitHub/Pi state:
 - Branch: main
-- Latest commit: current HEAD after this handoff (`Flip Bambu skip-object map vertically`)
+- Latest commit: current HEAD after this handoff (`Rotate Bambu skip-object map left`)
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
-- Refresh cachebust currently: ?cachebust=384 / style.css?v=313
+- Refresh cachebust currently: ?cachebust=385 / style.css?v=314
 
 Recent work:
+- Bambu top-down skip-object maps now apply mirror flags plus `map_coordinate_rotation=-90` through coordinate math, so the whole red overlay and SVG footprint layout rotates left together. On the X1C 6-object map, skipped object `#96` now lands where `#115` was previously.
 - Bambu top-down skip-object maps now expose `map_mirror_y=true` and `map_mirror_x=false`; this keeps the skipped X1C object `#96` in the top-right corner while preserving raw Bambu object IDs for skip commands.
 - Bambu top-down skip maps now draw a footprint shape for each object instead of only a generic rectangle. The parser sends a simplified convex footprint plus extrusion strokes from object-labelled gcode; X1C's 6-Benchy print parsed with 14-point footprints and 29 strokes for each skip ID.
 - Bambu skip-object maps now render as a Mainsail-style top-down bed map instead of using the angled Bambu plate thumbnail. The parser now recovers per-object top-down bboxes from `Metadata/plate_*.gcode` object-label extrusion moves, which fixes repeated-copy jobs like the X1C 6-Benchy print where `plate_1.json` only exposed one combined bbox.
@@ -55,7 +56,7 @@ Recent work:
 - Sim printer stale notifications cleaned up.
 
 Likely next items:
-- If the mirrored Bambu object map looks correct on the X1C/H2D, keep `map_mirror_y=true`; if the target changes, adjust only the mirror flags without changing the object parser or skip IDs.
+- If the rotated Bambu object map looks correct on the X1C/H2D, keep `map_mirror_y=true` plus `map_coordinate_rotation=-90`; if the target changes, adjust only the display transform flags without changing the object parser or skip IDs.
 - Keep polishing Fleet Wall layout and AMS sizing.
 - Recheck BigBoy AMS HT assignment after any physical spool moves; HT should now show as slot `128` rather than legacy `512`.
 - Recheck Fleet Wall click/zoom behaviour after real use.
@@ -73,6 +74,12 @@ Likely next items:
 - Switched the Bambu top-down skip-object map from X mirror to Y mirror: `map_mirror_x=false`, `map_mirror_y=true`.
 - This orientation puts the skipped X1C object `#96` in the top-right corner while keeping the same object outlines and raw skip IDs.
 - Backend restart required; static cache remains `app.js?v=384` and `style.css?v=313`.
+
+## What was changed - Session 28.259 (Bambu skip-object left rotation - 8 June)
+- Added `map_coordinate_rotation=-90` for Bambu top-down object maps.
+- Frontend map rendering now applies mirror/rotation transforms to the actual object coordinates and SVG footprint points, so the red regions and white outlines rotate together as one layout.
+- Coordinate check against live X1C data puts skipped `#96` at `left=0.00%, top=0.00%`, matching the previous `#115` corner.
+- Static cache bumped to `app.js?v=385` and `style.css?v=314`; backend restart and frontend refresh required.
 
 ## What was fixed - Session 28.241 (AMS HT slot canonicalization - 7 June)
 - Regular AMS slots continue to use `unit*4 + slot` indexes.
