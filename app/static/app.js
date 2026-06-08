@@ -3803,6 +3803,7 @@ function _objectMapHtml(id, data) {
         data-obj-name="${safeName}" data-obj-label="${esc(shortName)}" data-printer-id="${id}" data-obj-id="${safeId}" ${isExcluded ? 'disabled' : ''}
         title="${esc(shortName)}"><span class="obj-chip-id">${displayId}</span></button>`;
     }
+    if (hasGeometry && topDown) return '';
     return `<button type="button" class="obj-id-select obj-exclude-btn${isExcluded ? ' is-excluded' : ''}${isCurrent ? ' is-current' : ''}"
       data-obj-name="${safeName}" data-obj-label="${esc(shortName)}" data-printer-id="${id}" data-obj-id="${safeId}" ${isExcluded ? 'disabled' : ''}
       title="${esc(shortName)}"><span class="obj-chip-id">${displayId}</span></button>`;
@@ -4036,6 +4037,7 @@ function _largeObjectMapHtml(id, data) {
         data-obj-name="${safeName}" data-obj-label="${esc(shortName)}" data-printer-id="${id}" data-obj-id="${safeId}" ${isExcluded ? 'disabled' : ''}
         title="${esc(shortName)}"><span class="obj-chip-id">${displayId}</span></button>`;
     }
+    if (hasGeometry && topDown) return '';
     return `<button type="button" class="obj-id-select obj-exclude-btn${isExcluded ? ' is-excluded' : ''}${isCurrent ? ' is-current' : ''}"
       data-obj-name="${safeName}" data-obj-label="${esc(shortName)}" data-printer-id="${id}" data-obj-id="${safeId}" ${isExcluded ? 'disabled' : ''}
       title="${esc(shortName)}"><span class="obj-chip-id">${displayId}</span><span>${esc(shortName)}</span></button>`;
