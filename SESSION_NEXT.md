@@ -6,9 +6,10 @@ Latest GitHub/Pi state:
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
-- Refresh cachebust currently: ?cachebust=394 / style.css?v=321
+- Refresh cachebust currently: ?cachebust=395 / style.css?v=322
 
 Recent work:
+- Klipper/Moonraker printers now have a compact XYZ jog pad in Live Ops. X/Y jogs are 10mm steps, Z jogs are 1mm steps, XY home sits in the pad centre, and backend `/api/printers/{id}/jog` keeps X/Y capped at 50mm and Z capped at 10mm. Bambu pages show the jog pad as unavailable because the current Bambu wrapper only exposes safe Home All, not a proven axis-jog command.
 - Windows desktop installer shortcuts now use a packaged `app/static/flightdeck.ico` file for the Flightdeck icon. Both fresh installs and the standalone desktop-shortcut helper prefer the `.ico` and fall back to the PNG if it is missing.
 - Flightdeck shortcut icons are now explicit in the live app, demo app, and GitHub Pages site. The app pages link the SVG plus PNG favicon fallback, and `docs/assets/flightdeck-icon-192.png` gives the GitHub Pages page a PNG shortcut icon fallback.
 - Bambu skip-object maps now use the 3MF `Metadata/top_N.png` top-down plate image as the visual background when available, while Print Details keeps using the normal `Metadata/plate_N.png` preview thumbnail. This should keep the current Bambuddy-style ID coordinate mapping but make the tags line up against a true top-down bed image instead of the angled preview.
@@ -154,6 +155,13 @@ Likely next items:
 - Windows install and desktop shortcut scripts now use the `.ico` for Desktop/Startup shortcut icons, with the existing PNG as fallback.
 - README/INSTALL now describe the Windows shortcuts as Flightdeck-branded.
 - No backend restart required.
+
+## What was added - Session 28.271 (Klipper XYZ jog controls - 8 June)
+- Added `/api/printers/{id}/jog` for Klipper/Moonraker printers with bounded X/Y/Z relative motion.
+- Live Ops now shows a compact XYZ jog pad: X/Y use 10mm steps, Z uses 1mm steps, and the centre button homes XY.
+- Existing `/jog-z` remains available for compatibility.
+- Bambu pages show the jog pad as unavailable and still expose Home All separately; no Bambu axis jog is enabled until the MQTT/control path is proven safe.
+- Static cache bumped to `app.js?v=395` and `style.css?v=322`; backend restart and frontend refresh required.
 
 ## What was fixed - Session 28.241 (AMS HT slot canonicalization - 7 June)
 - Regular AMS slots continue to use `unit*4 + slot` indexes.

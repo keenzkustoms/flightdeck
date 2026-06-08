@@ -2071,6 +2071,12 @@ class JogZRequest(BaseModel):
     distance: float
 
 
+class JogRequest(BaseModel):
+    axis: str
+    distance: float
+    speed: int | None = None
+
+
 class HomeRequest(BaseModel):
     axes: str
 
@@ -2165,6 +2171,38 @@ async def jog_printer_z(printer_id: str, req: JogZRequest):
     for p in _bambu:
         if p.id == printer_id:
             raise HTTPException(status_code=422, detail="Z jog is only available for Klipper/Moonraker printers")
+
+    for (id, *_) in _simulated:
+        if id == printer_id:
+            raise HTTPException(status_code=422, detail="simulated printer does not accept hardware movement commands")
+
+    raise HTTPException(status_code=404, detail="printer not found")
+
+
+@app.post("/api/printers/{printer_id}/jog")
+async def jog_printer_axis(printer_id: str, req: JogRequest):
+    axis = req.axis.lower().strip()
+    if axis not in ("x", "y", "z"):
+        raise HTTPException(status_code=400, detail="invalid jog axis")
+    if abs(req.distance) < 0.01:
+        raise HTTPException(status_code=400, detail="distance must be non-zero")
+    limit = 50 if axis in ("x", "y") else 10
+    if not (-limit <= req.distance <= limit):
+        raise HTTPException(status_code=400, detail=f"{axis.upper()} jog out of range (-{limit} to {limit}mm)")
+    if req.speed is not None and not (60 <= req.speed <= 6000):
+        raise HTTPException(status_code=400, detail="jog speed out of range (60-6000mm/min)")
+
+    for (id, model_name, custom_name, icon, url) in _moonraker:
+        if id == printer_id:
+            try:
+                await moonraker.jog_axis(url, axis, req.distance, req.speed)
+            except Exception as exc:
+                raise HTTPException(status_code=502, detail=str(exc))
+            return {"ok": True}
+
+    for p in _bambu:
+        if p.id == printer_id:
+            raise HTTPException(status_code=422, detail="XYZ jog is only available for Klipper/Moonraker printers")
 
     for (id, *_) in _simulated:
         if id == printer_id:

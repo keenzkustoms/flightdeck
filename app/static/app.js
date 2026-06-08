@@ -1958,17 +1958,42 @@ function _detailLiveOps(p) {
         }).join('')}
       </div>`
     : '';
-  const pos = Array.isArray(p.toolhead_position) ? Number(p.toolhead_position[2]) : NaN;
-  const zLabel = Number.isFinite(pos) ? `Z ${pos.toFixed(1)}` : 'Z --';
-  const jog = isMoonraker
-    ? `<div class="live-op-group" aria-label="Bed and Z movement">
-        <span class="live-op-group-label">Bed / ${zLabel}</span>
-        <button class="live-op-btn live-op-mini" type="button" data-jog-z="-1" data-printer-id="${esc(p.id)}" ${canJog ? '' : 'disabled'}>
-          <span>Z -1</span><small>mm</small>
-        </button>
-        <button class="live-op-btn live-op-mini" type="button" data-jog-z="1" data-printer-id="${esc(p.id)}" ${canJog ? '' : 'disabled'}>
-          <span>Z +1</span><small>mm</small>
-        </button>
+  const pos = Array.isArray(p.toolhead_position) ? p.toolhead_position.map(v => Number(v)) : [];
+  const posParts = ['X', 'Y', 'Z'].map((axis, idx) => Number.isFinite(pos[idx]) ? `${axis}${pos[idx].toFixed(idx === 2 ? 1 : 0)}` : `${axis}--`);
+  const posLabel = posParts.join(' ');
+  const jogVisible = isMoonraker || isBambu;
+  const jog = jogVisible
+    ? `<div class="live-op-group live-op-jog" aria-label="XYZ movement">
+        <span class="live-op-group-label">${isMoonraker ? `Jog ${esc(posLabel)}` : 'Jog unavailable'}</span>
+        <div class="jog-pad" aria-label="XY jog controls">
+          <span></span>
+          <button class="live-op-btn live-op-mini jog-btn" type="button" data-jog-axis="y" data-jog-distance="10" data-printer-id="${esc(p.id)}" ${canJog ? '' : 'disabled'}>
+            <span>Y+</span><small>10</small>
+          </button>
+          <span></span>
+          <button class="live-op-btn live-op-mini jog-btn" type="button" data-jog-axis="x" data-jog-distance="-10" data-printer-id="${esc(p.id)}" ${canJog ? '' : 'disabled'}>
+            <span>X-</span><small>10</small>
+          </button>
+          <button class="live-op-btn live-op-mini jog-btn jog-home-center" type="button" data-home-axes="xy" data-printer-id="${esc(p.id)}" ${isMoonraker && canHome ? '' : 'disabled'}>
+            <span>${isMoonraker ? 'XY' : '--'}</span><small>${isMoonraker ? 'home' : 'Bambu'}</small>
+          </button>
+          <button class="live-op-btn live-op-mini jog-btn" type="button" data-jog-axis="x" data-jog-distance="10" data-printer-id="${esc(p.id)}" ${canJog ? '' : 'disabled'}>
+            <span>X+</span><small>10</small>
+          </button>
+          <span></span>
+          <button class="live-op-btn live-op-mini jog-btn" type="button" data-jog-axis="y" data-jog-distance="-10" data-printer-id="${esc(p.id)}" ${canJog ? '' : 'disabled'}>
+            <span>Y-</span><small>10</small>
+          </button>
+          <span></span>
+        </div>
+        <div class="jog-z-stack" aria-label="Z jog controls">
+          <button class="live-op-btn live-op-mini jog-btn" type="button" data-jog-axis="z" data-jog-distance="1" data-printer-id="${esc(p.id)}" ${canJog ? '' : 'disabled'}>
+            <span>Z+</span><small>1</small>
+          </button>
+          <button class="live-op-btn live-op-mini jog-btn" type="button" data-jog-axis="z" data-jog-distance="-1" data-printer-id="${esc(p.id)}" ${canJog ? '' : 'disabled'}>
+            <span>Z-</span><small>1</small>
+          </button>
+        </div>
       </div>`
     : '';
   const homeAxes = isBambu ? [['all', 'All']] : isMoonraker ? [['xy', 'XY'], ['z', 'Z'], ['all', 'All']] : [];
@@ -2187,16 +2212,17 @@ document.getElementById('view-printer').addEventListener('click', e => {
     return;
   }
 
-  const jogBtn = e.target.closest('[data-jog-z]');
+  const jogBtn = e.target.closest('[data-jog-axis], [data-jog-z]');
   if (jogBtn && !jogBtn.disabled) {
     const id = jogBtn.dataset.printerId;
-    const distance = Number(jogBtn.dataset.jogZ || 0);
+    const axis = (jogBtn.dataset.jogAxis || 'z').toUpperCase();
+    const distance = Number(jogBtn.dataset.jogDistance ?? jogBtn.dataset.jogZ ?? 0);
     const old = jogBtn.innerHTML;
     jogBtn.disabled = true;
-    jogBtn.innerHTML = `<span>Moving</span><small>${distance > 0 ? '+' : ''}${distance}mm</small>`;
-    sendJogZ(id, distance)
-      .then(() => showToast('Z jog sent', `${distance > 0 ? '+' : ''}${distance}mm`, 'success'))
-      .catch(err => showToast('Z jog failed', err.message || '', 'error'))
+    jogBtn.innerHTML = `<span>Moving</span><small>${axis} ${distance > 0 ? '+' : ''}${distance}</small>`;
+    sendJog(id, axis, distance)
+      .then(() => showToast(`${axis} jog sent`, `${distance > 0 ? '+' : ''}${distance}mm`, 'success'))
+      .catch(err => showToast(`${axis} jog failed`, err.message || '', 'error'))
       .finally(() => {
         jogBtn.disabled = false;
         jogBtn.innerHTML = old;
@@ -3445,6 +3471,22 @@ async function sendJogZ(id, distance) {
   if (!resp.ok) {
     const data = await resp.json().catch(() => ({}));
     throw new Error(data.detail || 'Z jog failed');
+  }
+}
+
+async function sendJog(id, axis, distance) {
+  const axisKey = String(axis || '').toLowerCase();
+  const limit = axisKey === 'z' ? 10 : 50;
+  const delta = Math.max(-limit, Math.min(limit, Number(distance)));
+  const speed = axisKey === 'z' ? 600 : 3000;
+  const resp = await fetch(`/api/printers/${id}/jog`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ axis: axisKey, distance: delta, speed }),
+  });
+  if (!resp.ok) {
+    const data = await resp.json().catch(() => ({}));
+    throw new Error(data.detail || 'Jog command failed');
   }
 }
 

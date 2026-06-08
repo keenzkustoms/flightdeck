@@ -3758,6 +3758,42 @@ button.briefing-row {
   text-align: center;
 }
 
+.live-op-jog {
+  display: grid;
+  grid-template-columns: minmax(5.6rem, max-content) max-content max-content;
+  align-items: center;
+}
+
+.live-op-jog .live-op-group-label {
+  max-width: 7.2rem;
+}
+
+.jog-pad {
+  display: grid;
+  grid-template-columns: repeat(3, 2.85rem);
+  grid-template-rows: repeat(3, 2.15rem);
+  gap: 0.2rem;
+}
+
+.jog-z-stack {
+  display: grid;
+  grid-template-columns: 2.85rem;
+  gap: 0.2rem;
+}
+
+.jog-btn {
+  min-width: 2.85rem;
+  width: 2.85rem;
+  min-height: 2.15rem;
+  padding-inline: 0.25rem;
+  text-align: center;
+}
+
+.jog-home-center {
+  border-color: rgba(34,197,94,0.34);
+  background: rgba(34,197,94,0.09);
+}
+
 .live-op-slider {
   display: inline-flex;
   align-items: center;
