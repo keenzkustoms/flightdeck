@@ -9,6 +9,7 @@ Latest GitHub/Pi state:
 - Refresh cachebust currently: ?cachebust=402 / style.css?v=329
 
 Recent work:
+- Bambu camera proxy startup race fixed: Live/Print Wall camera streams now count the browser as a client before ffmpeg starts, and the watchdog restarts a missing worker while clients are still watching. This targets the recurring H2D black camera panel where AMS/MQTT kept updating but the MJPEG stream opened with no frames.
 - H2D/other Bambu Print Bay loading is hardened: Bambu SD/FTP file listing now has a short timeout and a brief successful-target cache so the Print Bay can show vault/reprint content instead of sitting on `Loading Print Bay...` when the printer file store is slow.
 - Live rail fan controls now match the preheat rail width: each fan channel uses a full-width slider row with the label/percent above it, so the controls no longer look squeezed beside the camera.
 - Fixed the first-pass live-control rail camera collapse: `.live-main-deck` now has a viewport-based minimum height so the camera hero cannot compute to 0px high beside the new rail.

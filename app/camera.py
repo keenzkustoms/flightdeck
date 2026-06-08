@@ -105,6 +105,10 @@ class BambuCameraProxy:
             if self._clients == 0:
                 continue
             now = time.monotonic()
+            if not self._proc or self._proc.returncode is not None:
+                log.warning("camera worker missing while clients are watching, restarting: %s", self._id)
+                await self._start()
+                continue
             if self._last_frame_at == 0.0:
                 if self._started_at > 0 and (now - self._started_at) > _INITIAL_TIMEOUT:
                     log.warning("camera no initial frame after %ds, restarting: %s", _INITIAL_TIMEOUT, self._id)
@@ -170,12 +174,14 @@ class BambuCameraProxy:
             self._idle_task.cancel()
             self._idle_task = None
 
-        await self._start()
         self._clients += 1
+        await self._start()
 
         for _ in range(50):
             if self._latest:
                 break
+            if not self._proc or self._proc.returncode is not None:
+                await self._start()
             await asyncio.sleep(0.1)
 
         last_sent = None
