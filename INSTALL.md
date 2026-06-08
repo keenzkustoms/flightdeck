@@ -112,10 +112,22 @@ Then open:
 http://127.0.0.1:8000
 ```
 
-To remove the Startup shortcut:
+To uninstall the Windows tray app and shortcuts while keeping your printer data/history:
 
 ```powershell
-.\scripts\windows\uninstall-windows.ps1 -KeepData
+.\Uninstall-Flightdeck-Windows.cmd
+```
+
+To also delete restored data, uploads, history, and the print vault from `%LOCALAPPDATA%\Flightdeck`:
+
+```powershell
+.\Uninstall-Flightdeck-Windows.cmd -RemoveData
+```
+
+The PowerShell script can also be run directly:
+
+```powershell
+.\scripts\windows\uninstall-windows.ps1
 ```
 
 ## Manual Install

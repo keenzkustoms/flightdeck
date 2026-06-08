@@ -9,6 +9,7 @@ Latest GitHub/Pi state:
 - Refresh cachebust currently: ?cachebust=397 / style.css?v=322
 
 Recent work:
+- Windows uninstall is now a root `Uninstall-Flightdeck-Windows.cmd` plus hardened `scripts/windows/uninstall-windows.ps1`. It stops Flightdeck tray/backend processes for this checkout, removes Desktop and Startup shortcuts, keeps `%LOCALAPPDATA%\Flightdeck` by default, and only deletes restored data when `-RemoveData` is passed.
 - Windows installer can now import an existing Flightdeck backup archive via `-DataArchive`. The bootstrap passes the archive through, the install script extracts the standard `flightdeck-data` backup shape into `%LOCALAPPDATA%\Flightdeck`, and it creates a `restore-safety-*` copy first if Windows already has data.
 - Fresh all-data Pi backup for Windows install: `/home/flightdeck/windows-install-backups/flightdeck-backup-20260608-182118.tar.gz` (37 MB, SHA256 `5ff17fa0819f54d4d4588253e7ea4a254a067e0a66336c7fe584df001d240c49`). It was also pushed to the private backup repo.
 - Live Ops jog controls now allow paused printers, which is needed for recovery cases like the H2D reporting `paused` with a Bambu alarm. Jog still stays disabled for active printing, finished, offline, error, and estop states.
@@ -183,6 +184,13 @@ Likely next items:
 - The Windows install restores the normal Pi backup archive layout into `%LOCALAPPDATA%\Flightdeck` and creates a `restore-safety-*` copy first when existing Windows data is present.
 - README/INSTALL now document making a Pi backup with `INCLUDE_PRINT_LIBRARY=1` and passing it to the Windows installer.
 - Created current all-data Pi archive for Windows install: `/home/flightdeck/windows-install-backups/flightdeck-backup-20260608-182118.tar.gz`; SHA256 `5ff17fa0819f54d4d4588253e7ea4a254a067e0a66336c7fe584df001d240c49`.
+- No backend restart required for installer-only changes.
+
+## What was added - Session 28.275 (Windows uninstall helper - 8 June)
+- Added root `Uninstall-Flightdeck-Windows.cmd`.
+- Hardened `scripts/windows/uninstall-windows.ps1` to stop Flightdeck tray/backend processes for the checkout and remove both Desktop and Startup shortcuts.
+- Windows uninstall keeps `%LOCALAPPDATA%\Flightdeck` by default; pass `-RemoveData` to delete restored data/history/uploads/print vault, and `-RemoveVenv` to remove the repo virtual environment.
+- README/INSTALL now document uninstall commands.
 - No backend restart required for installer-only changes.
 
 ## What was fixed - Session 28.241 (AMS HT slot canonicalization - 7 June)

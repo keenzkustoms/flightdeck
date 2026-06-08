@@ -243,6 +243,14 @@ INCLUDE_PRINT_LIBRARY=1 ./scripts/backup-flightdeck-data.sh
 .\scripts\windows\bootstrap-install.ps1 -DataArchive "C:\path\to\flightdeck-backup-YYYYmmdd-HHMMSS.tar.gz"
 ```
 
+Uninstall the Windows tray app and shortcuts while keeping data:
+
+```powershell
+.\Uninstall-Flightdeck-Windows.cmd
+```
+
+Use `-RemoveData` only when you also want to delete `%LOCALAPPDATA%\Flightdeck`.
+
 By default the installer stores live data in `~/flightdeck-data`:
 
 - `flightdeck.db`
