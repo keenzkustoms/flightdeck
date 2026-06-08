@@ -2,13 +2,14 @@
 
 Latest GitHub/Pi state:
 - Branch: main
-- Latest commit: current HEAD after this handoff (`Rotate Bambu skip-object map left`)
+- Latest commit: current HEAD after this handoff (`Add Bambu map front marker`)
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
-- Refresh cachebust currently: ?cachebust=385 / style.css?v=314
+- Refresh cachebust currently: ?cachebust=386 / style.css?v=315
 
 Recent work:
+- Bambu top-down skip-object maps now show a small `Front` marker at the right-hand centre of the map. It is a visual-only overlay and does not affect red regions, object outlines, or skip IDs.
 - Bambu top-down skip-object maps now apply mirror flags plus `map_coordinate_rotation=-90` through coordinate math, so the whole red overlay and SVG footprint layout rotates left together. On the X1C 6-object map, skipped object `#96` now lands where `#115` was previously.
 - Bambu top-down skip-object maps now expose `map_mirror_y=true` and `map_mirror_x=false`; this keeps the skipped X1C object `#96` in the top-right corner while preserving raw Bambu object IDs for skip commands.
 - Bambu top-down skip maps now draw a footprint shape for each object instead of only a generic rectangle. The parser sends a simplified convex footprint plus extrusion strokes from object-labelled gcode; X1C's 6-Benchy print parsed with 14-point footprints and 29 strokes for each skip ID.
@@ -80,6 +81,11 @@ Likely next items:
 - Frontend map rendering now applies mirror/rotation transforms to the actual object coordinates and SVG footprint points, so the red regions and white outlines rotate together as one layout.
 - Coordinate check against live X1C data puts skipped `#96` at `left=0.00%, top=0.00%`, matching the previous `#115` corner.
 - Static cache bumped to `app.js?v=385` and `style.css?v=314`; backend restart and frontend refresh required.
+
+## What was changed - Session 28.260 (Bambu skip-object front marker - 8 June)
+- Added a small `Front` marker at the right-hand centre of Bambu top-down skip-object maps.
+- The marker is visual only, rendered above the map with `pointer-events: none`, and does not affect object regions, outlines, or skip commands.
+- Static cache bumped to `app.js?v=386` and `style.css?v=315`; frontend refresh required.
 
 ## What was fixed - Session 28.241 (AMS HT slot canonicalization - 7 June)
 - Regular AMS slots continue to use `unit*4 + slot` indexes.

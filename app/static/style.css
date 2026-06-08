@@ -6643,6 +6643,21 @@ button.live-route-node:hover {
   inset: 0;
 }
 
+.obj-map-front-marker {
+  position: absolute;
+  right: 0.45rem;
+  top: 50%;
+  z-index: 3;
+  transform: translateY(-50%);
+  color: rgba(226,232,240,0.78);
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-shadow: 0 0.12rem 0.2rem rgba(0,0,0,0.58);
+  pointer-events: none;
+}
+
 .obj-map-topdown .obj-map-stage,
 .object-map-modal-stage.obj-map-topdown {
   background:

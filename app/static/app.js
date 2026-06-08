@@ -3829,6 +3829,7 @@ function _objectMapHtml(id, data) {
       <div class="obj-map-plane">
         ${hasGeometry ? `<div class="obj-map-overlay">${mapButtons}</div>` : ''}
       </div>
+      ${topDown ? '<div class="obj-map-front-marker" aria-hidden="true">Front</div>' : ''}
     </div>
     ${hasGeometry ? '' : `<div class="obj-id-selector"><span>Printer object IDs</span><div>${mapButtons}</div></div>`}
     <div class="obj-map-helper">${esc(helper)}</div>
@@ -4015,6 +4016,7 @@ function _largeObjectMapHtml(id, data) {
       <div class="obj-map-plane">
         ${hasGeometry ? `<div class="obj-map-overlay">${buttons}</div>` : ''}
       </div>
+      ${topDown ? '<div class="obj-map-front-marker" aria-hidden="true">Front</div>' : ''}
     </div>
     <div class="obj-map-helper">${esc(helper)}</div>
     ${hasGeometry ? '' : `<div class="obj-id-selector object-map-modal-ids"><span>Printer object IDs</span><div>${buttons}</div></div>`}
