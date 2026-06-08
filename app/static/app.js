@@ -282,6 +282,7 @@ let _tabsBuilt = false;
 let _missionRenderInFlight = false;
 let _missionLastHtml = '';
 const _cameraUrlCache = {};     // printer_id → url string or null
+const _CAMERA_STREAM_REFRESH_MS = 120000;
 let _renderedDetailId = null;
 let _renderedDetailSubtab = null;
 let _renderedDetailOk = false;
@@ -6185,6 +6186,10 @@ function _pollPrintBayIfVisible() {
 }
 
 setInterval(_pollPrintBayIfVisible, 5000);
+setInterval(_refreshVisibleCameraStreams, 30000);
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) _refreshVisibleCameraStreams(true);
+});
 
 async function renderFileDeskView() {
   const el = document.getElementById('filedesk-page');
@@ -7795,6 +7800,12 @@ function _cameraStreamSrc(printerId) {
   return `${url}${url.includes('?') ? '&' : '?'}t=${Date.now()}`;
 }
 
+function _setCameraImageSrc(img, baseUrl, key = 't') {
+  if (!img || !baseUrl) return;
+  img.src = `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}${key}=${Date.now()}`;
+  img.dataset.streamLoadedAt = String(Date.now());
+}
+
 function _loadCameraUrl(printerId, onResolved) {
   if (!printerId || _cameraUrlCache[printerId] !== undefined) return Promise.resolve(_cameraUrlCache[printerId] || null);
   if (_cameraUrlFetches[printerId]) return _cameraUrlFetches[printerId];
@@ -7819,6 +7830,7 @@ function _attachCameraRetries(root) {
   root.querySelectorAll('img[data-camera-id]').forEach(img => {
     if (img.dataset.retryAttached === '1') return;
     img.dataset.retryAttached = '1';
+    img.dataset.streamLoadedAt = img.dataset.streamLoadedAt || String(Date.now());
     let tries = 0;
     img.addEventListener('error', () => {
       if (tries >= 3) return;
@@ -7826,9 +7838,28 @@ function _attachCameraRetries(root) {
       const url = _cameraUrlCache[img.dataset.cameraId];
       if (!url) return;
       setTimeout(() => {
-        img.src = `${url}${url.includes('?') ? '&' : '?'}retry=${Date.now()}`;
+        _setCameraImageSrc(img, url, 'retry');
       }, 1200 * tries);
     });
+    img.addEventListener('load', () => {
+      tries = 0;
+      img.dataset.streamLoadedAt = String(Date.now());
+    });
+  });
+}
+
+function _refreshVisibleCameraStreams(force = false) {
+  if (FLIGHTDECK_DEMO || document.hidden) return;
+  const now = Date.now();
+  document.querySelectorAll('img[data-camera-id]').forEach(img => {
+    const cameraId = img.dataset.cameraId;
+    const url = _cameraUrlCache[cameraId];
+    if (!url || url.startsWith('data:')) return;
+    const rect = img.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0 || rect.bottom < 0 || rect.right < 0 || rect.top > window.innerHeight || rect.left > window.innerWidth) return;
+    const loadedAt = Number(img.dataset.streamLoadedAt || 0);
+    if (!force && loadedAt && (now - loadedAt) < _CAMERA_STREAM_REFRESH_MS) return;
+    _setCameraImageSrc(img, url, 'refresh');
   });
 }
 

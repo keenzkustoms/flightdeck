@@ -6,9 +6,10 @@ Latest GitHub/Pi state:
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
-- Refresh cachebust currently: ?cachebust=391 / style.css?v=321
+- Refresh cachebust currently: ?cachebust=392 / style.css?v=321
 
 Recent work:
+- Camera stream caching/stale-connection handling has been tightened. `/api/camera/*` responses now send stronger no-store/no-buffer headers, and the frontend quietly refreshes visible live camera `<img>` streams after 2 minutes or when the browser tab becomes visible again.
 - Bambu skip-object maps now use the active 3MF/print thumbnail as the visible plate preview behind the Bambuddy-style object IDs. The old top-down diagnostic grid/exploded shape view is no longer the primary visual; transparent hit regions and the ID/name skip list still use the original Bambu object IDs.
 - Bambu skip-object map bounds now preserve the 3MF plate/preview bounds when available instead of replacing them with the tight recovered G-code object bounds. This avoids the skip-object map appearing exploded compared with the print-detail/top-preview layout.
 - Bambu skip-object maps now follow the Bambuddy-style ID workflow: a clean positional map with small red object markers, blue ID dots, active count, and a compact ID/name skip list. The raw G-code extrusion path is no longer shown as the main object shape.
@@ -119,6 +120,12 @@ Likely next items:
 - List-only Bambu IDs without bed bboxes no longer render as loose buttons on top of the plate preview; they remain available in the ID/name list.
 - Removed the previous `transform: rotate(25deg)` thumbnail-slice visual trial from `.obj-map-image-piece`.
 - Static cache bumped to `app.js?v=391` and `style.css?v=321`; frontend refresh required.
+
+## What was changed - Session 28.266 (Camera stale stream cleanup - 8 June)
+- Strengthened `/api/camera/*` stream headers to `no-store, no-cache, must-revalidate, max-age=0` with `Pragma`, `Expires`, and `X-Accel-Buffering: no`.
+- Added a frontend stale-connection refresh for visible camera images: each visible stream gets a fresh timestamped URL after 2 minutes, and all visible streams refresh when the browser tab becomes visible again.
+- This targets browser/MJPEG stale connections without changing the configured camera frame rates: Bambu remains 5 fps via ffmpeg; Voron/Greyhound remains pass-through from Crowsnest.
+- Static cache bumped to `app.js?v=392`; backend restart and frontend refresh required.
 
 ## What was fixed - Session 28.241 (AMS HT slot canonicalization - 7 June)
 - Regular AMS slots continue to use `unit*4 + slot` indexes.

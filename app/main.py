@@ -2409,8 +2409,17 @@ async def simulated_camera(printer_id: str):
     return Response(
         content=svg,
         media_type="image/svg+xml",
-        headers={"Cache-Control": "no-cache, no-store"},
+        headers=_camera_stream_headers(),
     )
+
+
+def _camera_stream_headers() -> dict:
+    return {
+        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Accel-Buffering": "no",
+    }
 
 
 async def _mjpeg_direct_response(url: str) -> StreamingResponse:
@@ -2437,7 +2446,7 @@ async def _mjpeg_direct_response(url: str) -> StreamingResponse:
     return StreamingResponse(
         chunks(),
         media_type=content_type,
-        headers={"Cache-Control": "no-cache, no-store"},
+        headers=_camera_stream_headers(),
     )
 
 
@@ -2453,7 +2462,7 @@ async def camera_stream(printer_id: str):
     return StreamingResponse(
         proxy.stream(),
         media_type="multipart/x-mixed-replace; boundary=frame",
-        headers={"Cache-Control": "no-cache, no-store"},
+        headers=_camera_stream_headers(),
     )
 
 
