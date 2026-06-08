@@ -2,16 +2,13 @@
 
 Latest GitHub/Pi state:
 - Branch: main
-- Latest commit: current HEAD after this handoff (`Limit Fleet Wall live camera load`)
+- Latest commit: current HEAD after this handoff (`Preserve Bambu skip-object plate bounds`)
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
-- Refresh cachebust currently: ?cachebust=398 / style.css?v=322
+- Refresh cachebust currently: ?cachebust=397 / style.css?v=322
 
 Recent work:
-- Fleet Wall camera load is now capped so only the first four priority camera tiles stay live at once. Larger walls keep the other camera-capable tiles parked/clickable instead of opening every MJPEG stream on page load.
-- Fleet Wall camera URLs now request `profile=fleet&fps=2`; Bambu RTSP proxy clients honour that as a per-client 2fps output cap while Live/Print Watch keep their normal stream behaviour.
-- Local demo verification loaded `app.js?v=398` and confirmed Fleet Wall camera URLs include `profile=fleet&fps=2`. Demo has only 3 camera printers, so the parking cap does not show there; it applies once more than four camera-capable printers are on the wall.
 - Windows uninstall is now a root `Uninstall-Flightdeck-Windows.cmd` plus hardened `scripts/windows/uninstall-windows.ps1`. It stops Flightdeck tray/backend processes for this checkout, removes Desktop and Startup shortcuts, keeps `%LOCALAPPDATA%\Flightdeck` by default, and only deletes restored data when `-RemoveData` is passed.
 - Windows installer can now import an existing Flightdeck backup archive via `-DataArchive`. The bootstrap passes the archive through, the install script extracts the standard `flightdeck-data` backup shape into `%LOCALAPPDATA%\Flightdeck`, and it creates a `restore-safety-*` copy first if Windows already has data.
 - Fresh all-data Pi backup for Windows install: `/home/flightdeck/windows-install-backups/flightdeck-backup-20260608-182118.tar.gz` (37 MB, SHA256 `5ff17fa0819f54d4d4588253e7ea4a254a067e0a66336c7fe584df001d240c49`). It was also pushed to the private backup repo.

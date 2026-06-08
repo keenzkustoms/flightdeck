@@ -283,8 +283,6 @@ let _missionRenderInFlight = false;
 let _missionLastHtml = '';
 const _cameraUrlCache = {};     // printer_id → url string or null
 const _CAMERA_STREAM_REFRESH_MS = 120000;
-const _FLEET_WALL_LIVE_CAMERA_LIMIT = 4;
-const _FLEET_WALL_CAMERA_FPS = 2;
 let _renderedDetailId = null;
 let _renderedDetailSubtab = null;
 let _renderedDetailOk = false;
@@ -7881,31 +7879,16 @@ function _camHeaderInner(p) {
   <span class="badge badge-${badgeClass}">${esc(badgeLabel)}</span>`;
 }
 
-function _streamUrlWithParams(url, params = {}) {
-  if (!url || (FLIGHTDECK_DEMO && url.startsWith('data:'))) return url;
-  const parts = [];
-  Object.entries(params || {}).forEach(([key, value]) => {
-    if (value === undefined || value === null || value === '') return;
-    parts.push(`${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`);
-  });
-  parts.push(`t=${Date.now()}`);
-  return `${url}${url.includes('?') ? '&' : '?'}${parts.join('&')}`;
-}
-
-function _cameraStreamSrc(printerId, params = {}) {
+function _cameraStreamSrc(printerId) {
   const url = _cameraUrlCache[printerId];
   if (!url) return null;
   if (FLIGHTDECK_DEMO && url.startsWith('data:')) return url;
-  return _streamUrlWithParams(url, params);
+  return `${url}${url.includes('?') ? '&' : '?'}t=${Date.now()}`;
 }
 
 function _setCameraImageSrc(img, baseUrl, key = 't') {
   if (!img || !baseUrl) return;
-  const params = {};
-  if (img.dataset.cameraProfile) params.profile = img.dataset.cameraProfile;
-  if (img.dataset.cameraFps) params.fps = img.dataset.cameraFps;
-  params[key] = Date.now();
-  img.src = _streamUrlWithParams(baseUrl, params);
+  img.src = `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}${key}=${Date.now()}`;
   img.dataset.streamLoadedAt = String(Date.now());
 }
 
@@ -8318,23 +8301,15 @@ function _fleetWallAmsVisual(p) {
   return `<div class="fleet-wall-ams-visual">${_detailLiveAmsLoadoutRows(p)}</div>`;
 }
 
-function _fleetWallLiveCameraIds(printers) {
-  const eligible = (printers || []).filter(p => p?.state !== 'offline' && !!_cameraUrlCache[p._camera_id || p.id]);
-  const limit = eligible.length <= _FLEET_WALL_LIVE_CAMERA_LIMIT ? eligible.length : _FLEET_WALL_LIVE_CAMERA_LIMIT;
-  return new Set(eligible.slice(0, limit).map(p => String(p._camera_id || p.id)));
-}
-
-function _fleetWallFeedHtml(p, liveCameraIds = null) {
+function _fleetWallFeedHtml(p) {
   const cameraId = p._camera_id || p.id;
-  const hasCamera = !!_cameraUrlCache[cameraId];
-  const allowLive = !liveCameraIds || liveCameraIds.has(String(cameraId));
-  const camSrc = allowLive ? _cameraStreamSrc(cameraId, { profile: 'fleet', fps: _FLEET_WALL_CAMERA_FPS }) : null;
+  const camSrc = _cameraStreamSrc(cameraId);
   return camSrc && p.state !== 'offline'
-    ? `<img src="${camSrc}" alt="${esc(_printerPrimaryLabel(p))} live camera" data-camera-id="${esc(cameraId)}" data-camera-profile="fleet" data-camera-fps="${_FLEET_WALL_CAMERA_FPS}" loading="lazy">`
+    ? `<img src="${camSrc}" alt="${esc(_printerPrimaryLabel(p))} live camera" data-camera-id="${cameraId}" loading="eager" fetchpriority="high">`
     : `<div class="fleet-wall-camera-fallback">
         <div class="fleet-wall-printer-glyph">${getIcon(p.icon)}</div>
         <strong>${esc(_printerPrimaryLabel(p))}</strong>
-        <span>${esc(p.state === 'offline' ? fmtLastSeen(p.last_seen) : (hasCamera ? `Camera parked · ${_FLEET_WALL_CAMERA_FPS}fps wall limit` : 'No camera feed'))}</span>
+        <span>${esc(p.state === 'offline' ? fmtLastSeen(p.last_seen) : 'No camera feed')}</span>
       </div>`;
 }
 
@@ -8384,13 +8359,13 @@ function _fleetWallHeadHtml(p) {
   </div>`;
 }
 
-function _fleetWallCardHtml(p, liveCameraIds = null) {
+function _fleetWallCardHtml(p) {
   return `<article class="fleet-wall-card fleet-wall-card-${_fleetWallTone(p)}" data-printer-id="${esc(p.id)}">
     <div class="fleet-wall-card-head">
       ${_fleetWallHeadHtml(p)}
     </div>
     <a class="fleet-wall-feed" href="#/printer/${esc(p.id)}" data-fleet-feed="${esc(p.id)}" data-fleet-live="${esc(p.id)}">
-      ${_fleetWallFeedHtml(p, liveCameraIds)}
+      ${_fleetWallFeedHtml(p)}
     </a>
     <div class="fleet-wall-card-body">${_fleetWallCardBody(p)}</div>
   </article>`;
@@ -8402,8 +8377,13 @@ async function _ensureFleetWallCameraUrls(printers) {
     _loadCameraUrl(p.id, printerId => {
       const page = document.getElementById('fleet-wall-page');
       if (!page || page.hidden || !page.classList.contains('fleet-wall-page')) return;
+      const card = page.querySelector(`.fleet-wall-card[data-printer-id="${CSS.escape(printerId)}"]`);
+      const printer = (_latestPrinters || []).find(x => x.id === printerId);
+      const feed = card?.querySelector('[data-fleet-feed]');
+      if (!printer || !feed || printer.state === 'offline') return;
+      feed.innerHTML = _fleetWallFeedHtml(printer);
+      _attachCameraRetries(feed);
       _fleetWallSignature = '';
-      renderFleetWall();
     });
   });
 }
@@ -8426,8 +8406,7 @@ async function renderFleetWall() {
 
   _ensureFleetWallCameraUrls(printers);
 
-  const liveCameraIds = _fleetWallLiveCameraIds(printers);
-  const signature = `${_fleetWallMode}|live:${[...liveCameraIds].join(',')}|${printers.map(p => `${p.id}:${_cameraUrlCache[p.id] ? 'cam' : 'nocam'}`).join('|')}`;
+  const signature = `${_fleetWallMode}|${printers.map(p => `${p.id}:${_cameraUrlCache[p.id] ? 'cam' : 'nocam'}`).join('|')}`;
   if (_fleetWallSignature !== signature || !el.querySelector('.fleet-wall-grid')) {
     const active = printers.filter(p => ['printing', 'paused'].includes(p.state)).length;
     const attention = printers.filter(p => _printerWarningTarget(p) || _printerPrintLocked(p)).length;
@@ -8445,7 +8424,7 @@ async function renderFleetWall() {
       </div>
     </div>
     <div class="fleet-wall-grid">
-      ${printers.map(p => _fleetWallCardHtml(p, liveCameraIds)).join('')}
+      ${printers.map(_fleetWallCardHtml).join('')}
     </div>`;
     _fleetWallSignature = signature;
     _attachCameraRetries(el);
@@ -8469,8 +8448,8 @@ async function renderFleetWall() {
       if (body) body.innerHTML = _fleetWallCardBody(p);
       const feed = card.querySelector('[data-fleet-feed]');
       const hasImg = !!feed?.querySelector('img[data-camera-id]');
-      const shouldImg = liveCameraIds.has(String(p.id)) && !!_cameraUrlCache[p.id] && p.state !== 'offline';
-      if (feed && hasImg !== shouldImg) feed.innerHTML = _fleetWallFeedHtml(p, liveCameraIds);
+      const shouldImg = !!_cameraStreamSrc(p.id) && p.state !== 'offline';
+      if (feed && hasImg !== shouldImg) feed.innerHTML = _fleetWallFeedHtml(p);
     });
   }
 

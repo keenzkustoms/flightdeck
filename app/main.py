@@ -2492,21 +2492,8 @@ async def _mjpeg_direct_response(url: str) -> StreamingResponse:
     )
 
 
-def _camera_stream_fps(request: Request) -> float | None:
-    profile = (request.query_params.get("profile") or "").strip().lower()
-    raw = request.query_params.get("fps")
-    if raw is None and profile == "fleet":
-        raw = os.getenv("FLIGHTDECK_FLEET_CAMERA_FPS", "2")
-    if raw is None:
-        return None
-    try:
-        return max(0.5, min(10.0, float(raw)))
-    except (TypeError, ValueError):
-        return 2.0 if profile == "fleet" else None
-
-
 @app.get("/api/camera/{printer_id}/stream")
-async def camera_stream(printer_id: str, request: Request):
+async def camera_stream(printer_id: str):
     camera = _cameras.get(printer_id)
     if isinstance(camera, MjpegDirectCamera):
         return await _mjpeg_direct_response(camera.stream_url)
@@ -2515,7 +2502,7 @@ async def camera_stream(printer_id: str, request: Request):
     if proxy is None:
         raise HTTPException(status_code=404, detail="no camera configured")
     return StreamingResponse(
-        proxy.stream(max_fps=_camera_stream_fps(request)),
+        proxy.stream(),
         media_type="multipart/x-mixed-replace; boundary=frame",
         headers=_camera_stream_headers(),
     )
