@@ -2,13 +2,14 @@
 
 Latest GitHub/Pi state:
 - Branch: main
-- Latest commit: current HEAD after this handoff (`Re-add AMS HT right nozzle route`)
+- Latest commit: current HEAD after this handoff (`Stop recycling steady Bambu camera frames`)
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
 - Refresh cachebust currently: ?cachebust=381 / style.css?v=310
 
 Recent work:
+- Bambu/H2D camera proxy no longer restarts ffmpeg just because frames are byte-identical for 8 seconds; that false-positive could make the Live view appear frozen during quiet parts of a print. It still restarts when no frames arrive, the initial frame never appears, or the 15-minute H2D RTSP session lifetime is reached.
 - H2D/AMS HT loaded filament now keeps a visible route to `Right nozzle` even when the HT slot is parked/idle; idle routes show `Ready` instead of pretending filament is actively fed. Demo AMS HT spool data now uses canonical slot `128` instead of legacy `512`.
 - Queue STEP slice dialogs now hide `Slice in Flightdeck` and explain the Orca GUI handoff because the Orca background CLI/API rejects STEP imports (`Unknown file format... must have .stl, .obj, .amf`). STEP items still provide Download/Open Orca/Copy output/Check vault actions.
 - Slicer API runs no longer require Orca installed on the Pi just to load profile JSON. If local Orca profile files are unavailable, Flightdeck fetches the selected profile JSONs from the synced Orca profile catalog paths.
