@@ -9,6 +9,7 @@ import logging
 from dataclasses import dataclass
 from typing import Optional
 import json
+import re
 
 log = logging.getLogger(__name__)
 
@@ -74,6 +75,10 @@ def _parse_3mf(buf: io.BytesIO, plate_number: Optional[int] = None) -> BambuPrev
             plate_json = json.loads(z.read(f"Metadata/plate_{plate_number}.json").decode())
         except Exception:
             plate_json = None
+        try:
+            plate_gcode = z.read(f"Metadata/plate_{plate_number}.gcode").decode("utf-8", "ignore")
+        except Exception:
+            plate_gcode = ""
 
     root_el = ET.fromstring(slice_xml)
     plates = root_el.findall("plate")
@@ -103,6 +108,10 @@ def _parse_3mf(buf: io.BytesIO, plate_number: Optional[int] = None) -> BambuPrev
             k: [_flip_bbox_y(v, plate_bounds) for v in vals]
             for k, vals in object_boxes_by_name.items()
         }
+    gcode_object_boxes = _extract_gcode_object_boxes(plate_gcode)
+    if gcode_object_boxes:
+        object_boxes.update(gcode_object_boxes)
+        plate_bounds = _bounds_for_boxes(gcode_object_boxes.values()) or plate_bounds
     if plate is not None:
         name_counts: dict[str, int] = {}
         name_box_counts: dict[str, int] = {}
@@ -252,6 +261,61 @@ def _extract_plate_object_boxes(data) -> tuple[dict[int, dict], dict[str, list[d
 
     walk(data)
     return boxes, boxes_by_name, plate_bounds
+
+
+def _extract_gcode_object_boxes(gcode: str) -> dict[int, dict]:
+    """Recover top-down per-object footprints from Bambu/Orca object label markers."""
+    if not gcode:
+        return {}
+    start_re = re.compile(r";\s*start printing object,\s*unique label id:\s*(\d+)", re.IGNORECASE)
+    stop_re = re.compile(r";\s*stop printing object,\s*unique label id", re.IGNORECASE)
+    move_re = re.compile(r"^G[01]\b([^;]*)")
+    coord_re = re.compile(r"\b([XYE])(-?\d+(?:\.\d+)?)")
+    raw_boxes: dict[int, list[float]] = {}
+    current_id: Optional[int] = None
+    last_x: Optional[float] = None
+    last_y: Optional[float] = None
+
+    for raw_line in gcode.splitlines():
+        line = raw_line.strip()
+        start = start_re.search(line)
+        if start:
+            current_id = int(start.group(1))
+            raw_boxes.setdefault(current_id, [float("inf"), float("inf"), float("-inf"), float("-inf")])
+            continue
+        if stop_re.search(line):
+            current_id = None
+            continue
+        move = move_re.match(line)
+        if not move:
+            continue
+        values = {
+            axis: float(value)
+            for axis, value in coord_re.findall(move.group(1))
+        }
+        old_x, old_y = last_x, last_y
+        if "X" in values:
+            last_x = values["X"]
+        if "Y" in values:
+            last_y = values["Y"]
+        if current_id is None or last_x is None or last_y is None:
+            continue
+        if values.get("E", 0.0) <= 0:
+            continue
+        box = raw_boxes[current_id]
+        for x, y in ((old_x, old_y), (last_x, last_y)):
+            if x is None or y is None:
+                continue
+            box[0] = min(box[0], x)
+            box[1] = min(box[1], y)
+            box[2] = max(box[2], x)
+            box[3] = max(box[3], y)
+
+    boxes: dict[int, dict] = {}
+    for obj_id, (min_x, min_y, max_x, max_y) in raw_boxes.items():
+        if max_x > min_x and max_y > min_y:
+            boxes[obj_id] = {"x": min_x, "y": min_y, "w": max_x - min_x, "h": max_y - min_y}
+    return boxes
 
 
 def friendly_bambu_ftp_error(exc: Exception) -> str:

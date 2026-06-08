@@ -3786,6 +3786,7 @@ function _objectMapHtml(id, data) {
   const bounds = data?.plate_bounds;
   const hasGeometry = bounds && bounds.w > 0 && bounds.h > 0 && objects.some(o => o.bbox);
   const availableObjects = objects.filter(o => o.state !== 'excluded');
+  const topDown = _objectMapIsTopDown(data);
   const mapButtons = objects.map(obj => {
     const isExcluded = obj.state === 'excluded';
     const isCurrent = obj.state === 'current';
@@ -3795,12 +3796,9 @@ function _objectMapHtml(id, data) {
     const shortName = (obj.label || rawName).replace(/.*[/\\]/, '');
     const displayId = safeId !== '' ? `#${esc(safeId)}` : esc(shortName);
     if (hasGeometry && obj.bbox) {
-      const left = ((obj.bbox.x - bounds.x) / bounds.w) * 100;
-      const top = ((obj.bbox.y - bounds.y) / bounds.h) * 100;
-      const width = (obj.bbox.w / bounds.w) * 100;
-      const height = (obj.bbox.h / bounds.h) * 100;
+      const geom = _objectMapBoxStyle(bounds, obj.bbox);
       return `<button type="button" class="obj-map-region obj-exclude-btn${isExcluded ? ' is-excluded' : ''}${isCurrent ? ' is-current' : ''}"
-        style="left:${left.toFixed(2)}%;top:${top.toFixed(2)}%;width:${Math.max(width, 5).toFixed(2)}%;height:${Math.max(height, 5).toFixed(2)}%"
+        style="${geom}"
         data-obj-name="${safeName}" data-obj-label="${esc(shortName)}" data-printer-id="${id}" data-obj-id="${safeId}" ${isExcluded ? 'disabled' : ''}
         title="${esc(shortName)}"><span class="obj-chip-id">${displayId}</span></button>`;
     }
@@ -3809,19 +3807,17 @@ function _objectMapHtml(id, data) {
       title="${esc(shortName)}"><span class="obj-chip-id">${displayId}</span></button>`;
   }).join('');
   const imageVersion = objects.map(o => `${o.id ?? ''}:${o.state ?? ''}`).join('-') || 'current';
-  const image = data?.plate_image_url
+  const image = !topDown && data?.plate_image_url
     ? `<img src="${esc(data.plate_image_url)}?map=${encodeURIComponent(imageVersion)}" alt="Plate object map" loading="lazy">`
     : '';
-  const objectImages = _objectMapImagePieces(data, imageVersion);
+  const objectImages = topDown ? _objectMapTopDownObjects(data) : _objectMapImagePieces(data, imageVersion);
   const rotation = Number(data?.map_rotation || 0);
   const imageRotation = Number(data?.map_image_rotation || 0);
   const imageOffsetX = Number(data?.map_image_offset_x || 0);
   const imageOffsetY = Number(data?.map_image_offset_y || 0);
   const rotated = rotation > 0 || imageRotation > 0;
-  const classes = `obj-map${hasGeometry ? ' obj-map-has-geometry' : ' obj-map-no-geometry'}${rotated ? ' obj-map-transformed' : ''}${rotation > 0 ? ' obj-map-overlay-rotated' : ''}${imageRotation > 0 ? ' obj-map-image-rotated' : ''}`;
-  const rotationStyle = rotated
-    ? ` style="--obj-map-rotation:${rotation.toFixed(2)}deg;--obj-map-image-rotation:${imageRotation.toFixed(2)}deg;--obj-map-image-offset-x:${imageOffsetX.toFixed(2)}%;--obj-map-image-offset-y:${imageOffsetY.toFixed(2)}%;--obj-map-counter-rotation:${(-rotation).toFixed(2)}deg;--obj-map-plane-scale:${rotation === 90 ? '177.78%' : '135%'};--obj-map-image-scale:${imageRotation === 90 ? '177.78%' : '135%'}"`
-    : '';
+  const classes = `obj-map${hasGeometry ? ' obj-map-has-geometry' : ' obj-map-no-geometry'}${topDown ? ' obj-map-topdown' : ''}${rotated ? ' obj-map-transformed' : ''}${rotation > 0 ? ' obj-map-overlay-rotated' : ''}${imageRotation > 0 ? ' obj-map-image-rotated' : ''}`;
+  const rotationStyle = _objectMapStyleVars(bounds, rotated, rotation, imageRotation, imageOffsetX, imageOffsetY);
   const helper = hasGeometry
     ? 'Tap the failed part on the plate map.'
     : `No bed positions in this 3MF; use the object ID shown on the printer screen. Bambu/Orca IDs can be high. ${availableObjects.length} objects still available.`;
@@ -3859,23 +3855,79 @@ function _objectMapImagePieces(data, imageVersion) {
   }).join('');
 }
 
+function _objectMapIsTopDown(data) {
+  return data?.map_image_mode === 'top_down' || data?.map_view === 'top_down';
+}
+
+function _objectMapBoxParts(bounds, box) {
+  const left = ((box.x - bounds.x) / bounds.w) * 100;
+  const top = ((box.y - bounds.y) / bounds.h) * 100;
+  const width = (box.w / bounds.w) * 100;
+  const height = (box.h / bounds.h) * 100;
+  return {
+    left,
+    top,
+    width: Math.max(width, 5),
+    height: Math.max(height, 5),
+  };
+}
+
+function _objectMapBoxStyle(bounds, box) {
+  const p = _objectMapBoxParts(bounds, box);
+  return `left:${p.left.toFixed(2)}%;top:${p.top.toFixed(2)}%;width:${p.width.toFixed(2)}%;height:${p.height.toFixed(2)}%`;
+}
+
+function _objectMapTopDownObjects(data) {
+  const objects = data?.objects || [];
+  const bounds = data?.plate_bounds;
+  if (!bounds || bounds.w <= 0 || bounds.h <= 0) return '';
+  return objects.filter(obj => obj.bbox).map(obj => {
+    const isExcluded = obj.state === 'excluded';
+    const isCurrent = obj.state === 'current';
+    const rawName = obj.name || `Object ${obj.id ?? ''}`;
+    const shortName = (obj.label || rawName).replace(/.*[/\\]/, '');
+    return `<div class="obj-map-top-object${isExcluded ? ' is-excluded' : ''}${isCurrent ? ' is-current' : ''}"
+      style="${_objectMapBoxStyle(bounds, obj.bbox)}"
+      title="${esc(shortName)}" aria-hidden="true"><span></span></div>`;
+  }).join('');
+}
+
+function _objectMapStyleVars(bounds, rotated, rotation, imageRotation, imageOffsetX, imageOffsetY) {
+  const vars = [];
+  if (bounds && bounds.w > 0 && bounds.h > 0) {
+    const aspect = Math.max(0.65, Math.min(1.85, Number(bounds.w) / Number(bounds.h)));
+    vars.push(`--obj-map-aspect:${aspect.toFixed(4)}`);
+  }
+  if (rotated) {
+    vars.push(
+      `--obj-map-rotation:${rotation.toFixed(2)}deg`,
+      `--obj-map-image-rotation:${imageRotation.toFixed(2)}deg`,
+      `--obj-map-image-offset-x:${imageOffsetX.toFixed(2)}%`,
+      `--obj-map-image-offset-y:${imageOffsetY.toFixed(2)}%`,
+      `--obj-map-counter-rotation:${(-rotation).toFixed(2)}deg`,
+      `--obj-map-plane-scale:${rotation === 90 ? '177.78%' : '135%'}`,
+      `--obj-map-image-scale:${imageRotation === 90 ? '177.78%' : '135%'}`,
+    );
+  }
+  return vars.length ? ` style="${vars.join(';')}"` : '';
+}
+
 function _largeObjectMapHtml(id, data) {
   const objects = data?.objects || [];
   const bounds = data?.plate_bounds;
   const hasGeometry = bounds && bounds.w > 0 && bounds.h > 0 && objects.some(o => o.bbox);
   const imageVersion = objects.map(o => `${o.id ?? ''}:${o.state ?? ''}`).join('-') || 'current';
-  const image = data?.plate_image_url
+  const topDown = _objectMapIsTopDown(data);
+  const image = !topDown && data?.plate_image_url
     ? `<img src="${esc(data.plate_image_url)}?map=${encodeURIComponent(imageVersion)}" alt="Large plate preview" loading="eager">`
     : '<div class="object-map-missing">No thumbnail available</div>';
-  const objectImages = _objectMapImagePieces(data, imageVersion);
+  const objectImages = topDown ? _objectMapTopDownObjects(data) : _objectMapImagePieces(data, imageVersion);
   const rotation = Number(data?.map_rotation || 0);
   const imageRotation = Number(data?.map_image_rotation || 0);
   const imageOffsetX = Number(data?.map_image_offset_x || 0);
   const imageOffsetY = Number(data?.map_image_offset_y || 0);
   const rotated = rotation > 0 || imageRotation > 0;
-  const rotationStyle = rotated
-    ? ` style="--obj-map-rotation:${rotation.toFixed(2)}deg;--obj-map-image-rotation:${imageRotation.toFixed(2)}deg;--obj-map-image-offset-x:${imageOffsetX.toFixed(2)}%;--obj-map-image-offset-y:${imageOffsetY.toFixed(2)}%;--obj-map-counter-rotation:${(-rotation).toFixed(2)}deg;--obj-map-plane-scale:${rotation === 90 ? '177.78%' : '135%'};--obj-map-image-scale:${imageRotation === 90 ? '177.78%' : '135%'}"`
-    : '';
+  const rotationStyle = _objectMapStyleVars(bounds, rotated, rotation, imageRotation, imageOffsetX, imageOffsetY);
   const buttons = objects.map(obj => {
     const isExcluded = obj.state === 'excluded';
     const isCurrent = obj.state === 'current';
@@ -3885,12 +3937,8 @@ function _largeObjectMapHtml(id, data) {
     const shortName = (obj.label || rawName).replace(/.*[/\\]/, '');
     const displayId = safeId !== '' ? `#${esc(safeId)}` : esc(shortName);
     if (hasGeometry && obj.bbox) {
-      const left = ((obj.bbox.x - bounds.x) / bounds.w) * 100;
-      const top = ((obj.bbox.y - bounds.y) / bounds.h) * 100;
-      const width = (obj.bbox.w / bounds.w) * 100;
-      const height = (obj.bbox.h / bounds.h) * 100;
       return `<button type="button" class="obj-map-region obj-exclude-btn${isExcluded ? ' is-excluded' : ''}${isCurrent ? ' is-current' : ''}"
-        style="left:${left.toFixed(2)}%;top:${top.toFixed(2)}%;width:${Math.max(width, 5).toFixed(2)}%;height:${Math.max(height, 5).toFixed(2)}%"
+        style="${_objectMapBoxStyle(bounds, obj.bbox)}"
         data-obj-name="${safeName}" data-obj-label="${esc(shortName)}" data-printer-id="${id}" data-obj-id="${safeId}" ${isExcluded ? 'disabled' : ''}
         title="${esc(shortName)}"><span class="obj-chip-id">${displayId}</span></button>`;
     }
@@ -3902,9 +3950,9 @@ function _largeObjectMapHtml(id, data) {
     ? 'Tap the failed object on the enlarged bed map.'
     : 'This file has no bed-position metadata. Match the object ID shown on the printer screen, then select it below.';
   return `<div class="object-map-modal-body">
-    <div class="object-map-modal-stage${hasGeometry ? ' has-geometry' : ''}${rotated ? ' obj-map-transformed' : ''}${rotation > 0 ? ' obj-map-overlay-rotated' : ''}${imageRotation > 0 ? ' obj-map-image-rotated' : ''}"${rotationStyle}>
+    <div class="object-map-modal-stage${hasGeometry ? ' has-geometry' : ''}${topDown ? ' obj-map-topdown' : ''}${rotated ? ' obj-map-transformed' : ''}${rotation > 0 ? ' obj-map-overlay-rotated' : ''}${imageRotation > 0 ? ' obj-map-image-rotated' : ''}"${rotationStyle}>
       <div class="obj-map-image-plane">
-        ${objectImages || image}
+        ${objectImages || (topDown ? '' : image)}
       </div>
       <div class="obj-map-plane">
         ${hasGeometry ? `<div class="obj-map-overlay">${buttons}</div>` : ''}

@@ -909,7 +909,7 @@ class BambuPrinter:
             "map_image_rotation": 0,
             "map_image_offset_x": 0,
             "map_image_offset_y": 0,
-            "map_image_mode": "per_object",
+            "map_image_mode": "top_down",
             "detail": "Bambu object exclusion uses the printer skip-object list.",
         }
 

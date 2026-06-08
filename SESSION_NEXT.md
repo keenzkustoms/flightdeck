@@ -2,13 +2,14 @@
 
 Latest GitHub/Pi state:
 - Branch: main
-- Latest commit: current HEAD after this handoff (`Stop recycling steady Bambu camera frames`)
+- Latest commit: current HEAD after this handoff (`Render Bambu skip maps top down`)
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
-- Refresh cachebust currently: ?cachebust=381 / style.css?v=310
+- Refresh cachebust currently: ?cachebust=382 / style.css?v=311
 
 Recent work:
+- Bambu skip-object maps now render as a Mainsail-style top-down bed map instead of using the angled Bambu plate thumbnail. The parser now recovers per-object top-down bboxes from `Metadata/plate_*.gcode` object-label extrusion moves, which fixes repeated-copy jobs like the X1C 6-Benchy print where `plate_1.json` only exposed one combined bbox.
 - Bambu/H2D camera proxy no longer restarts ffmpeg just because frames are byte-identical for 8 seconds; that false-positive could make the Live view appear frozen during quiet parts of a print. It still restarts when no frames arrive, the initial frame never appears, or the 15-minute H2D RTSP session lifetime is reached.
 - H2D/AMS HT loaded filament now keeps a visible route to `Right nozzle` even when the HT slot is parked/idle; idle routes show `Ready` instead of pretending filament is actively fed. Demo AMS HT spool data now uses canonical slot `128` instead of legacy `512`.
 - Queue STEP slice dialogs now hide `Slice in Flightdeck` and explain the Orca GUI handoff because the Orca background CLI/API rejects STEP imports (`Unknown file format... must have .stl, .obj, .amf`). STEP items still provide Download/Open Orca/Copy output/Check vault actions.
