@@ -9,6 +9,7 @@ Latest GitHub/Pi state:
 - Refresh cachebust currently: ?cachebust=394 / style.css?v=321
 
 Recent work:
+- Flightdeck shortcut icons are now explicit in the live app, demo app, and GitHub Pages site. The app pages link the SVG plus PNG favicon fallback, and `docs/assets/flightdeck-icon-192.png` gives the GitHub Pages page a PNG shortcut icon fallback.
 - Bambu skip-object maps now use the 3MF `Metadata/top_N.png` top-down plate image as the visual background when available, while Print Details keeps using the normal `Metadata/plate_N.png` preview thumbnail. This should keep the current Bambuddy-style ID coordinate mapping but make the tags line up against a true top-down bed image instead of the angled preview.
 - Bambu skip-object ID pins now use the same source as Bambuddy: `slice_info.config` provides the skip ID/name and `Metadata/plate_N.json` provides that object's bbox center by name. This fixes cases like Can Opener where G-code object-label IDs made `701` appear on the wrong thumbnail footprint.
 - Camera stream caching/stale-connection handling has been tightened. `/api/camera/*` responses now send stronger no-store/no-buffer headers, and the frontend quietly refreshes visible live camera `<img>` streams after 2 minutes or when the browser tab becomes visible again.
@@ -141,6 +142,11 @@ Likely next items:
 - `/api/printers/{id}/thumbnail?view=top` serves that top-down image for Bambu printers when available, falling back to the normal thumbnail behavior otherwise.
 - The skip-object map now uses the top-down image URL for top-down object maps, while Print Details and other thumbnail uses remain on the regular angled `plate_N.png` preview.
 - Static cache bumped to `app.js?v=394`; backend restart and frontend refresh required.
+
+## What was changed - Session 28.269 (Flightdeck shortcut icon - 8 June)
+- Added explicit `shortcut icon` and PNG favicon fallback links to the live app and demo HTML heads.
+- Added `docs/assets/flightdeck-icon-192.png` and linked it from the GitHub Pages `docs/index.html` page so the GitHub-hosted project page has the Flightdeck shortcut icon fallback as well as the SVG icon.
+- No backend restart required; frontend/page refresh enough.
 
 ## What was fixed - Session 28.241 (AMS HT slot canonicalization - 7 June)
 - Regular AMS slots continue to use `unit*4 + slot` indexes.
