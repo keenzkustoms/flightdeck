@@ -3,7 +3,10 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $AppDir = (Resolve-Path (Join-Path $ScriptDir "..\..")).Path
 $VenvPythonw = Join-Path $AppDir ".venv\Scripts\pythonw.exe"
 $Launcher = Join-Path $ScriptDir "flightdeck-tray.py"
-$IconPath = Join-Path $AppDir "app\static\icon-192.png"
+$IconPath = Join-Path $AppDir "app\static\flightdeck.ico"
+if (-not (Test-Path $IconPath)) {
+    $IconPath = Join-Path $AppDir "app\static\icon-192.png"
+}
 
 if (-not (Test-Path $VenvPythonw)) {
     throw "Flightdeck venv not found. Run scripts\windows\install-windows.ps1 first."

@@ -9,6 +9,7 @@ Latest GitHub/Pi state:
 - Refresh cachebust currently: ?cachebust=394 / style.css?v=321
 
 Recent work:
+- Windows desktop installer shortcuts now use a packaged `app/static/flightdeck.ico` file for the Flightdeck icon. Both fresh installs and the standalone desktop-shortcut helper prefer the `.ico` and fall back to the PNG if it is missing.
 - Flightdeck shortcut icons are now explicit in the live app, demo app, and GitHub Pages site. The app pages link the SVG plus PNG favicon fallback, and `docs/assets/flightdeck-icon-192.png` gives the GitHub Pages page a PNG shortcut icon fallback.
 - Bambu skip-object maps now use the 3MF `Metadata/top_N.png` top-down plate image as the visual background when available, while Print Details keeps using the normal `Metadata/plate_N.png` preview thumbnail. This should keep the current Bambuddy-style ID coordinate mapping but make the tags line up against a true top-down bed image instead of the angled preview.
 - Bambu skip-object ID pins now use the same source as Bambuddy: `slice_info.config` provides the skip ID/name and `Metadata/plate_N.json` provides that object's bbox center by name. This fixes cases like Can Opener where G-code object-label IDs made `701` appear on the wrong thumbnail footprint.
@@ -147,6 +148,12 @@ Likely next items:
 - Added explicit `shortcut icon` and PNG favicon fallback links to the live app and demo HTML heads.
 - Added `docs/assets/flightdeck-icon-192.png` and linked it from the GitHub Pages `docs/index.html` page so the GitHub-hosted project page has the Flightdeck shortcut icon fallback as well as the SVG icon.
 - No backend restart required; frontend/page refresh enough.
+
+## What was changed - Session 28.270 (Windows installer icon - 8 June)
+- Added packaged `app/static/flightdeck.ico` generated from the existing Flightdeck app icon.
+- Windows install and desktop shortcut scripts now use the `.ico` for Desktop/Startup shortcut icons, with the existing PNG as fallback.
+- README/INSTALL now describe the Windows shortcuts as Flightdeck-branded.
+- No backend restart required.
 
 ## What was fixed - Session 28.241 (AMS HT slot canonicalization - 7 June)
 - Regular AMS slots continue to use `unit*4 + slot` indexes.

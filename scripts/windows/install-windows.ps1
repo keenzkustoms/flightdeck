@@ -56,7 +56,10 @@ $env:FLIGHTDECK_PRINT_LIBRARY = Join-Path $DataDir "print_library"
 & $VenvPython -c "from app import db; db.init()"
 
 $Launcher = Join-Path $ScriptDir "flightdeck-tray.py"
-$IconPath = Join-Path $AppDir "app\static\icon-192.png"
+$IconPath = Join-Path $AppDir "app\static\flightdeck.ico"
+if (-not (Test-Path $IconPath)) {
+    $IconPath = Join-Path $AppDir "app\static\icon-192.png"
+}
 
 function New-FlightdeckShortcut {
     param(

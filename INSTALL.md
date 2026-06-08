@@ -83,7 +83,7 @@ The installer creates:
 %LOCALAPPDATA%\Flightdeck\logs
 ```
 
-It also creates a Startup shortcut named `Flightdeck Tray`, using `pythonw.exe` so no terminal window stays open. After login, Flightdeck appears in the Windows hidden icons / notification area. The tray menu can open the dashboard, update from GitHub, restart Flightdeck, and open logs.
+It also creates Flightdeck-branded Desktop and Startup shortcuts, using `pythonw.exe` so no terminal window stays open. After login, Flightdeck appears in the Windows hidden icons / notification area. The tray menu can open the dashboard, update from GitHub, restart Flightdeck, and open logs.
 
 Start it immediately without logging out:
 
