@@ -12,6 +12,7 @@ import socket
 import sqlite3
 import subprocess
 import tempfile
+import time
 import urllib.parse
 import urllib.request
 import zipfile
@@ -43,14 +44,14 @@ from .camera import BambuCameraProxy
 from .label_printer import LabelPrinter
 from .models import PrintPreview
 from .paths import APP_DIR, DATA_DIR, DB_PATH, PRINTERS_CONFIG_PATH, PRINT_LIBRARY_DIR, UPLOADS_DIR
-from .printer_config import BambuConnection, BambuRtspCamera, MjpegDirectCamera, MoonrakerConnection, NtfyConfig, PrinterEntry, SimulatedConnection, load, save
+from .printer_config import AdaptiveCamera, BambuConnection, BambuRtspCamera, MjpegDirectCamera, MoonrakerConnection, NtfyConfig, PrinterEntry, SimulatedConnection, SnapmakerU1Connection, WebrtcCamera, load, save
 from .printers import moonraker, simulated
 from .printers.bambu import BambuPrinter
 from .scale import Scale
 from .version import APP_RELEASE_NOTES, APP_VERSION, APP_VERSION_NAME
 
 _bambu: list[BambuPrinter] = []
-_moonraker: list[tuple[str, str, str, str, str]] = []  # (id, model_name, custom_name, icon, url)
+_moonraker: list[tuple[str, str, str, str, str, str, int]] = []  # (id, model_name, custom_name, icon, url, kind, toolheads)
 _simulated: list[tuple[str, str, str, str, str, str]] = []  # (id, model_name, custom_name, icon, profile, scenario)
 _cameras: dict = {}          # printer_id → Camera config
 _presets: dict[str, dict] = {}  # printer_id → temperature_presets dict
@@ -85,8 +86,94 @@ def _simulated_entry(printer_id: str) -> Optional[tuple[str, str, str, str, str,
     return None
 
 
+def _moonraker_runtime_entry(entry: PrinterEntry, conn: MoonrakerConnection | SnapmakerU1Connection) -> tuple[str, str, str, str, str, str, int]:
+    if isinstance(conn, SnapmakerU1Connection):
+        return (entry.id, entry.model_name, entry.custom_name, entry.icon_key(), conn.url, "snapmaker_u1", 4)
+    return (entry.id, entry.model_name, entry.custom_name, entry.icon_key(), conn.url, "moonraker", 1)
+
+
+def _is_moonraker_family(kind: Optional[str]) -> bool:
+    return kind in {"moonraker", "snapmaker_u1"}
+
+
 def _active_printer_ids() -> set[str]:
     return {pid for (pid, *_rest) in _moonraker} | {p.id for p in _bambu} | {pid for (pid, *_rest) in _simulated}
+
+
+def _offline_printer_entry(
+    printer_id: str,
+    model_name: str,
+    custom_name: str,
+    icon: str,
+    kind: str,
+    error: str = "waiting for telemetry",
+    extra: Optional[dict] = None,
+) -> dict:
+    entry = {
+        "id": printer_id,
+        "model_name": model_name,
+        "custom_name": custom_name,
+        "icon": icon,
+        "kind": kind,
+        "state": "offline",
+        "error": error,
+        "last_seen": _last_seen_cache.get(printer_id),
+        "updated_at": datetime.utcnow(),
+        "temperature_presets": _presets.get(printer_id, {}),
+        "health": db.get_printer_health(printer_id),
+        "print_enabled": db.is_printer_printing_enabled(printer_id),
+        "print_enabled_note": db.get_printer_printing_note(printer_id),
+    }
+    if extra:
+        entry.update(extra)
+    return entry
+
+
+def _stale_or_offline_printer_entry(
+    printer_id: str,
+    model_name: str,
+    custom_name: str,
+    icon: str,
+    kind: str,
+    error: str = "telemetry timeout",
+    extra: Optional[dict] = None,
+) -> dict:
+    previous = _latest_printers.get(printer_id)
+    if previous and previous.get("state") != "offline":
+        stale = dict(previous)
+        stale["stale"] = True
+        stale["telemetry_error"] = error
+        return stale
+    return _offline_printer_entry(printer_id, model_name, custom_name, icon, kind, error=error, extra=extra)
+
+
+def _prime_printer_cache() -> None:
+    global _latest_printers_at
+    out: list[dict] = []
+    for pid, model_name, custom_name, icon, url, kind, toolhead_count in _moonraker:
+        extra = {
+            "klipper_ui_url": url,
+            "toolheads": [
+                {
+                    "idx": idx,
+                    "label": f"T{idx}",
+                    "object": "extruder" if idx == 0 else f"extruder{idx}",
+                    "actual": None,
+                    "target": None,
+                    "power": None,
+                    "active": idx == 0,
+                }
+                for idx in range(toolhead_count)
+            ] if kind == "snapmaker_u1" else [],
+        }
+        out.append(_offline_printer_entry(pid, model_name, custom_name, icon, kind, extra=extra))
+    for p in _bambu:
+        out.append(_offline_printer_entry(p.id, p.model_name, p.custom_name, p.icon, "bambu", extra={"_error_print_id": p._error_print_id}))
+    for pid, model_name, custom_name, icon, _profile, _scenario in _simulated:
+        out.append(_offline_printer_entry(pid, model_name, custom_name, icon, "simulated"))
+    _latest_printers.clear()
+    _latest_printers.update({p["id"]: p for p in out})
+    _latest_printers_at = datetime.utcnow()
 
 
 async def _gather_all() -> list[dict]:
@@ -100,8 +187,27 @@ async def _gather_all() -> list[dict]:
 async def _gather_all_locked() -> list[dict]:
     global _latest_printers_at
 
-    async def _fetch_moonraker(id, model_name, custom_name, icon, url):
-        status = await moonraker.fetch(id, model_name, custom_name, icon, url)
+    async def _fetch_moonraker(id, model_name, custom_name, icon, url, kind, toolhead_count):
+        try:
+            status = await asyncio.wait_for(
+                moonraker.fetch(id, model_name, custom_name, icon, url, kind=kind, toolhead_count=toolhead_count),
+                timeout=8.0,
+            )
+        except Exception as exc:
+            log.warning("moonraker fetch timed out/failed for %s: %s", id, exc)
+            error = str(exc) or "telemetry timeout"
+            return _stale_or_offline_printer_entry(
+                id,
+                model_name,
+                custom_name,
+                icon,
+                kind,
+                error=error,
+                extra={
+                    "_error_print_id": moonraker._error_print_id.get(id),
+                    "klipper_ui_url": url,
+                },
+            )
         status.temperature_presets = _presets.get(id, {})
         _update_last_seen(status)
         d = asdict(status)
@@ -115,7 +221,19 @@ async def _gather_all_locked() -> list[dict]:
         return d
 
     async def _fetch_bambu(p):
-        status = await asyncio.to_thread(p.status)
+        try:
+            status = await asyncio.wait_for(asyncio.to_thread(p.status), timeout=12.0)
+        except Exception as exc:
+            log.warning("bambu fetch timed out/failed for %s: %s", p.id, exc)
+            return _stale_or_offline_printer_entry(
+                p.id,
+                p.model_name,
+                p.custom_name,
+                p.icon,
+                "bambu",
+                error=str(exc) or "telemetry timeout",
+                extra={"_error_print_id": p._error_print_id},
+            )
         status.temperature_presets = _presets.get(p.id, {})
         _update_last_seen(status)
         d = asdict(status)
@@ -142,8 +260,8 @@ async def _gather_all_locked() -> list[dict]:
         return d
 
     tasks = (
-        [_fetch_moonraker(id, model_name, custom_name, icon, url)
-         for (id, model_name, custom_name, icon, url) in _moonraker] +
+        [_fetch_moonraker(id, model_name, custom_name, icon, url, kind, toolhead_count)
+         for (id, model_name, custom_name, icon, url, kind, toolhead_count) in _moonraker] +
         [_fetch_bambu(p) for p in _bambu]
         + [_fetch_simulated(id, model_name, custom_name, icon, profile, scenario)
            for (id, model_name, custom_name, icon, profile, scenario) in _simulated]
@@ -164,19 +282,52 @@ async def _gather_all_locked() -> list[dict]:
     return out
 
 
-def _cached_printers(max_age_seconds: float = 8.0) -> Optional[list[dict]]:
+def _cached_printers(max_age_seconds: Optional[float] = 8.0) -> Optional[list[dict]]:
     if not _latest_printers or _latest_printers_at is None:
         return None
-    age = (datetime.utcnow() - _latest_printers_at).total_seconds()
-    if age > max_age_seconds:
-        return None
+    if max_age_seconds is not None:
+        age = (datetime.utcnow() - _latest_printers_at).total_seconds()
+        if age > max_age_seconds:
+            return None
     return list(_latest_printers.values())
 
 
+def _gather_in_progress() -> bool:
+    return _gather_lock is not None and _gather_lock.locked()
+
+
+async def _gather_all_with_cache(timeout: float = 5.0) -> list[dict]:
+    cached = _cached_printers()
+    if cached is not None:
+        return cached
+    stale = _cached_printers(max_age_seconds=None)
+    if stale is not None:
+        return stale
+    try:
+        return await asyncio.wait_for(_gather_all(), timeout=timeout)
+    except Exception as exc:
+        log.warning("printer gather timed out/failed: %s", exc)
+        stale = _cached_printers(max_age_seconds=None)
+        return stale if stale is not None else []
+
+
+async def _seed_prev_states() -> None:
+    try:
+        for p in await _gather_all_with_cache(timeout=6.0):
+            _prev_states[p["id"]] = p["state"]
+    except Exception:
+        pass
+
+
+async def _delayed_seed_prev_states() -> None:
+    await asyncio.sleep(3)
+    await _seed_prev_states()
+
+
 def _printer_meta(printer_id: str) -> Optional[dict]:
-    for pid, model_name, custom_name, _icon, _url in _moonraker:
+    for pid, model_name, custom_name, _icon, _url, kind, _toolhead_count in _moonraker:
         if pid == printer_id:
-            return {"id": pid, "model_name": model_name, "custom_name": custom_name, "kind": "moonraker"}
+            return {"id": pid, "model_name": model_name, "custom_name": custom_name, "kind": kind}
     for p in _bambu:
         if p.id == printer_id:
             return {"id": p.id, "model_name": p.model_name, "custom_name": p.custom_name, "kind": "bambu"}
@@ -575,7 +726,7 @@ async def _grab_snapshot(printer_id: str) -> Optional[bytes]:
 
     # Moonraker: hit the crowsnest snapshot URL directly
     camera = _cameras.get(printer_id)
-    if isinstance(camera, MjpegDirectCamera) and camera.snapshot_url:
+    if isinstance(camera, (AdaptiveCamera, MjpegDirectCamera)) and camera.snapshot_url:
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
                 r = await client.get(camera.snapshot_url)
@@ -660,7 +811,7 @@ def _check_transitions(data: list[dict]) -> None:
         name = p.get("custom_name") or p.get("id")
         job = p.get("job") or {}
         fname = (job.get("filename") or "").rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
-        sub = job.get("subtask_name", "").strip()
+        sub = (job.get("subtask_name") or "").strip()
         label = sub if sub and sub != fname else fname
         has_error_print = p.get("_error_print_id") is not None
         is_simulated = bool(p.get("_simulated"))
@@ -721,8 +872,10 @@ async def _push_toast(message: str, sub: str = "", toast_type: str = "warning") 
 
 async def _broadcast_loop():
     while True:
-        await asyncio.sleep(5)
+        await asyncio.sleep(15)
         try:
+            if _gather_in_progress():
+                continue
             data = await _gather_all()
             _check_transitions(data)
             if not _ws_clients:
@@ -776,9 +929,8 @@ async def lifespan(app: FastAPI):
         conn = entry.connection
         _cameras[entry.id] = entry.camera
         _presets[entry.id] = entry.temperature_presets or {}
-        if isinstance(conn, MoonrakerConnection):
-            _moonraker.append((entry.id, entry.model_name, entry.custom_name,
-                               entry.icon_key(), conn.url))
+        if isinstance(conn, (MoonrakerConnection, SnapmakerU1Connection)):
+            _moonraker.append(_moonraker_runtime_entry(entry, conn))
         elif isinstance(conn, BambuConnection):
             p = BambuPrinter(
                 id=entry.id,
@@ -807,12 +959,9 @@ async def lifespan(app: FastAPI):
                 conn.scenario,
             ))
 
-    # Seed prev states so startup doesn't fire spurious notifications
-    try:
-        for p in await _gather_all():
-            _prev_states[p["id"]] = p["state"]
-    except Exception:
-        pass
+    _prime_printer_cache()
+    # Seed prev states in the background so slow/offline printers do not block the app shell.
+    asyncio.create_task(_delayed_seed_prev_states())
 
     _broadcast_task = asyncio.create_task(_broadcast_loop())
     _scale_keep_awake_task = asyncio.create_task(_scale_keep_awake_loop())
@@ -1361,7 +1510,7 @@ async def get_file_desk(printer_id: Optional[str] = None):
 
     source_tasks = (
         [_moonraker_target(pid, model_name, custom_name, url)
-         for (pid, model_name, custom_name, _icon, url) in _moonraker
+         for (pid, model_name, custom_name, _icon, url, _kind, _toolhead_count) in _moonraker
          if printer_id is None or pid == printer_id] +
         [_bambu_target(p) for p in _bambu
          if printer_id is None or p.id == printer_id]
@@ -1379,8 +1528,8 @@ async def get_file_desk(printer_id: Optional[str] = None):
 async def get_file_desk_reprints(limit: int = 12):
     limit = max(1, min(int(limit or 12), 48))
     printers = {
-        id: {"id": id, "model_name": model_name, "custom_name": custom_name, "kind": "moonraker"}
-        for (id, model_name, custom_name, _icon, _url) in _moonraker
+        id: {"id": id, "model_name": model_name, "custom_name": custom_name, "kind": kind}
+        for (id, model_name, custom_name, _icon, _url, kind, _toolhead_count) in _moonraker
     }
     printers.update({
         p.id: {"id": p.id, "model_name": p.model_name, "custom_name": p.custom_name, "kind": "bambu"}
@@ -1407,7 +1556,7 @@ async def queue_file_from_file_desk(body: FileQueueRequest):
     target_kind = _printer_kind(printer_id)
     if target_kind is None:
         raise HTTPException(status_code=404, detail="Target printer not found")
-    if target_kind not in {"moonraker", "bambu"}:
+    if not (_is_moonraker_family(target_kind) or target_kind == "bambu"):
         raise HTTPException(status_code=422, detail="queueing to simulated printers is not supported yet")
 
     filename, data = await _read_file_desk_source(source_id, source_path)
@@ -1870,17 +2019,14 @@ async def clear_bambu_sd_print_files(printer_id: str, body: BambuSdClearRequest)
 
 @app.get("/api/printers")
 async def get_printers():
-    cached = _cached_printers()
-    if cached is not None:
-        return cached
-    return await _gather_all()
+    return await _gather_all_with_cache()
 
 
 @app.get("/api/printers/{printer_id}")
 async def get_printer(printer_id: str):
-    for (id, model_name, custom_name, icon, url) in _moonraker:
+    for (id, model_name, custom_name, icon, url, kind, toolhead_count) in _moonraker:
         if id == printer_id:
-            return asdict(await moonraker.fetch(id, model_name, custom_name, icon, url))
+            return asdict(await moonraker.fetch(id, model_name, custom_name, icon, url, kind=kind, toolhead_count=toolhead_count))
 
     for p in _bambu:
         if p.id == printer_id:
@@ -1898,7 +2044,7 @@ async def ws_endpoint(ws: WebSocket):
     await ws.accept()
     _ws_clients.add(ws)
     try:
-        data = await _gather_all()
+        data = await _gather_all_with_cache()
         await ws.send_text(json.dumps(data, default=_dt_default))
     except Exception:
         pass
@@ -1916,9 +2062,9 @@ async def ws_endpoint(ws: WebSocket):
 
 @app.get("/api/printers/{printer_id}/preview", response_model=PrintPreview)
 async def get_printer_preview(printer_id: str):
-    for (id, model_name, custom_name, icon, url) in _moonraker:
+    for (id, model_name, custom_name, icon, url, kind, toolhead_count) in _moonraker:
         if id == printer_id:
-            status = await moonraker.fetch(id, model_name, custom_name, icon, url)
+            status = await moonraker.fetch(id, model_name, custom_name, icon, url, kind=kind, toolhead_count=toolhead_count)
             if not status.job:
                 raise HTTPException(status_code=404, detail="no active job")
 
@@ -1931,6 +2077,18 @@ async def get_printer_preview(printer_id: str):
             if isinstance(camera, MjpegDirectCamera) and _camera_active(status):
                 return PrintPreview(
                     image_url=camera.stream_url,
+                    image_type="mjpeg",
+                    fallback_thumbnail_url=thumb_url,
+                    filename=status.job.filename,
+                    estimated_total_seconds=preview.estimated_total_seconds if preview else None,
+                    elapsed_seconds=elapsed,
+                    layer_height_mm=preview.layer_height_mm if preview else None,
+                    filament_weight_g=preview.filament_weight_g if preview else None,
+                    filament_type=preview.filament_type if preview else None,
+                )
+            if isinstance(camera, AdaptiveCamera) and _camera_active(status):
+                return PrintPreview(
+                    image_url=f"/api/camera/{printer_id}/stream",
                     image_type="mjpeg",
                     fallback_thumbnail_url=thumb_url,
                     filename=status.job.filename,
@@ -2071,7 +2229,7 @@ async def set_printer_temp(printer_id: str, req: SetTempRequest):
     if not (0 <= req.target <= 350):
         raise HTTPException(status_code=400, detail="target out of range (0-350)")
 
-    for (id, model_name, custom_name, icon, url) in _moonraker:
+    for (id, model_name, custom_name, icon, url, _kind, _toolhead_count) in _moonraker:
         if id == printer_id:
             try:
                 await moonraker.set_temp(url, req.heater, req.target)
@@ -2099,7 +2257,7 @@ async def set_printer_fan(printer_id: str, req: FanRequest):
     if channel not in ("part", "aux", "chamber"):
         raise HTTPException(status_code=400, detail="invalid fan channel")
 
-    for (id, model_name, custom_name, icon, url) in _moonraker:
+    for (id, model_name, custom_name, icon, url, _kind, _toolhead_count) in _moonraker:
         if id == printer_id:
             if channel != "part":
                 raise HTTPException(status_code=422, detail="Klipper fan control only supports the part fan from Flightdeck")
@@ -2131,7 +2289,7 @@ async def jog_printer_z(printer_id: str, req: JogZRequest):
     if not (-10 <= req.distance <= 10):
         raise HTTPException(status_code=400, detail="Z jog out of range (-10 to 10mm)")
 
-    for (id, model_name, custom_name, icon, url) in _moonraker:
+    for (id, model_name, custom_name, icon, url, _kind, _toolhead_count) in _moonraker:
         if id == printer_id:
             try:
                 await moonraker.jog_z(url, req.distance)
@@ -2156,7 +2314,7 @@ async def home_printer_axes(printer_id: str, req: HomeRequest):
     if axes not in ("xy", "z", "all"):
         raise HTTPException(status_code=400, detail="invalid home axes")
 
-    for (id, model_name, custom_name, icon, url) in _moonraker:
+    for (id, model_name, custom_name, icon, url, _kind, _toolhead_count) in _moonraker:
         if id == printer_id:
             try:
                 await moonraker.home_axes(url, axes)
@@ -2186,7 +2344,7 @@ async def control_printer(printer_id: str, req: ControlRequest):
     if req.action not in _VALID_ACTIONS:
         raise HTTPException(status_code=400, detail="invalid action")
 
-    for (id, model_name, custom_name, icon, url) in _moonraker:
+    for (id, model_name, custom_name, icon, url, _kind, _toolhead_count) in _moonraker:
         if id == printer_id:
             try:
                 await moonraker.control(url, req.action)
@@ -2298,9 +2456,49 @@ async def get_printer_camera(printer_id: str):
         raise HTTPException(status_code=404, detail="no camera configured")
     if isinstance(camera, MjpegDirectCamera):
         return {"url": f"/api/camera/{printer_id}/stream", "type": "mjpeg"}
+    if isinstance(camera, AdaptiveCamera):
+        return {
+            "url": f"/api/camera/{printer_id}/snapshot",
+            "type": "adaptive",
+            "active_fps": camera.active_fps,
+            "idle_fps": camera.idle_fps,
+            "refresh_ms": max(100, int(1000 / _adaptive_camera_fps(camera, printer_id))),
+        }
+    if isinstance(camera, WebrtcCamera):
+        return {
+            "url": camera.stream_url,
+            "type": "webrtc",
+            "snapshot_url": camera.snapshot_url,
+        }
     if isinstance(camera, BambuRtspCamera):
         return {"url": f"/api/camera/{printer_id}/stream", "type": "mjpeg"}
     raise HTTPException(status_code=404, detail="unknown camera type")
+
+
+@app.get("/api/camera/{printer_id}/snapshot")
+async def camera_snapshot(printer_id: str):
+    camera = _cameras.get(printer_id)
+    if isinstance(camera, AdaptiveCamera):
+        snapshot_url = camera.snapshot_url
+    elif isinstance(camera, WebrtcCamera) and camera.snapshot_url:
+        snapshot_url = camera.snapshot_url
+    else:
+        raise HTTPException(status_code=404, detail="adaptive camera not configured")
+
+    try:
+        content, content_type = await asyncio.to_thread(_fetch_adaptive_snapshot_sync, snapshot_url)
+        return Response(
+            content=content,
+            media_type=content_type,
+            headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+                "Expires": "0",
+            },
+        )
+    except Exception as exc:
+        log.warning("adaptive camera snapshot failed for %s: %s", printer_id, exc)
+        raise HTTPException(status_code=502, detail="snapshot unavailable")
 
 
 def _simulated_camera_svg(printer_id: str, model_name: str, custom_name: str, icon: str, profile: str, scenario: str) -> str:
@@ -2418,11 +2616,103 @@ async def _mjpeg_direct_response(url: str) -> StreamingResponse:
     )
 
 
+def _adaptive_camera_fps(camera: AdaptiveCamera, printer_id: str) -> float:
+    status = _latest_printers.get(printer_id) or {}
+    active = str(status.get("state") or "").lower() in {"printing", "paused", "error", "finished"}
+    raw = camera.active_fps if active else camera.idle_fps
+    try:
+        return max(0.05, min(float(raw or 0), 10.0))
+    except (TypeError, ValueError):
+        return 1.0
+
+
+def _fetch_adaptive_snapshot_sync(url: str) -> tuple[bytes, str]:
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    request = urllib.request.Request(
+        url,
+        headers={
+            "Cache-Control": "no-cache",
+            "Pragma": "no-cache",
+            "User-Agent": "Flightdeck adaptive camera",
+        },
+    )
+    with opener.open(request, timeout=8) as response:
+        content_type = (response.headers.get("content-type") or "image/jpeg").split(";", 1)[0] or "image/jpeg"
+        return response.read(), content_type
+
+
+async def _adaptive_camera_response(camera: AdaptiveCamera, printer_id: str) -> StreamingResponse:
+    def cache_busted_url(url: str) -> str:
+        sep = "&" if "?" in url else "?"
+        return f"{url}{sep}_fd_ts={int(time.time() * 1000)}"
+
+    async def fetch_snapshot(client: httpx.AsyncClient) -> tuple[Optional[bytes], str]:
+        content, content_type = await asyncio.to_thread(_fetch_adaptive_snapshot_sync, cache_busted_url(camera.snapshot_url))
+        if not content:
+            return None, "image/jpeg"
+        return content, content_type
+
+    first_frame: Optional[bytes] = None
+    first_content_type = "image/jpeg"
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(connect=3.0, read=8.0, write=3.0, pool=3.0),
+            follow_redirects=True,
+            trust_env=False,
+        ) as client:
+            first_frame, first_content_type = await fetch_snapshot(client)
+    except Exception as exc:
+        log.warning("adaptive camera initial snapshot failed for %s: %s", printer_id, exc)
+
+    async def chunks():
+        last_frame = first_frame
+        last_content_type = first_content_type
+        if last_frame:
+            yield (
+                b"--frame\r\n"
+                + f"Content-Type: {last_content_type}\r\n".encode()
+                + b"Content-Length: " + str(len(last_frame)).encode() + b"\r\n\r\n"
+                + last_frame + b"\r\n"
+            )
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(connect=3.0, read=8.0, write=3.0, pool=3.0),
+            follow_redirects=True,
+            trust_env=False,
+        ) as client:
+            while True:
+                fps = _adaptive_camera_fps(camera, printer_id)
+                try:
+                    frame, content_type = await fetch_snapshot(client)
+                    if frame:
+                        last_frame = frame
+                        last_content_type = content_type
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    log.debug("adaptive camera snapshot failed for %s: %s", printer_id, exc)
+                if last_frame:
+                    yield (
+                        b"--frame\r\n"
+                        + f"Content-Type: {last_content_type}\r\n".encode()
+                        + b"Content-Length: " + str(len(last_frame)).encode() + b"\r\n\r\n"
+                        + last_frame + b"\r\n"
+                    )
+                await asyncio.sleep(1.0 / fps)
+
+    return StreamingResponse(
+        chunks(),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+        headers={"Cache-Control": "no-cache, no-store"},
+    )
+
+
 @app.get("/api/camera/{printer_id}/stream")
 async def camera_stream(printer_id: str):
     camera = _cameras.get(printer_id)
     if isinstance(camera, MjpegDirectCamera):
         return await _mjpeg_direct_response(camera.stream_url)
+    if isinstance(camera, AdaptiveCamera):
+        return await _adaptive_camera_response(camera, printer_id)
 
     proxy = _cam_proxies.get(printer_id)
     if proxy is None:
@@ -2639,7 +2929,7 @@ class ExcludeObjectRequest(BaseModel):
 
 @app.get("/api/printers/{printer_id}/objects")
 async def get_printer_objects(printer_id: str):
-    for (id, model_name, custom_name, icon, url) in _moonraker:
+    for (id, model_name, custom_name, icon, url, _kind, _toolhead_count) in _moonraker:
         if id == printer_id:
             data = await moonraker.fetch_objects(url)
             return {
@@ -2676,8 +2966,8 @@ async def add_printer(entry: PrinterEntry):
     _cameras[entry.id] = entry.camera
     _presets[entry.id] = entry.temperature_presets or {}
 
-    if isinstance(conn, MoonrakerConnection):
-        _moonraker.append((entry.id, entry.model_name, entry.custom_name, entry.icon_key(), conn.url))
+    if isinstance(conn, (MoonrakerConnection, SnapmakerU1Connection)):
+        _moonraker.append(_moonraker_runtime_entry(entry, conn))
     elif isinstance(conn, BambuConnection):
         p = BambuPrinter(
             id=entry.id,
@@ -2786,8 +3076,8 @@ async def _attach_runtime_printer(entry: PrinterEntry) -> None:
     _cameras[entry.id] = entry.camera
     _presets[entry.id] = entry.temperature_presets or {}
 
-    if isinstance(conn, MoonrakerConnection):
-        _moonraker.append((entry.id, entry.model_name, entry.custom_name, entry.icon_key(), conn.url))
+    if isinstance(conn, (MoonrakerConnection, SnapmakerU1Connection)):
+        _moonraker.append(_moonraker_runtime_entry(entry, conn))
     elif isinstance(conn, BambuConnection):
         p = BambuPrinter(
             id=entry.id,
@@ -2853,7 +3143,7 @@ async def set_printer_print_enabled(printer_id: str, body: PrinterPrintEnabledRe
 
 @app.post("/api/printers/{printer_id}/exclude-object")
 async def post_exclude_object(printer_id: str, req: ExcludeObjectRequest):
-    for (id, model_name, custom_name, icon, url) in _moonraker:
+    for (id, model_name, custom_name, icon, url, _kind, _toolhead_count) in _moonraker:
         if id == printer_id:
             try:
                 await moonraker.exclude_object(url, req.name)
@@ -2878,9 +3168,9 @@ async def post_exclude_object(printer_id: str, req: ExcludeObjectRequest):
 
 @app.get("/api/printers/{printer_id}/thumbnail")
 async def get_printer_thumbnail(printer_id: str):
-    for (id, model_name, custom_name, icon, url) in _moonraker:
+    for (id, model_name, custom_name, icon, url, kind, toolhead_count) in _moonraker:
         if id == printer_id:
-            status = await moonraker.fetch(id, model_name, custom_name, icon, url)
+            status = await moonraker.fetch(id, model_name, custom_name, icon, url, kind=kind, toolhead_count=toolhead_count)
             if status.job:
                 preview = await moonraker.fetch_preview(url, status.job.filename)
                 if preview and preview.image_png:
@@ -4687,9 +4977,9 @@ _QUEUE_SOURCE_MODEL_EXT = {".step", ".stp"}
 
 
 def _printer_kind(printer_id: str) -> Optional[str]:
-    for (pid, *_) in _moonraker:
+    for (pid, _model_name, _custom_name, _icon, _url, kind, _toolhead_count) in _moonraker:
         if pid == printer_id:
-            return "moonraker"
+            return kind
     for p in _bambu:
         if p.id == printer_id:
             return "bambu"
@@ -5182,7 +5472,7 @@ async def _advance_queue(printer_id: str) -> None:
         return
     db.queue_update_status(job_id, "uploading")
     try:
-        for (pid, _, _, _, url) in _moonraker:
+        for (pid, _, _, _, url, _kind, _toolhead_count) in _moonraker:
             if pid == printer_id:
                 await moonraker.upload_and_start(url, file_path, filename)
                 db.queue_set_started(job_id)
@@ -5222,7 +5512,7 @@ async def queue_upload(printer_id: str = Form(...), file: UploadFile = File(...)
     kind = _printer_kind(printer_id)
     if kind is None:
         raise HTTPException(status_code=404, detail="printer not found")
-    if kind not in {"moonraker", "bambu"}:
+    if not (_is_moonraker_family(kind) or kind == "bambu"):
         raise HTTPException(status_code=422, detail="queueing to simulated printers is not supported yet")
 
     raw_name = _safe_basename(file.filename, "upload")
@@ -5350,7 +5640,7 @@ async def _advance_queue_specific(job_id: int, printer_id: str,
             return
     db.queue_update_status(job_id, "uploading")
     try:
-        for (pid, _, _, _, url) in _moonraker:
+        for (pid, _, _, _, url, _kind, _toolhead_count) in _moonraker:
             if pid == printer_id:
                 await moonraker.upload_and_start(url, file_path, filename)
                 db.queue_set_started(job_id)
@@ -5375,7 +5665,7 @@ def _find_bambu(printer_id: str):
     return next((p for p in _bambu if p.id == printer_id), None)
 
 def _find_moonraker_url(printer_id: str):
-    return next((url for (id, _, _, _, url) in _moonraker if id == printer_id), None)
+    return next((url for (id, _, _, _, url, _kind, _toolhead_count) in _moonraker if id == printer_id), None)
 
 _BUSY_STATES = {"printing", "paused"}
 

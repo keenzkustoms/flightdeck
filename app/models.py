@@ -40,7 +40,7 @@ class PrinterStatus:
     model_name: str          # from printers.yaml — leads the card header
     custom_name: str         # from printers.yaml — subtitle
     icon: str                # icon key: "voron" | "bambu" | "generic"
-    kind: str                # "moonraker" | "bambu"
+    kind: str                # "moonraker" | "snapmaker_u1" | "bambu"
     state: str               # "printing" | "idle" | "paused" | "finished" | "error" | "offline"
     temps: dict[str, TempReading] = field(default_factory=dict)
     job: Optional[JobStatus] = None
@@ -48,6 +48,7 @@ class PrinterStatus:
     idle_info: dict[str, str] = field(default_factory=dict)
     ams: list = field(default_factory=list)  # list of AMS unit dicts; empty for non-Bambu
     mmu: list = field(default_factory=list)  # list of MMU unit dicts; empty for non-HH
+    toolheads: list = field(default_factory=list)  # list of toolhead dicts; empty for single-tool printers
     maintenance: list = field(default_factory=list)  # live printer-reported care/advisory items
     light_state: Optional[str] = None  # Bambu chamber light state: "on" | "off" | "unknown"
     temperature_presets: dict = field(default_factory=dict)  # {hotend: [{label, value}], bed: [...]}

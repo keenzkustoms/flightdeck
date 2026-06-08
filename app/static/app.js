@@ -96,6 +96,35 @@ function _printerSecondaryLabel(p) {
   return p?.id && p.id !== primary ? p.id : '';
 }
 
+function _isMoonrakerFamily(p) {
+  const kind = typeof p === 'string' ? p : (p?.kind || p?.connection?.type || '');
+  return kind === 'moonraker' || kind === 'snapmaker_u1';
+}
+
+function _isSnapmakerU1(p) {
+  const kind = p?.kind || p?.connection?.type || '';
+  return kind === 'snapmaker_u1';
+}
+
+function _list(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function _snapmakerMonitorUrl(host) {
+  const clean = String(host || '').trim().replace(/^https?:\/\//i, '').replace(/\/+$/, '');
+  return clean ? `http://${clean}/webcam/snapshot.jpg` : '';
+}
+
+function _snapmakerMjpegUrl(host) {
+  const clean = String(host || '').trim().replace(/^https?:\/\//i, '').replace(/\/+$/, '');
+  return clean ? `http://${clean}/webcam/stream.mjpg` : '';
+}
+
+function _snapmakerWebrtcUrl(host) {
+  const clean = String(host || '').trim().replace(/^https?:\/\//i, '').replace(/\/+$/, '');
+  return clean ? `http://${clean}/webcam/webrtc` : '';
+}
+
 function _bambuLightWordHtml(p) {
   const lightState = _effectiveLightState(p);
   const lit = lightState === 'on';
@@ -281,7 +310,8 @@ let _latestPrinters = [];
 let _tabsBuilt = false;
 let _missionRenderInFlight = false;
 let _missionLastHtml = '';
-const _cameraUrlCache = {};     // printer_id → url string or null
+const _cameraUrlCache = {};     // printer_id -> url string or null
+const _cameraMetaCache = {};    // printer_id -> camera metadata
 let _renderedDetailId = null;
 let _renderedDetailSubtab = null;
 let _renderedDetailOk = false;
@@ -1837,10 +1867,10 @@ function _detailControls(id, p) {
     return `<button class="ctrl-btn ${cls}${loadingCls}" data-action="${action}" data-printer-id="${id}"${disabled}>${isPending ? '…' : label}</button>`;
   }
 
-  const firmwareRestartBtn = p.kind === 'moonraker'
+  const firmwareRestartBtn = _isMoonrakerFamily(p)
     ? btn('firmware_restart', 'Firmware Restart', 'ctrl-btn-firmware-restart')
     : '';
-  const lightControls = p.kind === 'moonraker'
+  const lightControls = _isMoonrakerFamily(p)
     ? `${btn('light_on', 'Bars On', 'ctrl-btn-light')}
        ${btn('light_off', 'Bars Off', 'ctrl-btn-light')}`
     : p.kind === 'bambu'
@@ -1877,13 +1907,13 @@ function _detailTransportControls(id, p) {
   };
   const lightControl = p.kind === 'bambu'
     ? _bambuLightWordHtml(p)
-    : p.kind === 'moonraker'
+    : _isMoonrakerFamily(p)
       ? `<div class="transport-bars">
           ${transportButton('light_on', '☀', 'Bars on', 'transport-light')}
           ${transportButton('light_off', '☾', 'Bars off', 'transport-light')}
         </div>`
       : '';
-  const firmwareRestartBtn = p.kind === 'moonraker' && _canDo(p.state, 'firmware_restart')
+  const firmwareRestartBtn = _isMoonrakerFamily(p) && _canDo(p.state, 'firmware_restart')
     ? transportButton('firmware_restart', '↻', 'Firmware restart', 'transport-warn')
     : '';
   return `<div class="live-transport detail-controls-wrap" aria-label="Printer transport controls">
@@ -1910,7 +1940,7 @@ function _preheatPresets(p) {
 
 function _detailLiveOps(p) {
   const canPreheat = !['offline', 'printing', 'error', 'estop'].includes(p.state || '');
-  const isMoonraker = p.kind === 'moonraker';
+  const isMoonraker = _isMoonrakerFamily(p);
   const isBambu = p.kind === 'bambu';
   const canFan = (isMoonraker || isBambu) && !['offline', 'error', 'estop'].includes(p.state || '');
   const canJog = isMoonraker && !['offline', 'printing', 'paused', 'finished', 'error', 'estop'].includes(p.state || '');
@@ -1926,7 +1956,7 @@ function _detailLiveOps(p) {
       data-hotend="0" data-bed="0" ${canPreheat ? '' : 'disabled'}>
       <span>Cool</span><small>0/0°</small>
     </button>`;
-  const klipper = p.kind === 'moonraker' && p.klipper_ui_url
+  const klipper = _isMoonrakerFamily(p) && p.klipper_ui_url
     ? `<a class="live-op-btn live-op-link" href="${esc(p.klipper_ui_url)}" target="_blank" rel="noreferrer">
         <span>Klipper</span><small>Mainsail / Fluidd</small>
       </a>`
@@ -2587,11 +2617,11 @@ function router() {
   // Abort MJPEG streams when leaving their view — mobile browsers don't close
   // orphaned <img> connections automatically, which exhausts connection pool slots.
   if (route.view !== 'printer') {
-    const img = document.querySelector('#detail-cam-img');
-    if (img) { img.src = ''; img.dataset.stopped = '1'; }
+    const media = document.querySelector('#detail-cam-img, #printer-detail iframe[data-camera-id]');
+    if (media) { media.src = ''; media.dataset.stopped = '1'; }
   }
   if (route.view !== 'cameras') {
-    document.querySelectorAll('#cameras-grid img').forEach(img => { img.src = ''; });
+    document.querySelectorAll('#cameras-grid img, #cameras-grid iframe').forEach(media => { media.src = ''; });
     _camerasFull = false;
     if (_printWatchTimer) {
       clearInterval(_printWatchTimer);
@@ -2599,7 +2629,7 @@ function router() {
     }
   }
   if (route.view !== 'fleet') {
-    document.querySelectorAll('#fleet-wall-page img').forEach(img => { img.src = ''; });
+    document.querySelectorAll('#fleet-wall-page img, #fleet-wall-page iframe').forEach(media => { media.src = ''; });
     _fleetWallSignature = '';
   }
   const wasOnSettings = _onSettings;
@@ -2861,7 +2891,7 @@ function _detailLiveSignals(p) {
 
 function _amsMismatchSignals(p, loaded = []) {
   const mismatches = [];
-  (p.ams || []).forEach(unit => (unit.slots || []).forEach(slot => {
+  _list(p.ams).forEach(unit => _list(unit.slots).forEach(slot => {
     const flatSlot = _amsFlatSlot(unit, slot);
     const loadedSpool = loaded.find(s => Number(s.location_slot) === flatSlot);
     const mismatch = _slotMismatch(loadedSpool, slot);
@@ -2922,13 +2952,13 @@ function _detailLiveSpoolChips(p) {
 }
 
 function _detailLiveAmsRows(p) {
-  if (!p.ams?.length) return '';
+  if (!_list(p.ams).length) return '';
   return _detailLiveAmsLoadoutRows(p);
 }
 
 function _detailLiveAmsLoadoutRows(p) {
   const loaded = _latestSpoolsByPrinter[p.id] || [];
-  const units = p.ams.map(unit => {
+  const units = _list(p.ams).map(unit => {
     const drying = !!unit.drying;
     const preset = unit.dry_setting || {};
     const dryTime = unit.dry_time ? formatEta(unit.dry_time * 60) : '';
@@ -2942,7 +2972,7 @@ function _detailLiveAmsLoadoutRows(p) {
           data-ams-dry data-printer-id="${p.id}" data-ams-id="${unit.unit}" data-enabled="${drying ? 'false' : 'true'}"
           title="${drying ? 'Stop AMS drying' : 'Start AMS drying'}">${drying ? 'Stop' : 'Dry'}</button>`
       : '';
-    const slots = (unit.slots || []).map(slot => {
+    const slots = _list(unit.slots).map(slot => {
       const flatSlot = _amsFlatSlot(unit, slot);
       const loadedSpool = loaded.find(s => Number(s.location_slot) === flatSlot);
       const mismatch = _slotMismatch(loadedSpool, slot);
@@ -2994,7 +3024,7 @@ function _detailLiveAmsLoadoutRows(p) {
         <div class="ams-loadout-slots">${slots}</div>
       </div>
       <div class="ams-loadout-side">
-        <small>${isHt ? 'High-temp bay' : `${(unit.slots || []).length} slot loadout`}</small>
+        <small>${isHt ? 'High-temp bay' : `${_list(unit.slots).length} slot loadout`}</small>
         ${unit.dry_capable ? `<span class="ams-loadout-dry-state">${drying ? 'Drying' : 'Idle'}</span>` : ''}
         ${drying && dryTime ? `<span class="ams-loadout-dry-time">${esc(dryTime)}</span>` : ''}
         <div class="ams-loadout-actions">
@@ -3009,11 +3039,11 @@ function _detailLiveAmsLoadoutRows(p) {
 }
 
 function _detailLiveMmuRows(p) {
-  if (!p.mmu?.length) return '';
+  if (!_list(p.mmu).length) return '';
   const loaded = _latestSpoolsByPrinter[p.id] || [];
-  return p.mmu.map(unit => {
+  return _list(p.mmu).map(unit => {
     const routeState = _mmuRouteState(unit);
-    const gates = (unit.gates || []).map(gate => {
+    const gates = _list(unit.gates).map(gate => {
       const loadedSpool = loaded.find(s => Number(s.location_slot) === Number(gate.idx));
       const mismatch = _slotMismatch(loadedSpool, gate);
       const gateLabel = `T${Number(gate.idx)}`;
@@ -3050,6 +3080,52 @@ function _detailLiveMmuRows(p) {
       <div class="live-mmu-gates">${gates}</div>
     </div>`;
   }).join('');
+}
+
+function _detailLiveToolheadRows(p) {
+  if (!_isSnapmakerU1(p)) return '';
+  const loaded = _latestSpoolsByPrinter[p.id] || [];
+  const tools = (_list(p.toolheads).length ? _list(p.toolheads) : [0, 1, 2, 3].map(idx => ({ idx, label: `T${idx}` }))).slice(0, 4);
+  const cards = tools.map(tool => {
+    const idx = Number(tool.idx ?? 0);
+    const loadedSpool = loaded.find(s => Number(s.location_slot) === idx);
+    const colour = loadedSpool?.color_hex || '#2563eb';
+    const temp = tool.actual != null ? `${_toDisplayTemp(tool.actual)}${_tempUnitLabel()}` : '—';
+    const target = Number(tool.target || 0) > 0 ? `/${_toDisplayTemp(tool.target)}${_tempUnitLabel()}` : '';
+    const grams = loadedSpool ? Math.round(Number(loadedSpool.remaining_g || 0)) : null;
+    const label = `T${idx}`;
+    const state = tool.active ? 'Active' : Number(tool.target || 0) > 0 ? 'Heating' : loadedSpool ? 'Ready' : 'Unassigned';
+    const title = [
+      label,
+      loadedSpool ? [loadedSpool.color_name, loadedSpool.material, loadedSpool.brand, `${grams}g`].filter(Boolean).join(' · ') : '',
+      `${temp}${target}`,
+      state,
+    ].filter(Boolean).join(' · ');
+    return `<button class="snapmaker-tool-card${tool.active ? ' is-active' : ''}${loadedSpool ? ' has-spool' : ''}"
+        type="button" data-slot-edit data-printer-id="${p.id}" data-slot-index="${idx}" data-slot-label="${esc(label)}"
+        style="--tool-colour:${colour};--tool-text:${_spoolTextColor(colour)}" title="${esc(title)}">
+      <span class="snapmaker-tool-head">
+        <b>${esc(label)}</b>
+        <small>${esc(state)}</small>
+      </span>
+      <span class="snapmaker-tool-nozzle" aria-hidden="true"></span>
+      <span class="snapmaker-tool-info">
+        <strong>${esc(loadedSpool ? (loadedSpool.color_name || `Spool #${loadedSpool.id}`) : 'No spool assigned')}</strong>
+        <em>${esc(loadedSpool ? [loadedSpool.material, loadedSpool.brand].filter(Boolean).join(' · ') : 'Click to assign')}</em>
+      </span>
+      <span class="snapmaker-tool-foot">
+        <small>${esc(`${temp}${target}`)}</small>
+        ${grams != null ? `<small>${grams}g</small>` : '<small>—</small>'}
+      </span>
+    </button>`;
+  }).join('');
+  return `<div class="snapmaker-tooldeck">
+    <div class="snapmaker-tooldeck-head">
+      <strong>Snapmaker U1 Toolheads</strong>
+      <span>Four independent tools · T0-T3</span>
+    </div>
+    <div class="snapmaker-tools">${cards}</div>
+  </div>`;
 }
 
 function _mmuRouteState(unit = {}) {
@@ -3149,12 +3225,41 @@ function _routeDestinationLabel(p, unit) {
 }
 
 function _detailFilamentRoute(p) {
-  if (!p.ams?.length && !p.mmu?.length) return '';
+  const amsUnits = _list(p.ams);
+  const mmuUnits = _list(p.mmu);
+  if (!amsUnits.length && !mmuUnits.length && !_isSnapmakerU1(p)) return '';
   const loaded = _latestSpoolsByPrinter[p.id] || [];
   const routes = [];
 
-  for (const unit of p.ams) {
-    for (const slot of (unit.slots || [])) {
+  if (_isSnapmakerU1(p)) {
+    const tools = (_list(p.toolheads).length ? _list(p.toolheads) : []).slice(0, 4);
+    for (const tool of tools) {
+      if (!tool.active) continue;
+      const idx = Number(tool.idx ?? 0);
+      const spool = loaded.find(s => Number(s.location_slot) === idx);
+      const colour = spool?.color_hex || '#2563eb';
+      const textColour = _spoolTextColor(colour);
+      const toolLabel = `T${idx}`;
+      const spoolLabel = spool
+        ? `#${spool.id} ${[spool.color_name, spool.material].filter(Boolean).join(' · ')}`
+        : 'No Flightdeck spool assigned';
+      routes.push(`<div class="live-filament-route live-filament-route-snapmaker" style="--route-colour:${colour};--route-text:${textColour}" title="${esc(`${toolLabel} active · ${spoolLabel}`)}">
+        <button class="live-route-node live-route-source" data-slot-edit data-printer-id="${p.id}" data-slot-index="${idx}" data-slot-label="${esc(toolLabel)}">
+          <span class="live-route-swatch"></span>
+          <span><strong>${esc(toolLabel)}</strong><em>${esc(spoolLabel)}</em></span>
+          <b class="live-route-fed">Active</b>
+        </button>
+        <span class="live-route-line" aria-hidden="true"></span>
+        <span class="live-route-node live-route-destination">
+          <span class="live-route-nozzle" aria-hidden="true"></span>
+          <span><strong>Selected tool</strong><em>Independent toolhead</em></span>
+        </span>
+      </div>`);
+    }
+  }
+
+  for (const unit of amsUnits) {
+    for (const slot of _list(unit.slots)) {
       if (!_slotRouteActive(p, unit, slot)) continue;
       const flatSlot = _amsFlatSlot(unit, slot);
       const spool = loaded.find(s => Number(s.location_slot) === flatSlot);
@@ -3193,9 +3298,9 @@ function _detailFilamentRoute(p) {
     }
   }
 
-  for (const unit of (p.mmu || [])) {
+  for (const unit of mmuUnits) {
     const routeState = _mmuRouteState(unit);
-    for (const gate of (unit.gates || [])) {
+    for (const gate of _list(unit.gates)) {
       if (!gate.active || gate.empty) continue;
       const spool = loaded.find(s => Number(s.location_slot) === Number(gate.idx));
       const colour = spool?.color_hex || gate.color || '#ef4444';
@@ -3229,7 +3334,11 @@ function _detailFilamentRoute(p) {
 
 function _detailCameraContent(id, p, camSrc) {
   if (camSrc && p.state !== 'offline') {
-    return `<img id="detail-cam-img" src="${camSrc}" alt="Live camera" data-camera-id="${id}">`;
+    const meta = _cameraMetaCache[id] || {};
+    if (meta.type === 'webrtc') {
+      return `<iframe id="detail-cam-img" class="webrtc-camera-frame detail-cam-media" src="${esc(camSrc)}" title="Live camera" data-camera-id="${esc(id)}" loading="eager" allow="autoplay; fullscreen" referrerpolicy="no-referrer"></iframe>`;
+    }
+    return `<img id="detail-cam-img" class="detail-cam-media" src="${camSrc}" alt="Live camera" data-camera-id="${id}">`;
   }
   return _cameraOfflineContent(p, '');
 }
@@ -3268,7 +3377,7 @@ function _detailCameraHud(p) {
 }
 
 function _detailLiveStrip(p) {
-  const loadedHtml = _detailLiveAmsRows(p) || _detailLiveMmuRows(p) || _detailLiveSpoolChips(p);
+  const loadedHtml = _detailLiveAmsRows(p) || _detailLiveMmuRows(p) || _detailLiveToolheadRows(p) || _detailLiveSpoolChips(p);
   const routeHtml = _detailFilamentRoute(p);
   return `<div class="live-environment-panel">
     <div class="live-environment-head">
@@ -3448,10 +3557,11 @@ async function sendHomeAxes(id, axes) {
 // ── AMS panel ─────────────────────────────────────────────────────────────
 
 function _detailAmsPanel(p) {
-  if (!p.ams?.length) return '';
+  const amsUnits = _list(p.ams);
+  if (!amsUnits.length) return '';
 
   const title = `<div class="detail-panel-title">AMS</div>`;
-  const units = p.ams.map(unit => {
+  const units = amsUnits.map(unit => {
     const drying = !!unit.drying;
     const dryTime = unit.dry_time ? formatEta(unit.dry_time * 60) : '';
     const preset = unit.dry_setting || {};
@@ -3466,7 +3576,7 @@ function _detailAmsPanel(p) {
           data-ams-dry data-printer-id="${p.id}" data-ams-id="${unit.unit}" data-enabled="${drying ? 'false' : 'true'}"
           title="${drying ? 'Stop AMS drying' : 'Start AMS drying'}">${drying ? 'Stop' : 'Dry'}</button>`
       : '';
-    const slots = unit.slots.map(slot => {
+    const slots = _list(unit.slots).map(slot => {
       const flatSlot = _amsFlatSlot(unit, slot);
       const loaded = (_latestSpoolsByPrinter[p.id] || []).find(s => Number(s.location_slot) === flatSlot);
       const mismatch = _slotMismatch(loaded, slot);
@@ -5663,16 +5773,16 @@ async function renderPrinterDetail(id, subtab = 'live') {
   } else {
     // Restore camera stream if it was stopped when navigating away and back.
     const heroEl = el.querySelector('.camera-hero');
-    const camImg = el.querySelector('#detail-cam-img');
+    const camMedia = el.querySelector('#detail-cam-img, iframe[data-camera-id]');
     const camSrc = _cameraStreamSrc(id);
-    const shouldShowImg = !!camSrc && p.state !== 'offline';
-    const hasImg = !!camImg;
-    if (heroEl && shouldShowImg !== hasImg) {
+    const shouldShowCamera = !!camSrc && p.state !== 'offline';
+    const hasCamera = !!camMedia;
+    if (heroEl && shouldShowCamera !== hasCamera) {
       heroEl.innerHTML = `${_detailCameraContent(id, p, camSrc)}<div class="camera-hud" id="detail-camera-hud">${_detailCameraHud(p)}</div>`;
       _attachCameraRetries(el);
-    } else if (camImg?.dataset.stopped && camSrc && p.state !== 'offline') {
-      delete camImg.dataset.stopped;
-      camImg.src = camSrc;
+    } else if (camMedia?.dataset.stopped && camSrc && p.state !== 'offline') {
+      delete camMedia.dataset.stopped;
+      camMedia.src = camSrc;
     }
 
     const printerColor = _printerColor(id);
@@ -5756,7 +5866,7 @@ function _fileCompatiblePrinters(file, sourceTarget = null) {
   const isBambu = name.endsWith('.gcode.3mf') || name.endsWith('.3mf');
   const isMoonraker = name.endsWith('.gcode') || name.endsWith('.gcode.gz') || name.endsWith('.ufp');
   let printers = _latestPrinters.filter(p =>
-    (p.kind === 'bambu' && isBambu) || (p.kind === 'moonraker' && isMoonraker)
+    (p.kind === 'bambu' && isBambu) || (_isMoonrakerFamily(p) && isMoonraker)
   );
   if (sourceTarget && sourceTarget.id !== 'library') {
     printers = printers.filter(p => p.id === sourceTarget.id);
@@ -7627,7 +7737,18 @@ function _cameraStreamSrc(printerId) {
   const url = _cameraUrlCache[printerId];
   if (!url) return null;
   if (FLIGHTDECK_DEMO && url.startsWith('data:')) return url;
+  if (_cameraMetaCache[printerId]?.type === 'webrtc') return url;
   return `${url}${url.includes('?') ? '&' : '?'}t=${Date.now()}`;
+}
+
+function _cameraFeedHtml(cameraId, label, extraClass = '') {
+  const camSrc = _cameraStreamSrc(cameraId);
+  const meta = _cameraMetaCache[cameraId] || {};
+  if (!camSrc) return '';
+  if (meta.type === 'webrtc') {
+    return `<iframe class="webrtc-camera-frame ${extraClass}" src="${esc(camSrc)}" title="${esc(label || 'WebRTC camera')}" data-camera-id="${esc(cameraId)}" loading="eager" allow="autoplay; fullscreen" referrerpolicy="no-referrer"></iframe>`;
+  }
+  return `<img class="${extraClass}" src="${camSrc}" alt="${esc(label || 'Live camera')}" data-camera-id="${esc(cameraId)}" loading="eager" fetchpriority="high">`;
 }
 
 function _loadCameraUrl(printerId, onResolved) {
@@ -7636,10 +7757,12 @@ function _loadCameraUrl(printerId, onResolved) {
   _cameraUrlFetches[printerId] = fetch(`/api/printers/${encodeURIComponent(printerId)}/camera`)
     .then(async r => {
       const body = r.ok ? await r.json() : null;
+      _cameraMetaCache[printerId] = body || null;
       _cameraUrlCache[printerId] = body?.url || null;
       return _cameraUrlCache[printerId];
     })
     .catch(() => {
+      _cameraMetaCache[printerId] = null;
       _cameraUrlCache[printerId] = null;
       return null;
     })
@@ -7655,16 +7778,35 @@ function _attachCameraRetries(root) {
     if (img.dataset.retryAttached === '1') return;
     img.dataset.retryAttached = '1';
     let tries = 0;
+    const cameraId = img.dataset.cameraId;
+    const meta = _cameraMetaCache[cameraId] || {};
+    if (meta.type === 'adaptive') {
+      const refreshMs = Math.max(250, Math.min(20000, Number(meta.refresh_ms || 1000)));
+      img.dataset.adaptiveCamera = '1';
+      img.dataset.adaptiveRefreshMs = String(refreshMs);
+      const refreshAdaptive = () => {
+        if (!img.isConnected) return;
+        const url = _cameraUrlCache[cameraId];
+        if (!url) return;
+        img.src = `${url}${url.includes('?') ? '&' : '?'}t=${Date.now()}`;
+        window.setTimeout(refreshAdaptive, refreshMs);
+      };
+      window.setTimeout(refreshAdaptive, refreshMs);
+    }
     img.addEventListener('error', () => {
       if (tries >= 3) return;
       tries += 1;
-      const url = _cameraUrlCache[img.dataset.cameraId];
+      const url = _cameraUrlCache[cameraId];
       if (!url) return;
       setTimeout(() => {
         img.src = `${url}${url.includes('?') ? '&' : '?'}retry=${Date.now()}`;
       }, 1200 * tries);
     });
   });
+}
+
+function _hasCameraMedia(root) {
+  return !!root?.querySelector('img[data-camera-id], iframe[data-camera-id]');
 }
 
 function _camTileHtml(p) {
@@ -7677,9 +7819,8 @@ function _camTileHtml(p) {
 
 function _camTileFeedHtml(p) {
   const cameraId = p._camera_id || p.id;
-  const camSrc = _cameraStreamSrc(cameraId);
-  return (camSrc && p.state !== 'offline')
-    ? `<img src="${camSrc}" alt="${p.custom_name}" data-camera-id="${cameraId}">`
+  return (_cameraStreamSrc(cameraId) && p.state !== 'offline')
+    ? _cameraFeedHtml(cameraId, p.custom_name || _printerPrimaryLabel(p))
     : _cameraOfflineContent(p, 'cam-tile-offline');
 }
 
@@ -7745,7 +7886,7 @@ function _printWatchFocusHtml(printers, sim = false, focusPrinter = null) {
   const mode = pinned ? 'Pinned' : 'Cycling';
   const pinTitle = pinned ? 'Unpin and continue cycling' : 'Pin this camera';
   const feed = (camSrc && p.state !== 'offline')
-    ? `<img src="${camSrc}" alt="${esc(_printerPrimaryLabel(p))} print watch camera" data-camera-id="${esc(cameraId)}" loading="eager" fetchpriority="high">`
+    ? _cameraFeedHtml(cameraId, `${_printerPrimaryLabel(p)} print watch camera`)
     : _cameraOfflineContent(p, 'print-watch-offline');
   return `<section class="print-watch-focus ${pinned ? 'print-watch-focus-pinned' : ''}" data-print-watch-focus="${esc(p.id)}" data-print-watch-camera="${esc(cameraId)}">
     <div class="print-watch-focus-head">
@@ -7826,9 +7967,9 @@ function _renderPrintWatchFocus(printers, sim = false) {
   if (currentFeed && nextFeed) {
     currentFeed.href = nextFeed.getAttribute('href') || currentFeed.href;
     currentFeed.dataset.printerId = nextFeed.dataset.printerId || '';
-    const currentIsImg = !!currentFeed.querySelector('img[data-camera-id]');
-    const nextIsImg = !!nextFeed.querySelector('img[data-camera-id]');
-    if (currentIsImg !== nextIsImg) currentFeed.innerHTML = nextFeed.innerHTML;
+    const currentHasCamera = _hasCameraMedia(currentFeed);
+    const nextHasCamera = _hasCameraMedia(nextFeed);
+    if (currentHasCamera !== nextHasCamera) currentFeed.innerHTML = nextFeed.innerHTML;
   }
   _attachCameraRetries(host);
 }
@@ -8021,9 +8162,8 @@ function _fleetWallAmsVisual(p) {
 
 function _fleetWallFeedHtml(p) {
   const cameraId = p._camera_id || p.id;
-  const camSrc = _cameraStreamSrc(cameraId);
-  return camSrc && p.state !== 'offline'
-    ? `<img src="${camSrc}" alt="${esc(_printerPrimaryLabel(p))} live camera" data-camera-id="${cameraId}" loading="eager" fetchpriority="high">`
+  return _cameraStreamSrc(cameraId) && p.state !== 'offline'
+    ? _cameraFeedHtml(cameraId, `${_printerPrimaryLabel(p)} live camera`)
     : `<div class="fleet-wall-camera-fallback">
         <div class="fleet-wall-printer-glyph">${getIcon(p.icon)}</div>
         <strong>${esc(_printerPrimaryLabel(p))}</strong>
@@ -8165,7 +8305,7 @@ async function renderFleetWall() {
       const body = card.querySelector('.fleet-wall-card-body');
       if (body) body.innerHTML = _fleetWallCardBody(p);
       const feed = card.querySelector('[data-fleet-feed]');
-      const hasImg = !!feed?.querySelector('img[data-camera-id]');
+      const hasImg = _hasCameraMedia(feed);
       const shouldImg = !!_cameraStreamSrc(p.id) && p.state !== 'offline';
       if (feed && hasImg !== shouldImg) feed.innerHTML = _fleetWallFeedHtml(p);
     });
@@ -8210,9 +8350,9 @@ async function renderCamerasView() {
       const feed = tile?.querySelector('.cam-tile-feed');
       if (feed) {
         const next = _camTileFeedHtml(p);
-        const currentIsImg = !!feed.querySelector('img[data-camera-id]');
-        const nextIsImg = next.includes('<img ');
-        if (currentIsImg !== nextIsImg || !nextIsImg) {
+        const currentHasCamera = _hasCameraMedia(feed);
+        const nextHasCamera = next.includes('data-camera-id=');
+        if (currentHasCamera !== nextHasCamera || !nextHasCamera) {
           feed.innerHTML = next;
         }
       }
@@ -8583,7 +8723,7 @@ function _statsPrinterRows(printers, filamentSummary, failureSummary, allSpools 
 function _statsRhReadings(printers) {
   const rows = [];
   printers.forEach(p => {
-    (p.ams || []).forEach(unit => {
+    _list(p.ams).forEach(unit => {
       if (unit.humidity == null) return;
       const rh = Number(unit.humidity);
       rows.push({
@@ -8983,6 +9123,8 @@ function _printersCategoryHtml(printers) {
     ? printers.map(p => {
         const connInfo = p.connection?.type === 'moonraker'
           ? `moonraker · ${p.connection.host}:${p.connection.port ?? 7125}`
+          : p.connection?.type === 'snapmaker_u1'
+            ? `snapmaker u1 · ${p.connection.host}:${p.connection.port ?? 7125}`
           : p.connection?.type === 'simulated'
             ? `simulated · ${p.connection.profile}${p.connection.scenario ? ` · ${p.connection.scenario}` : ''}`
             : `bambu · ${p.connection?.host ?? ''}`;
@@ -9038,6 +9180,7 @@ function _printersCategoryHtml(printers) {
           <label class="settings-label">Connection Type</label>
           <div class="settings-type-toggle">
             <button type="button" class="type-btn type-btn-active" data-conn-type="moonraker">Moonraker</button>
+            <button type="button" class="type-btn" data-conn-type="snapmaker_u1">Snapmaker U1</button>
             <button type="button" class="type-btn" data-conn-type="bambu">Bambu</button>
             <button type="button" class="type-btn" data-conn-type="simulated">Simulated</button>
           </div>
@@ -9094,6 +9237,8 @@ function _printersCategoryHtml(printers) {
             <select class="settings-input" id="p-cam-type" style="max-width:14rem">
               <option value="none">None</option>
               <option value="mjpeg_direct">MJPEG stream</option>
+              <option value="adaptive">Adaptive snapshots</option>
+              <option value="webrtc">WebRTC stream</option>
             </select>
           </div>
           <div class="settings-form-group" id="mjpeg-fields" hidden>
@@ -9108,6 +9253,37 @@ function _printersCategoryHtml(printers) {
               </label>
               <input class="settings-input" id="p-snap-url" type="text"
                 placeholder="http://192.168.1.100/webcam/?action=snapshot">
+            </div>
+          </div>
+          <div class="settings-form-group" id="webrtc-fields" hidden>
+            <div class="settings-form-row">
+              <label class="settings-label" for="p-webrtc-url">WebRTC URL</label>
+              <input class="settings-input" id="p-webrtc-url" type="text"
+                placeholder="http://192.168.1.100/webcam/webrtc">
+            </div>
+            <div class="settings-form-row">
+              <label class="settings-label" for="p-webrtc-snap-url">
+                Snapshot URL <span class="settings-hint">(optional)</span>
+              </label>
+              <input class="settings-input" id="p-webrtc-snap-url" type="text"
+                placeholder="http://192.168.1.100/webcam/snapshot.jpg">
+            </div>
+          </div>
+          <div class="settings-form-group" id="adaptive-fields" hidden>
+            <div class="settings-form-row">
+              <label class="settings-label" for="p-adaptive-snap-url">Snapshot URL</label>
+              <input class="settings-input" id="p-adaptive-snap-url" type="text"
+                placeholder="http://192.168.1.100/webcam/snapshot.jpg">
+            </div>
+            <div class="settings-form-row">
+              <label class="settings-label" for="p-active-fps">Active FPS</label>
+              <input class="settings-input" id="p-active-fps" type="number"
+                value="2" min="0.05" max="10" step="0.05" style="max-width:7rem">
+            </div>
+            <div class="settings-form-row">
+              <label class="settings-label" for="p-idle-fps">Idle FPS</label>
+              <input class="settings-input" id="p-idle-fps" type="number"
+                value="0.25" min="0.05" max="10" step="0.05" style="max-width:7rem">
             </div>
           </div>
         </div>
@@ -9191,10 +9367,44 @@ function _attachPrintersEvents(el) {
     el.querySelectorAll('[data-conn-type]').forEach(b =>
       b.classList.toggle('type-btn-active', b.dataset.connType === connType)
     );
-    el.querySelector('#moonraker-fields').hidden = connType !== 'moonraker';
+    el.querySelector('#moonraker-fields').hidden = !['moonraker', 'snapmaker_u1'].includes(connType);
     el.querySelector('#bambu-fields').hidden     = connType !== 'bambu';
     el.querySelector('#simulated-fields').hidden = connType !== 'simulated';
-    if (connType === 'bambu') {
+    if (connType === 'snapmaker_u1') {
+      el.querySelector('input[name="icon"][value="generic"]').checked = true;
+      if (!el.querySelector('#p-model')?.value) el.querySelector('#p-model').value = 'Snapmaker U1';
+      if (!el.querySelector('#p-custom')?.value) el.querySelector('#p-custom').value = 'Snapmaker U1';
+      if (el.querySelector('#p-cam-type')?.value === 'none') {
+        el.querySelector('#p-cam-type').value = 'mjpeg_direct';
+        el.querySelector('#mjpeg-fields').hidden = false;
+        el.querySelector('#adaptive-fields').hidden = false;
+        el.querySelector('#webrtc-fields').hidden = true;
+      }
+      if (el.querySelector('#p-cam-type')?.value === 'mjpeg_direct') {
+        el.querySelector('#mjpeg-fields').hidden = false;
+        el.querySelector('#adaptive-fields').hidden = true;
+        el.querySelector('#webrtc-fields').hidden = true;
+      }
+      if (!el.querySelector('#p-stream-url')?.value) {
+        el.querySelector('#p-stream-url').value = _snapmakerMjpegUrl(el.querySelector('#p-host')?.value);
+      }
+      if (!el.querySelector('#p-snap-url')?.value) {
+        el.querySelector('#p-snap-url').value = _snapmakerMonitorUrl(el.querySelector('#p-host')?.value);
+      }
+      if (el.querySelector('#p-cam-type')?.value === 'webrtc') {
+        el.querySelector('#adaptive-fields').hidden = true;
+        el.querySelector('#webrtc-fields').hidden = false;
+      }
+      if (!el.querySelector('#p-webrtc-url')?.value) {
+        el.querySelector('#p-webrtc-url').value = _snapmakerWebrtcUrl(el.querySelector('#p-host')?.value);
+      }
+      if (!el.querySelector('#p-adaptive-snap-url')?.value) {
+        el.querySelector('#p-adaptive-snap-url').value = _snapmakerMonitorUrl(el.querySelector('#p-host')?.value);
+      }
+      if (!el.querySelector('#p-webrtc-snap-url')?.value) {
+        el.querySelector('#p-webrtc-snap-url').value = _snapmakerMonitorUrl(el.querySelector('#p-host')?.value);
+      }
+    } else if (connType === 'bambu') {
       el.querySelector('input[name="icon"][value="bambu"]').checked = true;
     } else if (connType === 'simulated') {
       el.querySelector('input[name="icon"][value="generic"]').checked = true;
@@ -9207,6 +9417,31 @@ function _attachPrintersEvents(el) {
 
   el.querySelector('#p-cam-type')?.addEventListener('change', e => {
     el.querySelector('#mjpeg-fields').hidden = e.target.value !== 'mjpeg_direct';
+    el.querySelector('#adaptive-fields').hidden = e.target.value !== 'adaptive';
+    el.querySelector('#webrtc-fields').hidden = e.target.value !== 'webrtc';
+  });
+  el.querySelector('#p-host')?.addEventListener('input', () => {
+    if (connType !== 'snapmaker_u1') return;
+    const adaptiveUrl = el.querySelector('#p-adaptive-snap-url');
+    if (adaptiveUrl && (!adaptiveUrl.value || /\/(?:server\/files\/camera\/monitor|webcam\/snapshot)\.jpg$/i.test(adaptiveUrl.value))) {
+      adaptiveUrl.value = _snapmakerMonitorUrl(el.querySelector('#p-host')?.value);
+    }
+    const streamUrl = el.querySelector('#p-stream-url');
+    if (streamUrl && (!streamUrl.value || /\/webcam\/stream\.mjpg$/i.test(streamUrl.value))) {
+      streamUrl.value = _snapmakerMjpegUrl(el.querySelector('#p-host')?.value);
+    }
+    const snapUrl = el.querySelector('#p-snap-url');
+    if (snapUrl && (!snapUrl.value || /\/(?:server\/files\/camera\/monitor|webcam\/snapshot)\.jpg$/i.test(snapUrl.value))) {
+      snapUrl.value = _snapmakerMonitorUrl(el.querySelector('#p-host')?.value);
+    }
+    const webrtcUrl = el.querySelector('#p-webrtc-url');
+    if (webrtcUrl && (!webrtcUrl.value || /\/webcam\/webrtc$/i.test(webrtcUrl.value))) {
+      webrtcUrl.value = _snapmakerWebrtcUrl(el.querySelector('#p-host')?.value);
+    }
+    const webrtcSnapUrl = el.querySelector('#p-webrtc-snap-url');
+    if (webrtcSnapUrl && (!webrtcSnapUrl.value || /\/(?:server\/files\/camera\/monitor|webcam\/snapshot)\.jpg$/i.test(webrtcSnapUrl.value))) {
+      webrtcSnapUrl.value = _snapmakerMonitorUrl(el.querySelector('#p-host')?.value);
+    }
   });
 
   el.querySelectorAll('[data-delete-id]').forEach(btn => {
@@ -9263,16 +9498,26 @@ function _collectFormData(el, connType) {
     temperature_presets: { hotend, bed },
   };
 
-  if (connType === 'moonraker') {
+  if (connType === 'moonraker' || connType === 'snapmaker_u1') {
     const host    = v('p-host');
     const port    = parseInt(el.querySelector('#p-port').value, 10) || 7125;
     const camType = el.querySelector('#p-cam-type').value;
-    const conn    = { type: 'moonraker', host, port };
+    const conn    = { type: connType, host, port };
     let camera    = null;
     if (camType === 'mjpeg_direct') {
       const streamUrl = v('p-stream-url');
       const snapUrl   = v('p-snap-url');
       camera = { type: 'mjpeg_direct', stream_url: streamUrl };
+      if (snapUrl) camera.snapshot_url = snapUrl;
+    } else if (camType === 'adaptive') {
+      const snapshotUrl = v('p-adaptive-snap-url');
+      const activeFps = parseFloat(el.querySelector('#p-active-fps')?.value || '2') || 2;
+      const idleFps = parseFloat(el.querySelector('#p-idle-fps')?.value || '0.25') || 0.25;
+      camera = { type: 'adaptive', snapshot_url: snapshotUrl, active_fps: activeFps, idle_fps: idleFps };
+    } else if (camType === 'webrtc') {
+      const streamUrl = v('p-webrtc-url');
+      const snapUrl = v('p-webrtc-snap-url');
+      camera = { type: 'webrtc', stream_url: streamUrl };
       if (snapUrl) camera.snapshot_url = snapUrl;
     }
     return { ...base, connection: conn, ...(camera ? { camera } : {}) };
@@ -9311,8 +9556,8 @@ function _populatePrinterForm(el, printer, setConnType) {
   el.querySelector('#settings-cancel-edit')?.removeAttribute('hidden');
   form.querySelector('button[type="submit"]').textContent = 'Save Changes';
 
-  set('p-host', conn.type === 'moonraker' ? conn.host : '');
-  set('p-port', conn.type === 'moonraker' ? (conn.port ?? 7125) : 7125);
+  set('p-host', ['moonraker', 'snapmaker_u1'].includes(conn.type) ? conn.host : '');
+  set('p-port', ['moonraker', 'snapmaker_u1'].includes(conn.type) ? (conn.port ?? 7125) : 7125);
   set('p-bambu-host', conn.type === 'bambu' ? conn.host : '');
   set('p-access-code', conn.type === 'bambu' ? conn.access_code : '');
   set('p-serial', conn.type === 'bambu' ? conn.serial : '');
@@ -9320,11 +9565,18 @@ function _populatePrinterForm(el, printer, setConnType) {
   set('p-sim-scenario', conn.type === 'simulated' ? conn.scenario : 'mixed');
 
   const camera = printer.camera || null;
-  const camType = camera?.type === 'mjpeg_direct' ? 'mjpeg_direct' : 'none';
+  const camType = camera?.type === 'mjpeg_direct' ? 'mjpeg_direct' : camera?.type === 'adaptive' ? 'adaptive' : camera?.type === 'webrtc' ? 'webrtc' : 'none';
   set('p-cam-type', camType);
   el.querySelector('#mjpeg-fields').hidden = camType !== 'mjpeg_direct';
+  el.querySelector('#adaptive-fields').hidden = camType !== 'adaptive';
+  el.querySelector('#webrtc-fields').hidden = camType !== 'webrtc';
   set('p-stream-url', camera?.stream_url || '');
   set('p-snap-url', camera?.snapshot_url || '');
+  set('p-adaptive-snap-url', camera?.snapshot_url || '');
+  set('p-webrtc-url', camera?.stream_url || '');
+  set('p-webrtc-snap-url', camera?.snapshot_url || '');
+  set('p-active-fps', camera?.active_fps ?? 2);
+  set('p-idle-fps', camera?.idle_fps ?? 0.25);
   const bambuCam = el.querySelector('#p-bambu-cam');
   if (bambuCam) bambuCam.checked = camera?.type === 'bambu_rtsp' || conn.type === 'bambu';
 
@@ -9352,6 +9604,8 @@ function _resetPrinterForm(el, setConnType) {
   el.querySelector('#settings-form-error')?.setAttribute('hidden', '');
   setConnType('moonraker');
   el.querySelector('#mjpeg-fields').hidden = true;
+  el.querySelector('#adaptive-fields').hidden = true;
+  el.querySelector('#webrtc-fields').hidden = true;
 }
 
 function _validateFormData(data, connType, errorEl) {
@@ -9364,10 +9618,14 @@ function _validateFormData(data, connType, errorEl) {
   if (!data.model_name)  return fail('Model name is required');
   if (!data.custom_name) return fail('Custom name is required');
 
-  if (connType === 'moonraker') {
+  if (connType === 'moonraker' || connType === 'snapmaker_u1') {
     if (!data.connection.host) return fail('Host / IP is required');
     if (data.camera?.type === 'mjpeg_direct' && !data.camera.stream_url)
       return fail('Stream URL is required for MJPEG camera');
+    if (data.camera?.type === 'adaptive' && !data.camera.snapshot_url)
+      return fail('Snapshot URL is required for adaptive camera');
+    if (data.camera?.type === 'webrtc' && !data.camera.stream_url)
+      return fail('WebRTC URL is required for WebRTC camera');
   } else if (connType === 'bambu') {
     if (!data.connection.host)        return fail('Host / IP is required');
     if (!data.connection.access_code) return fail('Access code is required');
@@ -9427,7 +9685,7 @@ async function _checkDuplicateConnection(data, connType, ignoreId = '') {
     for (const p of existing) {
       if (ignoreId && p.id === ignoreId) continue;
       const conn = p.connection;
-      if (connType === 'moonraker' && conn.type === 'moonraker') {
+      if ((connType === 'moonraker' || connType === 'snapmaker_u1') && (conn.type === 'moonraker' || conn.type === 'snapmaker_u1')) {
         if (conn.host === data.connection.host && conn.port === data.connection.port) return p;
       } else if (connType === 'bambu' && conn.type === 'bambu') {
         if (conn.host === data.connection.host || conn.serial === data.connection.serial) return p;
@@ -11486,13 +11744,13 @@ function _slotCandidateScore(spool, report) {
 
 function _slotReport(printer, slotIndex) {
   if (!printer) return null;
-  for (const unit of printer.ams || []) {
-    for (const slot of unit.slots || []) {
+  for (const unit of _list(printer.ams)) {
+    for (const slot of _list(unit.slots)) {
       if (_amsFlatSlot(unit, slot) === Number(slotIndex)) return slot;
     }
   }
-  for (const unit of printer.mmu || []) {
-    for (const gate of unit.gates || []) {
+  for (const unit of _list(printer.mmu)) {
+    for (const gate of _list(unit.gates)) {
       if (Number(gate.idx) === Number(slotIndex)) return gate;
     }
   }
@@ -11833,8 +12091,11 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
 // Given a printer object and a flat slot index (unit_id*4 + tray_id), return
 // a human-readable label like "AMS 1 · S2" or "AMS HT".
 function _amsSlotLabel(printer, slotIndex) {
+  if (_isSnapmakerU1(printer)) return `T${Number(slotIndex || 0)}`;
+  if (!Array.isArray(printer?.ams)) return `S${slotIndex + 1}`;
   if (!printer?.ams?.length) return `S${slotIndex + 1}`;
   for (const unit of printer.ams) {
+    if (!Array.isArray(unit?.slots)) continue;
     for (const slot of unit.slots) {
       if (_amsFlatSlot(unit, slot) === slotIndex) {
         return unit.slots.length === 1
@@ -14092,6 +14353,7 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
     if (units?.length) {
       const opts = [];
       for (const unit of units) {
+        if (!Array.isArray(unit?.slots)) continue;
         for (const slot of unit.slots) {
           const flatIdx = _amsFlatSlot(unit, slot);
           const label = unit.slots.length === 1

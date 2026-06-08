@@ -21,6 +21,16 @@ class MoonrakerConnection(BaseModel):
         return f"http://{self.host}:{self.port}"
 
 
+class SnapmakerU1Connection(BaseModel):
+    type: Literal["snapmaker_u1"]
+    host: str
+    port: int = 7125
+
+    @property
+    def url(self) -> str:
+        return f"http://{self.host}:{self.port}"
+
+
 class BambuConnection(BaseModel):
     type: Literal["bambu"]
     host: str
@@ -35,7 +45,7 @@ class SimulatedConnection(BaseModel):
 
 
 Connection = Annotated[
-    Union[MoonrakerConnection, BambuConnection, SimulatedConnection],
+    Union[MoonrakerConnection, SnapmakerU1Connection, BambuConnection, SimulatedConnection],
     Field(discriminator="type"),
 ]
 
@@ -46,13 +56,26 @@ class MjpegDirectCamera(BaseModel):
     snapshot_url: Optional[str] = None
 
 
+class AdaptiveCamera(BaseModel):
+    type: Literal["adaptive"]
+    snapshot_url: str
+    active_fps: float = 2.0
+    idle_fps: float = 0.25
+
+
+class WebrtcCamera(BaseModel):
+    type: Literal["webrtc"]
+    stream_url: str
+    snapshot_url: Optional[str] = None
+
+
 class BambuRtspCamera(BaseModel):
     type: Literal["bambu_rtsp"]
     # stream_url served via /api/camera/{printer_id}/stream proxy
 
 
 Camera = Annotated[
-    Union[MjpegDirectCamera, BambuRtspCamera],
+    Union[MjpegDirectCamera, AdaptiveCamera, WebrtcCamera, BambuRtspCamera],
     Field(discriminator="type"),
 ]
 

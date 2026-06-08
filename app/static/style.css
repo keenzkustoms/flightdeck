@@ -3927,10 +3927,19 @@ button.briefing-row {
   border-radius: 0.75rem;
 }
 
-.camera-hero img {
+.camera-hero img,
+.camera-hero iframe {
   width: 100%;
   height: 100%;
   object-fit: contain;
+  display: block;
+}
+
+.webrtc-camera-frame {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #000;
   display: block;
 }
 
@@ -4461,6 +4470,126 @@ button.live-route-node:hover {
   border-radius: 0.28rem 0.28rem 0.5rem 0.5rem;
   background: linear-gradient(180deg, rgba(96,165,250,0.26), rgba(96,165,250,0.08));
   box-shadow: inset 0 -0.18rem 0 var(--route-colour);
+}
+
+.snapmaker-tooldeck {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.55rem 0.65rem 0.65rem;
+  border: 1px solid rgba(96,165,250,0.24);
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, rgba(15,23,42,0.96), rgba(8,13,26,0.98));
+}
+
+.snapmaker-tooldeck-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.snapmaker-tooldeck-head strong {
+  color: #dbeafe;
+  font-size: 0.78rem;
+}
+
+.snapmaker-tooldeck-head span {
+  color: #7f98bc;
+  font-size: 0.66rem;
+}
+
+.snapmaker-tools {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(5.2rem, 1fr));
+  gap: 0.44rem;
+}
+
+.snapmaker-tool-card {
+  min-width: 0;
+  min-height: 9.2rem;
+  display: grid;
+  grid-template-rows: auto 2.5rem minmax(2.3rem, 1fr) auto;
+  gap: 0.4rem;
+  padding: 0.5rem;
+  border: 1px solid rgba(59,130,246,0.2);
+  border-radius: 8px;
+  background:
+    radial-gradient(circle at 50% 38%, color-mix(in srgb, var(--tool-colour) 22%, transparent), transparent 58%),
+    linear-gradient(180deg, rgba(30,41,59,0.78), rgba(2,6,23,0.86));
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+}
+
+.snapmaker-tool-card:hover,
+.snapmaker-tool-card.is-active {
+  border-color: color-mix(in srgb, var(--tool-colour) 64%, #60a5fa);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--tool-colour) 24%, transparent);
+}
+
+.snapmaker-tool-card.is-active {
+  background:
+    radial-gradient(circle at 50% 38%, color-mix(in srgb, var(--tool-colour) 32%, transparent), transparent 60%),
+    linear-gradient(180deg, rgba(30,41,59,0.92), rgba(2,6,23,0.9));
+}
+
+.snapmaker-tool-head,
+.snapmaker-tool-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.35rem;
+}
+
+.snapmaker-tool-head b {
+  color: #eff6ff;
+  font-size: 0.76rem;
+}
+
+.snapmaker-tool-head small,
+.snapmaker-tool-foot small {
+  color: #93c5fd;
+  font-size: 0.58rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.snapmaker-tool-nozzle {
+  justify-self: center;
+  width: 2.1rem;
+  height: 2.5rem;
+  border: 1px solid rgba(148,163,184,0.34);
+  border-radius: 0.42rem 0.42rem 0.78rem 0.78rem;
+  background:
+    linear-gradient(180deg, rgba(226,232,240,0.28), rgba(30,41,59,0.22)),
+    linear-gradient(90deg, transparent 0 38%, var(--tool-colour) 38% 62%, transparent 62% 100%);
+  box-shadow: inset 0 -0.28rem 0 var(--tool-colour);
+}
+
+.snapmaker-tool-info {
+  min-width: 0;
+  display: grid;
+  align-content: center;
+  gap: 0.18rem;
+}
+
+.snapmaker-tool-info strong,
+.snapmaker-tool-info em {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.snapmaker-tool-info strong {
+  color: #f8fafc;
+  font-size: 0.7rem;
+}
+
+.snapmaker-tool-info em {
+  color: #7f98bc;
+  font-size: 0.62rem;
+  font-style: normal;
 }
 
 @keyframes live-route-flow {
@@ -5906,6 +6035,16 @@ button.live-route-node:hover {
 }
 
 @media (max-width: 520px) {
+  .snapmaker-tooldeck-head {
+    display: grid;
+    gap: 0.16rem;
+  }
+  .snapmaker-tools {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .snapmaker-tool-card {
+    min-height: 8.7rem;
+  }
   .command-overlay {
     padding: 0.7rem;
   }
@@ -8316,11 +8455,13 @@ button.live-route-node:hover {
   text-decoration: none;
 }
 
-.fleet-wall-feed img {
+.fleet-wall-feed img,
+.fleet-wall-feed iframe {
   width: 100%;
   height: 100%;
   object-fit: contain;
   background: #000;
+  display: block;
 }
 
 .fleet-wall-camera-fallback {
@@ -9153,7 +9294,8 @@ button.live-route-node:hover {
   overflow: hidden;
 }
 
-.print-watch-feed > img {
+.print-watch-feed > img,
+.print-watch-feed > iframe {
   width: 100%;
   height: 100%;
   object-fit: contain;
@@ -9230,11 +9372,18 @@ button.live-route-node:hover {
   text-transform: uppercase;
 }
 
-.cam-tile-feed img {
+.cam-tile-feed img,
+.cam-tile-feed iframe {
   width: 100%;
   height: 100%;
   object-fit: contain;
   display: block;
+}
+
+.cam-tile-feed iframe,
+.print-watch-feed iframe,
+.fleet-wall-feed iframe {
+  pointer-events: none;
 }
 
 .cam-tile-offline {
