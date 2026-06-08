@@ -2,13 +2,14 @@
 
 Latest GitHub/Pi state:
 - Branch: main
-- Latest commit: current HEAD after this handoff (`Preserve Bambu skip-object plate bounds`)
+- Latest commit: current HEAD after this handoff (`Revert "Limit Fleet Wall live camera load"`)
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
 - Refresh cachebust currently: ?cachebust=397 / style.css?v=322
 
 Recent work:
+- Reverted the Fleet Wall live-camera cap / `profile=fleet&fps=2` attempt because it made the live Fleet Wall camera areas black on the real 3-printer Pi view. Do not reapply that approach as-is; next camera-load attempt should preserve normal Fleet Wall stream URLs and first verify actual image rendering on the live Pi.
 - Windows uninstall is now a root `Uninstall-Flightdeck-Windows.cmd` plus hardened `scripts/windows/uninstall-windows.ps1`. It stops Flightdeck tray/backend processes for this checkout, removes Desktop and Startup shortcuts, keeps `%LOCALAPPDATA%\Flightdeck` by default, and only deletes restored data when `-RemoveData` is passed.
 - Windows installer can now import an existing Flightdeck backup archive via `-DataArchive`. The bootstrap passes the archive through, the install script extracts the standard `flightdeck-data` backup shape into `%LOCALAPPDATA%\Flightdeck`, and it creates a `restore-safety-*` copy first if Windows already has data.
 - Fresh all-data Pi backup for Windows install: `/home/flightdeck/windows-install-backups/flightdeck-backup-20260608-182118.tar.gz` (37 MB, SHA256 `5ff17fa0819f54d4d4588253e7ea4a254a067e0a66336c7fe584df001d240c49`). It was also pushed to the private backup repo.
