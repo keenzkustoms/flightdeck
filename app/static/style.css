@@ -3736,10 +3736,15 @@ button.briefing-row {
 
 .live-op-fan-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 2.2rem;
-  align-items: center;
-  gap: 0.22rem;
+  grid-template-columns: 1fr auto;
+  align-items: end;
+  gap: 0.2rem 0.35rem;
   min-width: 0;
+}
+
+.live-op-fan-row .live-op-slider {
+  grid-column: 1 / -1;
+  width: 100%;
 }
 
 .live-op-group-label {
@@ -3841,6 +3846,8 @@ button.briefing-row {
   color: var(--text);
   font-size: 0.72rem;
   font-weight: 900;
+  line-height: 1.05;
+  padding: 0 0.18rem;
 }
 
 .live-op-slider input:disabled {
