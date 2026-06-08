@@ -3796,7 +3796,7 @@ function _objectMapHtml(id, data) {
     const shortName = (obj.label || rawName).replace(/.*[/\\]/, '');
     const displayId = safeId !== '' ? `#${esc(safeId)}` : esc(shortName);
     if (hasGeometry && obj.bbox) {
-      const geom = _objectMapBoxStyle(bounds, obj.bbox);
+      const geom = _objectMapBoxStyle(bounds, obj.bbox, data);
       return `<button type="button" class="obj-map-region obj-exclude-btn${isExcluded ? ' is-excluded' : ''}${isCurrent ? ' is-current' : ''}"
         style="${geom}"
         data-obj-name="${safeName}" data-obj-label="${esc(shortName)}" data-printer-id="${id}" data-obj-id="${safeId}" ${isExcluded ? 'disabled' : ''}
@@ -3859,11 +3859,13 @@ function _objectMapIsTopDown(data) {
   return data?.map_image_mode === 'top_down' || data?.map_view === 'top_down';
 }
 
-function _objectMapBoxParts(bounds, box) {
-  const left = ((box.x - bounds.x) / bounds.w) * 100;
-  const top = ((box.y - bounds.y) / bounds.h) * 100;
+function _objectMapBoxParts(bounds, box, data = {}) {
   const width = (box.w / bounds.w) * 100;
   const height = (box.h / bounds.h) * 100;
+  let left = ((box.x - bounds.x) / bounds.w) * 100;
+  let top = ((box.y - bounds.y) / bounds.h) * 100;
+  if (data?.map_mirror_x) left = 100 - left - width;
+  if (data?.map_mirror_y) top = 100 - top - height;
   return {
     left,
     top,
@@ -3872,8 +3874,8 @@ function _objectMapBoxParts(bounds, box) {
   };
 }
 
-function _objectMapBoxStyle(bounds, box) {
-  const p = _objectMapBoxParts(bounds, box);
+function _objectMapBoxStyle(bounds, box, data = {}) {
+  const p = _objectMapBoxParts(bounds, box, data);
   return `left:${p.left.toFixed(2)}%;top:${p.top.toFixed(2)}%;width:${p.width.toFixed(2)}%;height:${p.height.toFixed(2)}%`;
 }
 
@@ -3887,8 +3889,9 @@ function _objectMapTopDownObjects(data) {
     const rawName = obj.name || `Object ${obj.id ?? ''}`;
     const shortName = (obj.label || rawName).replace(/.*[/\\]/, '');
     const shape = _objectMapShapeSvg(obj);
-    return `<div class="obj-map-top-object${isExcluded ? ' is-excluded' : ''}${isCurrent ? ' is-current' : ''}"
-      style="${_objectMapBoxStyle(bounds, obj.bbox)}"
+    const mirrorClass = `${data?.map_mirror_x ? ' is-mirrored-x' : ''}${data?.map_mirror_y ? ' is-mirrored-y' : ''}`;
+    return `<div class="obj-map-top-object${mirrorClass}${isExcluded ? ' is-excluded' : ''}${isCurrent ? ' is-current' : ''}"
+      style="${_objectMapBoxStyle(bounds, obj.bbox, data)}"
       title="${esc(shortName)}" aria-hidden="true">${shape || '<span></span>'}</div>`;
   }).join('');
 }
@@ -3957,7 +3960,7 @@ function _largeObjectMapHtml(id, data) {
     const displayId = safeId !== '' ? `#${esc(safeId)}` : esc(shortName);
     if (hasGeometry && obj.bbox) {
       return `<button type="button" class="obj-map-region obj-exclude-btn${isExcluded ? ' is-excluded' : ''}${isCurrent ? ' is-current' : ''}"
-        style="${_objectMapBoxStyle(bounds, obj.bbox)}"
+        style="${_objectMapBoxStyle(bounds, obj.bbox, data)}"
         data-obj-name="${safeName}" data-obj-label="${esc(shortName)}" data-printer-id="${id}" data-obj-id="${safeId}" ${isExcluded ? 'disabled' : ''}
         title="${esc(shortName)}"><span class="obj-chip-id">${displayId}</span></button>`;
     }

@@ -2,13 +2,14 @@
 
 Latest GitHub/Pi state:
 - Branch: main
-- Latest commit: current HEAD after this handoff (`Draw Bambu skip-object footprints`)
+- Latest commit: current HEAD after this handoff (`Mirror Bambu skip-object map`)
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
-- Refresh cachebust currently: ?cachebust=383 / style.css?v=312
+- Refresh cachebust currently: ?cachebust=384 / style.css?v=313
 
 Recent work:
+- Bambu top-down skip-object maps now expose `map_mirror_x=true`; Flightdeck mirrors the red clickable overlay positions and the white object-footprint outlines together while keeping the raw Bambu object IDs unchanged for skip commands. This is a visual orientation trial to better match the Bambu touchscreen/MQTT map orientation.
 - Bambu top-down skip maps now draw a footprint shape for each object instead of only a generic rectangle. The parser sends a simplified convex footprint plus extrusion strokes from object-labelled gcode; X1C's 6-Benchy print parsed with 14-point footprints and 29 strokes for each skip ID.
 - Bambu skip-object maps now render as a Mainsail-style top-down bed map instead of using the angled Bambu plate thumbnail. The parser now recovers per-object top-down bboxes from `Metadata/plate_*.gcode` object-label extrusion moves, which fixes repeated-copy jobs like the X1C 6-Benchy print where `plate_1.json` only exposed one combined bbox.
 - Bambu/H2D camera proxy no longer restarts ffmpeg just because frames are byte-identical for 8 seconds; that false-positive could make the Live view appear frozen during quiet parts of a print. It still restarts when no frames arrive, the initial frame never appears, or the 15-minute H2D RTSP session lifetime is reached.
@@ -54,12 +55,19 @@ Recent work:
 - Sim printer stale notifications cleaned up.
 
 Likely next items:
+- If the mirrored Bambu object map looks correct on the X1C/H2D, keep `map_mirror_x`; if it is the wrong axis, flip to `map_mirror_y` or disable the flag without changing the object parser.
 - Keep polishing Fleet Wall layout and AMS sizing.
 - Recheck BigBoy AMS HT assignment after any physical spool moves; HT should now show as slot `128` rather than legacy `512`.
 - Recheck Fleet Wall click/zoom behaviour after real use.
 - Continue slicer/API integration and profile filtering.
 - Continue stock-in QR/label workflow.
 - Make Windows installer/update flow smoother.
+
+## What was changed - Session 28.257 (Bambu skip-object map mirror - 8 June)
+- Bambu object maps now send `map_mirror_x=true` for the top-down skip-object view.
+- The frontend mirrors object overlay coordinates and SVG footprint outlines from that flag, so the red hit regions and white object shapes move together visually.
+- Raw Bambu object IDs are unchanged; skip commands still send the original printer/MQTT object IDs.
+- Static cache bumped to `app.js?v=384` and `style.css?v=313`; backend restart and frontend refresh required.
 
 ## What was fixed - Session 28.241 (AMS HT slot canonicalization - 7 June)
 - Regular AMS slots continue to use `unit*4 + slot` indexes.
