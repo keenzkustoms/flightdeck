@@ -3786,6 +3786,7 @@ function _objectMapHtml(id, data) {
   const bounds = data?.plate_bounds;
   const hasGeometry = bounds && bounds.w > 0 && bounds.h > 0 && objects.some(o => o.bbox);
   const availableObjects = objects.filter(o => o.state !== 'excluded');
+  const mappedAvailableObjects = hasGeometry ? availableObjects.filter(o => o.bbox) : availableObjects;
   const topDown = _objectMapIsTopDown(data);
   const mapButtons = objects.map(obj => {
     const isExcluded = obj.state === 'excluded';
@@ -3822,6 +3823,9 @@ function _objectMapHtml(id, data) {
     ? 'Match the ID to the printer screen, then tap the map or list.'
     : `No bed positions in this 3MF; use the object ID shown on the printer screen. Bambu/Orca IDs can be high. ${availableObjects.length} objects still available.`;
   const objectList = _objectMapObjectList(id, objects, hasGeometry);
+  const activeBadge = mappedAvailableObjects.length === availableObjects.length
+    ? `${availableObjects.length} active`
+    : `${mappedAvailableObjects.length} mapped`;
   return `<div class="${classes}"${rotationStyle}>
     <div class="obj-map-stage obj-map-open" data-printer-id="${esc(id)}" title="Open large object selector">
       <div class="obj-map-image-plane">
@@ -3832,7 +3836,7 @@ function _objectMapHtml(id, data) {
         ${hasGeometry ? `<div class="obj-map-overlay">${mapButtons}</div>` : ''}
       </div>
       ${topDown ? '<div class="obj-map-front-marker" aria-hidden="true">Front</div>' : ''}
-      ${topDown ? `<div class="obj-map-active-count">${availableObjects.length} active</div>` : ''}
+      ${topDown ? `<div class="obj-map-active-count">${esc(activeBadge)}</div>` : ''}
     </div>
     ${objectList || (hasGeometry ? '' : `<div class="obj-id-selector"><span>Printer object IDs</span><div>${mapButtons}</div></div>`)}
     <div class="obj-map-helper">${esc(helper)}</div>
@@ -4004,6 +4008,8 @@ function _largeObjectMapHtml(id, data) {
   const objects = data?.objects || [];
   const bounds = data?.plate_bounds;
   const hasGeometry = bounds && bounds.w > 0 && bounds.h > 0 && objects.some(o => o.bbox);
+  const availableObjects = objects.filter(o => o.state !== 'excluded');
+  const mappedAvailableObjects = hasGeometry ? availableObjects.filter(o => o.bbox) : availableObjects;
   const imageVersion = objects.map(o => `${o.id ?? ''}:${o.state ?? ''}`).join('-') || 'current';
   const topDown = _objectMapIsTopDown(data);
   const image = data?.plate_image_url
@@ -4038,6 +4044,9 @@ function _largeObjectMapHtml(id, data) {
     ? 'Match the ID to the printer screen, then tap the map or list.'
     : 'This file has no bed-position metadata. Match the object ID shown on the printer screen, then select it below.';
   const objectList = _objectMapObjectList(id, objects, hasGeometry);
+  const activeBadge = mappedAvailableObjects.length === availableObjects.length
+    ? `${availableObjects.length} active`
+    : `${mappedAvailableObjects.length} mapped`;
   return `<div class="object-map-modal-body">
     <div class="object-map-modal-stage${hasGeometry ? ' has-geometry' : ''}${topDown ? ' obj-map-topdown' : ''}${rotated ? ' obj-map-transformed' : ''}${rotation > 0 ? ' obj-map-overlay-rotated' : ''}${imageRotation > 0 ? ' obj-map-image-rotated' : ''}"${rotationStyle}>
       <div class="obj-map-image-plane">
@@ -4048,7 +4057,7 @@ function _largeObjectMapHtml(id, data) {
         ${hasGeometry ? `<div class="obj-map-overlay">${buttons}</div>` : ''}
       </div>
       ${topDown ? '<div class="obj-map-front-marker" aria-hidden="true">Front</div>' : ''}
-      ${topDown ? `<div class="obj-map-active-count">${objects.filter(o => o.state !== 'excluded').length} active</div>` : ''}
+      ${topDown ? `<div class="obj-map-active-count">${esc(activeBadge)}</div>` : ''}
     </div>
     <div class="obj-map-helper">${esc(helper)}</div>
     ${objectList || (hasGeometry ? '' : `<div class="obj-id-selector object-map-modal-ids"><span>Printer object IDs</span><div>${buttons}</div></div>`)}

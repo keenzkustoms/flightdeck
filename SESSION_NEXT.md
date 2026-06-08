@@ -6,7 +6,7 @@ Latest GitHub/Pi state:
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
-- Refresh cachebust currently: ?cachebust=389 / style.css?v=319
+- Refresh cachebust currently: ?cachebust=390 / style.css?v=320
 
 Recent work:
 - Bambu skip-object maps now use the active 3MF/print thumbnail as the visible plate preview behind the Bambuddy-style object IDs. The old top-down diagnostic grid/exploded shape view is no longer the primary visual; transparent hit regions and the ID/name skip list still use the original Bambu object IDs.
@@ -115,8 +115,9 @@ Likely next items:
 ## What was changed - Session 28.265 (Bambuddy plate preview for skip objects - 8 June)
 - Replaced the visible Bambu top-down skip-object grid/exploded marker presentation with a Bambuddy-style plate preview: the active 3MF thumbnail is now shown under compact red object pins with blue ID badges.
 - The transparent clickable red-box/hit regions are still generated from the preserved 3MF plate bounds and still send the raw Bambu object IDs; the ID/name list remains available below the map.
+- The map badge now reports mapped pins when the skip list has objects without plate bboxes, so list-only IDs do not make the plate count look wrong.
 - Removed the previous `transform: rotate(25deg)` thumbnail-slice visual trial from `.obj-map-image-piece`.
-- Static cache bumped to `app.js?v=389` and `style.css?v=319`; frontend refresh required.
+- Static cache bumped to `app.js?v=390` and `style.css?v=320`; frontend refresh required.
 
 ## What was fixed - Session 28.241 (AMS HT slot canonicalization - 7 June)
 - Regular AMS slots continue to use `unit*4 + slot` indexes.

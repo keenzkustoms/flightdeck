@@ -6674,11 +6674,13 @@ button.live-route-node:hover {
   background: rgba(2,6,23,0.76);
 }
 
-.obj-map-preview-image {
+.obj-map-stage .obj-map-preview-image,
+.object-map-modal-stage .obj-map-preview-image {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
+  max-height: none;
   aspect-ratio: auto;
   object-fit: contain;
   opacity: 0.58;
