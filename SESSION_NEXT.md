@@ -2,13 +2,14 @@
 
 Latest GitHub/Pi state:
 - Branch: main
-- Latest commit: current HEAD after this handoff (`Add slice action for queued STEP files`)
+- Latest commit: current HEAD after this handoff (`Fall back to slicer API when worker is offline`)
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
 - Refresh cachebust currently: ?cachebust=378 / style.css?v=309
 
 Recent work:
+- Queue/API slicing now falls back to the configured Slicer API URL when the configured Worker URL is unreachable. Live diagnosis showed `orcaslicer_worker_url=http://100.112.171.88:8000` timing out while `orcaslicer_api_url=http://100.112.171.88:3003` was healthy.
 - Queued `.step` / `.stp` source-model items now show a `Slice` button that opens the existing slicer dialog for that queue item and target printer.
 - Printer queues now accept `.step` and `.stp` uploads as source-model cue items. They appear in the queue with a STEP marker, but queue preflight blocks dispatch until the model is sliced into a printer-ready job.
 - Bambu per-object thumbnail slices currently use `transform: rotate(25deg)` on `.obj-map-image-piece` as the latest visual trial. This rotates only the white object slices, not the red overlay.

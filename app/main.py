@@ -1764,16 +1764,33 @@ async def run_slice_from_file_desk(body: SliceRunRequest):
             async with httpx.AsyncClient(timeout=httpx.Timeout(connect=10.0, read=900.0, write=30.0, pool=10.0)) as client:
                 resp = await client.post(f"{worker_url}/api/slicer/worker/slice", data=form, files=files)
         except Exception as exc:
-            raise HTTPException(status_code=502, detail=f"Slicer worker unreachable: {exc}") from exc
-        if resp.status_code >= 400:
-            try:
-                detail = resp.json().get("detail")
-            except Exception:
-                detail = resp.text
-            raise HTTPException(status_code=resp.status_code, detail=detail or "Slicer worker failed")
-        sliced_name = resp.headers.get("X-Flightdeck-Sliced-Filename") or output_filename
-        sliced_data = resp.content
-        _enforce_file_size(len(sliced_data), label="Sliced output")
+            if not sidecar_url:
+                detail = str(exc).strip() or "connection timed out"
+                raise HTTPException(status_code=502, detail=f"Slicer worker unreachable: {detail}") from exc
+            log.warning("slicer worker unreachable, falling back to API: %s", exc)
+            sliced_name, sliced_data, _log = await asyncio.to_thread(
+                _run_orca_slice_sidecar,
+                sidecar_url=sidecar_url,
+                filename=filename,
+                data=data,
+                profiles=profiles,
+                output_kind=output_kind,
+                output_filename=output_filename,
+                plate=body.plate or "1",
+                all_plates=bool(body.all_plates),
+                arrange=arrange,
+                bed_type=body.bed_type or "Textured PEI Plate",
+            )
+        else:
+            if resp.status_code >= 400:
+                try:
+                    detail = resp.json().get("detail")
+                except Exception:
+                    detail = resp.text
+                raise HTTPException(status_code=resp.status_code, detail=detail or "Slicer worker failed")
+            sliced_name = resp.headers.get("X-Flightdeck-Sliced-Filename") or output_filename
+            sliced_data = resp.content
+            _enforce_file_size(len(sliced_data), label="Sliced output")
     elif sidecar_url:
         sliced_name, sliced_data, _log = await asyncio.to_thread(
             _run_orca_slice_sidecar,
