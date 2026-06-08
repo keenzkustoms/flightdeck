@@ -10475,6 +10475,7 @@ function _openSliceModelDialog({ sourceId, path, file, printers }) {
         const browserUrl = data.browser_url || data.sidecar_url || '';
         const outputName = data.output?.filename || 'sliced-output';
         const profiles = data.profiles || {};
+        const canBackgroundSlice = data.can_background_slice !== false;
         const profileRows = [
           ['Printer', profiles.printer],
           ['Process', profiles.process],
@@ -10488,7 +10489,7 @@ function _openSliceModelDialog({ sourceId, path, file, printers }) {
           </div>
           <div class="filedesk-slice-profiles">${profileRows}</div>
           <div class="filedesk-slice-buttons">
-            <button class="filedesk-slice-link filedesk-slice-run" type="button" data-run-slice="${esc(outputName)}" data-printer-id="${esc(data.target?.id || choice.dataset.printerId)}">Slice in Flightdeck</button>
+            ${canBackgroundSlice ? `<button class="filedesk-slice-link filedesk-slice-run" type="button" data-run-slice="${esc(outputName)}" data-printer-id="${esc(data.target?.id || choice.dataset.printerId)}">Slice in Flightdeck</button>` : ''}
             ${sourceUrl ? `<a class="filedesk-slice-link" href="${esc(sourceUrl)}" download>Download model</a>` : ''}
             ${browserUrl ? `<a class="filedesk-slice-link" href="${esc(browserUrl)}" target="_blank" rel="noreferrer">Open Orca</a>` : ''}
             <button class="filedesk-slice-link" type="button" data-copy-slice-name="${esc(outputName)}">Copy output name</button>

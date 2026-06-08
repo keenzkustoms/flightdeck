@@ -2,13 +2,14 @@
 
 Latest GitHub/Pi state:
 - Branch: main
-- Latest commit: current HEAD after this handoff (`Use synced Orca profiles for slicer API`)
+- Latest commit: current HEAD after this handoff (`Treat STEP slicing as Orca handoff`)
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
-- Refresh cachebust currently: ?cachebust=378 / style.css?v=309
+- Refresh cachebust currently: ?cachebust=379 / style.css?v=309
 
 Recent work:
+- Queue STEP slice dialogs now hide `Slice in Flightdeck` because the Orca background CLI/API rejects STEP imports (`Unknown file format... must have .stl, .obj, .amf`). STEP items still provide Download/Open Orca/Copy output/Check vault handoff actions.
 - Slicer API runs no longer require Orca installed on the Pi just to load profile JSON. If local Orca profile files are unavailable, Flightdeck fetches the selected profile JSONs from the synced Orca profile catalog paths.
 - Queue/API slicing now falls back to the configured Slicer API URL when the configured Worker URL is unreachable. Live diagnosis showed `orcaslicer_worker_url=http://100.112.171.88:8000` timing out while `orcaslicer_api_url=http://100.112.171.88:3003` was healthy.
 - Queued `.step` / `.stp` source-model items now show a `Slice` button that opens the existing slicer dialog for that queue item and target printer.

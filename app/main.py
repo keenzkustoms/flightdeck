@@ -1520,6 +1520,7 @@ async def plan_slice_from_file_desk(body: SlicePlanRequest):
     ext = _queue_file_extension(filename)
     if filename.lower().endswith(".gcode.3mf") or ext not in _SOURCE_MODEL_EXT:
         raise HTTPException(status_code=422, detail="Only source model files can be sliced")
+    is_step_source = ext in {".step", ".stp"}
 
     settings = db.get_all_settings()
     browser_url = (settings.get("orcaslicer_docker_url") or "").strip().rstrip("/")
@@ -1534,10 +1535,13 @@ async def plan_slice_from_file_desk(body: SlicePlanRequest):
         "filament": settings.get(_slicer_profile_key(printer_id, "filament"), ""),
     }
     missing_profiles = [label for label, value in profiles.items() if not str(value or "").strip()]
-    can_slice = bool(worker_url or api_url or _orca_executable()) and not missing_profiles
+    can_slice = bool(worker_url or api_url or _orca_executable()) and not missing_profiles and not is_step_source
+    can_handoff = is_step_source and not missing_profiles
     return {
         "ok": True,
-        "ready": can_slice,
+        "ready": can_slice or can_handoff,
+        "can_background_slice": can_slice,
+        "manual_handoff": can_handoff,
         "sidecar_url": browser_url,
         "browser_url": browser_url,
         "api_url": api_url,
@@ -1568,6 +1572,8 @@ async def plan_slice_from_file_desk(body: SlicePlanRequest):
         "plate": body.plate or "auto",
         "all_plates": bool(body.all_plates),
         "message": (
+            "STEP models need Orca GUI import; use Download model/Open Orca, then export the sliced job back to the Print Vault."
+            if can_handoff else
             "Slicer API configured. Flightdeck can slice this in the background."
             if api_url and can_slice else
             "Slicer worker configured. Flightdeck can slice this in the background."
@@ -3242,6 +3248,8 @@ def _friendly_slicer_error(detail: str) -> str:
             "Slicer could not map the selected filament to the target printer. "
             "Try the slicer API sidecar, or choose matching printer/process/filament profiles."
         )
+    if "unknown file format" in lowered and ".step" in lowered:
+        return "Orca background slicing cannot import STEP files. Use Open Orca/Download model, or export the source as STL/3MF first."
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     important = [
         line for line in lines
