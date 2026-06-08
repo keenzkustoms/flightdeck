@@ -12,6 +12,7 @@ import json
 import re
 
 log = logging.getLogger(__name__)
+_MAX_OBJECT_SHAPE_SEGMENTS = 260
 
 
 class BambuFtpError(RuntimeError):
@@ -108,7 +109,7 @@ def _parse_3mf(buf: io.BytesIO, plate_number: Optional[int] = None) -> BambuPrev
             k: [_flip_bbox_y(v, plate_bounds) for v in vals]
             for k, vals in object_boxes_by_name.items()
         }
-    gcode_object_boxes = _extract_gcode_object_boxes(plate_gcode)
+    gcode_object_boxes, gcode_object_shapes = _extract_gcode_object_geometry(plate_gcode)
     if gcode_object_boxes:
         object_boxes.update(gcode_object_boxes)
         plate_bounds = _bounds_for_boxes(gcode_object_boxes.values()) or plate_bounds
@@ -147,6 +148,7 @@ def _parse_3mf(buf: io.BytesIO, plate_number: Optional[int] = None) -> BambuPrev
                 "label": f"{base} #{name_counts[base]}" if name_counts[base] > 1 else base,
                 "state": "excluded" if el.get("skipped", "false").lower() == "true" else "available",
                 **({"bbox": box} if box else {}),
+                **({"shape": gcode_object_shapes[identify_id]} if identify_id in gcode_object_shapes else {}),
             })
 
     if not plate_bounds and object_boxes:
@@ -263,15 +265,16 @@ def _extract_plate_object_boxes(data) -> tuple[dict[int, dict], dict[str, list[d
     return boxes, boxes_by_name, plate_bounds
 
 
-def _extract_gcode_object_boxes(gcode: str) -> dict[int, dict]:
+def _extract_gcode_object_geometry(gcode: str) -> tuple[dict[int, dict], dict[int, dict]]:
     """Recover top-down per-object footprints from Bambu/Orca object label markers."""
     if not gcode:
-        return {}
+        return {}, {}
     start_re = re.compile(r";\s*start printing object,\s*unique label id:\s*(\d+)", re.IGNORECASE)
     stop_re = re.compile(r";\s*stop printing object,\s*unique label id", re.IGNORECASE)
     move_re = re.compile(r"^G[01]\b([^;]*)")
     coord_re = re.compile(r"\b([XYE])(-?\d+(?:\.\d+)?)")
     raw_boxes: dict[int, list[float]] = {}
+    raw_shapes: dict[int, list[list[float]]] = {}
     current_id: Optional[int] = None
     last_x: Optional[float] = None
     last_y: Optional[float] = None
@@ -282,6 +285,7 @@ def _extract_gcode_object_boxes(gcode: str) -> dict[int, dict]:
         if start:
             current_id = int(start.group(1))
             raw_boxes.setdefault(current_id, [float("inf"), float("inf"), float("-inf"), float("-inf")])
+            raw_shapes.setdefault(current_id, [])
             continue
         if stop_re.search(line):
             current_id = None
@@ -303,19 +307,64 @@ def _extract_gcode_object_boxes(gcode: str) -> dict[int, dict]:
         if values.get("E", 0.0) <= 0:
             continue
         box = raw_boxes[current_id]
+        segment_points = []
         for x, y in ((old_x, old_y), (last_x, last_y)):
             if x is None or y is None:
                 continue
+            segment_points.append((x, y))
             box[0] = min(box[0], x)
             box[1] = min(box[1], y)
             box[2] = max(box[2], x)
             box[3] = max(box[3], y)
+        if (
+            len(segment_points) == 2
+            and len(raw_shapes[current_id]) < _MAX_OBJECT_SHAPE_SEGMENTS
+        ):
+            (x1, y1), (x2, y2) = segment_points
+            raw_shapes[current_id].append([
+                round(x1, 3),
+                round(y1, 3),
+                round(x2, 3),
+                round(y2, 3),
+            ])
 
     boxes: dict[int, dict] = {}
     for obj_id, (min_x, min_y, max_x, max_y) in raw_boxes.items():
         if max_x > min_x and max_y > min_y:
             boxes[obj_id] = {"x": min_x, "y": min_y, "w": max_x - min_x, "h": max_y - min_y}
-    return boxes
+    shapes = {}
+    for obj_id, segments in raw_shapes.items():
+        if not segments or obj_id not in boxes:
+            continue
+        shape = {"segments": segments}
+        hull = _convex_hull([(seg[0], seg[1]) for seg in segments] + [(seg[2], seg[3]) for seg in segments])
+        if len(hull) >= 3:
+            shape["polygon"] = [[round(x, 3), round(y, 3)] for x, y in hull]
+        shapes[obj_id] = shape
+    return boxes, shapes
+
+
+def _convex_hull(points: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    unique = sorted(set(points))
+    if len(unique) <= 2:
+        return unique
+
+    def cross(origin, a, b) -> float:
+        return (a[0] - origin[0]) * (b[1] - origin[1]) - (a[1] - origin[1]) * (b[0] - origin[0])
+
+    lower: list[tuple[float, float]] = []
+    for point in unique:
+        while len(lower) >= 2 and cross(lower[-2], lower[-1], point) <= 0:
+            lower.pop()
+        lower.append(point)
+
+    upper: list[tuple[float, float]] = []
+    for point in reversed(unique):
+        while len(upper) >= 2 and cross(upper[-2], upper[-1], point) <= 0:
+            upper.pop()
+        upper.append(point)
+
+    return lower[:-1] + upper[:-1]
 
 
 def friendly_bambu_ftp_error(exc: Exception) -> str:

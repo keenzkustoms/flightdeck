@@ -3886,10 +3886,29 @@ function _objectMapTopDownObjects(data) {
     const isCurrent = obj.state === 'current';
     const rawName = obj.name || `Object ${obj.id ?? ''}`;
     const shortName = (obj.label || rawName).replace(/.*[/\\]/, '');
+    const shape = _objectMapShapeSvg(obj);
     return `<div class="obj-map-top-object${isExcluded ? ' is-excluded' : ''}${isCurrent ? ' is-current' : ''}"
       style="${_objectMapBoxStyle(bounds, obj.bbox)}"
-      title="${esc(shortName)}" aria-hidden="true"><span></span></div>`;
+      title="${esc(shortName)}" aria-hidden="true">${shape || '<span></span>'}</div>`;
   }).join('');
+}
+
+function _objectMapShapeSvg(obj) {
+  const box = obj?.bbox;
+  const segments = Array.isArray(obj?.shape?.segments) ? obj.shape.segments : [];
+  const polygon = Array.isArray(obj?.shape?.polygon) ? obj.shape.polygon : [];
+  if (!box || (!segments.length && !polygon.length) || box.w <= 0 || box.h <= 0) return '';
+  const polygonHtml = polygon.length >= 3
+    ? `<polygon points="${polygon.map(pt => Array.isArray(pt) && pt.length >= 2 ? `${Number(pt[0]).toFixed(3)},${Number(pt[1]).toFixed(3)}` : '').filter(Boolean).join(' ')}"></polygon>`
+    : '';
+  const lines = segments.slice(0, 260).map(seg => {
+    if (!Array.isArray(seg) || seg.length < 4) return '';
+    const nums = seg.slice(0, 4).map(Number);
+    if (nums.some(n => !Number.isFinite(n))) return '';
+    return `<line x1="${nums[0].toFixed(3)}" y1="${nums[1].toFixed(3)}" x2="${nums[2].toFixed(3)}" y2="${nums[3].toFixed(3)}"></line>`;
+  }).join('');
+  if (!lines && !polygonHtml) return '';
+  return `<svg class="obj-map-shape" viewBox="${Number(box.x).toFixed(3)} ${Number(box.y).toFixed(3)} ${Number(box.w).toFixed(3)} ${Number(box.h).toFixed(3)}" preserveAspectRatio="none" focusable="false">${polygonHtml}${lines}</svg>`;
 }
 
 function _objectMapStyleVars(bounds, rotated, rotation, imageRotation, imageOffsetX, imageOffsetY) {
