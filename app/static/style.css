@@ -9006,54 +9006,31 @@ button.live-route-node:hover {
 
 .fleet-wall-xsmall .fleet-wall-hero {
   align-items: center;
-  padding: 0.72rem 0.85rem;
-}
-
-.fleet-wall-xsmall .fleet-wall-hero h1 {
-  font-size: 1.38rem;
 }
 
 .fleet-wall-xsmall .fleet-wall-summary {
-  min-width: min(20rem, 34%);
+  min-width: min(24rem, 38%);
 }
 
 .fleet-wall-xsmall .fleet-wall-grid {
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 0.62rem;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
 }
 
 .fleet-wall-xsmall .fleet-wall-card {
   grid-template-rows: auto 1fr;
-  min-height: 0;
-  border-left-width: 3px;
 }
 
 .fleet-wall-xsmall .fleet-wall-card-head {
-  padding: 0.48rem 0.55rem;
-  min-height: 2.9rem;
-}
-
-.fleet-wall-xsmall .printer-icon {
-  width: 1.2rem;
-  height: 1.2rem;
-}
-
-.fleet-wall-xsmall .printer-custom {
-  font-size: 0.82rem;
-}
-
-.fleet-wall-xsmall .printer-model {
-  font-size: 0.68rem;
+  padding: 0.62rem 0.72rem;
 }
 
 .fleet-wall-xsmall .fleet-wall-kind,
-.fleet-wall-xsmall .fleet-wall-head-flag,
 .fleet-wall-xsmall .fleet-wall-card-body {
   display: none;
 }
 
 .fleet-wall-xsmall .fleet-wall-feed {
-  aspect-ratio: 16 / 9;
+  aspect-ratio: 16 / 10;
 }
 
 .fleet-wall-small .fleet-wall-hero {

@@ -783,7 +783,6 @@ function _commandStaticItems() {
     ['Fleet Wall', '#/fleet', 'Shop-floor camera and printer wall'],
     ['Flight Tower', '#/mission', 'Dispatch and queue intelligence'],
     ['Telemetry', '#/stats', 'Stats, RH, utilisation'],
-    ['Camera Wall', '#/cameras', 'Compact camera grid'],
     ['Queue', '#/queue', 'Pending print jobs'],
     ['Global Print Bay', '#/files', 'Files, printer storage, and reprint staging'],
     ['Spools', '#/spools', 'Spool inventory'],
@@ -2421,7 +2420,7 @@ async function renderManualView() {
         '<strong>Telemetry</strong><span>Printer hours, print count, RH, and host health belong on Telemetry for the long view.</span>',
       ])}
       ${_manualSection('Tester Notes', 'For a demo or friend testing pass, give them these rails so they can explore without breaking the story.', [
-        '<strong>Try read-only first</strong><span>Dashboard, Camera Wall, Telemetry, History, Failures, and Flight Manual are safe places to browse.</span>',
+        '<strong>Try read-only first</strong><span>Dashboard, Fleet Wall, Telemetry, History, Failures, and Flight Manual are safe places to browse.</span>',
         '<strong>Ask before destructive controls</strong><span>Cancel, E-stop, SD cleanup, delete, and archive actions should be deliberate.</span>',
         '<strong>Report exact screen</strong><span>When something looks wrong, note the page name, printer, and whether the printer screen agrees.</span>',
       ])}
@@ -2572,7 +2571,7 @@ function parseRoute() {
   const spoolMatch = hash.match(/^#\/spool\/(\d+)/);
   if (spoolMatch) return { view: 'spool', id: parseInt(spoolMatch[1], 10) };
   if (hash === '#/mission' || hash.startsWith('#/mission?')) return { view: 'mission' };
-  if (hash === '#/cameras' || hash.startsWith('#/cameras?')) return { view: 'cameras' };
+  if (hash === '#/cameras' || hash.startsWith('#/cameras?')) return { view: 'fleet' };
   if (hash === '#/stats' || hash.startsWith('#/stats?')) return { view: 'stats' };
   if (hash === '#/queue') return { view: 'queue' };
   if (hash === '#/fleet') return { view: 'fleet' };
@@ -2674,7 +2673,6 @@ function router() {
       (route.view === 'mission'   && href === '#/mission') ||
       (route.view === 'stats'     && href === '#/stats') ||
       printerTabActive ||
-      (route.view === 'cameras'  && href === '#/cameras') ||
       (route.view === 'queue'    && href === '#/queue') ||
       (route.view === 'files'    && href === '#/files') ||
       (route.view === 'memory'   && href === '#/memory') ||
@@ -2738,7 +2736,6 @@ function buildTabs(printers) {
   nav.innerHTML = [
     `<a class="tab" href="#/">Dashboard</a>`,
     `<a class="tab" href="#/fleet">Fleet Wall</a>`,
-    `<a class="tab" href="#/cameras">Camera Wall</a>`,
     `<a class="tab" href="#/mission">Flight Tower</a>`,
     `<a class="tab" href="#/stats">Telemetry</a>`,
     `<div class="tab-section">Printers</div>`,
@@ -7519,7 +7516,7 @@ async function renderMissionControl() {
     ).join('');
     const simToggle = `<div class="mission-sim-actions">
       <a class="mission-sim-toggle ${prefs.sim ? 'active' : ''}" href="${_missionHref(prefs.filter, !prefs.sim)}">${prefs.sim ? '30-printer sim on' : 'Sim 30 printers'}</a>
-      ${prefs.sim ? '<a class="mission-sim-toggle" href="#/cameras?sim=30">View 30 feeds</a>' : ''}
+      ${prefs.sim ? '<a class="mission-sim-toggle" href="#/fleet">View Fleet Wall</a>' : ''}
     </div>`;
 
     const lanes = filteredContexts.map(({ p, laneJobs, signals, bucket }) => {
@@ -7857,7 +7854,7 @@ let _fleetWallSignature = '';
 let _fleetWallMode = localStorage.getItem('fleetWallMode') || 'medium';
 
 function _safeFleetWallMode(mode) {
-  return ['xsmall', 'small', 'medium', 'large'].includes(mode) ? mode : 'medium';
+  return ['xsmall', 'medium', 'large'].includes(mode) ? mode : 'medium';
 }
 
 function _fleetWallModeControls() {
@@ -7865,7 +7862,6 @@ function _fleetWallModeControls() {
   return `<div class="fleet-wall-mode" role="group" aria-label="Fleet Wall size">
     ${[
       ['xsmall', 'XS'],
-      ['small', 'Small'],
       ['medium', 'Medium'],
       ['large', 'Large'],
     ].map(([mode, label]) => `<button type="button"
