@@ -6645,7 +6645,7 @@ button.live-route-node:hover {
 
 .obj-map-front-marker {
   position: absolute;
-  right: 0.12rem;
+  right: -1rem;
   top: 50%;
   z-index: 3;
   transform: translateY(-50%);
@@ -6662,6 +6662,7 @@ button.live-route-node:hover {
 
 .obj-map-topdown .obj-map-stage,
 .object-map-modal-stage.obj-map-topdown {
+  overflow: visible;
   background:
     linear-gradient(rgba(148,163,184,0.16) 1px, transparent 1px),
     linear-gradient(90deg, rgba(148,163,184,0.16) 1px, transparent 1px),

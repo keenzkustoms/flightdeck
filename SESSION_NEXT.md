@@ -2,13 +2,14 @@
 
 Latest GitHub/Pi state:
 - Branch: main
-- Latest commit: current HEAD after this handoff (`Make Bambu front marker vertical`)
+- Latest commit: current HEAD after this handoff (`Move Bambu front marker outside map`)
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
-- Refresh cachebust currently: ?cachebust=386 / style.css?v=316
+- Refresh cachebust currently: ?cachebust=386 / style.css?v=317
 
 Recent work:
+- The vertical Bambu skip-object `Front` marker now sits just outside the map area on the far right.
 - The Bambu top-down skip-object `Front` marker is now vertical and sits on the far right-hand side of the map.
 - Bambu top-down skip-object maps now show a small `Front` marker at the right-hand centre of the map. It is a visual-only overlay and does not affect red regions, object outlines, or skip IDs.
 - Bambu top-down skip-object maps now apply mirror flags plus `map_coordinate_rotation=-90` through coordinate math, so the whole red overlay and SVG footprint layout rotates left together. On the X1C 6-object map, skipped object `#96` now lands where `#115` was previously.
@@ -91,6 +92,10 @@ Likely next items:
 ## What was changed - Session 28.261 (Bambu vertical front marker - 8 June)
 - Changed the Bambu top-down skip-object `Front` marker to vertical text on the far right-hand side.
 - Static cache bumped to `style.css?v=316`; frontend refresh required.
+
+## What was changed - Session 28.262 (Bambu front marker outside map - 8 June)
+- Moved the vertical Bambu top-down skip-object `Front` marker just outside the map area on the far right.
+- Static cache bumped to `style.css?v=317`; frontend refresh required.
 
 ## What was fixed - Session 28.241 (AMS HT slot canonicalization - 7 June)
 - Regular AMS slots continue to use `unit*4 + slot` indexes.
