@@ -3188,6 +3188,42 @@ def _orca_profile_file(profile_name: str, category: str, exe: Path | None = None
     raise HTTPException(status_code=422, detail=f"Orca {category} profile not found on worker: {name}")
 
 
+def _slicer_catalog_profile_blob(profile_name: str, category: str) -> tuple[str, bytes]:
+    name = (profile_name or "").strip()
+    if not name:
+        raise HTTPException(status_code=422, detail=f"{category} profile is not set")
+    bucket = {"machine": "machines", "process": "processes", "filament": "filaments"}.get(category)
+    if not bucket:
+        raise HTTPException(status_code=422, detail=f"Unknown slicer profile category: {category}")
+
+    for vendor in db.get_slicer_profile_vendors():
+        vendor_key = str(vendor.get("vendor") or vendor.get("name") or "").strip()
+        for row in vendor.get(bucket) or []:
+            if str(row.get("name") or "").strip().lower() != name.lower():
+                continue
+            rel_path = str(row.get("path") or "").strip()
+            if not vendor_key or not rel_path:
+                continue
+            url = f"{_ORCA_PROFILE_BASE}/{urllib.parse.quote(vendor_key, safe='')}/{urllib.parse.quote(rel_path, safe='/')}"
+            try:
+                with urllib.request.urlopen(url, timeout=15) as resp:
+                    data = resp.read()
+            except Exception as exc:
+                raise HTTPException(status_code=502, detail=f"Could not fetch Orca {category} profile {name}: {exc}") from exc
+            if not data:
+                raise HTTPException(status_code=502, detail=f"Downloaded Orca {category} profile {name} was empty")
+            return Path(rel_path).name, data
+    raise HTTPException(status_code=422, detail=f"Orca {category} profile not found in synced catalog: {name}")
+
+
+def _slicer_profile_blob(profile_name: str, category: str, exe: Path | None = None) -> tuple[str, bytes]:
+    try:
+        path = _orca_profile_file(profile_name, category, exe)
+        return path.name, path.read_bytes()
+    except HTTPException:
+        return _slicer_catalog_profile_blob(profile_name, category)
+
+
 def _content_disposition_filename(value: str) -> str:
     for part in (value or "").split(";"):
         key, _, raw = part.strip().partition("=")
@@ -3241,11 +3277,9 @@ def _run_orca_slice_sidecar(
     bed_type: str = "Textured PEI Plate",
 ) -> tuple[str, bytes, str]:
     exe = _orca_executable()
-    if not exe:
-        raise HTTPException(status_code=503, detail="OrcaSlicer executable not found on this worker")
-    machine = _orca_profile_file(str(profiles.get("printer") or ""), "machine", exe)
-    process = _orca_profile_file(str(profiles.get("process") or ""), "process", exe)
-    filament = _orca_profile_file(str(profiles.get("filament") or ""), "filament", exe)
+    machine_name, machine_data = _slicer_profile_blob(str(profiles.get("printer") or ""), "machine", exe)
+    process_name, process_data = _slicer_profile_blob(str(profiles.get("process") or ""), "process", exe)
+    filament_name, filament_data = _slicer_profile_blob(str(profiles.get("filament") or ""), "filament", exe)
 
     safe_source = _safe_basename(filename, "flightdeck-model.stl")
     requested = _safe_basename(output_filename, f"{_file_archive_key(safe_source)}.gcode.3mf")
@@ -3255,9 +3289,9 @@ def _run_orca_slice_sidecar(
 
     files = [
         ("file", (safe_source, data, _slicer_model_mime(safe_source))),
-        ("printerProfile", (machine.name, machine.read_bytes(), "application/json")),
-        ("presetProfile", (process.name, process.read_bytes(), "application/json")),
-        ("filamentProfile", (filament.name, filament.read_bytes(), "application/json")),
+        ("printerProfile", (machine_name, machine_data, "application/json")),
+        ("presetProfile", (process_name, process_data, "application/json")),
+        ("filamentProfile", (filament_name, filament_data, "application/json")),
     ]
     form = {
         "plate": "0" if all_plates else str(plate or "1"),
