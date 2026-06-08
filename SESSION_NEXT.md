@@ -6,9 +6,10 @@ Latest GitHub/Pi state:
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
-- Refresh cachebust currently: ?cachebust=388 / style.css?v=318
+- Refresh cachebust currently: ?cachebust=389 / style.css?v=319
 
 Recent work:
+- Bambu skip-object maps now use the active 3MF/print thumbnail as the visible plate preview behind the Bambuddy-style object IDs. The old top-down diagnostic grid/exploded shape view is no longer the primary visual; transparent hit regions and the ID/name skip list still use the original Bambu object IDs.
 - Bambu skip-object map bounds now preserve the 3MF plate/preview bounds when available instead of replacing them with the tight recovered G-code object bounds. This avoids the skip-object map appearing exploded compared with the print-detail/top-preview layout.
 - Bambu skip-object maps now follow the Bambuddy-style ID workflow: a clean positional map with small red object markers, blue ID dots, active count, and a compact ID/name skip list. The raw G-code extrusion path is no longer shown as the main object shape.
 - The vertical Bambu skip-object `Front` marker now sits just outside the map area on the far right.
@@ -110,6 +111,12 @@ Likely next items:
 - The parser now preserves 3MF plate/preview bounds when they exist and only falls back to tight G-code object bounds when no plate bounds are available.
 - Clarified the Bambu object detail text: skip state comes from MQTT, object positions come from 3MF metadata.
 - Static cache bumped to `app.js?v=388`; backend restart and frontend refresh required.
+
+## What was changed - Session 28.265 (Bambuddy plate preview for skip objects - 8 June)
+- Replaced the visible Bambu top-down skip-object grid/exploded marker presentation with a Bambuddy-style plate preview: the active 3MF thumbnail is now shown under compact red object pins with blue ID badges.
+- The transparent clickable red-box/hit regions are still generated from the preserved 3MF plate bounds and still send the raw Bambu object IDs; the ID/name list remains available below the map.
+- Removed the previous `transform: rotate(25deg)` thumbnail-slice visual trial from `.obj-map-image-piece`.
+- Static cache bumped to `app.js?v=389` and `style.css?v=319`; frontend refresh required.
 
 ## What was fixed - Session 28.241 (AMS HT slot canonicalization - 7 June)
 - Regular AMS slots continue to use `unit*4 + slot` indexes.

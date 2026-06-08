@@ -3807,8 +3807,8 @@ function _objectMapHtml(id, data) {
       title="${esc(shortName)}"><span class="obj-chip-id">${displayId}</span></button>`;
   }).join('');
   const imageVersion = objects.map(o => `${o.id ?? ''}:${o.state ?? ''}`).join('-') || 'current';
-  const image = !topDown && data?.plate_image_url
-    ? `<img src="${esc(data.plate_image_url)}?map=${encodeURIComponent(imageVersion)}" alt="Plate object map" loading="lazy">`
+  const image = data?.plate_image_url
+    ? `<img class="${topDown ? 'obj-map-preview-image' : ''}" src="${esc(data.plate_image_url)}?map=${encodeURIComponent(imageVersion)}" alt="Plate object map" loading="lazy">`
     : '';
   const objectImages = topDown ? _objectMapTopDownObjects(data) : _objectMapImagePieces(data, imageVersion);
   const rotation = Number(data?.map_rotation || 0);
@@ -3825,7 +3825,8 @@ function _objectMapHtml(id, data) {
   return `<div class="${classes}"${rotationStyle}>
     <div class="obj-map-stage obj-map-open" data-printer-id="${esc(id)}" title="Open large object selector">
       <div class="obj-map-image-plane">
-        ${objectImages || image}
+        ${topDown ? image : ''}
+        ${objectImages || (topDown ? '' : image)}
       </div>
       <div class="obj-map-plane">
         ${hasGeometry ? `<div class="obj-map-overlay">${mapButtons}</div>` : ''}
@@ -3930,6 +3931,13 @@ function _objectMapBoxStyle(bounds, box, data = {}) {
   return `left:${p.left.toFixed(2)}%;top:${p.top.toFixed(2)}%;width:${p.width.toFixed(2)}%;height:${p.height.toFixed(2)}%`;
 }
 
+function _objectMapMarkerStyle(bounds, box, data = {}) {
+  const p = _objectMapBoxParts(bounds, box, data);
+  const centerX = Math.max(0, Math.min(100, p.left + (p.width / 2)));
+  const centerY = Math.max(0, Math.min(100, p.top + (p.height / 2)));
+  return `left:${centerX.toFixed(2)}%;top:${centerY.toFixed(2)}%`;
+}
+
 function _objectMapTopDownObjects(data) {
   const objects = data?.objects || [];
   const bounds = data?.plate_bounds;
@@ -3941,7 +3949,7 @@ function _objectMapTopDownObjects(data) {
     const shortName = (obj.label || rawName).replace(/.*[/\\]/, '');
     const displayId = obj.id !== undefined && obj.id !== null ? `#${obj.id}` : '?';
     return `<div class="obj-map-top-object${isExcluded ? ' is-excluded' : ''}${isCurrent ? ' is-current' : ''}"
-      style="${_objectMapBoxStyle(bounds, obj.bbox, data)}"
+      style="${_objectMapMarkerStyle(bounds, obj.bbox, data)}"
       title="${esc(shortName)}" aria-hidden="true"><span class="obj-map-top-block"></span><span class="obj-map-id-dot">${esc(displayId)}</span></div>`;
   }).join('');
 }
@@ -3998,8 +4006,8 @@ function _largeObjectMapHtml(id, data) {
   const hasGeometry = bounds && bounds.w > 0 && bounds.h > 0 && objects.some(o => o.bbox);
   const imageVersion = objects.map(o => `${o.id ?? ''}:${o.state ?? ''}`).join('-') || 'current';
   const topDown = _objectMapIsTopDown(data);
-  const image = !topDown && data?.plate_image_url
-    ? `<img src="${esc(data.plate_image_url)}?map=${encodeURIComponent(imageVersion)}" alt="Large plate preview" loading="eager">`
+  const image = data?.plate_image_url
+    ? `<img class="${topDown ? 'obj-map-preview-image' : ''}" src="${esc(data.plate_image_url)}?map=${encodeURIComponent(imageVersion)}" alt="Large plate preview" loading="eager">`
     : '<div class="object-map-missing">No thumbnail available</div>';
   const objectImages = topDown ? _objectMapTopDownObjects(data) : _objectMapImagePieces(data, imageVersion);
   const rotation = Number(data?.map_rotation || 0);
@@ -4033,6 +4041,7 @@ function _largeObjectMapHtml(id, data) {
   return `<div class="object-map-modal-body">
     <div class="object-map-modal-stage${hasGeometry ? ' has-geometry' : ''}${topDown ? ' obj-map-topdown' : ''}${rotated ? ' obj-map-transformed' : ''}${rotation > 0 ? ' obj-map-overlay-rotated' : ''}${imageRotation > 0 ? ' obj-map-image-rotated' : ''}"${rotationStyle}>
       <div class="obj-map-image-plane">
+        ${topDown ? image : ''}
         ${objectImages || (topDown ? '' : image)}
       </div>
       <div class="obj-map-plane">
