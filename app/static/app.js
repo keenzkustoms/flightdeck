@@ -10900,7 +10900,7 @@ function _setupVersionHtml(version) {
       <div class="setup-version-actions">
         <span class="setup-health-badge setup-ready-${updateClass}" id="setup-update-state">${esc(updateText)}</span>
         <button type="button" class="settings-save-btn" id="setup-check-update">Check</button>
-        <button type="button" class="settings-save-btn" id="setup-run-update">Update</button>
+        <button type="button" class="settings-save-btn setup-update-btn" id="setup-run-update" data-update-state="${version?.dirty ? 'blocked' : version?.behind ? 'available' : 'idle'}">${version?.dirty ? 'Blocked' : 'Update'}</button>
       </div>
     </div>
     <div class="setup-version-meta">
@@ -10993,14 +10993,22 @@ function _setupHealthHtml(health, context = {}) {
 function _attachSetupEvents(el) {
   const message = el.querySelector('#setup-update-message');
   const state = el.querySelector('#setup-update-state');
+  const updateBtn = el.querySelector('#setup-run-update');
   const setMessage = (text, tone = 'info') => {
     if (message) {
       message.textContent = text;
       message.dataset.tone = tone;
     }
   };
+  const setUpdateButton = (status, label = 'Update') => {
+    if (updateBtn) {
+      updateBtn.dataset.updateState = status;
+      updateBtn.textContent = label;
+    }
+  };
   el.querySelector('#setup-check-update')?.addEventListener('click', async () => {
-    setMessage('Checking GitHub...');
+    setMessage('Checking GitHub...', 'busy');
+    setUpdateButton('checking', 'Checking');
     try {
       const r = await fetch('/api/update/status?check_remote=true');
       const data = await r.json().catch(() => ({}));
@@ -11010,27 +11018,34 @@ function _attachSetupEvents(el) {
           ? `Update available ${data.remote_commit ? `· ${data.remote_commit}` : ''}`
           : data.fetch_ok === false ? 'GitHub check failed' : 'Up to date';
       }
+      if (data.dirty) setUpdateButton('blocked', 'Blocked');
+      else if (data.behind) setUpdateButton('available', 'Update now');
+      else setUpdateButton('done', 'Current');
       setMessage(data.dirty
         ? 'Local changes are present. Update is blocked until they are committed, stashed, or removed.'
         : data.behind ? 'A newer GitHub build is available.' : (data.fetch_detail || 'Flightdeck is up to date.'),
         (data.dirty || data.behind) ? 'warn' : 'ok');
     } catch (err) {
+      setUpdateButton('blocked', 'Check failed');
       setMessage(err.message || 'Update check failed', 'warn');
     }
   });
   el.querySelector('#setup-run-update')?.addEventListener('click', async e => {
     const btn = e.currentTarget;
     btn.disabled = true;
-    setMessage('Updating from GitHub...');
+    setUpdateButton('running', 'Updating...');
+    setMessage('Updating from GitHub...', 'busy');
     try {
       const r = await fetch('/api/update', { method: 'POST' });
       const data = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(data.detail || 'Update failed');
       if (state) state.textContent = 'Updated';
+      setUpdateButton('done', 'Updated');
       setMessage(`${data.message || 'Update complete.'} Restart Flightdeck to load the new code.`, 'ok');
       showToast('Flightdeck updated', 'Restart Flightdeck to load the new build.', 'success');
     } catch (err) {
       btn.disabled = false;
+      setUpdateButton('blocked', 'Blocked');
       setMessage(err.message || 'Update failed', 'warn');
     }
   });

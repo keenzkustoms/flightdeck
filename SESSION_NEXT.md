@@ -6,9 +6,10 @@ Latest GitHub/Pi state:
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
-- Refresh cachebust currently: ?cachebust=403 / style.css?v=329
+- Refresh cachebust currently: ?cachebust=404 / style.css?v=330
 
 Recent work:
+- Setup updater now has explicit visual states: Update changes colour/text for available, checking, updating, blocked, and updated states, and the update message becomes a coloured status box so Windows users can see when local changes or a failed pull block the update.
 - Windows/web Setup update button now remains clickable when the checkout has local changes, so clicking Update surfaces the backend blocker message instead of feeling like a dead button. Check GitHub also explains that local changes must be committed, stashed, or removed before updating.
 - Bambu camera proxy startup race fixed: Live/Print Wall camera streams now count the browser as a client before ffmpeg starts, and the watchdog restarts a missing worker while clients are still watching. This targets the recurring H2D black camera panel where AMS/MQTT kept updating but the MJPEG stream opened with no frames.
 - H2D/other Bambu Print Bay loading is hardened: Bambu SD/FTP file listing now has a short timeout and a brief successful-target cache so the Print Bay can show vault/reprint content instead of sitting on `Loading Print Bay...` when the printer file store is slow.

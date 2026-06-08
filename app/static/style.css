@@ -14466,8 +14466,50 @@ select optgroup {
   font-size: 0.78rem;
   line-height: 1.45;
 }
-#setup-update-message[data-tone="ok"] { color: #86efac; opacity: 1; }
-#setup-update-message[data-tone="warn"] { color: #fcd34d; opacity: 1; }
+.setup-update-btn[data-update-state="available"] {
+  border-color: rgba(34,197,94,0.75);
+  background: rgba(34,197,94,0.18);
+  color: #bbf7d0;
+}
+.setup-update-btn[data-update-state="blocked"] {
+  border-color: rgba(245,158,11,0.72);
+  background: rgba(245,158,11,0.16);
+  color: #fde68a;
+}
+.setup-update-btn[data-update-state="checking"],
+.setup-update-btn[data-update-state="running"] {
+  border-color: rgba(96,165,250,0.72);
+  background: rgba(96,165,250,0.16);
+  color: #bfdbfe;
+}
+.setup-update-btn[data-update-state="done"] {
+  border-color: rgba(34,197,94,0.58);
+  background: rgba(34,197,94,0.12);
+  color: #86efac;
+}
+#setup-update-message {
+  border: 1px solid transparent;
+  border-radius: 0.6rem;
+  padding: 0.45rem 0.6rem;
+}
+#setup-update-message[data-tone="ok"] {
+  border-color: rgba(34,197,94,0.24);
+  color: #86efac;
+  background: rgba(34,197,94,0.08);
+  opacity: 1;
+}
+#setup-update-message[data-tone="warn"] {
+  border-color: rgba(245,158,11,0.32);
+  color: #fcd34d;
+  background: rgba(245,158,11,0.1);
+  opacity: 1;
+}
+#setup-update-message[data-tone="busy"] {
+  border-color: rgba(96,165,250,0.3);
+  color: #bfdbfe;
+  background: rgba(96,165,250,0.09);
+  opacity: 1;
+}
 
 .setup-health-head {
   display: flex;
