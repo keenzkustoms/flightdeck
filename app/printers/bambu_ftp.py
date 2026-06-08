@@ -112,7 +112,7 @@ def _parse_3mf(buf: io.BytesIO, plate_number: Optional[int] = None) -> BambuPrev
     gcode_object_boxes, gcode_object_shapes = _extract_gcode_object_geometry(plate_gcode)
     if gcode_object_boxes:
         object_boxes.update(gcode_object_boxes)
-        plate_bounds = _bounds_for_boxes(gcode_object_boxes.values()) or plate_bounds
+        plate_bounds = plate_bounds or _bounds_for_boxes(gcode_object_boxes.values())
     if plate is not None:
         name_counts: dict[str, int] = {}
         name_box_counts: dict[str, int] = {}

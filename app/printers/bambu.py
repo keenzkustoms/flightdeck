@@ -913,7 +913,7 @@ class BambuPrinter:
             "map_mirror_x": False,
             "map_mirror_y": True,
             "map_coordinate_rotation": -90,
-            "detail": "Bambu object exclusion uses the printer skip-object list and top-down object footprints.",
+            "detail": "Bambu object exclusion uses the printer skip-object list and 3MF object positions.",
         }
 
     def skip_object(self, object_id: int) -> bool:

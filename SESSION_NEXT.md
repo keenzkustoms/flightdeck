@@ -2,13 +2,14 @@
 
 Latest GitHub/Pi state:
 - Branch: main
-- Latest commit: current HEAD after this handoff (`Simplify Bambu skip-object map`)
+- Latest commit: current HEAD after this handoff (`Preserve Bambu skip-object plate bounds`)
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
-- Refresh cachebust currently: ?cachebust=387 / style.css?v=318
+- Refresh cachebust currently: ?cachebust=388 / style.css?v=318
 
 Recent work:
+- Bambu skip-object map bounds now preserve the 3MF plate/preview bounds when available instead of replacing them with the tight recovered G-code object bounds. This avoids the skip-object map appearing exploded compared with the print-detail/top-preview layout.
 - Bambu skip-object maps now follow the Bambuddy-style ID workflow: a clean positional map with small red object markers, blue ID dots, active count, and a compact ID/name skip list. The raw G-code extrusion path is no longer shown as the main object shape.
 - The vertical Bambu skip-object `Front` marker now sits just outside the map area on the far right.
 - The Bambu top-down skip-object `Front` marker is now vertical and sits on the far right-hand side of the map.
@@ -103,6 +104,12 @@ Likely next items:
 - The visible map now uses compact red object markers with blue ID dots and an active count, while the raw G-code extrusion path is no longer shown as the main visual shape.
 - Added a compact object ID/name list below the map; map regions and list rows still send the original Bambu skip IDs.
 - Static cache bumped to `app.js?v=387` and `style.css?v=318`; frontend refresh required.
+
+## What was fixed - Session 28.264 (Bambu skip-object plate bounds - 8 June)
+- Fixed the skip-object map looking exploded compared with the print-detail preview.
+- The parser now preserves 3MF plate/preview bounds when they exist and only falls back to tight G-code object bounds when no plate bounds are available.
+- Clarified the Bambu object detail text: skip state comes from MQTT, object positions come from 3MF metadata.
+- Static cache bumped to `app.js?v=388`; backend restart and frontend refresh required.
 
 ## What was fixed - Session 28.241 (AMS HT slot canonicalization - 7 June)
 - Regular AMS slots continue to use `unit*4 + slot` indexes.
