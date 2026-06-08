@@ -44,14 +44,14 @@ from .camera import BambuCameraProxy
 from .label_printer import LabelPrinter
 from .models import PrintPreview
 from .paths import APP_DIR, DATA_DIR, DB_PATH, PRINTERS_CONFIG_PATH, PRINT_LIBRARY_DIR, UPLOADS_DIR
-from .printer_config import BambuConnection, BambuRtspCamera, MjpegDirectCamera, MoonrakerConnection, NtfyConfig, PrinterEntry, SimulatedConnection, load, save
+from .printer_config import BambuConnection, BambuRtspCamera, MjpegDirectCamera, MoonrakerConnection, NtfyConfig, PrinterEntry, SimulatedConnection, SnapmakerU1Connection, load, save
 from .printers import moonraker, simulated
 from .printers.bambu import BambuPrinter
 from .scale import Scale
 from .version import APP_RELEASE_NOTES, APP_VERSION, APP_VERSION_NAME
 
 _bambu: list[BambuPrinter] = []
-_moonraker: list[tuple[str, str, str, str, str]] = []  # (id, model_name, custom_name, icon, url)
+_moonraker: list[tuple[str, str, str, str, str, str, int]] = []  # (id, model_name, custom_name, icon, url, kind, toolheads)
 _simulated: list[tuple[str, str, str, str, str, str]] = []  # (id, model_name, custom_name, icon, profile, scenario)
 _cameras: dict = {}          # printer_id → Camera config
 _presets: dict[str, dict] = {}  # printer_id → temperature_presets dict
@@ -89,6 +89,16 @@ def _simulated_entry(printer_id: str) -> Optional[tuple[str, str, str, str, str,
     return None
 
 
+def _moonraker_runtime_entry(entry: PrinterEntry, conn: MoonrakerConnection | SnapmakerU1Connection) -> tuple[str, str, str, str, str, str, int]:
+    if isinstance(conn, SnapmakerU1Connection):
+        return (entry.id, entry.model_name, entry.custom_name, entry.icon_key(), conn.url, "snapmaker_u1", 4)
+    return (entry.id, entry.model_name, entry.custom_name, entry.icon_key(), conn.url, "moonraker", 1)
+
+
+def _is_moonraker_family(kind: Optional[str]) -> bool:
+    return kind in {"moonraker", "snapmaker_u1"}
+
+
 def _active_printer_ids() -> set[str]:
     return {pid for (pid, *_rest) in _moonraker} | {p.id for p in _bambu} | {pid for (pid, *_rest) in _simulated}
 
@@ -104,8 +114,8 @@ async def _gather_all() -> list[dict]:
 async def _gather_all_locked() -> list[dict]:
     global _latest_printers_at
 
-    async def _fetch_moonraker(id, model_name, custom_name, icon, url):
-        status = await moonraker.fetch(id, model_name, custom_name, icon, url)
+    async def _fetch_moonraker(id, model_name, custom_name, icon, url, kind, toolhead_count):
+        status = await moonraker.fetch(id, model_name, custom_name, icon, url, kind=kind, toolhead_count=toolhead_count)
         status.temperature_presets = _presets.get(id, {})
         _update_last_seen(status)
         d = asdict(status)
@@ -146,8 +156,8 @@ async def _gather_all_locked() -> list[dict]:
         return d
 
     tasks = (
-        [_fetch_moonraker(id, model_name, custom_name, icon, url)
-         for (id, model_name, custom_name, icon, url) in _moonraker] +
+        [_fetch_moonraker(id, model_name, custom_name, icon, url, kind, toolhead_count)
+         for (id, model_name, custom_name, icon, url, kind, toolhead_count) in _moonraker] +
         [_fetch_bambu(p) for p in _bambu]
         + [_fetch_simulated(id, model_name, custom_name, icon, profile, scenario)
            for (id, model_name, custom_name, icon, profile, scenario) in _simulated]
@@ -178,9 +188,9 @@ def _cached_printers(max_age_seconds: float = 8.0) -> Optional[list[dict]]:
 
 
 def _printer_meta(printer_id: str) -> Optional[dict]:
-    for pid, model_name, custom_name, _icon, _url in _moonraker:
+    for pid, model_name, custom_name, _icon, _url, kind, _toolhead_count in _moonraker:
         if pid == printer_id:
-            return {"id": pid, "model_name": model_name, "custom_name": custom_name, "kind": "moonraker"}
+            return {"id": pid, "model_name": model_name, "custom_name": custom_name, "kind": kind}
     for p in _bambu:
         if p.id == printer_id:
             return {"id": p.id, "model_name": p.model_name, "custom_name": p.custom_name, "kind": "bambu"}
@@ -780,9 +790,8 @@ async def lifespan(app: FastAPI):
         conn = entry.connection
         _cameras[entry.id] = entry.camera
         _presets[entry.id] = entry.temperature_presets or {}
-        if isinstance(conn, MoonrakerConnection):
-            _moonraker.append((entry.id, entry.model_name, entry.custom_name,
-                               entry.icon_key(), conn.url))
+        if isinstance(conn, (MoonrakerConnection, SnapmakerU1Connection)):
+            _moonraker.append(_moonraker_runtime_entry(entry, conn))
         elif isinstance(conn, BambuConnection):
             p = BambuPrinter(
                 id=entry.id,
@@ -1378,7 +1387,7 @@ async def get_file_desk(printer_id: Optional[str] = None):
 
     source_tasks = (
         [_moonraker_target(pid, model_name, custom_name, url)
-         for (pid, model_name, custom_name, _icon, url) in _moonraker
+         for (pid, model_name, custom_name, _icon, url, _kind, _toolhead_count) in _moonraker
          if printer_id is None or pid == printer_id] +
         [_bambu_target(p) for p in _bambu
          if printer_id is None or p.id == printer_id]
@@ -1396,8 +1405,8 @@ async def get_file_desk(printer_id: Optional[str] = None):
 async def get_file_desk_reprints(limit: int = 12):
     limit = max(1, min(int(limit or 12), 48))
     printers = {
-        id: {"id": id, "model_name": model_name, "custom_name": custom_name, "kind": "moonraker"}
-        for (id, model_name, custom_name, _icon, _url) in _moonraker
+        id: {"id": id, "model_name": model_name, "custom_name": custom_name, "kind": kind}
+        for (id, model_name, custom_name, _icon, _url, kind, _toolhead_count) in _moonraker
     }
     printers.update({
         p.id: {"id": p.id, "model_name": p.model_name, "custom_name": p.custom_name, "kind": "bambu"}
@@ -1424,7 +1433,7 @@ async def queue_file_from_file_desk(body: FileQueueRequest):
     target_kind = _printer_kind(printer_id)
     if target_kind is None:
         raise HTTPException(status_code=404, detail="Target printer not found")
-    if target_kind not in {"moonraker", "bambu"}:
+    if not (_is_moonraker_family(target_kind) or target_kind == "bambu"):
         raise HTTPException(status_code=422, detail="queueing to simulated printers is not supported yet")
 
     filename, data = await _read_file_desk_source(source_id, source_path)
@@ -1918,9 +1927,9 @@ async def get_printers():
 
 @app.get("/api/printers/{printer_id}")
 async def get_printer(printer_id: str):
-    for (id, model_name, custom_name, icon, url) in _moonraker:
+    for (id, model_name, custom_name, icon, url, kind, toolhead_count) in _moonraker:
         if id == printer_id:
-            return asdict(await moonraker.fetch(id, model_name, custom_name, icon, url))
+            return asdict(await moonraker.fetch(id, model_name, custom_name, icon, url, kind=kind, toolhead_count=toolhead_count))
 
     for p in _bambu:
         if p.id == printer_id:
@@ -1956,9 +1965,9 @@ async def ws_endpoint(ws: WebSocket):
 
 @app.get("/api/printers/{printer_id}/preview", response_model=PrintPreview)
 async def get_printer_preview(printer_id: str):
-    for (id, model_name, custom_name, icon, url) in _moonraker:
+    for (id, model_name, custom_name, icon, url, kind, toolhead_count) in _moonraker:
         if id == printer_id:
-            status = await moonraker.fetch(id, model_name, custom_name, icon, url)
+            status = await moonraker.fetch(id, model_name, custom_name, icon, url, kind=kind, toolhead_count=toolhead_count)
             if not status.job:
                 raise HTTPException(status_code=404, detail="no active job")
 
@@ -2117,7 +2126,7 @@ async def set_printer_temp(printer_id: str, req: SetTempRequest):
     if not (0 <= req.target <= 350):
         raise HTTPException(status_code=400, detail="target out of range (0-350)")
 
-    for (id, model_name, custom_name, icon, url) in _moonraker:
+    for (id, model_name, custom_name, icon, url, _kind, _toolhead_count) in _moonraker:
         if id == printer_id:
             try:
                 await moonraker.set_temp(url, req.heater, req.target)
@@ -2145,7 +2154,7 @@ async def set_printer_fan(printer_id: str, req: FanRequest):
     if channel not in ("part", "aux", "chamber"):
         raise HTTPException(status_code=400, detail="invalid fan channel")
 
-    for (id, model_name, custom_name, icon, url) in _moonraker:
+    for (id, model_name, custom_name, icon, url, _kind, _toolhead_count) in _moonraker:
         if id == printer_id:
             if channel != "part":
                 raise HTTPException(status_code=422, detail="Klipper fan control only supports the part fan from Flightdeck")
@@ -2177,7 +2186,7 @@ async def jog_printer_z(printer_id: str, req: JogZRequest):
     if not (-10 <= req.distance <= 10):
         raise HTTPException(status_code=400, detail="Z jog out of range (-10 to 10mm)")
 
-    for (id, model_name, custom_name, icon, url) in _moonraker:
+    for (id, model_name, custom_name, icon, url, _kind, _toolhead_count) in _moonraker:
         if id == printer_id:
             try:
                 await moonraker.jog_z(url, req.distance)
@@ -2209,7 +2218,7 @@ async def jog_printer_axis(printer_id: str, req: JogRequest):
     if req.speed is not None and not (60 <= req.speed <= 6000):
         raise HTTPException(status_code=400, detail="jog speed out of range (60-6000mm/min)")
 
-    for (id, model_name, custom_name, icon, url) in _moonraker:
+    for (id, model_name, custom_name, icon, url, _kind, _toolhead_count) in _moonraker:
         if id == printer_id:
             try:
                 await moonraker.jog_axis(url, axis, req.distance, req.speed)
@@ -2238,7 +2247,7 @@ async def home_printer_axes(printer_id: str, req: HomeRequest):
     if axes not in ("xy", "z", "all"):
         raise HTTPException(status_code=400, detail="invalid home axes")
 
-    for (id, model_name, custom_name, icon, url) in _moonraker:
+    for (id, model_name, custom_name, icon, url, _kind, _toolhead_count) in _moonraker:
         if id == printer_id:
             try:
                 await moonraker.home_axes(url, axes)
@@ -2268,7 +2277,7 @@ async def control_printer(printer_id: str, req: ControlRequest):
     if req.action not in _VALID_ACTIONS:
         raise HTTPException(status_code=400, detail="invalid action")
 
-    for (id, model_name, custom_name, icon, url) in _moonraker:
+    for (id, model_name, custom_name, icon, url, _kind, _toolhead_count) in _moonraker:
         if id == printer_id:
             try:
                 await moonraker.control(url, req.action)
@@ -2730,7 +2739,7 @@ class ExcludeObjectRequest(BaseModel):
 
 @app.get("/api/printers/{printer_id}/objects")
 async def get_printer_objects(printer_id: str):
-    for (id, model_name, custom_name, icon, url) in _moonraker:
+    for (id, model_name, custom_name, icon, url, _kind, _toolhead_count) in _moonraker:
         if id == printer_id:
             data = await moonraker.fetch_objects(url)
             return {
@@ -2767,8 +2776,8 @@ async def add_printer(entry: PrinterEntry):
     _cameras[entry.id] = entry.camera
     _presets[entry.id] = entry.temperature_presets or {}
 
-    if isinstance(conn, MoonrakerConnection):
-        _moonraker.append((entry.id, entry.model_name, entry.custom_name, entry.icon_key(), conn.url))
+    if isinstance(conn, (MoonrakerConnection, SnapmakerU1Connection)):
+        _moonraker.append(_moonraker_runtime_entry(entry, conn))
     elif isinstance(conn, BambuConnection):
         p = BambuPrinter(
             id=entry.id,
@@ -2877,8 +2886,8 @@ async def _attach_runtime_printer(entry: PrinterEntry) -> None:
     _cameras[entry.id] = entry.camera
     _presets[entry.id] = entry.temperature_presets or {}
 
-    if isinstance(conn, MoonrakerConnection):
-        _moonraker.append((entry.id, entry.model_name, entry.custom_name, entry.icon_key(), conn.url))
+    if isinstance(conn, (MoonrakerConnection, SnapmakerU1Connection)):
+        _moonraker.append(_moonraker_runtime_entry(entry, conn))
     elif isinstance(conn, BambuConnection):
         p = BambuPrinter(
             id=entry.id,
@@ -2944,7 +2953,7 @@ async def set_printer_print_enabled(printer_id: str, body: PrinterPrintEnabledRe
 
 @app.post("/api/printers/{printer_id}/exclude-object")
 async def post_exclude_object(printer_id: str, req: ExcludeObjectRequest):
-    for (id, model_name, custom_name, icon, url) in _moonraker:
+    for (id, model_name, custom_name, icon, url, _kind, _toolhead_count) in _moonraker:
         if id == printer_id:
             try:
                 await moonraker.exclude_object(url, req.name)
@@ -2969,9 +2978,9 @@ async def post_exclude_object(printer_id: str, req: ExcludeObjectRequest):
 
 @app.get("/api/printers/{printer_id}/thumbnail")
 async def get_printer_thumbnail(printer_id: str, view: str | None = None):
-    for (id, model_name, custom_name, icon, url) in _moonraker:
+    for (id, model_name, custom_name, icon, url, kind, toolhead_count) in _moonraker:
         if id == printer_id:
-            status = await moonraker.fetch(id, model_name, custom_name, icon, url)
+            status = await moonraker.fetch(id, model_name, custom_name, icon, url, kind=kind, toolhead_count=toolhead_count)
             if status.job:
                 preview = await moonraker.fetch_preview(url, status.job.filename)
                 if preview and preview.image_png:
@@ -4816,9 +4825,9 @@ _QUEUE_SOURCE_MODEL_EXT = {".step", ".stp"}
 
 
 def _printer_kind(printer_id: str) -> Optional[str]:
-    for (pid, *_) in _moonraker:
+    for (pid, _model_name, _custom_name, _icon, _url, kind, _toolhead_count) in _moonraker:
         if pid == printer_id:
-            return "moonraker"
+            return kind
     for p in _bambu:
         if p.id == printer_id:
             return "bambu"
@@ -5311,7 +5320,7 @@ async def _advance_queue(printer_id: str) -> None:
         return
     db.queue_update_status(job_id, "uploading")
     try:
-        for (pid, _, _, _, url) in _moonraker:
+        for (pid, _, _, _, url, _kind, _toolhead_count) in _moonraker:
             if pid == printer_id:
                 await moonraker.upload_and_start(url, file_path, filename)
                 db.queue_set_started(job_id)
@@ -5479,7 +5488,7 @@ async def _advance_queue_specific(job_id: int, printer_id: str,
             return
     db.queue_update_status(job_id, "uploading")
     try:
-        for (pid, _, _, _, url) in _moonraker:
+        for (pid, _, _, _, url, _kind, _toolhead_count) in _moonraker:
             if pid == printer_id:
                 await moonraker.upload_and_start(url, file_path, filename)
                 db.queue_set_started(job_id)
@@ -5504,7 +5513,7 @@ def _find_bambu(printer_id: str):
     return next((p for p in _bambu if p.id == printer_id), None)
 
 def _find_moonraker_url(printer_id: str):
-    return next((url for (id, _, _, _, url) in _moonraker if id == printer_id), None)
+    return next((url for (id, _, _, _, url, _kind, _toolhead_count) in _moonraker if id == printer_id), None)
 
 _BUSY_STATES = {"printing", "paused"}
 

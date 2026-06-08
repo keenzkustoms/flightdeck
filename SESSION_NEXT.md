@@ -6,9 +6,10 @@ Latest GitHub/Pi state:
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
-- Refresh cachebust currently: ?cachebust=405 / style.css?v=331
+- Refresh cachebust currently: ?cachebust=406 / style.css?v=332
 
 Recent work:
+- Ported Steve/keenzkustoms' Snapmaker U1 ecosystem support from his fork as a narrow Flightdeck-main change. Flightdeck now accepts `connection.type: snapmaker_u1`, polls U1 as a Moonraker-family printer with four independent toolheads (`T0`-`T3`), shows a Snapmaker U1 toolhead loadout/selected-tool route on Live, exposes Snapmaker U1 in printer setup with default MJPEG/snapshot paths, and documents the config shape in `printers.yaml.example`. Deliberately not ported from Steve's fork yet: adaptive snapshot/WebRTC camera experiments or broad polling/camera changes.
 - Fleet Wall Medium now uses a compact AMS feed-route strip instead of the full AMS bay visual. It reuses the Live-page route truth, shows active/ready filament paths to Left/Right nozzle or toolhead, and falls back to loaded spool chips when nothing is actively feeding.
 - Setup updater now has explicit visual states: Update changes colour/text for available, checking, updating, blocked, and updated states, and the update message becomes a coloured status box so Windows users can see when local changes or a failed pull block the update.
 - Windows/web Setup update button now remains clickable when the checkout has local changes, so clicking Update surfaces the backend blocker message instead of feeling like a dead button. Check GitHub also explains that local changes must be committed, stashed, or removed before updating.

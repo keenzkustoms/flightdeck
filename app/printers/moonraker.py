@@ -35,7 +35,16 @@ class MoonrakerPreview:
     layer_height_mm: Optional[float]
 
 
-async def fetch(id: str, model_name: str, custom_name: str, icon: str, base_url: str) -> PrinterStatus:
+async def fetch(
+    id: str,
+    model_name: str,
+    custom_name: str,
+    icon: str,
+    base_url: str,
+    *,
+    kind: str = "moonraker",
+    toolhead_count: int = 1,
+) -> PrinterStatus:
     import asyncio as _asyncio
     base_url = base_url.rstrip("/")
 
@@ -44,6 +53,19 @@ async def fetch(id: str, model_name: str, custom_name: str, icon: str, base_url:
             r = await client.get(f"{base_url}/printer/objects/query?{_OBJECTS}")
             r.raise_for_status()
             return r.json()["result"]["status"]
+
+    async def _extra_tool_objects() -> dict:
+        if toolhead_count <= 1:
+            return {}
+        try:
+            extra_tools = "&".join(f"extruder{idx}" for idx in range(1, min(int(toolhead_count), 8)))
+            async with httpx.AsyncClient(timeout=1.5) as client:
+                r = await client.get(f"{base_url}/printer/objects/query?{extra_tools}")
+                if r.status_code == 200:
+                    return r.json().get("result", {}).get("status", {})
+        except Exception as exc:
+            log.debug("optional multi-tool query failed for %s: %s", id, exc)
+        return {}
 
     async def _info_state() -> tuple[str, str]:
         try:
@@ -57,8 +79,8 @@ async def fetch(id: str, model_name: str, custom_name: str, icon: str, base_url:
         return "", ""
 
     # Fire both requests concurrently; _info_state never raises.
-    results = await _asyncio.gather(_objects(), _info_state(), return_exceptions=True)
-    data_or_exc, klippy_info = results[0], results[1]
+    results = await _asyncio.gather(_objects(), _info_state(), _extra_tool_objects(), return_exceptions=True)
+    data_or_exc, klippy_info, extra_tools = results[0], results[1], results[2]
     klippy_state, klippy_message = klippy_info if isinstance(klippy_info, tuple) else (klippy_info, "")
 
     if isinstance(data_or_exc, Exception):
@@ -66,12 +88,14 @@ async def fetch(id: str, model_name: str, custom_name: str, icon: str, base_url:
         if klippy_state == "shutdown":
             now = datetime.utcnow()
             return PrinterStatus(id=id, model_name=model_name, custom_name=custom_name,
-                                 icon=icon, kind="moonraker", state="estop",
+                                 icon=icon, kind=kind, state="estop",
                                  last_seen=now, updated_at=now)
         return PrinterStatus(id=id, model_name=model_name, custom_name=custom_name,
-                             icon=icon, kind="moonraker", state="offline", error=str(exc))
+                             icon=icon, kind=kind, state="offline", error=str(exc))
 
     data = data_or_exc
+    if isinstance(extra_tools, dict):
+        data.update(extra_tools)
     ps = data.get("print_stats", {})
     if klippy_state == "shutdown":
         raw_state = "shutdown"
@@ -87,6 +111,9 @@ async def fetch(id: str, model_name: str, custom_name: str, icon: str, base_url:
     if "extruder" in data:
         e = data["extruder"]
         temps["hotend"] = TempReading(actual=e.get("temperature", 0), target=e.get("target", 0))
+    toolheads = _parse_toolheads(data, toolhead_count) if toolhead_count > 1 else []
+    for tool in toolheads:
+        temps[f"tool{tool['idx']}"] = TempReading(actual=tool.get("actual", 0), target=tool.get("target", 0))
     if "heater_bed" in data:
         b = data["heater_bed"]
         temps["bed"] = TempReading(actual=b.get("temperature", 0), target=b.get("target", 0))
@@ -203,13 +230,35 @@ async def fetch(id: str, model_name: str, custom_name: str, icon: str, base_url:
     toolhead = data.get("toolhead", {}) or {}
     return PrinterStatus(
         id=id, model_name=model_name, custom_name=custom_name, icon=icon,
-        kind="moonraker", state=state, temps=temps, job=job,
-        idle_info=idle_info, mmu=mmu_panel, last_seen=now, updated_at=now,
+        kind=kind, state=state, temps=temps, job=job,
+        idle_info=idle_info, mmu=mmu_panel, toolheads=toolheads, last_seen=now, updated_at=now,
         fan_speed=fan.get("speed"),
         fan_speeds={"part": fan.get("speed")} if fan.get("speed") is not None else {},
         toolhead_position=toolhead.get("position"),
         error=error_message if state == "error" else None,
     )
+
+
+def _parse_toolheads(data: dict, count: int = 1) -> list[dict]:
+    tools: list[dict] = []
+    try:
+        count = max(1, min(int(count or 1), 8))
+    except (TypeError, ValueError):
+        count = 1
+    active_extruder = str((data.get("toolhead", {}) or {}).get("extruder") or "")
+    for idx in range(count):
+        key = "extruder" if idx == 0 else f"extruder{idx}"
+        raw = data.get(key) if isinstance(data.get(key), dict) else {}
+        tools.append({
+            "idx": idx,
+            "label": f"T{idx}",
+            "object": key,
+            "actual": raw.get("temperature", 0),
+            "target": raw.get("target", 0),
+            "power": raw.get("power"),
+            "active": active_extruder == key or (idx == 0 and not active_extruder),
+        })
+    return tools
 
 
 def _resolve_state(

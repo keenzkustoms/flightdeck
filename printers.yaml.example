@@ -50,6 +50,20 @@ printers:
         - { label: ASA, value: 100 }
         - { label: ABS, value: 100 }
 
+  # Snapmaker U1 example:
+  # - id: u1
+  #   model_name: Snapmaker U1
+  #   custom_name: Snapmaker U1
+  #   icon: generic
+  #   connection:
+  #     type: snapmaker_u1
+  #     host: 192.168.1.30
+  #     port: 7125
+  #   camera:
+  #     type: mjpeg_direct
+  #     stream_url: http://192.168.1.30/webcam/stream.mjpg
+  #     snapshot_url: http://192.168.1.30/webcam/snapshot.jpg
+
   # Simulator example:
   # - id: ir3
   #   model_name: IdeaFormer

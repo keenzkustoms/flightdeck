@@ -96,6 +96,30 @@ function _printerSecondaryLabel(p) {
   return p?.id && p.id !== primary ? p.id : '';
 }
 
+function _asList(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function _isMoonrakerFamily(p) {
+  const kind = typeof p === 'string' ? p : (p?.kind || p?.connection?.type || '');
+  return kind === 'moonraker' || kind === 'snapmaker_u1';
+}
+
+function _isSnapmakerU1(p) {
+  const kind = p?.kind || p?.connection?.type || '';
+  return kind === 'snapmaker_u1';
+}
+
+function _snapmakerMjpegUrl(host) {
+  const clean = String(host || '').trim().replace(/^https?:\/\//i, '').replace(/\/+$/, '');
+  return clean ? `http://${clean}/webcam/stream.mjpg` : '';
+}
+
+function _snapmakerSnapshotUrl(host) {
+  const clean = String(host || '').trim().replace(/^https?:\/\//i, '').replace(/\/+$/, '');
+  return clean ? `http://${clean}/webcam/snapshot.jpg` : '';
+}
+
 function _bambuLightWordHtml(p) {
   const lightState = _effectiveLightState(p);
   const lit = lightState === 'on';
@@ -1837,10 +1861,10 @@ function _detailControls(id, p) {
     return `<button class="ctrl-btn ${cls}${loadingCls}" data-action="${action}" data-printer-id="${id}"${disabled}>${isPending ? '…' : label}</button>`;
   }
 
-  const firmwareRestartBtn = p.kind === 'moonraker'
+  const firmwareRestartBtn = _isMoonrakerFamily(p)
     ? btn('firmware_restart', 'Firmware Restart', 'ctrl-btn-firmware-restart')
     : '';
-  const lightControls = p.kind === 'moonraker'
+  const lightControls = _isMoonrakerFamily(p)
     ? `${btn('light_on', 'Bars On', 'ctrl-btn-light')}
        ${btn('light_off', 'Bars Off', 'ctrl-btn-light')}`
     : p.kind === 'bambu'
@@ -1877,13 +1901,13 @@ function _detailTransportControls(id, p) {
   };
   const lightControl = p.kind === 'bambu'
     ? _bambuLightWordHtml(p)
-    : p.kind === 'moonraker'
+    : _isMoonrakerFamily(p)
       ? `<div class="transport-bars">
           ${transportButton('light_on', '☀', 'Bars on', 'transport-light')}
           ${transportButton('light_off', '☾', 'Bars off', 'transport-light')}
         </div>`
       : '';
-  const firmwareRestartBtn = p.kind === 'moonraker' && _canDo(p.state, 'firmware_restart')
+  const firmwareRestartBtn = _isMoonrakerFamily(p) && _canDo(p.state, 'firmware_restart')
     ? transportButton('firmware_restart', '↻', 'Firmware restart', 'transport-warn')
     : '';
   return `<div class="live-transport detail-controls-wrap" aria-label="Printer transport controls">
@@ -1910,7 +1934,7 @@ function _preheatPresets(p) {
 
 function _detailLiveOps(p) {
   const canPreheat = !['offline', 'printing', 'error', 'estop'].includes(p.state || '');
-  const isMoonraker = p.kind === 'moonraker';
+  const isMoonraker = _isMoonrakerFamily(p);
   const isBambu = p.kind === 'bambu';
   const canFan = (isMoonraker || isBambu) && !['offline', 'error', 'estop'].includes(p.state || '');
   const canJog = (isMoonraker || isBambu) && !['offline', 'printing', 'finished', 'error', 'estop'].includes(p.state || '');
@@ -1926,7 +1950,7 @@ function _detailLiveOps(p) {
       data-hotend="0" data-bed="0" ${canPreheat ? '' : 'disabled'}>
       <span>Cool</span><small>0/0°</small>
     </button>`;
-  const klipper = p.kind === 'moonraker' && p.klipper_ui_url
+  const klipper = _isMoonrakerFamily(p) && p.klipper_ui_url
     ? `<a class="live-op-btn live-op-link" href="${esc(p.klipper_ui_url)}" target="_blank" rel="noreferrer">
         <span>Klipper</span><small>Mainsail / Fluidd</small>
       </a>`
@@ -3078,6 +3102,54 @@ function _detailLiveMmuRows(p) {
   }).join('');
 }
 
+function _detailLiveToolheadRows(p) {
+  if (!_isSnapmakerU1(p)) return '';
+  const loaded = _latestSpoolsByPrinter[p.id] || [];
+  const reported = _asList(p.toolheads);
+  const tools = (reported.length ? reported : [0, 1, 2, 3].map(idx => ({ idx, label: `T${idx}` }))).slice(0, 4);
+  const cards = tools.map(tool => {
+    const idx = Number(tool.idx ?? 0);
+    const label = tool.label || `T${idx}`;
+    const loadedSpool = loaded.find(s => Number(s.location_slot) === idx);
+    const colour = loadedSpool?.color_hex || '#64748b';
+    const actual = Math.round(Number(tool.actual || 0));
+    const target = Math.round(Number(tool.target || 0));
+    const temp = actual || target ? `${actual}°` : '—';
+    const targetText = target ? ` / ${target}°` : '';
+    const grams = loadedSpool?.remaining_g != null ? Math.round(Number(loadedSpool.remaining_g)) : null;
+    const state = tool.active ? 'Selected' : (target ? 'Heating' : 'Ready');
+    const title = [
+      label,
+      loadedSpool ? [loadedSpool.color_name, loadedSpool.material, loadedSpool.brand, `${grams}g`].filter(Boolean).join(' · ') : 'No Flightdeck spool assigned',
+      state,
+    ].filter(Boolean).join(' · ');
+    return `<button class="snapmaker-tool-card${tool.active ? ' is-active' : ''}${loadedSpool ? ' has-spool' : ''}"
+        type="button" data-slot-edit data-printer-id="${p.id}" data-slot-index="${idx}" data-slot-label="${esc(label)}"
+        style="--tool-colour:${colour};--tool-text:${_spoolTextColor(colour)}" title="${esc(title)}">
+      <span class="snapmaker-tool-head">
+        <b>${esc(label)}</b>
+        <small>${esc(state)}</small>
+      </span>
+      <span class="snapmaker-tool-nozzle" aria-hidden="true"></span>
+      <span class="snapmaker-tool-info">
+        <strong>${esc(loadedSpool ? (loadedSpool.color_name || `Spool #${loadedSpool.id}`) : 'No spool assigned')}</strong>
+        <em>${esc(loadedSpool ? [loadedSpool.material, loadedSpool.brand].filter(Boolean).join(' · ') : 'Click to assign')}</em>
+      </span>
+      <span class="snapmaker-tool-foot">
+        <small>${esc(`${temp}${targetText}`)}</small>
+        ${grams != null ? `<small>${grams}g</small>` : '<small>—</small>'}
+      </span>
+    </button>`;
+  }).join('');
+  return `<div class="snapmaker-tooldeck">
+    <div class="snapmaker-tooldeck-head">
+      <strong>Snapmaker U1 Toolheads</strong>
+      <span>Four independent tools · T0-T3</span>
+    </div>
+    <div class="snapmaker-tools">${cards}</div>
+  </div>`;
+}
+
 function _mmuRouteState(unit = {}) {
   const sensors = unit.sensors || {};
   const filament = String(unit.filament || '').trim();
@@ -3186,9 +3258,36 @@ function _routeDestinationLabel(p, unit) {
 }
 
 function _detailFilamentRoute(p) {
-  if (!p.ams?.length && !p.mmu?.length) return '';
+  if (!p.ams?.length && !p.mmu?.length && !_isSnapmakerU1(p)) return '';
   const loaded = _latestSpoolsByPrinter[p.id] || [];
   const routes = [];
+
+  if (_isSnapmakerU1(p)) {
+    const tools = _asList(p.toolheads).slice(0, 4);
+    for (const tool of tools) {
+      if (!tool.active) continue;
+      const idx = Number(tool.idx ?? 0);
+      const toolLabel = tool.label || `T${idx}`;
+      const spool = loaded.find(s => Number(s.location_slot) === idx);
+      const colour = spool?.color_hex || '#60a5fa';
+      const textColour = _spoolTextColor(colour);
+      const spoolLabel = spool
+        ? `#${spool.id} ${[spool.color_name, spool.material].filter(Boolean).join(' · ')}`
+        : 'No Flightdeck spool assigned';
+      routes.push(`<div class="live-filament-route live-filament-route-snapmaker" style="--route-colour:${colour};--route-text:${textColour}" title="${esc(`${toolLabel} selected · ${spoolLabel}`)}">
+        <button class="live-route-node live-route-source" data-slot-edit data-printer-id="${p.id}" data-slot-index="${idx}" data-slot-label="${esc(toolLabel)}">
+          <span class="live-route-swatch"></span>
+          <span><strong>${esc(toolLabel)}</strong><em>${esc(spoolLabel)}</em></span>
+          <b class="live-route-fed">Selected</b>
+        </button>
+        <span class="live-route-line" aria-hidden="true"></span>
+        <span class="live-route-node live-route-destination">
+          <span class="live-route-nozzle" aria-hidden="true"></span>
+          <span><strong>Selected tool</strong><em>Independent toolhead</em></span>
+        </span>
+      </div>`);
+    }
+  }
 
   for (const unit of p.ams) {
     for (const slot of (unit.slots || [])) {
@@ -3308,7 +3407,7 @@ function _detailCameraHud(p) {
 }
 
 function _detailLiveStrip(p) {
-  const loadedHtml = _detailLiveAmsRows(p) || _detailLiveMmuRows(p) || _detailLiveSpoolChips(p);
+  const loadedHtml = _detailLiveAmsRows(p) || _detailLiveMmuRows(p) || _detailLiveToolheadRows(p) || _detailLiveSpoolChips(p);
   const routeHtml = _detailFilamentRoute(p);
   return `<div class="live-environment-panel">
     <div class="live-environment-head">
@@ -6013,7 +6112,7 @@ function _fileCompatiblePrinters(file, sourceTarget = null) {
   const isBambu = name.endsWith('.gcode.3mf') || name.endsWith('.3mf');
   const isMoonraker = name.endsWith('.gcode') || name.endsWith('.gcode.gz') || name.endsWith('.ufp');
   let printers = _latestPrinters.filter(p =>
-    (p.kind === 'bambu' && isBambu) || (p.kind === 'moonraker' && isMoonraker)
+    (p.kind === 'bambu' && isBambu) || (_isMoonrakerFamily(p) && isMoonraker)
   );
   if (sourceTarget && sourceTarget.id !== 'library') {
     printers = printers.filter(p => p.id === sourceTarget.id);
@@ -9315,6 +9414,8 @@ function _printersCategoryHtml(printers) {
     ? printers.map(p => {
         const connInfo = p.connection?.type === 'moonraker'
           ? `moonraker · ${p.connection.host}:${p.connection.port ?? 7125}`
+          : p.connection?.type === 'snapmaker_u1'
+            ? `snapmaker u1 · ${p.connection.host}:${p.connection.port ?? 7125}`
           : p.connection?.type === 'simulated'
             ? `simulated · ${p.connection.profile}${p.connection.scenario ? ` · ${p.connection.scenario}` : ''}`
             : `bambu · ${p.connection?.host ?? ''}`;
@@ -9370,6 +9471,7 @@ function _printersCategoryHtml(printers) {
           <label class="settings-label">Connection Type</label>
           <div class="settings-type-toggle">
             <button type="button" class="type-btn type-btn-active" data-conn-type="moonraker">Moonraker</button>
+            <button type="button" class="type-btn" data-conn-type="snapmaker_u1">Snapmaker U1</button>
             <button type="button" class="type-btn" data-conn-type="bambu">Bambu</button>
             <button type="button" class="type-btn" data-conn-type="simulated">Simulated</button>
           </div>
@@ -9523,11 +9625,22 @@ function _attachPrintersEvents(el) {
     el.querySelectorAll('[data-conn-type]').forEach(b =>
       b.classList.toggle('type-btn-active', b.dataset.connType === connType)
     );
-    el.querySelector('#moonraker-fields').hidden = connType !== 'moonraker';
+    el.querySelector('#moonraker-fields').hidden = !['moonraker', 'snapmaker_u1'].includes(connType);
     el.querySelector('#bambu-fields').hidden     = connType !== 'bambu';
     el.querySelector('#simulated-fields').hidden = connType !== 'simulated';
     if (connType === 'bambu') {
       el.querySelector('input[name="icon"][value="bambu"]').checked = true;
+    } else if (connType === 'snapmaker_u1') {
+      el.querySelector('input[name="icon"][value="generic"]').checked = true;
+      if (!el.querySelector('#p-model')?.value) el.querySelector('#p-model').value = 'Snapmaker U1';
+      if (!el.querySelector('#p-custom')?.value) el.querySelector('#p-custom').value = 'Snapmaker U1';
+      if (el.querySelector('#p-cam-type')?.value === 'none') el.querySelector('#p-cam-type').value = 'mjpeg_direct';
+      el.querySelector('#mjpeg-fields').hidden = el.querySelector('#p-cam-type')?.value !== 'mjpeg_direct';
+      const stream = el.querySelector('#p-stream-url');
+      const snapshot = el.querySelector('#p-snap-url');
+      const host = el.querySelector('#p-host')?.value;
+      if (stream && !stream.value) stream.value = _snapmakerMjpegUrl(host);
+      if (snapshot && !snapshot.value) snapshot.value = _snapmakerSnapshotUrl(host);
     } else if (connType === 'simulated') {
       el.querySelector('input[name="icon"][value="generic"]').checked = true;
     }
@@ -9539,6 +9652,17 @@ function _attachPrintersEvents(el) {
 
   el.querySelector('#p-cam-type')?.addEventListener('change', e => {
     el.querySelector('#mjpeg-fields').hidden = e.target.value !== 'mjpeg_direct';
+  });
+  el.querySelector('#p-host')?.addEventListener('input', () => {
+    if (connType !== 'snapmaker_u1') return;
+    const stream = el.querySelector('#p-stream-url');
+    const snapshot = el.querySelector('#p-snap-url');
+    if (stream && (!stream.value || /\/webcam\/stream\.mjpg$/i.test(stream.value))) {
+      stream.value = _snapmakerMjpegUrl(el.querySelector('#p-host')?.value);
+    }
+    if (snapshot && (!snapshot.value || /\/webcam\/snapshot\.jpg$/i.test(snapshot.value))) {
+      snapshot.value = _snapmakerSnapshotUrl(el.querySelector('#p-host')?.value);
+    }
   });
 
   el.querySelectorAll('[data-delete-id]').forEach(btn => {
@@ -9595,11 +9719,11 @@ function _collectFormData(el, connType) {
     temperature_presets: { hotend, bed },
   };
 
-  if (connType === 'moonraker') {
+  if (connType === 'moonraker' || connType === 'snapmaker_u1') {
     const host    = v('p-host');
     const port    = parseInt(el.querySelector('#p-port').value, 10) || 7125;
     const camType = el.querySelector('#p-cam-type').value;
-    const conn    = { type: 'moonraker', host, port };
+    const conn    = { type: connType, host, port };
     let camera    = null;
     if (camType === 'mjpeg_direct') {
       const streamUrl = v('p-stream-url');
@@ -9643,8 +9767,8 @@ function _populatePrinterForm(el, printer, setConnType) {
   el.querySelector('#settings-cancel-edit')?.removeAttribute('hidden');
   form.querySelector('button[type="submit"]').textContent = 'Save Changes';
 
-  set('p-host', conn.type === 'moonraker' ? conn.host : '');
-  set('p-port', conn.type === 'moonraker' ? (conn.port ?? 7125) : 7125);
+  set('p-host', ['moonraker', 'snapmaker_u1'].includes(conn.type) ? conn.host : '');
+  set('p-port', ['moonraker', 'snapmaker_u1'].includes(conn.type) ? (conn.port ?? 7125) : 7125);
   set('p-bambu-host', conn.type === 'bambu' ? conn.host : '');
   set('p-access-code', conn.type === 'bambu' ? conn.access_code : '');
   set('p-serial', conn.type === 'bambu' ? conn.serial : '');
@@ -9696,7 +9820,7 @@ function _validateFormData(data, connType, errorEl) {
   if (!data.model_name)  return fail('Model name is required');
   if (!data.custom_name) return fail('Custom name is required');
 
-  if (connType === 'moonraker') {
+  if (connType === 'moonraker' || connType === 'snapmaker_u1') {
     if (!data.connection.host) return fail('Host / IP is required');
     if (data.camera?.type === 'mjpeg_direct' && !data.camera.stream_url)
       return fail('Stream URL is required for MJPEG camera');
@@ -9759,7 +9883,7 @@ async function _checkDuplicateConnection(data, connType, ignoreId = '') {
     for (const p of existing) {
       if (ignoreId && p.id === ignoreId) continue;
       const conn = p.connection;
-      if (connType === 'moonraker' && conn.type === 'moonraker') {
+      if ((connType === 'moonraker' || connType === 'snapmaker_u1') && (conn.type === 'moonraker' || conn.type === 'snapmaker_u1')) {
         if (conn.host === data.connection.host && conn.port === data.connection.port) return p;
       } else if (connType === 'bambu' && conn.type === 'bambu') {
         if (conn.host === data.connection.host || conn.serial === data.connection.serial) return p;

@@ -21,6 +21,16 @@ class MoonrakerConnection(BaseModel):
         return f"http://{self.host}:{self.port}"
 
 
+class SnapmakerU1Connection(BaseModel):
+    type: Literal["snapmaker_u1"]
+    host: str
+    port: int = 7125
+
+    @property
+    def url(self) -> str:
+        return f"http://{self.host}:{self.port}"
+
+
 class BambuConnection(BaseModel):
     type: Literal["bambu"]
     host: str
@@ -35,7 +45,7 @@ class SimulatedConnection(BaseModel):
 
 
 Connection = Annotated[
-    Union[MoonrakerConnection, BambuConnection, SimulatedConnection],
+    Union[MoonrakerConnection, SnapmakerU1Connection, BambuConnection, SimulatedConnection],
     Field(discriminator="type"),
 ]
 
