@@ -424,7 +424,7 @@
     if (path.startsWith('/api/notifications/')) return jsonResponse({ ok: true, demo: true });
     if (path === '/api/scale/status') return jsonResponse({ ok: true, available: true, label: 'Dymo M10 USB scale', detail: 'Demo scale ready' });
     if (path === '/api/scale/read') return jsonResponse({ ok: true, grams: 536, stable: true });
-    if (path === '/api/label_printer/status') return jsonResponse({ ok: true, available: true, label: 'Brother QL-700', detail: 'Demo label printer ready' });
+    if (path === '/api/label_printer/status') return jsonResponse({ ok: true, available: true, model: 'Brother QL-700', label_size: 'DK-22212 62mm continuous', backend: 'brother_ql', printer_name: 'usb://0x04f9:0x2042' });
     if (path.startsWith('/api/label_printer')) return jsonResponse({ ok: true, demo: true });
     if (path === '/api/config/printers') return jsonResponse(clone(demoPrinters));
     if (path.startsWith('/api/config/printers')) return jsonResponse({ ok: true, demo: true });

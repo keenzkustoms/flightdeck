@@ -15,7 +15,7 @@ Flightdeck is still early software. Start on your LAN, keep printer credentials 
 - Raspberry Pi OS 64-bit.
 - Bambu printers in LAN mode, if you use Bambu machines.
 - Moonraker reachable on the network, if you use Voron/Klipper machines.
-- Optional hardware: Dymo USB scale and Brother QL-700 label printer.
+- Optional hardware: Dymo USB scale and Brother QL-700 or AusPrint Pro label printer.
 - Optional remote access: Tailscale.
 
 ## Raspberry Pi Sizing
@@ -191,7 +191,7 @@ For the best first pass:
 1. Add shelf locations.
 2. Add each spool with material, brand, colour, label weight, and remaining weight.
 3. Use the optional scale to verify weight if connected.
-4. Use the optional Brother QL-700 label printer to print spool labels if connected.
+4. Use the optional label printer to print spool labels if connected.
 
 ## Run Flightdeck Once Manually
 
@@ -263,6 +263,16 @@ Common supported hardware:
 
 - Dymo USB scale
 - Brother QL-700 using DK-22212 continuous labels
+- AusPrint Pro 300DPI direct thermal label printer on Windows
+
+For AusPrint Pro, install the Windows printer driver first, then set these environment values before starting Flightdeck:
+
+```powershell
+FLIGHTDECK_LABEL_PRINTER_MODEL=ausprint_pro
+FLIGHTDECK_LABEL_PRINTER_NAME=AusPrint
+```
+
+Use the exact Windows printer queue name, or a unique part of it, for `FLIGHTDECK_LABEL_PRINTER_NAME`.
 
 ## Updating Flightdeck
 

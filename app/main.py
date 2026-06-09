@@ -738,6 +738,60 @@ async def _grab_snapshot(printer_id: str) -> Optional[bytes]:
     return None
 
 
+def _fetch_mjpeg_frame_sync(url: str) -> tuple[bytes, str]:
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    request = urllib.request.Request(
+        url,
+        headers={
+            "Cache-Control": "no-cache",
+            "Pragma": "no-cache",
+            "User-Agent": "Flightdeck fleet wall snapshot",
+        },
+    )
+    buf = b""
+    with opener.open(request, timeout=3) as response:
+        content_type = (response.headers.get("content-type") or "image/jpeg").split(";", 1)[0] or "image/jpeg"
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline:
+            chunk = response.read(65536)
+            if not chunk:
+                break
+            buf += chunk
+            start = buf.find(b"\xff\xd8")
+            if start >= 0:
+                end = buf.find(b"\xff\xd9", start + 2)
+                if end >= 0:
+                    return buf[start:end + 2], "image/jpeg"
+            if len(buf) > 2_000_000:
+                buf = buf[-512_000:]
+    if buf and content_type.startswith("image/"):
+        return buf, content_type
+    raise RuntimeError("MJPEG frame unavailable")
+
+
+def _camera_unavailable_response(printer_id: str, detail: str = "Camera frame unavailable") -> Response:
+    name = html_escape(printer_id)
+    note = html_escape(detail[:80])
+    svg = f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360">
+  <rect width="640" height="360" fill="#050914"/>
+  <rect x="24" y="24" width="592" height="312" rx="18" fill="#0b1120" stroke="#1f3657" stroke-width="2"/>
+  <path d="M260 148 h120 l34 84 H226 z" fill="#1e293b" stroke="#475569" stroke-width="8" stroke-linejoin="round"/>
+  <circle cx="320" cy="192" r="34" fill="#020617" stroke="#64748b" stroke-width="8"/>
+  <path d="M242 250 L398 94" stroke="#ef4444" stroke-width="12" stroke-linecap="round"/>
+  <text x="320" y="292" fill="#dbeafe" font-family="Segoe UI, Arial, sans-serif" font-size="28" font-weight="800" text-anchor="middle">{name}</text>
+  <text x="320" y="320" fill="#93a4bd" font-family="Segoe UI, Arial, sans-serif" font-size="16" text-anchor="middle">{note}</text>
+</svg>'''
+    return Response(
+        content=svg,
+        media_type="image/svg+xml",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
+
+
 async def _do_failure_snapshot(printer_id: str, print_id: Optional[int]) -> None:
     jpeg = await _grab_snapshot(printer_id)
     if not jpeg:
@@ -2515,12 +2569,18 @@ async def control_ams_drying(printer_id: str, ams_id: int, req: AmsDryRequest):
 async def get_printer_camera(printer_id: str):
     """Return camera stream URL for the given printer, regardless of print state."""
     if _simulated_entry(printer_id):
-        return {"url": f"/api/camera/{printer_id}/simulated.svg", "type": "simulated"}
+        return {"url": f"/api/camera/{printer_id}/simulated.svg", "type": "simulated", "fleet_url": f"/api/camera/{printer_id}/simulated.svg", "fleet_refresh_ms": 4000}
     camera = _cameras.get(printer_id)
     if camera is None:
         raise HTTPException(status_code=404, detail="no camera configured")
     if isinstance(camera, MjpegDirectCamera):
-        return {"url": f"/api/camera/{printer_id}/stream", "type": "mjpeg"}
+        return {
+            "url": f"/api/camera/{printer_id}/stream",
+            "type": "mjpeg",
+            "snapshot_url": camera.snapshot_url,
+            "fleet_url": f"/api/camera/{printer_id}/snapshot",
+            "fleet_refresh_ms": 3500,
+        }
     if isinstance(camera, AdaptiveCamera):
         return {
             "url": f"/api/camera/{printer_id}/snapshot",
@@ -2528,15 +2588,19 @@ async def get_printer_camera(printer_id: str):
             "active_fps": camera.active_fps,
             "idle_fps": camera.idle_fps,
             "refresh_ms": max(100, int(1000 / _adaptive_camera_fps(camera, printer_id))),
+            "fleet_url": f"/api/camera/{printer_id}/snapshot",
+            "fleet_refresh_ms": max(1000, int(1000 / _adaptive_camera_fps(camera, printer_id))),
         }
     if isinstance(camera, WebrtcCamera):
         return {
             "url": camera.stream_url,
             "type": "webrtc",
             "snapshot_url": camera.snapshot_url,
+            "fleet_url": f"/api/camera/{printer_id}/snapshot" if camera.snapshot_url else None,
+            "fleet_refresh_ms": 3500,
         }
     if isinstance(camera, BambuRtspCamera):
-        return {"url": f"/api/camera/{printer_id}/stream", "type": "mjpeg"}
+        return {"url": f"/api/camera/{printer_id}/stream", "type": "mjpeg", "fleet_url": f"/api/camera/{printer_id}/snapshot", "fleet_refresh_ms": 3000}
     raise HTTPException(status_code=404, detail="unknown camera type")
 
 
@@ -2547,8 +2611,41 @@ async def camera_snapshot(printer_id: str):
         snapshot_url = camera.snapshot_url
     elif isinstance(camera, WebrtcCamera) and camera.snapshot_url:
         snapshot_url = camera.snapshot_url
+    elif isinstance(camera, MjpegDirectCamera) and camera.snapshot_url:
+        snapshot_url = camera.snapshot_url
     else:
-        raise HTTPException(status_code=404, detail="adaptive camera not configured")
+        snapshot_url = ""
+
+    if not snapshot_url:
+        if isinstance(camera, MjpegDirectCamera):
+            try:
+                content, content_type = await asyncio.to_thread(_fetch_mjpeg_frame_sync, camera.stream_url)
+                return Response(
+                    content=content,
+                    media_type=content_type,
+                    headers={
+                        "Cache-Control": "no-cache, no-store, must-revalidate",
+                        "Pragma": "no-cache",
+                        "Expires": "0",
+                    },
+                )
+            except Exception as exc:
+                log.warning("mjpeg snapshot failed for %s: %s", printer_id, exc)
+                return _camera_unavailable_response(printer_id)
+        if _cam_proxies.get(printer_id) is not None:
+            content = await _grab_snapshot(printer_id)
+            if content:
+                return Response(
+                    content=content,
+                    media_type="image/jpeg",
+                    headers={
+                        "Cache-Control": "no-cache, no-store, must-revalidate",
+                        "Pragma": "no-cache",
+                        "Expires": "0",
+                    },
+                )
+            return _camera_unavailable_response(printer_id)
+        raise HTTPException(status_code=404, detail="snapshot not configured")
 
     try:
         content, content_type = await asyncio.to_thread(_fetch_adaptive_snapshot_sync, snapshot_url)
@@ -2563,7 +2660,7 @@ async def camera_snapshot(printer_id: str):
         )
     except Exception as exc:
         log.warning("adaptive camera snapshot failed for %s: %s", printer_id, exc)
-        raise HTTPException(status_code=502, detail="snapshot unavailable")
+        return _camera_unavailable_response(printer_id)
 
 
 def _simulated_camera_svg(printer_id: str, model_name: str, custom_name: str, icon: str, profile: str, scenario: str) -> str:
@@ -4295,7 +4392,7 @@ async def setup_health():
     label_status = _label_printer.status()
     checks.append(_setup_check(
         "label_printer",
-        "QL-700 label printer",
+        f"{label_status.model} label printer",
         label_status.available,
         "Detected" if label_status.available else (label_status.last_error or "Not detected"),
         optional=True,

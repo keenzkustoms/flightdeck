@@ -12,9 +12,9 @@ _INITIAL_TIMEOUT    = 10    # max seconds to wait for the very first frame after
 _MAX_SESSION_LIFE   = 900   # 15 min — H2D firmware silently freezes long-lived RTSP sessions
 _FRAME_START = b"\xff\xd8"
 _FRAME_END   = b"\xff\xd9"
-_STREAM_WIDTH = "960"
-_STREAM_FPS = "5"
-_STREAM_QUALITY = "7"
+_STREAM_WIDTH = "640"
+_STREAM_FPS = "2"
+_STREAM_QUALITY = "8"
 
 
 class BambuCameraProxy:
