@@ -11217,7 +11217,7 @@ function _openSupportBundleModal() {
         </label>
         <div class="settings-hint setup-support-email">After it downloads, email the zip to <strong>flightdeck3dprinters@gmail.com</strong>.</div>
         <div class="modal-actions">
-          <a class="modal-btn setup-support-fallback" href="/api/setup/logs/download" download>Quick zip</a>
+          <a class="modal-btn setup-support-fallback" href="/api/setup/logs/download" download>Diagnostics only</a>
           <button type="button" class="modal-btn" data-support-close>Cancel</button>
           <button type="submit" class="modal-btn setup-support-primary" data-support-submit>Download zip</button>
         </div>
