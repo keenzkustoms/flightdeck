@@ -3699,6 +3699,169 @@ def _is_writable_dir(path: Path) -> bool:
         return False
 
 
+_DIAGNOSTIC_MAX_TEXT_BYTES = 320 * 1024
+_DIAGNOSTIC_SECRET_KEY_RE = re.compile(
+    r"(access[_-]?code|serial|token|secret|password|passwd|passcode|api[_-]?key|mqtt[_-]?password)",
+    re.IGNORECASE,
+)
+_DIAGNOSTIC_ASSIGNMENT_RE = re.compile(
+    r"^(\s*(?:[A-Za-z0-9_.-]*(?:access[_-]?code|serial|token|secret|password|passwd|passcode|api[_-]?key|mqtt[_-]?password)[A-Za-z0-9_.-]*)\s*[:=]\s*).*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def _diagnostic_redact_value(key: str, value):
+    if _DIAGNOSTIC_SECRET_KEY_RE.search(str(key or "")):
+        return "[redacted]"
+    if isinstance(value, dict):
+        return {k: _diagnostic_redact_value(k, v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_diagnostic_redact_value(key, item) for item in value]
+    return value
+
+
+def _diagnostic_redact_text(text: str) -> str:
+    return _DIAGNOSTIC_ASSIGNMENT_RE.sub(r"\1[redacted]", text)
+
+
+def _diagnostic_tail_text(path: Path, max_bytes: int = _DIAGNOSTIC_MAX_TEXT_BYTES) -> str:
+    data = path.read_bytes()
+    if len(data) > max_bytes:
+        data = data[-max_bytes:]
+        prefix = f"[truncated to last {max_bytes} bytes from {path}]\n"
+    else:
+        prefix = ""
+    return prefix + _diagnostic_redact_text(data.decode("utf-8", errors="replace"))
+
+
+def _diagnostic_json(value) -> str:
+    return json.dumps(value, indent=2, sort_keys=True, default=_dt_default) + "\n"
+
+
+def _diagnostic_recent_decisions(limit: int = 250) -> list[dict]:
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                """SELECT id, print_id, printer_id, event, detail, logged_at
+                   FROM decisions
+                   ORDER BY logged_at DESC
+                   LIMIT ?""",
+                (limit,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+    except Exception as exc:
+        return [{"error": str(exc)}]
+
+
+def _diagnostic_recent_notifications(limit: int = 120) -> list[dict]:
+    try:
+        return db.list_notifications(limit=limit, include_cleared=True)
+    except Exception as exc:
+        return [{"error": str(exc)}]
+
+
+def _diagnostic_command(name: str, args: list[str], timeout: int = 5) -> tuple[str, str]:
+    try:
+        proc = subprocess.run(args, text=True, capture_output=True, timeout=timeout)
+        output = (proc.stdout or "") + (("\n" + proc.stderr) if proc.stderr else "")
+        if not output.strip():
+            output = f"{name} exited {proc.returncode} with no output\n"
+        return name, _diagnostic_redact_text(output)
+    except Exception as exc:
+        return name, f"{name} unavailable: {exc}\n"
+
+
+async def _diagnostic_bundle_bytes() -> bytes:
+    now = datetime.now(timezone.utc)
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        def add_text(name: str, text: str) -> None:
+            zf.writestr(name, text)
+
+        add_text("README.txt", "\n".join([
+            "Flightdeck diagnostic bundle",
+            f"Generated: {now.isoformat()}",
+            "",
+            "This bundle is intended for support/debugging.",
+            "Known secret-like settings are redacted, but review before sharing publicly.",
+            "",
+        ]))
+        add_text("version.json", _diagnostic_json(_app_version_info(include_remote=False)))
+        add_text("instance.json", _diagnostic_json({
+            "app": "flightdeck",
+            "version": APP_VERSION,
+            "version_name": APP_VERSION_NAME,
+            "address": _local_ipv4(),
+            "hardware": _hardware_label(),
+            "runtime": os.environ.get("FLIGHTDECK_RUNTIME", "").strip() or ("docker" if Path("/.dockerenv").exists() else "systemd"),
+            "host": _host_health(),
+            "camera_workers": _camera_worker_status(),
+        }))
+        add_text("setup-health.json", _diagnostic_json(await setup_health()))
+        add_text("settings.redacted.json", _diagnostic_json(_diagnostic_redact_value("", db.get_all_settings())))
+        add_text("recent-decisions.json", _diagnostic_json(_diagnostic_recent_decisions()))
+        add_text("recent-notifications.json", _diagnostic_json(_diagnostic_recent_notifications()))
+
+        if PRINTERS_CONFIG_PATH.exists():
+            add_text("printers.redacted.yaml", _diagnostic_tail_text(PRINTERS_CONFIG_PATH, max_bytes=512 * 1024))
+        else:
+            add_text("printers.redacted.yaml", f"Missing printer config: {PRINTERS_CONFIG_PATH}\n")
+
+        env_keys = {
+            key: value
+            for key, value in os.environ.items()
+            if key.startswith("FLIGHTDECK_") or key in {"PATH", "PYTHONPATH", "LOCALAPPDATA"}
+        }
+        add_text("environment.redacted.json", _diagnostic_json(_diagnostic_redact_value("", env_keys)))
+
+        log_dirs = [DATA_DIR / "logs", APP_DIR / "logs"]
+        seen_logs: set[Path] = set()
+        for log_dir in log_dirs:
+            if not log_dir.exists():
+                continue
+            for path in sorted(log_dir.glob("*.log"), key=lambda p: p.stat().st_mtime if p.exists() else 0, reverse=True)[:8]:
+                resolved = path.resolve()
+                if resolved in seen_logs or not path.is_file():
+                    continue
+                seen_logs.add(resolved)
+                add_text(f"logs/{path.name}", _diagnostic_tail_text(path))
+
+        for name, args in [
+            ("git-status.txt", ["git", "-C", str(APP_DIR), "status", "--short", "--branch"]),
+            ("git-log.txt", ["git", "-C", str(APP_DIR), "log", "--oneline", "-20"]),
+            ("python-version.txt", [shutil.which("python") or "python", "--version"]),
+            ("ffmpeg-version.txt", [shutil.which("ffmpeg") or "ffmpeg", "-version"]),
+        ]:
+            command_name, output = _diagnostic_command(name, args)
+            add_text(f"commands/{command_name}", output)
+
+        if os.name != "nt":
+            for name, args in [
+                ("systemd-flightdeck.txt", ["systemctl", "status", "flightdeck.service", "--no-pager"]),
+                ("journal-flightdeck.txt", ["journalctl", "-u", "flightdeck.service", "-n", "250", "--no-pager"]),
+                ("processes.txt", ["ps", "-eo", "pid,ppid,comm,args"]),
+            ]:
+                command_name, output = _diagnostic_command(name, args, timeout=8)
+                add_text(f"commands/{command_name}", output)
+
+    return buffer.getvalue()
+
+
+@app.get("/api/setup/logs/download")
+async def download_setup_logs():
+    data = await _diagnostic_bundle_bytes()
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    return Response(
+        content=data,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="flightdeck-diagnostics-{stamp}.zip"',
+            "Cache-Control": "no-store",
+        },
+    )
+
+
 def _systemd_status() -> tuple[bool, str]:
     runtime = os.environ.get("FLIGHTDECK_RUNTIME", "").strip().lower()
     if runtime in {"docker", "container", "portainer"} or Path("/.dockerenv").exists():

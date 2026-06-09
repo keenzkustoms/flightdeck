@@ -14981,6 +14981,15 @@ select optgroup {
   background: rgba(34,197,94,0.12);
   color: #86efac;
 }
+.setup-log-download-btn {
+  border-color: rgba(96,165,250,0.52);
+  color: #dbeafe;
+  background: rgba(59,130,246,0.1);
+  text-decoration: none;
+}
+.setup-log-download-btn:hover {
+  background: rgba(59,130,246,0.18);
+}
 #setup-update-message {
   border: 1px solid transparent;
   border-radius: 0.6rem;

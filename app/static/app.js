@@ -11146,6 +11146,7 @@ function _setupVersionHtml(version) {
         <span class="setup-health-badge setup-ready-${updateClass}" id="setup-update-state">${esc(updateText)}</span>
         <button type="button" class="settings-save-btn" id="setup-check-update">Check</button>
         <button type="button" class="settings-save-btn setup-update-btn" id="setup-run-update" data-update-state="${version?.dirty ? 'blocked' : version?.behind ? 'available' : 'idle'}">${version?.dirty ? 'Blocked' : 'Update'}</button>
+        <a class="settings-save-btn setup-log-download-btn" href="/api/setup/logs/download" download>Download logs</a>
       </div>
     </div>
     <div class="setup-version-meta">
@@ -11154,7 +11155,7 @@ function _setupVersionHtml(version) {
       ${dirty}
     </div>
     ${notes ? `<ul class="setup-version-notes">${notes}</ul>` : ''}
-    <div class="settings-hint" id="setup-update-message">Updates use <code>git pull --ff-only</code>. Restart Flightdeck after a successful update.</div>
+    <div class="settings-hint" id="setup-update-message">Updates use <code>git pull --ff-only</code>. Restart Flightdeck after a successful update. Download logs creates a redacted diagnostic zip for support.</div>
   </div>`;
 }
 
