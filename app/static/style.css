@@ -6644,6 +6644,72 @@ button.live-route-node:hover {
   font-weight: 700;
 }
 
+.slot-ams-profile-list {
+  display: grid;
+  gap: 0.25rem;
+  max-height: 11.5rem;
+  overflow: auto;
+  padding-right: 0.2rem;
+}
+
+.slot-ams-profile-option {
+  width: 100%;
+  min-height: 2.1rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.75rem;
+  border: 1px solid rgba(122,162,216,0.18);
+  border-radius: 0.35rem;
+  background: rgba(2,6,23,0.72);
+  color: var(--text);
+  cursor: pointer;
+  padding: 0.35rem 0.55rem;
+  text-align: left;
+}
+
+.slot-ams-profile-option:hover {
+  border-color: rgba(96,165,250,0.58);
+  background: rgba(30,64,175,0.28);
+}
+
+.slot-ams-profile-option.selected {
+  border-color: rgba(96,165,250,0.82);
+  background: rgba(37,99,235,0.34);
+}
+
+.slot-ams-profile-option-main {
+  min-width: 0;
+  display: grid;
+  gap: 0.1rem;
+}
+
+.slot-ams-profile-option strong,
+.slot-ams-profile-option small,
+.slot-ams-profile-option em {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.slot-ams-profile-option strong {
+  color: var(--text);
+  font-size: 0.78rem;
+}
+
+.slot-ams-profile-option small {
+  color: var(--muted);
+  font-size: 0.62rem;
+}
+
+.slot-ams-profile-option em {
+  color: #dbeafe;
+  font-size: 0.64rem;
+  font-style: normal;
+  font-weight: 900;
+}
+
 .slot-ams-profile-grid label {
   display: grid;
   gap: 0.24rem;
@@ -10849,6 +10915,67 @@ select optgroup {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.slicer-profile-dropdown {
+  position: absolute;
+  z-index: 10000;
+  display: grid;
+  gap: 0.25rem;
+  max-height: 17rem;
+  overflow: auto;
+  border: 1px solid rgba(96,165,250,0.36);
+  border-radius: 0.45rem;
+  background: rgba(2,6,23,0.98);
+  box-shadow: 0 1.1rem 2.4rem rgba(0,0,0,0.45);
+  padding: 0.35rem;
+}
+
+.slicer-profile-choice {
+  width: 100%;
+  min-height: 2.15rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.75rem;
+  border: 1px solid rgba(122,162,216,0.16);
+  border-radius: 0.35rem;
+  background: rgba(0,0,0,0.56);
+  color: var(--text);
+  cursor: pointer;
+  padding: 0.38rem 0.55rem;
+  text-align: left;
+}
+
+.slicer-profile-choice:hover {
+  border-color: rgba(96,165,250,0.62);
+  background: rgba(30,64,175,0.34);
+}
+
+.slicer-profile-choice.selected {
+  border-color: rgba(96,165,250,0.86);
+  background: rgba(37,99,235,0.42);
+}
+
+.slicer-profile-choice span,
+.slicer-profile-choice em {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.slicer-profile-choice span {
+  color: var(--text);
+  font-size: 0.78rem;
+  font-weight: 850;
+}
+
+.slicer-profile-choice em {
+  color: #dbeafe;
+  font-size: 0.63rem;
+  font-style: normal;
+  font-weight: 900;
 }
 
 @media (max-width: 640px) {

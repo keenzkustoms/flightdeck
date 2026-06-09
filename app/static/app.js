@@ -10110,9 +10110,9 @@ function _slicerProfilesHtml(profileData, printers) {
         <strong>${esc(p.custom_name || p.model_name || p.id)}</strong>
         <span>${esc([p.model_name, p.kind].filter(Boolean).join(' · '))}</span>
       </div>
-      <input class="settings-input slicer-profile-input" data-profile-slot="printer" list="slicer-printer-profiles-${esc(rowKey)}" value="${esc(d.printer_profile || '')}" placeholder="${esc(printerPlaceholder)}">
-      <input class="settings-input slicer-profile-input" data-profile-slot="process" list="slicer-process-profiles-${esc(rowKey)}" value="${esc(d.process_profile || '')}" placeholder="${esc(processPlaceholder)}">
-      <input class="settings-input slicer-profile-input" data-profile-slot="filament" list="slicer-filament-profiles-${esc(rowKey)}" value="${esc(d.filament_profile || '')}" placeholder="${esc(filamentPlaceholder)}">
+      <input class="settings-input slicer-profile-input" data-profile-slot="printer" data-profile-list-id="slicer-printer-profiles-${esc(rowKey)}" value="${esc(d.printer_profile || '')}" placeholder="${esc(printerPlaceholder)}">
+      <input class="settings-input slicer-profile-input" data-profile-slot="process" data-profile-list-id="slicer-process-profiles-${esc(rowKey)}" value="${esc(d.process_profile || '')}" placeholder="${esc(processPlaceholder)}">
+      <input class="settings-input slicer-profile-input" data-profile-slot="filament" data-profile-list-id="slicer-filament-profiles-${esc(rowKey)}" value="${esc(d.filament_profile || '')}" placeholder="${esc(filamentPlaceholder)}">
       ${_slicerDatalist(`slicer-printer-profiles-${rowKey}`, rowPrinters)}
       ${_slicerDatalist(`slicer-process-profiles-${rowKey}`, rowProcesses)}
       ${_slicerDatalist(`slicer-filament-profiles-${rowKey}`, rowFilaments)}
@@ -10159,10 +10159,82 @@ function _slicerRefreshRowProfileLists(row) {
   const fallback = row.querySelector('.slicer-profile-printer')?.textContent || '';
   const processRows = _slicerFilterRowsForPrinter(_slicerProfileOptions(_slicerProfileData, 'process'), printerText, fallback);
   const filamentRows = _slicerFilterRowsForPrinter(_slicerProfileOptions(_slicerProfileData, 'filament'), printerText, fallback);
-  if (processInput?.list?.id) _slicerReplaceDatalist(processInput.list.id, processRows);
-  if (filamentInput?.list?.id) _slicerReplaceDatalist(filamentInput.list.id, filamentRows);
+  if (processInput?.dataset.profileListId) _slicerReplaceDatalist(processInput.dataset.profileListId, processRows);
+  if (filamentInput?.dataset.profileListId) _slicerReplaceDatalist(filamentInput.dataset.profileListId, filamentRows);
   if (processInput && !processInput.value) processInput.placeholder = processRows[0]?.name || 'Process/layer profile';
   if (filamentInput && !filamentInput.value) filamentInput.placeholder = filamentRows[0]?.name || 'Filament profile';
+}
+
+function _slicerProfileRowsForInput(input) {
+  const listId = input?.dataset.profileListId || '';
+  const list = listId ? document.getElementById(listId) : null;
+  return [...(list?.querySelectorAll('option') || [])]
+    .map(option => ({ name: option.value || '', vendor: option.textContent || '' }))
+    .filter(row => row.name);
+}
+
+function _slicerProfileDropdownHtml(rows, selectedName) {
+  return rows.map(row => {
+    const selected = row.name === selectedName;
+    return `<button type="button" class="slicer-profile-choice${selected ? ' selected' : ''}" data-slicer-profile-choice="${esc(row.name)}" data-search="${esc(`${row.name} ${row.vendor}`.toLowerCase())}">
+      <span>${esc(row.name)}</span>
+      <em>${esc(row.vendor || 'Custom')}</em>
+    </button>`;
+  }).join('') || '<div class="settings-empty">No profiles found.</div>';
+}
+
+function _attachSlicerProfileDropdowns(root) {
+  let activeMenu = null;
+  const closeMenu = () => {
+    activeMenu?.remove();
+    activeMenu = null;
+  };
+  const openMenu = input => {
+    closeMenu();
+    const rows = _slicerProfileRowsForInput(input);
+    const rect = input.getBoundingClientRect();
+    activeMenu = document.createElement('div');
+    activeMenu.className = 'slicer-profile-dropdown';
+    activeMenu.style.left = `${rect.left + window.scrollX}px`;
+    activeMenu.style.top = `${rect.bottom + window.scrollY + 4}px`;
+    activeMenu.style.width = `${rect.width}px`;
+    activeMenu.innerHTML = _slicerProfileDropdownHtml(rows, input.value);
+    document.body.appendChild(activeMenu);
+    const filter = () => {
+      if (!activeMenu) return;
+      const q = input.value.trim().toLowerCase();
+      activeMenu.querySelectorAll('[data-slicer-profile-choice]').forEach(row => {
+        row.hidden = q && !(row.dataset.search || '').includes(q);
+        row.classList.toggle('selected', row.dataset.slicerProfileChoice === input.value);
+      });
+    };
+    activeMenu.querySelectorAll('[data-slicer-profile-choice]').forEach(btn => {
+      btn.addEventListener('mousedown', e => {
+        e.preventDefault();
+        input.value = btn.dataset.slicerProfileChoice || '';
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+        closeMenu();
+      });
+    });
+    input.addEventListener('input', filter, { once: true });
+    requestAnimationFrame(filter);
+  };
+  root.querySelectorAll('.slicer-profile-input').forEach(input => {
+    input.addEventListener('focus', () => openMenu(input));
+    input.addEventListener('input', () => {
+      if (!activeMenu) openMenu(input);
+      else {
+        const q = input.value.trim().toLowerCase();
+        activeMenu.querySelectorAll('[data-slicer-profile-choice]').forEach(row => {
+          row.hidden = q && !(row.dataset.search || '').includes(q);
+          row.classList.toggle('selected', row.dataset.slicerProfileChoice === input.value);
+        });
+      }
+    });
+  });
+  document.addEventListener('mousedown', e => {
+    if (activeMenu && !activeMenu.contains(e.target) && !e.target.closest('.slicer-profile-input')) closeMenu();
+  });
 }
 
 function _slicerCategoryHtml(profileData = null, printers = []) {
@@ -10461,6 +10533,7 @@ function _attachSlicerEvents(el) {
     input.addEventListener('change', () => _slicerRefreshRowProfileLists(input.closest('[data-printer-id]')));
     input.addEventListener('input', () => _slicerRefreshRowProfileLists(input.closest('[data-printer-id]')));
   });
+  _attachSlicerProfileDropdowns(el);
 }
 
 // ── Filament category ─────────────────────────────────────────────────────
@@ -12082,6 +12155,18 @@ function _amsSlotProfileRows(profileData, spool, printer) {
   return (filtered.length ? filtered : rows).slice().sort((a, b) => a.name.localeCompare(b.name)).slice(0, 320);
 }
 
+function _amsProfileOptionHtml(row, selectedName) {
+  const parsed = _amsProfileParts(row.name);
+  const selected = String(row.name || '') === String(selectedName || '');
+  return `<button type="button" class="slot-ams-profile-option${selected ? ' selected' : ''}" data-ams-profile-option="${esc(row.name)}" data-search="${esc(`${row.name || ''} ${row.vendor || ''}`.toLowerCase())}">
+    <span class="slot-ams-profile-option-main">
+      <strong>${esc(row.name)}</strong>
+      <small>${esc(row.vendor || 'Custom')}</small>
+    </span>
+    <em>${esc(parsed.material || 'PLA')}</em>
+  </button>`;
+}
+
 function _amsProfilePanelHtml(current, report, profileData, printer) {
   if (!current) return '';
   const fallbackName = [current.brand, current.material, current.subtype].filter(Boolean).join(' ').trim();
@@ -12100,10 +12185,10 @@ function _amsProfilePanelHtml(current, report, profileData, printer) {
         <input type="checkbox" id="slot-ams-profile-enabled">
         <span>Override spool default profile</span>
       </label>
-      <input id="slot-ams-profile-name" class="spool-form-input" list="slot-ams-profile-options" value="${esc(initialName)}" placeholder="Filament profile">
-      <datalist id="slot-ams-profile-options">
-        ${rows.map(row => `<option value="${esc(row.name)}">${esc(row.vendor || '')}</option>`).join('')}
-      </datalist>
+      <input id="slot-ams-profile-name" class="spool-form-input" value="${esc(initialName)}" placeholder="Search filament profiles...">
+      <div class="slot-ams-profile-list" role="listbox" aria-label="Filament profiles">
+        ${rows.length ? rows.map(row => _amsProfileOptionHtml(row, initialName)).join('') : '<div class="slot-empty-state">No synced filament profiles available.</div>'}
+      </div>
       <div class="slot-ams-profile-grid">
         <label><span>Material</span><input class="spool-form-input" id="slot-ams-profile-material" value="${esc(parsed.material)}"></label>
         <label><span>Colour</span><input class="spool-form-input" id="slot-ams-profile-color" type="color" value="${esc(_normHex(current.color_hex || report?.color || '#808080') || '#808080')}"></label>
@@ -12334,7 +12419,7 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
     body.querySelectorAll('#slot-ams-profile-name, #slot-ams-profile-material, #slot-ams-profile-color, #slot-ams-profile-temp-min, #slot-ams-profile-temp-max').forEach(input => {
       input.addEventListener('input', () => { if (profileEnableInput) profileEnableInput.checked = true; });
     });
-    profileNameInput?.addEventListener('change', () => {
+    const applyProfileName = () => {
       const parsed = _amsProfileParts(profileNameInput.value, current);
       const materialInput = body.querySelector('#slot-ams-profile-material');
       const minInput = body.querySelector('#slot-ams-profile-temp-min');
@@ -12343,6 +12428,21 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
       if (materialInput) materialInput.value = parsed.material;
       if (minInput) minInput.value = temp.min;
       if (maxInput) maxInput.value = temp.max;
+      body.querySelectorAll('[data-ams-profile-option]').forEach(row => row.classList.toggle('selected', row.dataset.amsProfileOption === profileNameInput.value));
+    };
+    profileNameInput?.addEventListener('change', applyProfileName);
+    profileNameInput?.addEventListener('input', () => {
+      const q = profileNameInput.value.trim().toLowerCase();
+      body.querySelectorAll('[data-ams-profile-option]').forEach(row => {
+        row.hidden = q && !(row.dataset.search || '').includes(q);
+      });
+    });
+    body.querySelectorAll('[data-ams-profile-option]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        profileNameInput.value = btn.dataset.amsProfileOption || '';
+        if (profileEnableInput) profileEnableInput.checked = true;
+        applyProfileName();
+      });
     });
 
     body.querySelectorAll('[data-slot-spool-id]').forEach(btn => {
