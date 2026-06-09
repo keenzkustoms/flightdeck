@@ -2,13 +2,16 @@
 
 Latest GitHub/Pi state:
 - Branch: main
-- Latest commit: current HEAD after this handoff (`Add setup diagnostics download`)
+- Latest commit: current HEAD after this handoff (`Update session handoff for support bundle`)
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
-- Refresh cachebust currently: ?cachebust=415 / style.css?v=340
+- Refresh cachebust currently: ?cachebust=416 / style.css?v=341
 
 Recent work:
+- Setup `Download logs` now opens a support-bundle form before downloading the zip. The form captures optional name/email plus problem, expected outcome, and notes, then POSTs to `/api/setup/logs/support`; the generated `flightdeck-support-*.zip` includes both `support-request.txt` and `support-request.json` alongside the existing redacted diagnostics. The old `/api/setup/logs/download` quick zip remains available from inside the modal. Demo mode stubs both log endpoints, and static cache bumped to `app.js?v=416` / `style.css?v=341`; backend restart required for the new POST endpoint.
+  - Verification: `node --check app/static/app.js` passed; `python -m py_compile app/main.py` and `.venv/Scripts/python.exe -m py_compile app/main.py` passed with the usual Windows embedded-Python prefix warning. Local venv smoke test generated a support zip containing `support-request.txt` and `support-request.json`. Local browser smoke test on `http://127.0.0.1:8766/#/settings/setup` opened the support modal and submitted the form; the in-app browser cannot save downloads but the modal closed and showed the success toast after the POST.
+  - Deploy note: GitHub was pushed and the Pi repo fast-forwarded to commit `c667373` via `/api/update`; updater reported `restart_required: true`, so run `sudo systemctl restart flightdeck` before testing the support-bundle form on the live Pi.
 - Setup now has a `Download logs` support button in Version & Updates. It downloads a generated diagnostic zip from `/api/setup/logs/download` containing setup health, instance/version metadata, redacted settings/config/environment, recent decisions/notifications, recent local log tails, git status/log, ffmpeg/python info, and systemd/journal/process details where available. Secret-like keys are redacted and log/config files are capped to recent tails. Static cache bumped to `app.js?v=415` and `style.css?v=340`; backend restart required for the new endpoint.
   - Verification: `node --check app/static/app.js` passed; `python -m py_compile app/main.py` and `.venv/Scripts/python.exe -m py_compile app/main.py` passed with the usual Windows embedded-Python prefix warning. Local venv smoke test generated a diagnostic zip containing setup health, redacted settings, recent decisions, recent notifications, redacted printer config, logs, and command outputs.
   - Deploy note: GitHub was pushed and the Pi repo fast-forwarded to commit `e402e3e` via `/api/update`; updater reported `restart_required: true`, so run `sudo systemctl restart flightdeck` before testing the download button.
