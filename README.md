@@ -406,6 +406,14 @@ If the slicer model has no geometry assigned to a colour, the send dialog may le
 
 ---
 
+## Support Flightdeck
+
+Flightdeck is open-source and built from a real mixed-printer workshop. If it helps your fleet, you can support testing hardware, filament, parts, hosting, and the development time behind new features:
+
+[Support Flightdeck on Ko-fi](https://ko-fi.com/flightdeck3dprinters)
+
+---
+
 ## Roadmap
 
 - [x] Pi 5 host commissioned, SSH-hardened, NVMe-backed
