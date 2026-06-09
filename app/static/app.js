@@ -11959,7 +11959,7 @@ function _slotDoctorState(spool, report) {
 
 function _slotCandidateScore(spool, report) {
   if (!report || report.empty) return 9999;
-  if (_slotReportIsGeneric(report)) {
+  if (_slotReportIsLowConfidence(report)) {
     const mat = _normMat(`${spool.material || ''}${spool.subtype ? ' ' + spool.subtype : ''}`);
     const reported = _normMat(_slotReportedMaterial(report));
     const matPenalty = reported && mat && (mat.includes(reported) || reported.includes(mat)) ? 0 : 250;
@@ -11976,6 +11976,17 @@ function _slotReportIsGeneric(report) {
   if (!report || report.empty) return false;
   const text = [report.brand, report.profile_name, report.profile_id].filter(Boolean).join(' ');
   return _isGenericProfile(report.brand) || _isGenericProfile(report.profile_name) || /\bGFL99\b/i.test(text);
+}
+
+function _slotReportIsUnknownLoaded(report) {
+  if (!report || report.empty) return false;
+  return !String(_slotReportedMaterial(report) || '').trim()
+    && !String(report.color || '').trim()
+    && !String(report.brand || report.profile_name || report.profile_id || '').trim();
+}
+
+function _slotReportIsLowConfidence(report) {
+  return _slotReportIsGeneric(report) || _slotReportIsUnknownLoaded(report);
 }
 
 function _slotReport(printer, slotIndex) {
@@ -12030,7 +12041,7 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
       s.location_printer_id === printerId && Number(s.location_slot) === Number(slotIndex) && !s.archived_at
     );
     const report = _slotReport(printer, slotIndex);
-    const lowConfidenceGeneric = !current && _slotReportIsGeneric(report);
+    const lowConfidenceReport = !current && _slotReportIsLowConfidence(report);
     const mismatch = _slotMismatch(current, report);
     const doctor = _slotDoctorState(current, report);
     const candidates = spools
@@ -12041,7 +12052,7 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
         (a.material || '').localeCompare(b.material || '') ||
         (a.color_name || '').localeCompare(b.color_name || '')
       );
-    const bestCandidate = report && !report.empty && !lowConfidenceGeneric ? candidates.find(s => _slotCandidateScore(s, report) < 320) : null;
+    const bestCandidate = report && !report.empty && !lowConfidenceReport ? candidates.find(s => _slotCandidateScore(s, report) < 320) : null;
     const reportProfile = report ? (_slotProfileLabel(report) || 'Loaded filament') : 'No report';
     const reportColour = report?.empty ? 'Empty' : (report?.color || 'Unknown');
     const reportMaterial = report?.empty ? 'Empty' : (_slotReportedMaterial(report) || 'Unknown');
@@ -12074,11 +12085,11 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
         <button type="button" class="spool-action-btn spool-action-label" data-slot-spool-id="${bestCandidate.id}">Assign suggested spool</button>
       </div>`
       : '';
-    const genericWarningHtml = lowConfidenceGeneric ? `
+    const genericWarningHtml = lowConfidenceReport ? `
       <div class="slot-warning">
-        Printer is reporting a generic Bambu profile, so the stored colour may be stale. Choose the physical shelf spool; assigning it will overwrite the AMS slot profile.
+        Printer is reporting a generic or incomplete Bambu profile, so the stored colour may be stale or missing. Choose the physical shelf spool; assigning it will overwrite the AMS slot profile.
       </div>` : '';
-    const matchCount = lowConfidenceGeneric ? 0 : candidates.filter(s => _slotCandidateScore(s, report) < 320).length;
+    const matchCount = lowConfidenceReport ? 0 : candidates.filter(s => _slotCandidateScore(s, report) < 320).length;
     const locationCounts = new Map();
     for (const s of candidates) {
       const key = String(s.storage_location_id || '');
@@ -12092,15 +12103,15 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
     const pickerFilters = candidates.length ? `
       <div class="slot-filter-chips" role="group" aria-label="Filter stored spools">
         <button type="button" class="slot-filter-chip active" data-slot-filter="all">All <span>${candidates.length}</span></button>
-        ${report && !report.empty && !lowConfidenceGeneric ? `<button type="button" class="slot-filter-chip" data-slot-filter="match">Matches <span>${matchCount}</span></button>` : ''}
+        ${report && !report.empty && !lowConfidenceReport ? `<button type="button" class="slot-filter-chip" data-slot-filter="match">Matches <span>${matchCount}</span></button>` : ''}
         ${locationFilters.map(loc => `<button type="button" class="slot-filter-chip" data-slot-filter="loc:${esc(loc.id)}">${esc(loc.name)} <span>${loc.count}</span></button>`).join('')}
       </div>` : '';
     const pickerRows = candidates.length ? candidates.map(s => {
       const pct = s.label_weight_g > 0 ? Math.round(s.remaining_g * 100 / s.label_weight_g) : 0;
       const loc = _spoolStorageLocationName(s.storage_location_id);
       const score = _slotCandidateScore(s, report);
-      const suggested = !lowConfidenceGeneric && score < 96;
-      const nearMatch = !lowConfidenceGeneric && !suggested && score < 320;
+      const suggested = !lowConfidenceReport && score < 96;
+      const nearMatch = !lowConfidenceReport && !suggested && score < 320;
       const homeShelf = s.home_storage_location_id && String(s.home_storage_location_id) === String(s.storage_location_id);
       const badges = [
         suggested ? 'Suggested' : '',
