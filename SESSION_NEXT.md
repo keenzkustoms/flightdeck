@@ -2,13 +2,16 @@
 
 Latest GitHub/Pi state:
 - Branch: main
-- Latest commit: current HEAD after this handoff (`Update handoff for printer setup model presets`)
+- Latest commit: current HEAD after this handoff (`Update handoff for Bambu model preset additions`)
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
-- Refresh cachebust currently: ?cachebust=422 / style.css?v=342
+- Refresh cachebust currently: ?cachebust=423 / style.css?v=342
 
 Recent work:
+- Bambu add-printer model presets were expanded after review. The dropdown now includes `H2C`, `P2S`, and `X2D` alongside the existing H2/X1/P1/A1 models, with build-volume defaults for the future exclude-object/bed-map flow. Static cache bumped to `app.js?v=423`.
+  - Verification: `node --check app/static/app.js` passed.
+  - Deploy note: frontend/static-only; hard refresh browsers after update.
 - Add Printer now starts with a real `Printer` family dropdown instead of exposing protocol as the first mental model. The first flow is `Bambu -> Model Name`, with model presets for Bambu, Voron/Klipper, Snapmaker, Other Moonraker, and a tucked-away Simulated option for demo/dev use. Model selection fills sensible protocol/icon/camera defaults while leaving `Custom Name` as the user's shop nickname.
   - Printer config now carries optional `build_volume: {x, y, z}` in mm and `printers.yaml.example` shows the new field. The add-printer model dropdown auto-fills editable Build Plate dimensions because exclude-object/bed-map logic will need real plate size later. Current defaults include common Bambu sizes such as H2D `350x320x325`, X/P/A-series `256x256x256`, A1 mini `180x180x180`, plus common Voron presets.
   - Verification: `node --check app/static/app.js` passed; `python -m py_compile app/printer_config.py app/main.py` passed with the usual Windows embedded-Python prefix warning; venv smoke test confirmed `PrinterEntry` preserves `build_volume`.

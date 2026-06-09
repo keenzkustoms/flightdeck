@@ -9481,7 +9481,7 @@ const _PRINTER_SETUP_FAMILIES = {
     icon: 'bambu',
     idPlaceholder: 'h2d',
     customPlaceholder: 'BigBoy',
-    models: ['H2D', 'H2S', 'X1C', 'X1E', 'P1S', 'P1P', 'A1', 'A1 mini', 'Custom Bambu'],
+    models: ['H2D', 'H2C', 'H2S', 'X2D', 'X1C', 'X1E', 'P2S', 'P1S', 'P1P', 'A1', 'A1 mini', 'Custom Bambu'],
   },
   voron: {
     label: 'Voron / Klipper',
@@ -9520,9 +9520,12 @@ const _PRINTER_SETUP_FAMILIES = {
 const _CUSTOM_MODEL_RE = /custom|other/i;
 const _PRINTER_MODEL_BUILD_VOLUME = {
   'H2D': { x: 350, y: 320, z: 325 },
+  'H2C': { x: 350, y: 320, z: 325 },
   'H2S': { x: 340, y: 320, z: 340 },
+  'X2D': { x: 256, y: 256, z: 256 },
   'X1C': { x: 256, y: 256, z: 256 },
   'X1E': { x: 256, y: 256, z: 256 },
+  'P2S': { x: 256, y: 256, z: 256 },
   'P1S': { x: 256, y: 256, z: 256 },
   'P1P': { x: 256, y: 256, z: 256 },
   'A1': { x: 256, y: 256, z: 256 },
