@@ -4321,11 +4321,21 @@ class SpoolUpdate(BaseModel):
     empty_spool_weight_g: Optional[float] = None
     notes: Optional[str] = None
 
+class AmsSlotProfileOverride(BaseModel):
+    profile_name: Optional[str] = None
+    tray_type: Optional[str] = None
+    tray_info_idx: Optional[str] = None
+    brand: Optional[str] = None
+    color: Optional[str] = None
+    nozzle_temp_min: Optional[int] = None
+    nozzle_temp_max: Optional[int] = None
+
 class SpoolMove(BaseModel):
     printer_id: Optional[str] = None
     slot: Optional[int] = None
     storage_location_id: Optional[int] = None
     replace_existing: bool = False
+    ams_profile: Optional[AmsSlotProfileOverride] = None
 
 class SpoolTrustPrinter(BaseModel):
     printer_id: str
@@ -4738,7 +4748,8 @@ async def move_spool(spool_id: int, body: SpoolMove):
             )
     if body.printer_id and body.slot is not None:
         spool = db.get_spool(spool_id)
-        ams_sync = await _sync_bambu_ams_slot(body.printer_id, body.slot, spool)
+        profile_override = body.ams_profile.model_dump(exclude_none=True) if body.ams_profile else None
+        ams_sync = await _sync_bambu_ams_slot(body.printer_id, body.slot, spool, profile_override)
     return {
         "ok": True,
         "ams_sync": ams_sync,
@@ -4792,7 +4803,12 @@ async def trust_printer_spool(spool_id: int, body: SpoolTrustPrinter):
     return {"ok": True, "updated": fields}
 
 
-async def _sync_bambu_ams_slot(printer_id: str, slot: int, spool: Optional[dict]) -> Optional[bool]:
+async def _sync_bambu_ams_slot(
+    printer_id: str,
+    slot: int,
+    spool: Optional[dict],
+    profile_override: Optional[dict] = None,
+) -> Optional[bool]:
     for p in _bambu:
         if p.id != printer_id:
             continue
@@ -4820,10 +4836,12 @@ async def _sync_bambu_ams_slot(printer_id: str, slot: int, spool: Optional[dict]
             if clear_first:
                 await asyncio.to_thread(p.set_ams_slot_filament, slot, None)
                 await asyncio.sleep(3)
-            ok = await asyncio.to_thread(p.set_ams_slot_filament, slot, spool)
+            ok = await asyncio.to_thread(p.set_ams_slot_filament, slot, spool, profile_override)
             action = "ams_slot_synced" if spool else "ams_slot_cleared"
             target = f"{printer_id}:{slot}"
             detail = f"{target} {'spool #' + str(spool['id']) if spool else 'empty'}"
+            if profile_override and spool:
+                detail += f" profile={profile_override.get('profile_name') or profile_override.get('tray_type') or 'custom'}"
             if clear_first:
                 detail += " after clearing stale printer profile"
             db.log_decision(printer_id, action, detail)

@@ -698,7 +698,7 @@ class BambuPrinter:
         if not ok_any:
             raise RuntimeError(f"Bambu light command failed: {mode}")
 
-    def set_ams_slot_filament(self, slot: int, spool: Optional[dict]) -> bool:
+    def set_ams_slot_filament(self, slot: int, spool: Optional[dict], profile_override: Optional[dict] = None) -> bool:
         ams_id, tray_id = _split_ams_slot(slot)
         if spool is None:
             return self._printer.mqtt_client._PrinterMQTTClient__publish_command({
@@ -715,6 +715,10 @@ class BambuPrinter:
                     "tray_id_name": "",
                 }
             })
+
+        if profile_override:
+            payload = _ams_profile_override_payload(spool, profile_override, ams_id, tray_id)
+            return self._printer.mqtt_client._PrinterMQTTClient__publish_command({"print": payload})
 
         color = str(spool.get("color_hex") or "#808080").lstrip("#")[:6]
         if len(color) != 6:
@@ -1383,6 +1387,77 @@ def _ams_filament_setting_payload(spool: dict, color: str, ams_id: int, tray_id:
         "tray_type": alias.get("tray_type") or filament.tray_type,
         "tray_sub_brands": brand,
         "tray_id_name": profile,
+    }
+
+
+_GENERIC_BAMBU_FILAMENT_IDS = {
+    "PLA": "GFL99",
+    "PLA-CF": "GFL98",
+    "PLA SILK": "GFL96",
+    "PLA HIGH SPEED": "GFL95",
+    "PETG": "GFG99",
+    "PETG HF": "GFG96",
+    "PETG-CF": "GFG98",
+    "PCTG": "GFG97",
+    "ABS": "GFB99",
+    "ASA": "GFB98",
+    "PC": "GFC99",
+    "PA": "GFN99",
+    "PA-CF": "GFN98",
+    "NYLON": "GFN99",
+    "TPU": "GFU99",
+    "PVA": "GFS99",
+    "HIPS": "GFS98",
+    "PE": "GFP99",
+    "PP": "GFP97",
+}
+
+
+def _generic_bambu_filament_id(material: str) -> str:
+    mat = re.sub(r"[^A-Z0-9 +-]+", " ", str(material or "").upper()).strip()
+    mat = re.sub(r"\s+", " ", mat)
+    return (
+        _GENERIC_BAMBU_FILAMENT_IDS.get(mat)
+        or _GENERIC_BAMBU_FILAMENT_IDS.get(mat.replace("+", ""))
+        or _GENERIC_BAMBU_FILAMENT_IDS.get(mat.split(" ")[0].split("-")[0])
+        or "GFL99"
+    )
+
+
+def _ams_profile_override_payload(spool: dict, profile: dict, ams_id: int, tray_id: int) -> dict:
+    fallback = _ams_filament_setting_payload(
+        spool,
+        str(spool.get("color_hex") or "#808080").lstrip("#")[:6].upper(),
+        ams_id,
+        tray_id,
+    )
+    material = str(profile.get("tray_type") or profile.get("material") or fallback.get("tray_type") or "PLA").strip().upper()
+    name = str(profile.get("profile_name") or profile.get("tray_id_name") or fallback.get("tray_id_name") or material).strip()
+    brand = str(profile.get("brand") or profile.get("tray_sub_brands") or "").strip()
+    color = str(profile.get("color") or profile.get("tray_color") or spool.get("color_hex") or "#808080").strip().lstrip("#")[:6]
+    if not re.fullmatch(r"[0-9A-Fa-f]{6}", color):
+        color = str(spool.get("color_hex") or "#808080").lstrip("#")[:6]
+    if not re.fullmatch(r"[0-9A-Fa-f]{6}", color):
+        color = "808080"
+    tray_info_idx = str(profile.get("tray_info_idx") or "").strip()
+    if not tray_info_idx:
+        tray_info_idx = _generic_bambu_filament_id(material)
+    temp_min = _safe_int(profile.get("nozzle_temp_min") or profile.get("temp_min")) or int(fallback.get("nozzle_temp_min") or 0)
+    temp_max = _safe_int(profile.get("nozzle_temp_max") or profile.get("temp_max")) or int(fallback.get("nozzle_temp_max") or 0)
+    if temp_min <= 0 or temp_max <= 0 or temp_max < temp_min:
+        temp_min = int(fallback.get("nozzle_temp_min") or 0)
+        temp_max = int(fallback.get("nozzle_temp_max") or 0)
+    return {
+        "command": "ams_filament_setting",
+        "ams_id": ams_id,
+        "tray_id": tray_id,
+        "tray_info_idx": tray_info_idx,
+        "tray_color": f"{color.upper()}FF",
+        "nozzle_temp_min": temp_min,
+        "nozzle_temp_max": temp_max,
+        "tray_type": material,
+        "tray_sub_brands": brand or name.replace("@", " @").split(" @", 1)[0].strip(),
+        "tray_id_name": name,
     }
 
 

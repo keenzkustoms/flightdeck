@@ -12004,6 +12004,108 @@ function _slotReport(printer, slotIndex) {
   return null;
 }
 
+const _AMS_PROFILE_MATERIALS = ['PLA', 'PETG', 'PCTG', 'ABS', 'ASA', 'TPU', 'PC', 'PA', 'NYLON', 'PVA', 'HIPS', 'PP', 'PET'];
+
+function _amsProfileParts(name, fallbackSpool = null) {
+  const clean = String(name || '').replace(/\s*@.+$/, '').trim();
+  const upper = clean.toUpperCase();
+  for (const mat of _AMS_PROFILE_MATERIALS) {
+    if (new RegExp(`\\b${mat}\\b`, 'i').test(upper)) return { material: mat, profileName: clean || mat };
+  }
+  return {
+    material: String(fallbackSpool?.material || 'PLA').trim().toUpperCase(),
+    profileName: clean || [fallbackSpool?.brand, fallbackSpool?.material, fallbackSpool?.subtype].filter(Boolean).join(' ').trim(),
+  };
+}
+
+function _amsGenericFilamentId(material) {
+  const mat = String(material || '').toUpperCase().replace(/[^A-Z0-9 +.-]+/g, ' ').replace(/\s+/g, ' ').trim();
+  const ids = {
+    PLA: 'GFL99', 'PLA-CF': 'GFL98', 'PLA SILK': 'GFL96', 'PLA HIGH SPEED': 'GFL95',
+    PETG: 'GFG99', 'PETG HF': 'GFG96', 'PETG-CF': 'GFG98', PCTG: 'GFG97',
+    ABS: 'GFB99', ASA: 'GFB98', PC: 'GFC99',
+    PA: 'GFN99', 'PA-CF': 'GFN98', NYLON: 'GFN99',
+    TPU: 'GFU99', PVA: 'GFS99', HIPS: 'GFS98', PE: 'GFP99', PP: 'GFP97',
+  };
+  return ids[mat] || ids[mat.replace(/\+$/, '')] || ids[mat.split(/[-\s]/)[0]] || 'GFL99';
+}
+
+function _amsProfileTempRange(material) {
+  const mat = String(material || '').toUpperCase();
+  if (mat.includes('ABS') || mat.includes('ASA')) return { min: 240, max: 280 };
+  if (mat.includes('PETG') || mat.includes('PCTG')) return { min: 220, max: 260 };
+  if (mat.includes('TPU')) return { min: 200, max: 240 };
+  if (mat.includes('PC')) return { min: 260, max: 300 };
+  if (mat.includes('PA') || mat.includes('NYLON')) return { min: 250, max: 290 };
+  return { min: 190, max: 230 };
+}
+
+function _amsSlotProfileRows(profileData, spool, printer) {
+  const rows = _slicerProfileOptions(profileData, 'filament');
+  const material = String(spool?.material || '').toUpperCase();
+  const printerText = [printer?.model_name, printer?.custom_name, printer?.id].filter(Boolean).join(' ');
+  const keywords = _slicerProfileKeywords(printerText);
+  const filtered = rows.filter(row => {
+    const name = String(row.name || '');
+    if (material && !name.toUpperCase().includes(material)) return false;
+    return _slicerProfileScore(row, keywords) > 0 || !/@BBL|@Bambu/i.test(name);
+  });
+  return (filtered.length ? filtered : rows).slice().sort((a, b) => a.name.localeCompare(b.name)).slice(0, 320);
+}
+
+function _amsProfilePanelHtml(current, report, profileData, printer) {
+  if (!current) return '';
+  const fallbackName = [current.brand, current.material, current.subtype].filter(Boolean).join(' ').trim();
+  const reportedName = report && !report.empty ? (report.profile_name || report.brand || '') : '';
+  const initialName = fallbackName || reportedName || current.material || 'PLA';
+  const parsed = _amsProfileParts(initialName, current);
+  const temp = _amsProfileTempRange(parsed.material);
+  const rows = _amsSlotProfileRows(profileData, current, printer);
+  return `
+    <div class="slot-ams-profile">
+      <div class="slot-assign-head">
+        <label class="spool-form-label" for="slot-ams-profile-name">Bambu slot profile</label>
+        <span>Sent by Trust Flightdeck</span>
+      </div>
+      <label class="slot-ams-profile-toggle">
+        <input type="checkbox" id="slot-ams-profile-enabled">
+        <span>Override spool default profile</span>
+      </label>
+      <input id="slot-ams-profile-name" class="spool-form-input" list="slot-ams-profile-options" value="${esc(initialName)}" placeholder="Filament profile">
+      <datalist id="slot-ams-profile-options">
+        ${rows.map(row => `<option value="${esc(row.name)}">${esc(row.vendor || '')}</option>`).join('')}
+      </datalist>
+      <div class="slot-ams-profile-grid">
+        <label><span>Material</span><input class="spool-form-input" id="slot-ams-profile-material" value="${esc(parsed.material)}"></label>
+        <label><span>Colour</span><input class="spool-form-input" id="slot-ams-profile-color" type="color" value="${esc(_normHex(current.color_hex || report?.color || '#808080') || '#808080')}"></label>
+        <label><span>Min</span><input class="spool-form-input" id="slot-ams-profile-temp-min" type="number" value="${temp.min}" min="0" max="350"></label>
+        <label><span>Max</span><input class="spool-form-input" id="slot-ams-profile-temp-max" type="number" value="${temp.max}" min="0" max="350"></label>
+      </div>
+      <div class="slot-return-memory">Flightdeck still treats spool #${esc(current.id)} as the identity. These fields only control the profile and colour written to the Bambu AMS slot.</div>
+    </div>`;
+}
+
+function _slotAmsProfilePayload(container, current) {
+  if (!current) return null;
+  if (!container.querySelector('#slot-ams-profile-enabled')?.checked) return null;
+  const name = container.querySelector('#slot-ams-profile-name')?.value.trim() || '';
+  const parsed = _amsProfileParts(name, current);
+  const material = container.querySelector('#slot-ams-profile-material')?.value.trim().toUpperCase() || parsed.material;
+  const color = container.querySelector('#slot-ams-profile-color')?.value.trim() || current.color_hex || '#808080';
+  const min = parseInt(container.querySelector('#slot-ams-profile-temp-min')?.value || '', 10);
+  const max = parseInt(container.querySelector('#slot-ams-profile-temp-max')?.value || '', 10);
+  const fallback = _amsProfileTempRange(material);
+  return {
+    profile_name: name || parsed.profileName || material,
+    tray_type: material,
+    tray_info_idx: _amsGenericFilamentId(material),
+    brand: current.brand || '',
+    color,
+    nozzle_temp_min: Number.isFinite(min) ? min : fallback.min,
+    nozzle_temp_max: Number.isFinite(max) ? max : fallback.max,
+  };
+}
+
 async function _openSlotEditor(printerId, slotIndex, slotLabel) {
   const printer = _latestPrinters.find(p => p.id === printerId);
   const title = `${printer?.custom_name || printerId} · ${slotLabel}`;
@@ -12031,10 +12133,12 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
   overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
 
   async function load() {
-    const [spools, locations] = await Promise.all([
+    const [spools, locations, profileData] = await Promise.all([
       fetch('/api/spools').then(r => r.json()).catch(() => []),
       fetch('/api/spool-locations').then(r => r.json()).catch(() => []),
+      fetch('/api/slicer/profiles').then(r => r.json()).catch(() => null),
     ]);
+    if (profileData) _slicerProfileData = profileData;
     _allSpools = spools;
     _spoolLocations = locations;
     const current = spools.find(s =>
@@ -12179,7 +12283,8 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
             <select class="slot-clear-location" data-slot-clear-location>${locationOptions}</select>
             <button class="spool-action-btn spool-action-danger" data-slot-clear="${current.id}">Return spool</button>
           </div>
-          ${returnHelp ? `<div class="slot-return-memory">${esc(returnHelp)}</div>` : ''}` : ''}
+          ${returnHelp ? `<div class="slot-return-memory">${esc(returnHelp)}</div>` : ''}
+          ${_amsProfilePanelHtml(current, report, profileData, printer)}` : ''}
       </div>
       <div class="slot-assign">
         <div class="slot-assign-head">
@@ -12190,6 +12295,22 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
         <input id="slot-spool-filter" class="spool-form-input" type="search" placeholder="Filter by location, material, brand, colour..."${candidates.length ? '' : ' disabled'}>
         <div class="slot-spool-picker">${pickerRows}</div>
       </div>`;
+
+    const profileNameInput = body.querySelector('#slot-ams-profile-name');
+    const profileEnableInput = body.querySelector('#slot-ams-profile-enabled');
+    body.querySelectorAll('#slot-ams-profile-name, #slot-ams-profile-material, #slot-ams-profile-color, #slot-ams-profile-temp-min, #slot-ams-profile-temp-max').forEach(input => {
+      input.addEventListener('input', () => { if (profileEnableInput) profileEnableInput.checked = true; });
+    });
+    profileNameInput?.addEventListener('change', () => {
+      const parsed = _amsProfileParts(profileNameInput.value, current);
+      const materialInput = body.querySelector('#slot-ams-profile-material');
+      const minInput = body.querySelector('#slot-ams-profile-temp-min');
+      const maxInput = body.querySelector('#slot-ams-profile-temp-max');
+      const temp = _amsProfileTempRange(parsed.material);
+      if (materialInput) materialInput.value = parsed.material;
+      if (minInput) minInput.value = temp.min;
+      if (maxInput) maxInput.value = temp.max;
+    });
 
     body.querySelectorAll('[data-slot-spool-id]').forEach(btn => {
       btn.addEventListener('click', async () => {
@@ -12223,10 +12344,11 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
       const old = btn.textContent;
       btn.disabled = true;
       btn.textContent = 'Syncing';
+      const amsProfile = _slotAmsProfilePayload(body, current);
       const r = await fetch(`/api/spools/${id}/move`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ printer_id: printerId, slot: Number(slotIndex) }),
+        body: JSON.stringify({ printer_id: printerId, slot: Number(slotIndex), ams_profile: amsProfile }),
       });
       if (!r.ok) showToast('AMS sync failed', 'Flightdeck could not push this spool to the printer slot.', 'error');
       else _spoolMoveSyncToast(await r.json().catch(() => ({})), printer?.custom_name || printerId, slotLabel);

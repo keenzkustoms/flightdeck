@@ -6619,6 +6619,50 @@ button.live-route-node:hover {
   padding: 0.55rem 0.65rem;
 }
 
+.slot-ams-profile {
+  display: grid;
+  gap: 0.55rem;
+  margin-top: 0.2rem;
+  border: 1px solid rgba(34,197,94,0.24);
+  border-radius: 0.55rem;
+  background: rgba(6,78,59,0.14);
+  padding: 0.75rem;
+}
+
+.slot-ams-profile-grid {
+  display: grid;
+  grid-template-columns: minmax(7rem, 1fr) 4.8rem 4.8rem 4.8rem;
+  gap: 0.5rem;
+}
+
+.slot-ams-profile-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
+.slot-ams-profile-grid label {
+  display: grid;
+  gap: 0.24rem;
+  min-width: 0;
+}
+
+.slot-ams-profile-grid span {
+  color: var(--muted);
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.slot-ams-profile-grid input[type="color"] {
+  min-height: 2.35rem;
+  padding: 0.2rem;
+}
+
 .slot-suggestion {
   display: flex;
   align-items: center;
@@ -6790,6 +6834,9 @@ button.live-route-node:hover {
   .slot-trust-board,
   .slot-facts {
     grid-template-columns: 1fr;
+  }
+  .slot-ams-profile-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(4.4rem, 0.6fr);
   }
 
   .slot-suggestion {
