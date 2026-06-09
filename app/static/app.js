@@ -14247,7 +14247,7 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
               <button type="button" class="spool-inline-btn" id="sm-catalogue-sync">Sync</button>
             </div>
             <div id="sm-catalogue-chips" class="spool-catalogue-chips">
-              ${['PLA','PLA+','PETG','ASA','ABS','TPU','Bambu','Polymaker'].map(v => `<button type="button" data-chip="${v}">${v}</button>`).join('')}
+              ${['PLA','PLA+','PETG','ASA','ABS','TPU','Siddament','Bambu','Polymaker'].map(v => `<button type="button" data-chip="${v}">${v}</button>`).join('')}
             </div>
             <input id="sm-catalogue-search" class="spool-form-input" type="search" placeholder="Search brand, material, colour...">
             <div id="sm-catalogue-picked" class="spool-catalogue-picked hidden"></div>
@@ -14578,6 +14578,12 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
     return null;
   }
 
+  function catalogueSourceLabel(source) {
+    if (source === 'siddament') return 'Siddament';
+    if (source === 'open_filament_database') return 'Open Filament Database';
+    return source ? String(source).replaceAll('_', ' ') : 'Filament catalogue';
+  }
+
   function applyCatalogueEntry(item) {
     const material = String(item.material || '').toUpperCase();
     const brand = item.brand || '';
@@ -14598,7 +14604,7 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
     catalogueResults.classList.add('hidden');
     cataloguePicked.innerHTML = `
       <span class="spool-catalogue-swatch" style="background:${item.color_hex || '#808080'}"></span>
-      <span><b>${esc(item.color_name || 'Colour')}</b><small>${esc(brand)} · ${esc(material)}${item.subtype ? ` · ${esc(item.subtype)}` : ''}${item.filament_weight_g ? ` · ${Math.round(item.filament_weight_g)}g` : ''}</small><em>Catalogue match applied · editable before saving</em></span>
+      <span><b>${esc(item.color_name || 'Colour')}</b><small>${esc(brand)} · ${esc(material)}${item.subtype ? ` · ${esc(item.subtype)}` : ''}${item.filament_weight_g ? ` · ${Math.round(item.filament_weight_g)}g` : ''}</small><em>${esc(catalogueSourceLabel(item.source))} · editable before saving</em></span>
     `;
     cataloguePicked.classList.remove('hidden');
     catalogueSearch.value = `${brand} ${material} ${item.color_name || ''}`.trim();
@@ -14621,7 +14627,7 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
     catalogueResults.innerHTML = `<div class="spool-catalogue-hint">Showing ${rows.length} matches. Add material or colour to narrow.</div><div class="spool-catalogue-grid">` + rows.map((item, idx) => `
       <button type="button" class="spool-catalogue-result" data-idx="${idx}">
         <span class="spool-catalogue-swatch" style="background:${item.color_hex || '#808080'}"></span>
-        <span><b>${esc(item.color_name || 'Colour')}</b><small>${esc(item.brand || '')} · ${esc(item.material || '')}${item.subtype ? ` · ${esc(item.subtype)}` : ''}${item.filament_weight_g ? ` · ${Math.round(item.filament_weight_g)}g` : ''}</small></span>
+        <span><b>${esc(item.color_name || 'Colour')}</b><small>${esc(item.brand || '')} · ${esc(item.material || '')}${item.subtype ? ` · ${esc(item.subtype)}` : ''}${item.filament_weight_g ? ` · ${Math.round(item.filament_weight_g)}g` : ''} · ${esc(catalogueSourceLabel(item.source))}</small></span>
       </button>
     `).join('') + '</div>';
     catalogueResults.classList.remove('hidden');

@@ -405,7 +405,7 @@
       ],
     });
     if (path === '/api/filament/catalog/search') return jsonResponse({ items: [] });
-    if (path === '/api/filament/catalog/sync') return jsonResponse({ ok: true, demo: true });
+    if (path === '/api/filament/catalog/sync') return jsonResponse({ ok: true, demo: true, imported: 12, results: [{ source: 'siddament', imported: 12 }], errors: [] });
     if (path === '/api/files') return jsonResponse(filesDemo());
     if (path === '/api/files/reprints') return jsonResponse([]);
     if (path === '/api/files/queue' || path === '/api/files/library/copy') return jsonResponse({ ok: true, demo: true });

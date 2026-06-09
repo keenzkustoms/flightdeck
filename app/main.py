@@ -4604,6 +4604,69 @@ OPEN_FILAMENT_CSV_BASES = [
     "https://api.openfilamentdatabase.org/csv",
     "https://openfilamentcollective.github.io/open-filament-database/csv",
 ]
+SIDDAMENT_PRODUCTS_URL = "https://siddament.com.au/products.json"
+SIDDAMENT_PRODUCT_BASE_URL = "https://siddament.com.au/products"
+SIDDAMENT_FILAMENT_TYPES = {
+    "PLA": ("PLA", None),
+    "PLA PRO": ("PLA+", "Pro"),
+    "PLA MATTE": ("PLA", "Matte"),
+    "PLA SILK": ("PLA", "Silk"),
+    "PLA SINGLE ROLL": ("PLA", "Single Roll"),
+    "PLA SILK DUAL COLOR": ("PLA", "Silk Dual Colour"),
+    "PLA SILK TRI-COLOR": ("PLA", "Silk Tri Colour"),
+    "PLA RAINBOW": ("PLA", "Rainbow"),
+    "PLA STARLIGHT": ("PLA", "Starlight"),
+    "PLA MARBLE": ("PLA", "Marble"),
+    "PLA LUMINOUS": ("PLA", "Luminous"),
+    "PLA WOODEN": ("PLA", "Wood"),
+    "PLA-CFRP-CF": ("PLA-CF", "Carbon Fibre"),
+    "LW PLA": ("PLA", "LW"),
+    "HTPLA": ("HTPLA", None),
+    "PETG": ("PETG", None),
+    "PETG DUAL COLOR": ("PETG", "Dual Colour"),
+    "PETG SINGLE ROLL": ("PETG", "Single Roll"),
+    "ASA": ("ASA", None),
+    "ABS": ("ABS", None),
+    "ABS PRO": ("ABS", "Pro"),
+    "TPU": ("TPU", None),
+    "TPU 95A": ("TPU", "95A"),
+    "SILK TPU 95A": ("TPU", "Silk 95A"),
+    "SHOEFLEX": ("TPU", "ShoeFlex"),
+    "PCTG": ("PCTG", None),
+    "PC": ("PC", None),
+    "PCCF": ("PC-CF", None),
+    "PA12 CF": ("PA12-CF", None),
+    "PA6 CF": ("PA6-CF", None),
+    "PPA CF": ("PPA-CF", None),
+    "FILAMENT": ("PLA", None),
+}
+SIDDAMENT_NON_FILAMENT_TAGS = {"hidden", "printed-parts", "surcharge"}
+SIDDAMENT_COLOUR_HEX = {
+    "BLACK": "#111111",
+    "WHITE": "#F8FAFC",
+    "PURE WHITE": "#FFFFFF",
+    "GREY": "#808080",
+    "GRAY": "#808080",
+    "SILVER": "#C0C0C0",
+    "RED": "#EF4444",
+    "ORANGE": "#F97316",
+    "YELLOW": "#EAB308",
+    "GOLD": "#B8860B",
+    "GREEN": "#22C55E",
+    "PEAK GREEN": "#8EDD65",
+    "BLUE": "#3B82F6",
+    "NAVY BLUE": "#0F2A44",
+    "PURPLE": "#8B5CF6",
+    "PINK": "#EC4899",
+    "HOT PINK": "#FF4F8B",
+    "BROWN": "#7C4B00",
+    "BEIGE": "#D8C6A5",
+    "NATURAL": "#E7E5DA",
+    "TRANSPARENT": "#DDEEFF",
+    "CLEAR": "#DDEEFF",
+    "CARBON FIBRE": "#202020",
+    "CARBON FIBER": "#202020",
+}
 
 
 def _catalog_float(value: object) -> Optional[float]:
@@ -4631,6 +4694,177 @@ def _catalog_rows(name: str) -> list[dict]:
             last_error = exc
             _app_log.warning("catalogue fetch failed for %s: %s", url, exc)
     raise RuntimeError(f"Could not fetch {name}.csv: {last_error}")
+
+
+def _siddament_tags(product: dict) -> list[str]:
+    tags = product.get("tags") or []
+    if isinstance(tags, str):
+        return [t.strip() for t in tags.split(",") if t.strip()]
+    if isinstance(tags, list):
+        return [str(t).strip() for t in tags if str(t).strip()]
+    return []
+
+
+def _siddament_material(product: dict) -> tuple[Optional[str], Optional[str]]:
+    product_type = str(product.get("product_type") or "").strip().upper()
+    title = str(product.get("title") or "").strip()
+    tags = _siddament_tags(product)
+    if product_type in SIDDAMENT_FILAMENT_TYPES:
+        material, subtype = SIDDAMENT_FILAMENT_TYPES[product_type]
+    else:
+        text = " ".join([product_type, title, " ".join(tags)]).upper()
+        material, subtype = None, None
+        for key in sorted(SIDDAMENT_FILAMENT_TYPES, key=len, reverse=True):
+            if re.search(rf"\b{re.escape(key)}\b", text):
+                material, subtype = SIDDAMENT_FILAMENT_TYPES[key]
+                break
+        if not material:
+            return None, None
+    title_upper = title.upper()
+    if "PLA+" in title_upper or "PLA PLUS" in title_upper:
+        material = "PLA+"
+    if "CARBON FIB" in title_upper and material in {"PLA", "PETG", "ASA", "ABS", "PC"}:
+        subtype = "Carbon Fibre" if not subtype else subtype
+    return material, subtype
+
+
+def _siddament_colour(product: dict) -> tuple[str, str]:
+    title = str(product.get("title") or "").strip()
+    tags = _siddament_tags(product)
+    candidates = tags + [title]
+    for candidate in candidates:
+        upper = str(candidate or "").upper()
+        for name in sorted(SIDDAMENT_COLOUR_HEX, key=len, reverse=True):
+            if re.search(rf"\b{re.escape(name)}\b", upper):
+                label = name.title().replace("Pla", "PLA").replace("Petg", "PETG")
+                return label, SIDDAMENT_COLOUR_HEX[name]
+    cleaned = re.sub(
+        r"\b(PLA\+?|PLA PLUS|PETG|ASA|ABS|TPU|PCTG|PC|PA12|PA6|PPA|CF|CARBON|FIB(?:RE|ER)|MATTE|SILK|PRO|NORMAL|FILAMENT)\b",
+        "",
+        title,
+        flags=re.I,
+    )
+    cleaned = re.sub(r"[-_/]+", " ", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" -")
+    return (cleaned or "Siddament colour"), "#808080"
+
+
+def _siddament_filament_weight(title: str, variant: dict) -> Optional[float]:
+    text = " ".join([title, str(variant.get("title") or ""), str(variant.get("sku") or "")])
+    match = re.search(r"\b(\d+(?:\.\d+)?)\s*kg\b", text, flags=re.I)
+    if match:
+        return float(match.group(1)) * 1000
+    match = re.search(r"\b(\d{3,4})\s*g\b", text, flags=re.I)
+    if match:
+        return float(match.group(1))
+    grams = _catalog_float(variant.get("grams"))
+    if grams:
+        if 2500 <= grams <= 3600:
+            return 3000.0
+        if 1100 <= grams <= 1800:
+            return 1000.0
+        if 650 <= grams <= 950:
+            return 500.0
+    return None
+
+
+def _siddament_subtype(product: dict, material: str, fallback: Optional[str]) -> Optional[str]:
+    title = str(product.get("title") or "").strip()
+    bits = []
+    if fallback:
+        bits.append(fallback)
+    title_upper = title.upper()
+    for label, pattern in [
+        ("Matte", r"\bMATTE\b"),
+        ("Silk", r"\bSILK\b"),
+        ("Carbon Fibre", r"\bCARBON FIB(?:RE|ER)\b|\bCF\b"),
+        ("Glass Fibre", r"\bGLASS FIB(?:RE|ER)\b|\bGF\b"),
+        ("Dual Colour", r"\bDUAL COLOU?R\b"),
+        ("Tri Colour", r"\bTRI[-\s]?COLOU?R\b"),
+        ("Translucent", r"\bTRANSLUCENT\b|\bTRANSPARENT\b"),
+        ("Wood", r"\bWOOD(?:EN)?\b"),
+        ("Marble", r"\bMARBLE\b"),
+        ("Glow", r"\bGLOW\b|\bLUMINOUS\b"),
+        ("Sparkle", r"\bSPARKLE\b|STARDUST|STARLIGHT"),
+    ]:
+        if re.search(pattern, title_upper) and label not in bits:
+            bits.append(label)
+    if material == "PLA+" and "PLA+" not in bits:
+        bits.insert(0, "PLA+")
+    return " ".join(bits) or None
+
+
+def _sync_siddament_catalog() -> dict:
+    rows: list[dict] = []
+    page = 1
+    headers = {
+        "User-Agent": "Flightdeck/1.0 Siddament filament-catalog-sync",
+        "Accept": "application/json,*/*",
+    }
+    while page <= 20:
+        url = f"{SIDDAMENT_PRODUCTS_URL}?limit=250&page={page}"
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=45) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+        products = payload.get("products") or []
+        if not products:
+            break
+        for product in products:
+            tags = _siddament_tags(product)
+            tag_keys = {t.strip().lower() for t in tags}
+            if tag_keys & SIDDAMENT_NON_FILAMENT_TAGS:
+                continue
+            material, base_subtype = _siddament_material(product)
+            if not material:
+                continue
+            title = str(product.get("title") or "").strip()
+            colour_name, colour_hex = _siddament_colour(product)
+            subtype = _siddament_subtype(product, material, base_subtype)
+            product_url = f"{SIDDAMENT_PRODUCT_BASE_URL}/{product.get('handle')}" if product.get("handle") else ""
+            variants = product.get("variants") or [{}]
+            for variant in variants:
+                if variant.get("requires_shipping") is False:
+                    continue
+                filament_weight = _siddament_filament_weight(title, variant)
+                gross_weight = _catalog_float(variant.get("grams"))
+                tare = None
+                if gross_weight and filament_weight and gross_weight > filament_weight:
+                    tare = round(gross_weight - filament_weight, 1)
+                variant_title = str(variant.get("title") or "").strip()
+                row_colour = colour_name
+                if variant_title and variant_title.lower() != "default title":
+                    row_colour = f"{colour_name} {variant_title}".strip()
+                traits = {
+                    "source": "Siddament Shopify products.json",
+                    "product_url": product_url,
+                    "sku": variant.get("sku") or "",
+                    "barcode": variant.get("barcode") or "",
+                    "price_aud": variant.get("price"),
+                    "available": bool(variant.get("available")),
+                    "product_type": product.get("product_type") or "",
+                    "tags": tags,
+                    "gross_weight_g": gross_weight,
+                    "shop_updated_at": product.get("updated_at") or variant.get("updated_at") or "",
+                }
+                rows.append({
+                    "source_variant_id": str(variant.get("id") or product.get("id") or ""),
+                    "source_filament_id": str(product.get("id") or ""),
+                    "brand": "Siddament",
+                    "material": material,
+                    "product": title,
+                    "subtype": subtype,
+                    "color_name": row_colour,
+                    "color_hex": colour_hex,
+                    "filament_weight_g": filament_weight,
+                    "empty_spool_weight_g": tare,
+                    "diameter": 1.75,
+                    "traits": json.dumps(traits, sort_keys=True),
+                    "discontinued": (not bool(variant.get("available", True))) or ("discontinued" in tag_keys),
+                })
+        page += 1
+    count = db.replace_filament_catalog(rows, source="siddament")
+    db.log_decision("system", "filament_catalog_synced", f"Siddament rows imported: {count}")
+    return {"ok": True, "imported": count, **db.get_filament_catalog_status("siddament")}
 
 
 def _sync_open_filament_catalog() -> dict:
@@ -4685,18 +4919,49 @@ async def get_filament_costs():
 
 
 @app.get("/api/filament/catalog/status")
-async def get_filament_catalog_status():
-    return db.get_filament_catalog_status()
+async def get_filament_catalog_status(source: str = "open_filament_database"):
+    if source == "all":
+        return {
+            "sources": [
+                db.get_filament_catalog_status("open_filament_database"),
+                db.get_filament_catalog_status("siddament"),
+            ]
+        }
+    return db.get_filament_catalog_status(source)
 
 
 @app.post("/api/filament/catalog/sync")
-async def sync_filament_catalog():
-    try:
-        return await asyncio.to_thread(_sync_open_filament_catalog)
-    except Exception as exc:
-        _app_log.exception("filament catalog sync failed")
-        _notify("warn", "Filament catalogue sync failed", str(exc), link="#/settings/filament")
-        raise HTTPException(status_code=502, detail=f"Filament catalogue sync failed: {exc}")
+async def sync_filament_catalog(source: str = "all"):
+    source = (source or "all").strip().lower()
+    syncers = {
+        "open_filament_database": _sync_open_filament_catalog,
+        "ofd": _sync_open_filament_catalog,
+        "siddament": _sync_siddament_catalog,
+    }
+    if source not in {"all", *syncers.keys()}:
+        raise HTTPException(status_code=422, detail=f"Unknown catalogue source: {source}")
+    targets = [("open_filament_database", _sync_open_filament_catalog), ("siddament", _sync_siddament_catalog)]
+    if source != "all":
+        target_name = "open_filament_database" if source == "ofd" else source
+        targets = [(target_name, syncers[source])]
+    results: list[dict] = []
+    errors: list[dict] = []
+    for name, syncer in targets:
+        try:
+            result = await asyncio.to_thread(syncer)
+            result["source"] = name
+            results.append(result)
+        except Exception as exc:
+            _app_log.exception("%s filament catalog sync failed", name)
+            errors.append({"source": name, "error": str(exc)})
+    if not results:
+        detail = "; ".join(f"{e['source']}: {e['error']}" for e in errors) or "Catalogue sync failed"
+        _notify("warn", "Filament catalogue sync failed", detail, link="#/settings/filament")
+        raise HTTPException(status_code=502, detail=f"Filament catalogue sync failed: {detail}")
+    imported = sum(int(r.get("imported") or 0) for r in results)
+    if errors:
+        _notify("warn", "Filament catalogue partially synced", "; ".join(f"{e['source']}: {e['error']}" for e in errors), link="#/spools?view=catalogue")
+    return {"ok": not errors, "imported": imported, "results": results, "errors": errors}
 
 
 @app.get("/api/filament/catalog/search")

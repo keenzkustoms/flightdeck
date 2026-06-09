@@ -1757,7 +1757,7 @@ def replace_filament_catalog(rows: list[dict], source: str = "open_filament_data
                (source, source_variant_id, source_filament_id, brand, material, product,
                 subtype, color_name, color_hex, filament_weight_g, empty_spool_weight_g,
                 diameter, traits, discontinued, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             [
                 (
                     source,

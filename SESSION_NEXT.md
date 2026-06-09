@@ -6,9 +6,13 @@ Latest GitHub/Pi state:
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
-- Refresh cachebust currently: ?cachebust=424 / style.css?v=342
+- Refresh cachebust currently: ?cachebust=425 / style.css?v=342
 
 Recent work:
+- Filament catalogue sync now imports Siddament as a first-class source from the public Siddament Shopify product feed. The existing Add Spool `Sync` button now syncs Open Filament Database plus Siddament by default; `POST /api/filament/catalog/sync?source=siddament` can run just Siddament while testing. Siddament rows are stored under source `siddament` with brand `Siddament`, inferred material/subtype/colour, 1.75mm diameter, inferred filament weight/tare from product/variant/gross weight, and factual traceability in `traits` including SKU/barcode, price, availability, product URL, product type, tags, gross weight, and shop update time. Add Spool catalogue chips now include `Siddament`, and result cards show the catalogue source label. Static cache bumped to `app.js?v=425`.
+  - Also fixed the catalogue insert SQL placeholder count in `replace_filament_catalog`; it had 16 placeholders for 15 columns and would break catalogue sync paths.
+  - Verification: `python -m py_compile app/main.py app/db.py` passed with the usual Windows embedded-Python prefix warning; `node --check app/static/app.js` passed; local TestClient `POST /api/filament/catalog/sync?source=siddament` returned 200 and imported 1,259 Siddament rows; search for `siddament asa black` returned Siddament ASA rows with SKU/source URL traits. `peak green` is currently found from Open Filament Database/eSUN, not Siddament's current public product titles/tags.
+  - Deploy note: backend restart required for the new sync source and DB insert fix; hard refresh browsers to pick up `app.js?v=425`.
 - Add Printer naming labels were clarified after user feedback: the URL-safe machine key is now labelled `Internal ID (no spaces)`, while the user-facing spaced field is labelled `Printer Name (spaces ok)`. Validation now says `Printer name is required` instead of `Custom name is required`. Internal IDs were deliberately left unchanged because routes/API paths/spool locations depend on them staying URL-safe. Static cache bumped to `app.js?v=424`.
   - Verification: `node --check app/static/app.js` passed.
   - Deploy note: frontend/static-only; hard refresh browsers after update.
