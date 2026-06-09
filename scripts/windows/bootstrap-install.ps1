@@ -78,6 +78,25 @@ function Unblock-FlightdeckFiles {
         ForEach-Object { Unblock-File -LiteralPath $_.FullName -ErrorAction SilentlyContinue }
 }
 
+function Get-FfmpegCompatibility {
+    param([string]$FfmpegPath)
+    if (-not $FfmpegPath) {
+        return @{ Tested = $false; Detail = "ffmpeg not found" }
+    }
+    try {
+        $VersionLine = (& $FfmpegPath -version 2>$null | Select-Object -First 1)
+    } catch {
+        return @{ Tested = $false; Detail = "ffmpeg found but version check failed: $($_.Exception.Message)" }
+    }
+    $Tested = $VersionLine -match "ffmpeg version\s+(5|6|7|8)(\.|\s|-)"
+    $Suffix = if ($Tested) {
+        "tested Flightdeck camera driver family"
+    } else {
+        "untested FFmpeg major version for Flightdeck camera proxy"
+    }
+    return @{ Tested = $Tested; Detail = "$VersionLine ($Suffix)" }
+}
+
 Write-Host "Flightdeck Windows bootstrap"
 Write-Host "App dir: $AppDir"
 
@@ -117,6 +136,13 @@ if (-not $FfmpegPath) {
 }
 if ($FfmpegPath) {
     Write-Host "ffmpeg ready: $FfmpegPath"
+    $FfmpegCompat = Get-FfmpegCompatibility -FfmpegPath $FfmpegPath
+    if ($FfmpegCompat.Tested) {
+        Write-Host $FfmpegCompat.Detail -ForegroundColor Green
+    } else {
+        Write-Host $FfmpegCompat.Detail -ForegroundColor Yellow
+        Write-Host "Flightdeck is tested with Raspberry Pi OS/Debian apt FFmpeg 5.x and Gyan Windows FFmpeg 8.x." -ForegroundColor Yellow
+    }
 } else {
     throw "ffmpeg is required for Bambu camera streams but was not found after install. Install ffmpeg manually, then run this installer again."
 }

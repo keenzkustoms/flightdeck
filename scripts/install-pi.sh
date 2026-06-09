@@ -23,6 +23,17 @@ echo
 echo "Installing system packages..."
 sudo apt update
 sudo apt install -y git python3 python3-venv python3-pip ffmpeg curl
+if command -v ffmpeg >/dev/null 2>&1; then
+  FFMPEG_VERSION="$(ffmpeg -version 2>/dev/null | head -n 1 || true)"
+  FFMPEG_TESTED_RE='ffmpeg version (5|6|7|8)(\.|[[:space:]]|-)'
+  echo "ffmpeg ready: ${FFMPEG_VERSION}"
+  if [[ "${FFMPEG_VERSION}" =~ ${FFMPEG_TESTED_RE} ]]; then
+    echo "ffmpeg compatibility: tested Flightdeck camera driver family"
+  else
+    echo "ffmpeg compatibility: untested FFmpeg major version for Flightdeck camera proxy"
+    echo "Flightdeck is tested with Raspberry Pi OS/Debian apt FFmpeg 5.x and Gyan Windows FFmpeg 8.x."
+  fi
+fi
 
 echo
 if [[ -d "${APP_DIR}/.git" ]]; then

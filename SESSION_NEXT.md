@@ -2,13 +2,17 @@
 
 Latest GitHub/Pi state:
 - Branch: main
-- Latest commit: current HEAD after this handoff (`Update handoff for Fleet Wall camera stills`)
+- Latest commit: current HEAD after this handoff (`Update handoff for FFmpeg camera driver guard`)
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
-- Refresh cachebust currently: ?cachebust=419 / style.css?v=341
+- Refresh cachebust currently: ?cachebust=420 / style.css?v=341
 
 Recent work:
+- FFmpeg is now treated as a tested camera-driver family instead of "whatever newest version happens to be installed". Setup Health now reports `FFmpeg camera driver` and marks Raspberry Pi OS/Debian apt FFmpeg 5.x plus Gyan Windows FFmpeg 8.x as tested; other major versions remain allowed but show as untested/warn for support diagnostics. Windows bootstrap/diagnostics and the Pi installer print the same compatibility message. `INSTALL.md` documents the tested lane so new users do not assume latest FFmpeg is always the safest camera choice.
+  - Fleet Wall still-frame preloader no longer shows the large camera icon/`Waiting for next frame` placeholder before the first real snapshot arrives. It now uses a quiet blank dark frame and swaps to the camera when ready. Static cache bumped to `app.js?v=420`.
+  - Verification: `node --check app/static/app.js` passed; `python -m py_compile app/main.py` passed with the usual Windows embedded-Python prefix warning; PowerShell AST parse passed for `scripts/windows/bootstrap-install.ps1` and `scripts/windows/diagnose-windows.ps1`; normalized `scripts/install-pi.sh` and the staged Git version passed `bash -n`.
+  - Deploy note: backend restart required for the Setup Health FFmpeg check: run `sudo systemctl restart flightdeck` after the Pi pulls it. Hard refresh browsers to pick up `app.js?v=420`.
 - Fleet Wall camera load now uses low-rate still snapshots instead of holding a live MJPEG stream open for every printer tile. This was a narrow port of the useful part of Steve/keenzkustoms' fork idea, not a full merge: Flightdeck now exposes `fleet_url`/`fleet_refresh_ms` camera metadata, adds `/api/camera/{printer_id}/snapshot`, and the Fleet Wall frontend staggers still-frame refreshes around every 3.5s. Live view, printer camera pages, and normal camera stream quality remain unchanged.
   - Bambu snapshot requests use a temporary counted `BambuCameraProxy.snapshot()` client so the shared ffmpeg worker still benefits from the existing idle shutdown/watchdog logic. Deliberately not ported from Steve's fork: the global Bambu proxy downgrade to 640px/2fps/q8, unrelated label-printer changes, or any broad branch merge.
   - GPU/FFmpeg note: browser/GPU acceleration can help display/decoding on Windows, but Flightdeck cannot reliably force camera feeds into AMD VRAM from the web app. Reducing the number of persistent live camera streams is the practical win. FFmpeg is installed through the platform package path (`apt` on Pi, `winget`/Gyan on Windows), so it may trail the newest upstream FFmpeg release; upgrading FFmpeg can be tested separately, but this change reduces Fleet Wall dependence on constant ffmpeg/live streams.

@@ -8009,14 +8009,8 @@ function _fleetWallCameraSrc(cameraId) {
 }
 
 function _fleetWallPlaceholderSrc(cameraId, label) {
-  const safeId = esc(label || cameraId || 'Camera').replace(/&apos;/g, "'").replace(/&quot;/g, '"');
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360">
     <rect width="640" height="360" fill="#050914"/>
-    <rect x="24" y="24" width="592" height="312" rx="18" fill="#0b1120" stroke="#1f3657" stroke-width="2"/>
-    <path d="M244 152 h132 l40 86 H218 z" fill="#1e293b" stroke="#475569" stroke-width="7" stroke-linejoin="round"/>
-    <circle cx="320" cy="196" r="34" fill="#020617" stroke="#64748b" stroke-width="8"/>
-    <text x="320" y="292" fill="#dbeafe" font-family="Segoe UI, Arial, sans-serif" font-size="28" font-weight="800" text-anchor="middle">${safeId}</text>
-    <text x="320" y="320" fill="#93a4bd" font-family="Segoe UI, Arial, sans-serif" font-size="16" text-anchor="middle">Waiting for next frame</text>
   </svg>`;
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }

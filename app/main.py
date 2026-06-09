@@ -3799,6 +3799,46 @@ def _setup_check(
     return {"key": key, "label": label, "ok": ok, "level": level, "detail": detail, "optional": optional}
 
 
+_TESTED_FFMPEG_MAJOR_VERSIONS = {"5", "6", "7", "8"}
+_TESTED_FFMPEG_DETAIL = "Tested with Raspberry Pi OS/Debian apt FFmpeg 5.x and Gyan Windows FFmpeg 8.x"
+
+
+def _ffmpeg_compatibility() -> dict:
+    ffmpeg_path = shutil.which("ffmpeg")
+    if not ffmpeg_path:
+        return {
+            "available": False,
+            "tested": False,
+            "version_line": "",
+            "detail": "ffmpeg not found; Bambu camera streams will not work",
+        }
+    try:
+        proc = subprocess.run(
+            [ffmpeg_path, "-version"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        version_line = (proc.stdout or proc.stderr or "").splitlines()[0].strip()
+    except Exception as exc:
+        return {
+            "available": True,
+            "tested": False,
+            "version_line": "",
+            "detail": f"{ffmpeg_path} found but version check failed: {exc}",
+        }
+    match = re.search(r"ffmpeg version\s+([0-9]+)(?:\.([0-9]+))?", version_line, re.IGNORECASE)
+    major = match.group(1) if match else ""
+    tested = bool(major in _TESTED_FFMPEG_MAJOR_VERSIONS)
+    return {
+        "available": True,
+        "tested": tested,
+        "version_line": version_line,
+        "detail": f"{version_line} ({_TESTED_FFMPEG_DETAIL if tested else 'untested FFmpeg major version for Flightdeck camera proxy'})",
+    }
+
+
 def _is_writable_dir(path: Path) -> bool:
     path.mkdir(parents=True, exist_ok=True)
     probe = path / ".flightdeck-write-test"
@@ -4421,6 +4461,15 @@ async def setup_health():
         camera_workers_ok,
         str(camera_workers.get("detail") or "Unavailable"),
         level="ok" if camera_workers_ok else "warn",
+        optional=True,
+    ))
+    ffmpeg = _ffmpeg_compatibility()
+    checks.append(_setup_check(
+        "ffmpeg",
+        "FFmpeg camera driver",
+        bool(ffmpeg.get("available") and ffmpeg.get("tested")),
+        str(ffmpeg.get("detail") or "Unknown"),
+        level="ok" if ffmpeg.get("tested") else "warn",
         optional=True,
     ))
 

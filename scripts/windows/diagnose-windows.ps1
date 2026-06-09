@@ -34,7 +34,14 @@ Section "ffmpeg"
 $Ffmpeg = Get-Command ffmpeg -ErrorAction SilentlyContinue
 if ($Ffmpeg) {
     Write-Host "ffmpeg: $($Ffmpeg.Source)"
-    ffmpeg -version 2>$null | Select-Object -First 1
+    $FfmpegVersion = ffmpeg -version 2>$null | Select-Object -First 1
+    Write-Host $FfmpegVersion
+    if ($FfmpegVersion -match "ffmpeg version\s+(5|6|7|8)(\.|\s|-)") {
+        Write-Host "ffmpeg compatibility: tested Flightdeck camera driver family" -ForegroundColor Green
+    } else {
+        Write-Host "ffmpeg compatibility: untested FFmpeg major version for Flightdeck camera proxy" -ForegroundColor Yellow
+        Write-Host "Flightdeck is tested with Raspberry Pi OS/Debian apt FFmpeg 5.x and Gyan Windows FFmpeg 8.x." -ForegroundColor Yellow
+    }
 } else {
     Write-Host "ffmpeg not found on PATH" -ForegroundColor Red
 }
