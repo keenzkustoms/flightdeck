@@ -2,7 +2,7 @@
 
 Latest GitHub/Pi state:
 - Branch: main
-- Latest commit: current HEAD after this handoff (`Add Ko-fi support links`)
+- Latest commit: current HEAD after this handoff (`Add setup diagnostics download`)
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
@@ -10,6 +10,8 @@ Latest GitHub/Pi state:
 
 Recent work:
 - Setup now has a `Download logs` support button in Version & Updates. It downloads a generated diagnostic zip from `/api/setup/logs/download` containing setup health, instance/version metadata, redacted settings/config/environment, recent decisions/notifications, recent local log tails, git status/log, ffmpeg/python info, and systemd/journal/process details where available. Secret-like keys are redacted and log/config files are capped to recent tails. Static cache bumped to `app.js?v=415` and `style.css?v=340`; backend restart required for the new endpoint.
+  - Verification: `node --check app/static/app.js` passed; `python -m py_compile app/main.py` and `.venv/Scripts/python.exe -m py_compile app/main.py` passed with the usual Windows embedded-Python prefix warning. Local venv smoke test generated a diagnostic zip containing setup health, redacted settings, recent decisions, recent notifications, redacted printer config, logs, and command outputs.
+  - Deploy note: GitHub was pushed and the Pi repo fast-forwarded to commit `e402e3e` via `/api/update`; updater reported `restart_required: true`, so run `sudo systemctl restart flightdeck` before testing the download button.
 - Added Flightdeck Ko-fi support wiring for `https://ko-fi.com/flightdeck3dprinters`: GitHub funding metadata in `.github/FUNDING.yml`, a restrained README support section, and Ko-fi CTAs on the GitHub Pages site. This is docs/static site only; no app restart required.
   - Deploy note: GitHub was pushed and the Pi repo fast-forwarded to commit `4ce6b5c` via `/api/update`. Updater reported `restart_required: true`, but this change is README/docs/funding metadata only; no Flightdeck service restart is needed for it.
 - AMS Profile Doctor and Slicer settings now use Flightdeck custom profile pickers instead of browser datalist dropdowns. The AMS slot profile override shows a search field with a scrollable Bambuddy-style filament profile list, selected state, material tag, and keeps profile override opt-in. The Slicer defaults printer/process/filament inputs use the same search-and-select popup while preserving the existing Orca profile filtering and defaults save endpoint. Static cache bumped to `app.js?v=414` and `style.css?v=339`; frontend refresh required.
