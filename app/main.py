@@ -3168,6 +3168,8 @@ async def put_setting(key: str, body: SettingUpdate):
 
 _ORCA_PROFILE_VENDORS = ["BBL", "Sovol", "Voron", "Prusa", "Anycubic", "Creality"]
 _ORCA_PROFILE_BASE = "https://raw.githubusercontent.com/OrcaSlicer/OrcaSlicer/main/resources/profiles"
+_ORCA_LOCAL_VENDOR = "Orca Local"
+_ORCA_LOCAL_PROFILE_LIMIT = 20000
 
 
 def _slicer_profile_key(printer_id: str, slot: str) -> str:
@@ -3214,6 +3216,13 @@ def _fetch_orca_profile_vendor(vendor: str) -> dict:
     return _normalise_orca_profile_vendor(vendor, payload)
 
 
+def _profile_name_from_json(payload: dict, source_path: str) -> str:
+    name = str(payload.get("name") or "").strip()
+    if name:
+        return name
+    return Path(source_path).stem.strip()
+
+
 def _profile_bucket_from_json(payload: dict, source_path: str = "") -> Optional[str]:
     text = " ".join(str(payload.get(k) or "") for k in ("type", "preset_type", "inherits", "name")).lower()
     path = source_path.replace("\\", "/").lower()
@@ -3224,6 +3233,97 @@ def _profile_bucket_from_json(payload: dict, source_path: str = "") -> Optional[
     if "machine" in path or "printer" in path or "machine" in text:
         return "machines"
     return None
+
+
+def _profile_relative_path(path: Path, roots: list[Path]) -> str:
+    for root in roots:
+        try:
+            return path.resolve().relative_to(root.resolve()).as_posix()
+        except Exception:
+            continue
+    return path.name
+
+
+def _local_orca_profile_paths(roots: list[Path]) -> list[Path]:
+    out: list[Path] = []
+    seen: set[str] = set()
+    for root in roots:
+        try:
+            iterator = root.rglob("*.json")
+        except Exception:
+            continue
+        for path in iterator:
+            if len(out) >= _ORCA_LOCAL_PROFILE_LIMIT:
+                return out
+            parts = {p.lower() for p in path.parts}
+            if "cache" in parts or "log" in parts:
+                continue
+            key = str(path.resolve()).lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(path)
+    def sort_key(path: Path) -> tuple[int, float, str]:
+        backup = 1 if any(part.lower().startswith("user_backup") for part in path.parts) else 0
+        try:
+            mtime = -path.stat().st_mtime
+        except Exception:
+            mtime = 0.0
+        return (backup, mtime, str(path).lower())
+
+    return sorted(out, key=sort_key)[:_ORCA_LOCAL_PROFILE_LIMIT]
+
+
+def _sync_local_orca_profiles() -> dict:
+    roots = _orca_profile_roots(_orca_executable())
+    payload = {
+        "vendor": _ORCA_LOCAL_VENDOR,
+        "name": _ORCA_LOCAL_VENDOR,
+        "version": None,
+        "source": "Local OrcaSlicer AppData/config profiles",
+        "source_url": "",
+        "machines": [],
+        "machine_models": [],
+        "processes": [],
+        "filaments": [],
+    }
+    seen: dict[str, set[str]] = {key: set() for key in ("machines", "machine_models", "processes", "filaments")}
+    scanned = 0
+    errors = 0
+    for path in _local_orca_profile_paths(roots):
+        scanned += 1
+        try:
+            profile = json.loads(path.read_text(encoding="utf-8-sig"))
+        except Exception:
+            errors += 1
+            continue
+        if not isinstance(profile, dict):
+            continue
+        bucket = _profile_bucket_from_json(profile, str(path))
+        if not bucket:
+            continue
+        name = _profile_name_from_json(profile, str(path))
+        if not name or name.startswith("fdm_") or name in seen[bucket]:
+            continue
+        item = {
+            "name": name,
+            "path": _profile_relative_path(path, roots),
+            "local_path": str(path),
+        }
+        payload[bucket].append(item)
+        seen[bucket].add(name)
+    for key in ("machines", "machine_models", "processes", "filaments"):
+        payload[key] = sorted(payload[key], key=lambda row: row.get("name", "").lower())
+    return {
+        "payload": payload,
+        "scanned": scanned,
+        "errors": errors,
+        "added": {
+            "machines": len(payload["machines"]),
+            "processes": len(payload["processes"]),
+            "filaments": len(payload["filaments"]),
+        },
+    }
 
 
 def _custom_profile_payload() -> dict:
@@ -3256,7 +3356,7 @@ def _custom_profile_payload() -> dict:
 def _add_custom_profile(payload: dict, profile: dict, source_path: str) -> Optional[str]:
     if not isinstance(profile, dict):
         return None
-    name = str(profile.get("name") or Path(source_path).stem).strip()
+    name = _profile_name_from_json(profile, source_path)
     if not name or name.startswith("fdm_"):
         return None
     bucket = _profile_bucket_from_json(profile, source_path)
@@ -3376,11 +3476,18 @@ def _orca_profile_file(profile_name: str, category: str, exe: Path | None = None
     if not name:
         raise HTTPException(status_code=422, detail=f"{category} profile is not set")
     filename = f"{name}.json".lower()
-    for root in _orca_profile_roots(exe):
-        candidates = list(root.glob(f"*/{category}/*.json")) + list(root.glob(f"{category}/*.json"))
-        for path in candidates:
-            if path.name.lower() == filename:
-                return path
+    bucket = {"machine": "machines", "process": "processes", "filament": "filaments"}.get(category)
+    for path in _local_orca_profile_paths(_orca_profile_roots(exe)):
+        if path.name.lower() == filename:
+            return path
+        try:
+            profile = json.loads(path.read_text(encoding="utf-8-sig"))
+        except Exception:
+            continue
+        if _profile_bucket_from_json(profile, str(path)) != bucket:
+            continue
+        if _profile_name_from_json(profile, str(path)).lower() == name.lower():
+            return path
     raise HTTPException(status_code=422, detail=f"Orca {category} profile not found on worker: {name}")
 
 
@@ -3397,8 +3504,15 @@ def _slicer_catalog_profile_blob(profile_name: str, category: str) -> tuple[str,
         for row in vendor.get(bucket) or []:
             if str(row.get("name") or "").strip().lower() != name.lower():
                 continue
+            local_path = str(row.get("local_path") or "").strip()
+            if local_path:
+                path = Path(local_path)
+                if path.exists() and path.is_file():
+                    return path.name, path.read_bytes()
             rel_path = str(row.get("path") or "").strip()
             if not vendor_key or not rel_path:
+                continue
+            if vendor_key == _ORCA_LOCAL_VENDOR:
                 continue
             url = f"{_ORCA_PROFILE_BASE}/{urllib.parse.quote(vendor_key, safe='')}/{urllib.parse.quote(rel_path, safe='/')}"
             try:
@@ -3412,7 +3526,28 @@ def _slicer_catalog_profile_blob(profile_name: str, category: str) -> tuple[str,
     raise HTTPException(status_code=422, detail=f"Orca {category} profile not found in synced catalog: {name}")
 
 
+def _local_catalog_profile_blob(profile_name: str, category: str) -> Optional[tuple[str, bytes]]:
+    name = (profile_name or "").strip()
+    bucket = {"machine": "machines", "process": "processes", "filament": "filaments"}.get(category)
+    if not name or not bucket:
+        return None
+    for vendor in db.get_slicer_profile_vendors():
+        for row in vendor.get(bucket) or []:
+            if str(row.get("name") or "").strip().lower() != name.lower():
+                continue
+            local_path = str(row.get("local_path") or "").strip()
+            if not local_path:
+                continue
+            path = Path(local_path)
+            if path.exists() and path.is_file():
+                return path.name, path.read_bytes()
+    return None
+
+
 def _slicer_profile_blob(profile_name: str, category: str, exe: Path | None = None) -> tuple[str, bytes]:
+    local = _local_catalog_profile_blob(profile_name, category)
+    if local:
+        return local
     try:
         path = _orca_profile_file(profile_name, category, exe)
         return path.name, path.read_bytes()
@@ -3644,8 +3779,6 @@ async def get_slicer_profiles():
 async def sync_slicer_profiles(body: SlicerProfileSyncRequest):
     vendors = [v.strip() for v in (body.vendors or []) if v.strip()] or ["BBL", "Sovol", "Voron", "Prusa", "Anycubic"]
     vendors = [v for v in vendors if v in _ORCA_PROFILE_VENDORS]
-    if not vendors:
-        raise HTTPException(status_code=422, detail="No supported profile vendors selected")
     synced = []
     errors = []
     for vendor in vendors:
@@ -3655,6 +3788,15 @@ async def sync_slicer_profiles(body: SlicerProfileSyncRequest):
             synced.append(vendor)
         except Exception as exc:
             errors.append({"vendor": vendor, "error": str(exc)})
+    try:
+        local = await asyncio.to_thread(_sync_local_orca_profiles)
+        if any(local["added"].values()):
+            db.save_slicer_profile_vendor(_ORCA_LOCAL_VENDOR, local["payload"])
+            synced.append(_ORCA_LOCAL_VENDOR)
+        elif not vendors:
+            errors.append({"vendor": _ORCA_LOCAL_VENDOR, "error": "No local Orca profiles found"})
+    except Exception as exc:
+        errors.append({"vendor": _ORCA_LOCAL_VENDOR, "error": str(exc)})
     if errors and not synced:
         raise HTTPException(status_code=502, detail={"message": "Profile sync failed", "errors": errors})
     return {"ok": True, "synced": synced, "errors": errors, "vendors": db.get_slicer_profile_vendors()}
