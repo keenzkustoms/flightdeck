@@ -201,3 +201,25 @@ class BambuCameraProxy:
             self._clients = max(0, self._clients - 1)
             if self._clients == 0:
                 self._idle_task = asyncio.create_task(self._idle_shutdown())
+
+    async def snapshot(self, timeout: float = 3.0) -> Optional[bytes]:
+        """Return the latest JPEG frame without leaving a permanent stream client."""
+        if self._idle_task:
+            self._idle_task.cancel()
+            self._idle_task = None
+
+        self._clients += 1
+        try:
+            await self._start()
+            deadline = time.monotonic() + max(0.1, timeout)
+            while time.monotonic() < deadline:
+                if self._latest:
+                    return self._latest
+                if not self._proc or self._proc.returncode is not None:
+                    await self._start()
+                await asyncio.sleep(0.1)
+            return self._latest
+        finally:
+            self._clients = max(0, self._clients - 1)
+            if self._clients == 0:
+                self._idle_task = asyncio.create_task(self._idle_shutdown())
