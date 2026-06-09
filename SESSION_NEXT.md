@@ -6,9 +6,12 @@ Latest GitHub/Pi state:
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
-- Refresh cachebust currently: ?cachebust=425 / style.css?v=342
+- Refresh cachebust currently: ?cachebust=426 / style.css?v=343
 
 Recent work:
+- Slicer/AMS profile picker usability was tightened after live Windows feedback. Printer Defaults now has explicit column labels (`Printer/nozzle`, `Process/layer`, `Filament/profile`) so Siddament filament profiles are searched in the right-hand filament field rather than the process field. The slicer profile dropdown now uses a fixed floating menu, opens upward when there is no room below, widens to at least 380px where possible, and shows a useful no-match message instead of collapsing into a tiny strip at the bottom of the page. Profile search now tolerates common Siddament typos/prefixes such as `sydd`, `syd`, `syddament`, and `sidament`; the same matching is used in the AMS Profile Doctor. `Orca Local` profile source pills are highlighted green. Static cache bumped to `app.js?v=426` and `style.css?v=343`.
+  - Verification: `node --check app/static/app.js` and `git diff --check` passed. Browser verification was attempted, but the local dev server at `127.0.0.1:8766` was not running (`ERR_CONNECTION_REFUSED`).
+  - Deploy note: frontend/static-only; hard refresh after update. For local Orca/Siddament profiles to appear, the backend from the previous commit still needs to be restarted and `Setup > Slicer > Sync profiles` run on the Windows instance that has the Orca AppData folder.
 - Orca profile sync now imports local OrcaSlicer AppData/config profiles as an `Orca Local` profile vendor. The scanner recursively reads profile JSONs under the discovered Orca data/profile roots, including nested paths like `AppData/Roaming/OrcaSlicer/user/2780676685/filament/base` and `user_backup-*`, and sorts active user profiles ahead of backup folders. This makes local Siddament filament profiles show in Flightdeck profile pickers after `Setup > Slicer > Sync profiles`.
   - Slicing profile resolution now prefers stored `local_path` entries from the synced profile catalog, so selected local profiles are read directly instead of recursively scanning AppData during each slice. Direct resolution of `Siddament ABS CF Big Parts @Bambu Lab H2D 0.4 nozzle` took ~0.014s in the local smoke test.
   - Orca Cloud note: `https://cloud.orcaslicer.com/app/profiles` redirects to Orca Cloud login in the Codex in-app browser unless that browser session is authenticated. Keep using the local AppData scanner for now; a future cloud sync would need an authenticated/export/API path.

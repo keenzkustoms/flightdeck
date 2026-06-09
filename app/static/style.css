@@ -10886,14 +10886,32 @@ select optgroup {
   padding: 0.22rem 0.55rem;
 }
 
+.slicer-profile-pill-local {
+  border-color: rgba(34,197,94,0.48);
+  background: rgba(22,163,74,0.13);
+  color: #bbf7d0;
+}
+
 .slicer-profile-table {
   display: grid;
   gap: 0.5rem;
 }
 
+.slicer-profile-headings {
+  display: grid;
+  grid-template-columns: minmax(11rem, 0.62fr) repeat(3, minmax(12rem, 1fr)) auto;
+  gap: 0.45rem;
+  color: #93c5fd;
+  font-size: 0.64rem;
+  font-weight: 900;
+  letter-spacing: 0;
+  text-transform: uppercase;
+  padding: 0 0.6rem;
+}
+
 .slicer-profile-row {
   display: grid;
-  grid-template-columns: minmax(10rem, 0.8fr) minmax(9rem, 1fr) minmax(9rem, 1fr) minmax(9rem, 1fr) auto;
+  grid-template-columns: minmax(11rem, 0.62fr) repeat(3, minmax(12rem, 1fr)) auto;
   gap: 0.45rem;
   align-items: center;
   padding: 0.6rem;
@@ -10925,7 +10943,7 @@ select optgroup {
 }
 
 .slicer-profile-dropdown {
-  position: absolute;
+  position: fixed;
   z-index: 10000;
   display: grid;
   gap: 0.25rem;
@@ -10936,6 +10954,12 @@ select optgroup {
   background: rgba(2,6,23,0.98);
   box-shadow: 0 1.1rem 2.4rem rgba(0,0,0,0.45);
   padding: 0.35rem;
+}
+
+.slicer-profile-no-match {
+  padding: 0.75rem;
+  color: #fcd34d;
+  font-size: 0.76rem;
 }
 
 .slicer-profile-choice {
@@ -10990,6 +11014,21 @@ select optgroup {
   .slicer-docker-panel { grid-template-columns: 1fr; }
   .slicer-launch-btn { width: 100%; }
   .slicer-profile-row { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 1180px) {
+  .slicer-profile-row {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+  }
+  .slicer-profile-headings {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+  }
+  .slicer-profile-headings span:first-child {
+    display: none;
+  }
+  .slicer-profile-printer {
+    grid-column: 1 / -1;
+  }
 }
 
 /* ── Filament tracking ───────────────────────────────────────────────────── */

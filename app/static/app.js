@@ -10346,6 +10346,25 @@ function _slicerFilterRowsForPrinter(rows, printerProfile, fallback = '') {
   return scored.length ? scored.map(item => item.row) : rows;
 }
 
+function _profileSearchNormalise(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/\bsydd/g, 'sidd')
+    .replace(/\bsyd/g, 'sid')
+    .replace(/syddament|sydament|sidament/g, 'siddament')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function _profileSearchMatches(search, query) {
+  const q = _profileSearchNormalise(query);
+  if (!q) return true;
+  const haystack = _profileSearchNormalise(search);
+  if (haystack.includes(q)) return true;
+  return q.split(' ').filter(Boolean).every(token => haystack.includes(token));
+}
+
 function _slicerProfilesHtml(profileData, printers) {
   _slicerProfileData = profileData;
   const vendors = profileData?.vendors || [];
@@ -10354,7 +10373,11 @@ function _slicerProfilesHtml(profileData, printers) {
   const processProfiles = _slicerProfileOptions(profileData, 'process');
   const filamentProfiles = _slicerProfileOptions(profileData, 'filament');
   const vendorStats = vendors.length
-    ? vendors.map(v => `<span class="slicer-profile-pill">${esc(v.vendor || v.name)} · ${(v.machines || []).length} printers · ${(v.processes || []).length} processes · ${(v.filaments || []).length} filaments</span>`).join('')
+    ? vendors.map(v => {
+      const name = v.vendor || v.name;
+      const isLocal = name === 'Orca Local';
+      return `<span class="slicer-profile-pill${isLocal ? ' slicer-profile-pill-local' : ''}">${esc(name)} · ${(v.machines || []).length} printers · ${(v.processes || []).length} processes · ${(v.filaments || []).length} filaments</span>`;
+    }).join('')
     : '<span class="settings-empty">No standard profiles synced yet.</span>';
   const rows = (printers || []).map(p => {
     const d = defaults[p.id] || {};
@@ -10386,7 +10409,7 @@ function _slicerProfilesHtml(profileData, printers) {
       <div class="setup-version-main">
         <div>
           <div class="settings-section-title">Standard Profiles</div>
-          <div class="settings-hint">Synced from OrcaSlicer standard profiles, plus any custom profiles you upload.</div>
+          <div class="settings-hint">Synced from OrcaSlicer standard profiles, local Orca AppData profiles, plus any custom profiles you upload.</div>
         </div>
         <div class="setup-version-actions">
           <button type="button" class="settings-save-btn" id="slicer-upload-profiles">Upload profiles</button>
@@ -10402,6 +10425,13 @@ function _slicerProfilesHtml(profileData, printers) {
       <div class="settings-hint">Choose the default profile triplet Flightdeck should use when slicing for each printer. Nozzle size lives in the printer profile; Bambu 0.4 process profiles are usually named by layer height, like 0.20mm Standard @BBL H2D.</div>
       ${_slicerDatalist('slicer-process-profiles', processProfiles)}
       ${_slicerDatalist('slicer-filament-profiles', filamentProfiles)}
+      <div class="slicer-profile-headings">
+        <span>Printer</span>
+        <span>Printer/nozzle</span>
+        <span>Process/layer</span>
+        <span>Filament/profile</span>
+        <span></span>
+      </div>
       <div class="slicer-profile-table">${rows}</div>
     </div>`;
 }
@@ -10436,13 +10466,16 @@ function _slicerProfileRowsForInput(input) {
 }
 
 function _slicerProfileDropdownHtml(rows, selectedName) {
-  return rows.map(row => {
+  const options = rows.map(row => {
     const selected = row.name === selectedName;
     return `<button type="button" class="slicer-profile-choice${selected ? ' selected' : ''}" data-slicer-profile-choice="${esc(row.name)}" data-search="${esc(`${row.name} ${row.vendor}`.toLowerCase())}">
       <span>${esc(row.name)}</span>
       <em>${esc(row.vendor || 'Custom')}</em>
     </button>`;
-  }).join('') || '<div class="settings-empty">No profiles found.</div>';
+  }).join('');
+  return options
+    ? `${options}<div class="slicer-profile-no-match hidden">No matching profiles in this field. Check the correct profile column, then Sync profiles.</div>`
+    : '<div class="settings-empty">No profiles found. Run Sync profiles first.</div>';
 }
 
 function _attachSlicerProfileDropdowns(root) {
@@ -10457,18 +10490,31 @@ function _attachSlicerProfileDropdowns(root) {
     const rect = input.getBoundingClientRect();
     activeMenu = document.createElement('div');
     activeMenu.className = 'slicer-profile-dropdown';
-    activeMenu.style.left = `${rect.left + window.scrollX}px`;
-    activeMenu.style.top = `${rect.bottom + window.scrollY + 4}px`;
-    activeMenu.style.width = `${rect.width}px`;
+    const viewportPad = 12;
+    const menuWidth = Math.min(Math.max(rect.width, 380), window.innerWidth - viewportPad * 2);
+    const left = Math.min(Math.max(rect.left, viewportPad), window.innerWidth - menuWidth - viewportPad);
+    const below = window.innerHeight - rect.bottom - viewportPad;
+    const above = rect.top - viewportPad;
+    const openUp = below < 220 && above > below;
+    const maxHeight = Math.max(180, Math.min(420, (openUp ? above : below) - 8));
+    activeMenu.style.left = `${left}px`;
+    activeMenu.style.width = `${menuWidth}px`;
+    activeMenu.style.maxHeight = `${maxHeight}px`;
+    activeMenu.style.top = openUp ? `${Math.max(viewportPad, rect.top - maxHeight - 6)}px` : `${rect.bottom + 6}px`;
     activeMenu.innerHTML = _slicerProfileDropdownHtml(rows, input.value);
     document.body.appendChild(activeMenu);
     const filter = () => {
       if (!activeMenu) return;
-      const q = input.value.trim().toLowerCase();
+      const q = input.value.trim();
+      let visible = 0;
       activeMenu.querySelectorAll('[data-slicer-profile-choice]').forEach(row => {
-        row.hidden = q && !(row.dataset.search || '').includes(q);
+        const match = _profileSearchMatches(row.dataset.search || '', q);
+        row.hidden = !match;
+        if (match) visible += 1;
         row.classList.toggle('selected', row.dataset.slicerProfileChoice === input.value);
       });
+      const empty = activeMenu.querySelector('.slicer-profile-no-match');
+      if (empty) empty.classList.toggle('hidden', visible > 0);
     };
     activeMenu.querySelectorAll('[data-slicer-profile-choice]').forEach(btn => {
       btn.addEventListener('mousedown', e => {
@@ -10486,11 +10532,16 @@ function _attachSlicerProfileDropdowns(root) {
     input.addEventListener('input', () => {
       if (!activeMenu) openMenu(input);
       else {
-        const q = input.value.trim().toLowerCase();
+        const q = input.value.trim();
+        let visible = 0;
         activeMenu.querySelectorAll('[data-slicer-profile-choice]').forEach(row => {
-          row.hidden = q && !(row.dataset.search || '').includes(q);
+          const match = _profileSearchMatches(row.dataset.search || '', q);
+          row.hidden = !match;
+          if (match) visible += 1;
           row.classList.toggle('selected', row.dataset.slicerProfileChoice === input.value);
         });
+        const empty = activeMenu.querySelector('.slicer-profile-no-match');
+        if (empty) empty.classList.toggle('hidden', visible > 0);
       }
     });
   });
@@ -12560,6 +12611,7 @@ function _amsProfilePanelHtml(current, report, profileData, printer) {
       <input id="slot-ams-profile-name" class="spool-form-input" value="${esc(initialName)}" placeholder="Search filament profiles...">
       <div class="slot-ams-profile-list" role="listbox" aria-label="Filament profiles">
         ${rows.length ? rows.map(row => _amsProfileOptionHtml(row, initialName)).join('') : '<div class="slot-empty-state">No synced filament profiles available.</div>'}
+        <div class="slot-ams-profile-no-match hidden">No matching filament profiles. Run Slicer Sync profiles, then search again.</div>
       </div>
       <div class="slot-ams-profile-grid">
         <label><span>Material</span><input class="spool-form-input" id="slot-ams-profile-material" value="${esc(parsed.material)}"></label>
@@ -12804,10 +12856,14 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
     };
     profileNameInput?.addEventListener('change', applyProfileName);
     profileNameInput?.addEventListener('input', () => {
-      const q = profileNameInput.value.trim().toLowerCase();
+      const q = profileNameInput.value.trim();
+      let visible = 0;
       body.querySelectorAll('[data-ams-profile-option]').forEach(row => {
-        row.hidden = q && !(row.dataset.search || '').includes(q);
+        const match = _profileSearchMatches(row.dataset.search || '', q);
+        row.hidden = !match;
+        if (match) visible += 1;
       });
+      body.querySelector('.slot-ams-profile-no-match')?.classList.toggle('hidden', visible > 0);
     });
     body.querySelectorAll('[data-ams-profile-option]').forEach(btn => {
       btn.addEventListener('click', () => {
