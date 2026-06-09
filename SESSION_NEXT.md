@@ -2,7 +2,7 @@
 
 Latest GitHub/Pi state:
 - Branch: main
-- Latest commit: current HEAD after this handoff (`Treat generic AMS reports as stale hints`)
+- Latest commit: current HEAD after this handoff (`Treat blank AMS reports as stale hints`)
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
@@ -10,6 +10,7 @@ Latest GitHub/Pi state:
 
 Recent work:
 - AMS Profile Doctor now also treats Bambu slots that report `Loaded` but have blank material/colour/profile as low-confidence. Live watch of H2D AMS 1 S1 showed stale red -> Peak Green after Trust Flightdeck -> empty -> Flightdeck auto-returned #76 -> Bambu reinserted as loaded with blank metadata. The Doctor should no longer invent a best match such as Black ABS from an unknown loaded slot; pick the physical shelf spool and Flightdeck will overwrite the AMS profile. Static cache bumped to `app.js?v=411` and `style.css?v=337`; frontend refresh only.
+  - Deploy note: GitHub was pushed and the Pi repo pulled commit `f47a256` via `/api/update`. Updater reported `restart_required: true`, but this is frontend/static-only; refresh the browser to pick up `app.js?v=411`.
 - AMS Profile Doctor now treats unassigned Bambu slots with generic profiles (`Generic PLA`/`GFL99`) as low-confidence because the printer can retain stale AMS colour/profile memory after a physical spool change. It no longer promotes a "best stored match" or Suggested badges from stale generic colour; it shows a warning to choose the physical shelf spool, and assignment still overwrites the AMS slot profile. Static cache bumped to `app.js?v=410` and `style.css?v=336`; frontend refresh only.
   - Deploy note: GitHub was pushed and the Pi repo pulled commit `4d45176` via `/api/update`. The updater reported `restart_required: true`, but the code change is frontend/static-only; refresh the browser to pick up `app.js?v=410`.
 - AMS slot doctor can now automate shelf-to-occupied-slot swaps. The picker sends an intentional `replace_existing` move: if the target AMS slot already has a Flightdeck spool, the backend returns that old spool to its home shelf, assigns the chosen shelf spool into the slot, then pushes the existing Trust Flightdeck/Bambu AMS profile sync. Static cache bumped to `app.js?v=409` and `style.css?v=335`; backend restart required.
