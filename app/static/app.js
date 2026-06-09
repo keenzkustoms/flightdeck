@@ -9660,7 +9660,7 @@ function _printersCategoryHtml(printers) {
 
         <div class="settings-form-row">
           <label class="settings-label" for="p-id">
-            ID <span class="settings-hint">(e.g. sovol_sv08)</span>
+            Internal ID <span class="settings-hint">(no spaces)</span>
           </label>
           <input class="settings-input" id="p-id" type="text"
             placeholder="my_printer" autocomplete="off" required>
@@ -9686,7 +9686,9 @@ function _printersCategoryHtml(printers) {
         </div>
 
         <div class="settings-form-row">
-          <label class="settings-label" for="p-custom">Custom Name</label>
+          <label class="settings-label" for="p-custom">
+            Printer Name <span class="settings-hint">(spaces ok)</span>
+          </label>
           <input class="settings-input" id="p-custom" type="text"
             placeholder="Workshop Beast" required>
         </div>
@@ -10083,7 +10085,7 @@ function _validateFormData(data, connType, errorEl) {
   if (!/^[a-z][a-z0-9_-]*$/.test(data.id))
                          return fail('ID must be lowercase letters, digits, underscores or hyphens — starting with a letter');
   if (!data.model_name)  return fail('Model name is required');
-  if (!data.custom_name) return fail('Custom name is required');
+  if (!data.custom_name) return fail('Printer name is required');
 
   if (connType === 'moonraker' || connType === 'snapmaker_u1') {
     if (!data.connection.host) return fail('Host / IP is required');

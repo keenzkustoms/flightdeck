@@ -2,13 +2,16 @@
 
 Latest GitHub/Pi state:
 - Branch: main
-- Latest commit: current HEAD after this handoff (`Update handoff for Bambu model preset additions`)
+- Latest commit: current HEAD after this handoff (`Update handoff for printer name labels`)
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
-- Refresh cachebust currently: ?cachebust=423 / style.css?v=342
+- Refresh cachebust currently: ?cachebust=424 / style.css?v=342
 
 Recent work:
+- Add Printer naming labels were clarified after user feedback: the URL-safe machine key is now labelled `Internal ID (no spaces)`, while the user-facing spaced field is labelled `Printer Name (spaces ok)`. Validation now says `Printer name is required` instead of `Custom name is required`. Internal IDs were deliberately left unchanged because routes/API paths/spool locations depend on them staying URL-safe. Static cache bumped to `app.js?v=424`.
+  - Verification: `node --check app/static/app.js` passed.
+  - Deploy note: frontend/static-only; hard refresh browsers after update.
 - Bambu add-printer model presets were expanded after review. The dropdown now includes `H2C`, `P2S`, and `X2D` alongside the existing H2/X1/P1/A1 models, with build-volume defaults for the future exclude-object/bed-map flow. Static cache bumped to `app.js?v=423`.
   - Verification: `node --check app/static/app.js` passed.
   - Deploy note: frontend/static-only; hard refresh browsers after update.
