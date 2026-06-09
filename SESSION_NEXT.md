@@ -2,13 +2,18 @@
 
 Latest GitHub/Pi state:
 - Branch: main
-- Latest commit: current HEAD after this handoff (`Update handoff for required support bundles`)
+- Latest commit: current HEAD after this handoff (`Update handoff for Fleet Wall camera stills`)
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
-- Refresh cachebust currently: ?cachebust=418 / style.css?v=341
+- Refresh cachebust currently: ?cachebust=419 / style.css?v=341
 
 Recent work:
+- Fleet Wall camera load now uses low-rate still snapshots instead of holding a live MJPEG stream open for every printer tile. This was a narrow port of the useful part of Steve/keenzkustoms' fork idea, not a full merge: Flightdeck now exposes `fleet_url`/`fleet_refresh_ms` camera metadata, adds `/api/camera/{printer_id}/snapshot`, and the Fleet Wall frontend staggers still-frame refreshes around every 3.5s. Live view, printer camera pages, and normal camera stream quality remain unchanged.
+  - Bambu snapshot requests use a temporary counted `BambuCameraProxy.snapshot()` client so the shared ffmpeg worker still benefits from the existing idle shutdown/watchdog logic. Deliberately not ported from Steve's fork: the global Bambu proxy downgrade to 640px/2fps/q8, unrelated label-printer changes, or any broad branch merge.
+  - GPU/FFmpeg note: browser/GPU acceleration can help display/decoding on Windows, but Flightdeck cannot reliably force camera feeds into AMD VRAM from the web app. Reducing the number of persistent live camera streams is the practical win. FFmpeg is installed through the platform package path (`apt` on Pi, `winget`/Gyan on Windows), so it may trail the newest upstream FFmpeg release; upgrading FFmpeg can be tested separately, but this change reduces Fleet Wall dependence on constant ffmpeg/live streams.
+  - Verification: `node --check app/static/app.js` passed; `python -m py_compile app/main.py app/camera.py` and `.venv/Scripts/python.exe -m py_compile app/main.py app/camera.py` passed with the usual Windows embedded-Python prefix warning; `git diff --check` passed.
+  - Deploy note: functional commit is `12b7ca5` (`Use still snapshots on Fleet Wall`). Backend restart required for the new snapshot endpoint and camera metadata: run `sudo systemctl restart flightdeck` after the Pi pulls it. Hard refresh browsers to pick up `app.js?v=419`.
 - Support bundles now require context during early testing. The visible `Diagnostics only` fallback was removed from the modal, the copy now asks users to fill in as much information as possible, then click `Download zip`, attach it to an email, and send it to `flightdeck3dprinters@gmail.com`. Frontend and backend both require name, email, and problem/what happened before generating `/api/setup/logs/support`. The plain `/api/setup/logs/download` endpoint remains available for internal direct use, but it is no longer offered in the modal. Static cache bumped to `app.js?v=418`.
   - Journal log capture was improved: diagnostic bundles now append a clear remediation note when `journalctl` cannot read service logs, Setup Health includes an optional `Journal logs` check, and `scripts/install-systemd.sh` writes `SupplementaryGroups=systemd-journal adm` so freshly installed/refreshed systemd units can read journal output.
   - Verification: `node --check app/static/app.js` passed; `python -m py_compile app/main.py` and `.venv/Scripts/python.exe -m py_compile app/main.py` passed with the usual Windows embedded-Python prefix warning. Local smoke test confirmed missing name/email/problem is rejected with 422 and a filled support bundle still contains `support-request.txt`.
