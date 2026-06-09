@@ -12061,17 +12061,42 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
         <button type="button" class="spool-action-btn spool-action-label" data-slot-spool-id="${bestCandidate.id}">Assign suggested spool</button>
       </div>`
       : '';
+    const matchCount = candidates.filter(s => _slotCandidateScore(s, report) < 320).length;
+    const locationCounts = new Map();
+    for (const s of candidates) {
+      const key = String(s.storage_location_id || '');
+      const currentCount = locationCounts.get(key) || { id: key, name: _spoolStorageLocationName(s.storage_location_id), count: 0 };
+      currentCount.count += 1;
+      locationCounts.set(key, currentCount);
+    }
+    const locationFilters = [...locationCounts.values()]
+      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
+      .slice(0, 6);
+    const pickerFilters = candidates.length ? `
+      <div class="slot-filter-chips" role="group" aria-label="Filter stored spools">
+        <button type="button" class="slot-filter-chip active" data-slot-filter="all">All <span>${candidates.length}</span></button>
+        ${report && !report.empty ? `<button type="button" class="slot-filter-chip" data-slot-filter="match">Matches <span>${matchCount}</span></button>` : ''}
+        ${locationFilters.map(loc => `<button type="button" class="slot-filter-chip" data-slot-filter="loc:${esc(loc.id)}">${esc(loc.name)} <span>${loc.count}</span></button>`).join('')}
+      </div>` : '';
     const pickerRows = candidates.length ? candidates.map(s => {
       const pct = s.label_weight_g > 0 ? Math.round(s.remaining_g * 100 / s.label_weight_g) : 0;
       const loc = _spoolStorageLocationName(s.storage_location_id);
       const score = _slotCandidateScore(s, report);
       const suggested = score < 96;
+      const nearMatch = !suggested && score < 320;
+      const homeShelf = s.home_storage_location_id && String(s.home_storage_location_id) === String(s.storage_location_id);
+      const badges = [
+        suggested ? 'Suggested' : '',
+        nearMatch ? 'Near match' : '',
+        homeShelf ? 'Home shelf' : '',
+      ].filter(Boolean);
       const searchable = `${loc} ${s.material || ''} ${s.subtype || ''} ${s.brand || ''} ${s.color_name || ''} ${s.color_hex || ''} #${s.id}`.toLowerCase();
-      return `<button type="button" class="slot-spool-option" data-slot-spool-id="${s.id}" data-search="${esc(searchable)}">
+      return `<button type="button" class="slot-spool-option" data-slot-spool-id="${s.id}" data-search="${esc(searchable)}" data-score="${score}" data-location-id="${esc(String(s.storage_location_id || ''))}">
         <span class="location-spool-swatch" style="${_spoolColorStyle(s)}"></span>
         <span class="slot-spool-option-main">
-          <strong>${esc(s.color_name || s.color_hex || 'Colour')} · ${esc(s.material)}${s.subtype ? ` ${esc(s.subtype)}` : ''}${suggested ? ' <em>Suggested</em>' : ''}</strong>
+          <strong>${esc(s.color_name || s.color_hex || 'Colour')} · ${esc(s.material)}${s.subtype ? ` ${esc(s.subtype)}` : ''}</strong>
           <small>${esc(s.brand || 'Unknown brand')} · #${s.id} · ${Math.round(s.remaining_g || 0)}g (${pct}%)</small>
+          ${badges.length ? `<span class="slot-spool-badges">${badges.map(b => `<em>${esc(b)}</em>`).join('')}</span>` : ''}
         </span>
         <span class="slot-spool-location">${esc(loc)}</span>
       </button>`;
@@ -12128,7 +12153,11 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
           ${returnHelp ? `<div class="slot-return-memory">${esc(returnHelp)}</div>` : ''}` : ''}
       </div>
       <div class="slot-assign">
-        <label class="spool-form-label" for="slot-spool-filter">Assign stored spool</label>
+        <div class="slot-assign-head">
+          <label class="spool-form-label" for="slot-spool-filter">Assign stored spool</label>
+          <span>${candidates.length ? `${candidates.length} shelf spools` : 'No shelf stock'}</span>
+        </div>
+        ${pickerFilters}
         <input id="slot-spool-filter" class="spool-form-input" type="search" placeholder="Filter by location, material, brand, colour..."${candidates.length ? '' : ' disabled'}>
         <div class="slot-spool-picker">${pickerRows}</div>
       </div>`;
@@ -12136,22 +12165,22 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
     body.querySelectorAll('[data-slot-spool-id]').forEach(btn => {
       btn.addEventListener('click', async () => {
         const id = btn.dataset.slotSpoolId;
-      btn.disabled = true;
-      btn.classList.add('assigning');
-      const r = await fetch(`/api/spools/${id}/move`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ printer_id: printerId, slot: Number(slotIndex) }),
-      });
-      if (!r.ok) {
-        btn.classList.remove('assigning');
-        btn.classList.add('slot-spool-error');
-        setTimeout(load, 1200);
-        return;
-      }
-      _spoolMoveSyncToast(await r.json().catch(() => ({})), printer?.custom_name || printerId, slotLabel);
-      await _refreshSpoolsByPrinter();
-      load();
+        btn.disabled = true;
+        btn.classList.add('assigning');
+        const r = await fetch(`/api/spools/${id}/move`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ printer_id: printerId, slot: Number(slotIndex) }),
+        });
+        if (!r.ok) {
+          btn.classList.remove('assigning');
+          btn.classList.add('slot-spool-error');
+          setTimeout(load, 1200);
+          return;
+        }
+        _spoolMoveSyncToast(await r.json().catch(() => ({})), printer?.custom_name || printerId, slotLabel);
+        await _refreshSpoolsByPrinter();
+        load();
       });
     });
 
@@ -12203,13 +12232,27 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
       load();
     });
 
-    body.querySelector('#slot-spool-filter')?.addEventListener('input', e => {
-      const q = e.target.value.trim().toLowerCase();
+    const applySlotPickerFilters = () => {
+      const q = body.querySelector('#slot-spool-filter')?.value.trim().toLowerCase() || '';
+      const activeFilter = body.querySelector('.slot-filter-chip.active')?.dataset.slotFilter || 'all';
       const terms = q.split(/\s+/).filter(Boolean);
       body.querySelectorAll('[data-slot-spool-id]').forEach(row => {
         const search = row.dataset.search || '';
         if (!search) return;
-        row.hidden = !!(terms.length && !terms.every(term => search.includes(term)));
+        const matchesSearch = !terms.length || terms.every(term => search.includes(term));
+        const matchesFilter =
+          activeFilter === 'all'
+          || (activeFilter === 'match' && Number(row.dataset.score || 9999) < 320)
+          || (activeFilter.startsWith('loc:') && String(row.dataset.locationId || '') === activeFilter.slice(4));
+        row.hidden = !(matchesSearch && matchesFilter);
+      });
+    };
+
+    body.querySelector('#slot-spool-filter')?.addEventListener('input', applySlotPickerFilters);
+    body.querySelectorAll('[data-slot-filter]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        body.querySelectorAll('[data-slot-filter]').forEach(item => item.classList.toggle('active', item === btn));
+        applySlotPickerFilters();
       });
     });
 
