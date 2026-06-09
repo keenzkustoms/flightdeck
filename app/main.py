@@ -3326,6 +3326,46 @@ def _sync_local_orca_profiles() -> dict:
     }
 
 
+def _profile_vendor_payload_counts(payload: dict) -> dict:
+    return {
+        "machines": len(payload.get("machines") or []),
+        "processes": len(payload.get("processes") or []),
+        "filaments": len(payload.get("filaments") or []),
+    }
+
+
+def _sync_worker_orca_profiles(worker_url: str) -> Optional[dict]:
+    worker_url = (worker_url or "").strip().rstrip("/")
+    if not worker_url:
+        return None
+    parsed = urllib.parse.urlparse(worker_url)
+    if not parsed.scheme or not parsed.netloc:
+        return None
+    try:
+        with httpx.Client(timeout=httpx.Timeout(connect=3.0, read=90.0, write=10.0, pool=5.0)) as client:
+            resp = client.post(
+                f"{worker_url}/api/slicer/profiles/sync?include_worker=false",
+                json={"vendors": ["local"]},
+            )
+    except Exception as exc:
+        return {"error": str(exc)}
+    if resp.status_code >= 400:
+        return {"error": f"HTTP {resp.status_code}: {resp.text[:240]}"}
+    try:
+        payload = resp.json()
+    except Exception as exc:
+        return {"error": f"Invalid JSON: {exc}"}
+    local = next(
+        (vendor for vendor in payload.get("vendors") or [] if vendor.get("vendor") == _ORCA_LOCAL_VENDOR),
+        None,
+    )
+    if not local:
+        return {"error": "Worker did not return Orca Local profiles"}
+    local["source"] = f"Local OrcaSlicer profiles from worker {worker_url}"
+    local["source_url"] = worker_url
+    return {"payload": local, "added": _profile_vendor_payload_counts(local)}
+
+
 def _custom_profile_payload() -> dict:
     for vendor in db.get_slicer_profile_vendors():
         if vendor.get("vendor") == "Custom":
@@ -3776,7 +3816,8 @@ async def get_slicer_profiles():
 
 
 @app.post("/api/slicer/profiles/sync")
-async def sync_slicer_profiles(body: SlicerProfileSyncRequest):
+async def sync_slicer_profiles(body: SlicerProfileSyncRequest, include_worker: bool = True):
+    settings = db.get_all_settings()
     vendors = [v.strip() for v in (body.vendors or []) if v.strip()] or ["BBL", "Sovol", "Voron", "Prusa", "Anycubic"]
     vendors = [v for v in vendors if v in _ORCA_PROFILE_VENDORS]
     synced = []
@@ -3797,6 +3838,15 @@ async def sync_slicer_profiles(body: SlicerProfileSyncRequest):
             errors.append({"vendor": _ORCA_LOCAL_VENDOR, "error": "No local Orca profiles found"})
     except Exception as exc:
         errors.append({"vendor": _ORCA_LOCAL_VENDOR, "error": str(exc)})
+    worker_url = (settings.get("orcaslicer_worker_url") or "").strip().rstrip("/")
+    if include_worker and worker_url:
+        worker = await asyncio.to_thread(_sync_worker_orca_profiles, worker_url)
+        if worker and worker.get("payload"):
+            db.save_slicer_profile_vendor(_ORCA_LOCAL_VENDOR, worker["payload"])
+            if _ORCA_LOCAL_VENDOR not in synced:
+                synced.append(_ORCA_LOCAL_VENDOR)
+        elif worker and worker.get("error") and _ORCA_LOCAL_VENDOR not in synced:
+            errors.append({"vendor": f"{_ORCA_LOCAL_VENDOR} worker", "error": worker["error"]})
     if errors and not synced:
         raise HTTPException(status_code=502, detail={"message": "Profile sync failed", "errors": errors})
     return {"ok": True, "synced": synced, "errors": errors, "vendors": db.get_slicer_profile_vendors()}
