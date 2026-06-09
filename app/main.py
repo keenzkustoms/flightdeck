@@ -4325,6 +4325,7 @@ class SpoolMove(BaseModel):
     printer_id: Optional[str] = None
     slot: Optional[int] = None
     storage_location_id: Optional[int] = None
+    replace_existing: bool = False
 
 class SpoolTrustPrinter(BaseModel):
     printer_id: str
@@ -4703,13 +4704,26 @@ async def reconcile_print_spool_usage(print_id: int, spool_id: int, body: SpoolU
 async def move_spool(spool_id: int, body: SpoolMove):
     before = db.get_spool(spool_id)
     result = db.move_spool(spool_id, body.printer_id, body.slot, body.storage_location_id)
+    replaced_spool = None
     if not result["ok"]:
         conflict = db.get_spool(result["conflict_spool_id"])
-        raise HTTPException(status_code=409, detail={
-            "message": "Slot occupied",
-            "conflict_spool_id": result["conflict_spool_id"],
-            "conflict_spool": conflict,
-        })
+        if body.replace_existing and body.printer_id and body.slot is not None and conflict:
+            replaced_spool = conflict
+            clear_result = db.move_spool(int(conflict["id"]), None, None, None)
+            if not clear_result["ok"]:
+                raise HTTPException(status_code=409, detail={
+                    "message": "Unable to return existing spool before assigning slot",
+                    "conflict_spool_id": conflict["id"],
+                    "conflict_spool": conflict,
+                })
+            result = db.move_spool(spool_id, body.printer_id, body.slot, body.storage_location_id)
+        if not result["ok"]:
+            conflict = db.get_spool(result["conflict_spool_id"])
+            raise HTTPException(status_code=409, detail={
+                "message": "Slot occupied",
+                "conflict_spool_id": result["conflict_spool_id"],
+                "conflict_spool": conflict,
+            })
     ams_sync = None
     if before and before.get("location_printer_id") and before.get("location_slot") is not None:
         moved_slot = (
@@ -4725,7 +4739,11 @@ async def move_spool(spool_id: int, body: SpoolMove):
     if body.printer_id and body.slot is not None:
         spool = db.get_spool(spool_id)
         ams_sync = await _sync_bambu_ams_slot(body.printer_id, body.slot, spool)
-    return {"ok": True, "ams_sync": ams_sync}
+    return {
+        "ok": True,
+        "ams_sync": ams_sync,
+        "replaced_spool_id": replaced_spool["id"] if replaced_spool else None,
+    }
 
 
 @app.post("/api/spools/{spool_id}/trust_printer")

@@ -6,9 +6,10 @@ Latest GitHub/Pi state:
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
-- Refresh cachebust currently: ?cachebust=408 / style.css?v=334
+- Refresh cachebust currently: ?cachebust=409 / style.css?v=335
 
 Recent work:
+- AMS slot doctor can now automate shelf-to-occupied-slot swaps. The picker sends an intentional `replace_existing` move: if the target AMS slot already has a Flightdeck spool, the backend returns that old spool to its home shelf, assigns the chosen shelf spool into the slot, then pushes the existing Trust Flightdeck/Bambu AMS profile sync. Static cache bumped to `app.js?v=409` and `style.css?v=335`; backend restart required.
 - AMS slot shelf assignment picker has been tightened for the "add spool from shelf to AMS slot" flow. Slot editor now shows shelf-aware filter chips (`All`, live-report `Matches`, and top storage locations), row badges for suggested/home-shelf spools, clearer shelf counts, and keeps the existing backend move/home-shelf memory plus Bambu AMS profile sync untouched. Static cache bumped to `app.js?v=408` and `style.css?v=334`; frontend refresh only.
   - Deploy note: GitHub was pushed and the Pi repo pulled commit `8b0391f` via `/api/update`. The updater reported `restart_required: true` even though the code change is static/frontend-only, so a browser refresh should pick it up; a service restart is only needed if the running app does not serve the new cache-busted static files.
 - Snapmaker U1 setup camera defaults were corrected after live UI review: choosing Snapmaker U1 now replaces the old generic Moonraker `/webcam/?action=stream|snapshot` defaults with U1-style `/webcam/stream.mjpg` and `/webcam/snapshot.jpg` paths, and the placeholders match those paths.

@@ -12170,7 +12170,7 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
         const r = await fetch(`/api/spools/${id}/move`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ printer_id: printerId, slot: Number(slotIndex) }),
+          body: JSON.stringify({ printer_id: printerId, slot: Number(slotIndex), replace_existing: true }),
         });
         if (!r.ok) {
           btn.classList.remove('assigning');
@@ -12178,7 +12178,11 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
           setTimeout(load, 1200);
           return;
         }
-        _spoolMoveSyncToast(await r.json().catch(() => ({})), printer?.custom_name || printerId, slotLabel);
+        const data = await r.json().catch(() => ({}));
+        _spoolMoveSyncToast(data, printer?.custom_name || printerId, slotLabel);
+        if (data.replaced_spool_id) {
+          showToast('AMS slot swapped', `Returned spool #${data.replaced_spool_id} home and assigned spool #${id}.`, 'success');
+        }
         await _refreshSpoolsByPrinter();
         load();
       });
