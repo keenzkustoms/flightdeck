@@ -9686,7 +9686,21 @@ function _attachPrintersEvents(el) {
   let connType = 'moonraker';
 
   const setConnType = type => {
+    const previousType = connType;
     connType = type;
+    const idInput = el.querySelector('#p-id');
+    const modelInput = el.querySelector('#p-model');
+    const customInput = el.querySelector('#p-custom');
+    if (previousType === 'snapmaker_u1' && connType !== 'snapmaker_u1') {
+      if (modelInput?.dataset.autoSnapmaker === '1') {
+        modelInput.value = '';
+        delete modelInput.dataset.autoSnapmaker;
+      }
+      if (customInput?.value === 'Snapmaker U1') customInput.value = '';
+    }
+    if (idInput) idInput.placeholder = connType === 'snapmaker_u1' ? 'u1' : 'my_printer';
+    if (modelInput) modelInput.placeholder = connType === 'snapmaker_u1' ? 'Snapmaker U1' : 'Sovol SV08';
+    if (customInput) customInput.placeholder = connType === 'snapmaker_u1' ? 'Printer Beast' : 'Workshop Beast';
     el.querySelectorAll('[data-conn-type]').forEach(b =>
       b.classList.toggle('type-btn-active', b.dataset.connType === connType)
     );
@@ -9697,8 +9711,11 @@ function _attachPrintersEvents(el) {
       el.querySelector('input[name="icon"][value="bambu"]').checked = true;
     } else if (connType === 'snapmaker_u1') {
       el.querySelector('input[name="icon"][value="generic"]').checked = true;
-      if (!el.querySelector('#p-model')?.value) el.querySelector('#p-model').value = 'Snapmaker U1';
-      if (!el.querySelector('#p-custom')?.value) el.querySelector('#p-custom').value = 'Snapmaker U1';
+      if (!modelInput?.value) {
+        modelInput.value = 'Snapmaker U1';
+        modelInput.dataset.autoSnapmaker = '1';
+      }
+      if (customInput?.value === 'Snapmaker U1') customInput.value = '';
       if (el.querySelector('#p-cam-type')?.value === 'none') el.querySelector('#p-cam-type').value = 'mjpeg_direct';
       el.querySelector('#mjpeg-fields').hidden = el.querySelector('#p-cam-type')?.value !== 'mjpeg_direct';
       const stream = el.querySelector('#p-stream-url');
@@ -9825,6 +9842,7 @@ function _populatePrinterForm(el, printer, setConnType) {
   set('p-id', printer.id);
   set('p-model', printer.model_name || '');
   set('p-custom', printer.custom_name || '');
+  delete el.querySelector('#p-model')?.dataset.autoSnapmaker;
   const icon = el.querySelector(`input[name="icon"][value="${printer.icon || 'generic'}"]`);
   if (icon) icon.checked = true;
   el.querySelector('#p-id').disabled = true;
@@ -9865,6 +9883,7 @@ function _resetPrinterForm(el, setConnType) {
   const form = el.querySelector('#settings-add-form');
   if (!form) return;
   form.reset();
+  delete el.querySelector('#p-model')?.dataset.autoSnapmaker;
   el.querySelector('#p-editing-id').value = '';
   el.querySelector('#p-id').disabled = false;
   el.querySelector('#settings-printer-form-title').textContent = 'Add Printer';

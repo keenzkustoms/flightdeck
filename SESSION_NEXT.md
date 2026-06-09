@@ -2,13 +2,16 @@
 
 Latest GitHub/Pi state:
 - Branch: main
-- Latest commit: current HEAD after this handoff (`Update handoff for FFmpeg camera driver guard`)
+- Latest commit: current HEAD after this handoff (`Update handoff for Snapmaker setup defaults`)
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
-- Refresh cachebust currently: ?cachebust=420 / style.css?v=341
+- Refresh cachebust currently: ?cachebust=421 / style.css?v=341
 
 Recent work:
+- Snapmaker U1 add-printer defaults were tidied. Selecting `Snapmaker U1` still sets the model to `Snapmaker U1`, but it no longer fills `Custom Name`; that field stays empty with a faded `Printer Beast` placeholder so the user enters their shop name. The form also clears the old auto-filled Snapmaker value when switching connection type/resetting/editing, so `Snapmaker U1` does not stick in the next add-printer form. Static cache bumped to `app.js?v=421`.
+  - Verification: `node --check app/static/app.js` passed.
+  - Deploy note: frontend/static-only; hard refresh browsers after update.
 - FFmpeg is now treated as a tested camera-driver family instead of "whatever newest version happens to be installed". Setup Health now reports `FFmpeg camera driver` and marks Raspberry Pi OS/Debian apt FFmpeg 5.x plus Gyan Windows FFmpeg 8.x as tested; other major versions remain allowed but show as untested/warn for support diagnostics. Windows bootstrap/diagnostics and the Pi installer print the same compatibility message. `INSTALL.md` documents the tested lane so new users do not assume latest FFmpeg is always the safest camera choice.
   - Fleet Wall still-frame preloader no longer shows the large camera icon/`Waiting for next frame` placeholder before the first real snapshot arrives. It now uses a quiet blank dark frame and swaps to the camera when ready. Static cache bumped to `app.js?v=420`.
   - Verification: `node --check app/static/app.js` passed; `python -m py_compile app/main.py` passed with the usual Windows embedded-Python prefix warning; PowerShell AST parse passed for `scripts/windows/bootstrap-install.ps1` and `scripts/windows/diagnose-windows.ps1`; normalized `scripts/install-pi.sh` and the staged Git version passed `bash -n`.
