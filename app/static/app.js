@@ -9474,6 +9474,118 @@ const _DEFAULT_PRESETS = [
   { label: 'ASA',  hotend: 255, bed: 110 },
 ];
 
+const _PRINTER_SETUP_FAMILIES = {
+  bambu: {
+    label: 'Bambu',
+    connType: 'bambu',
+    icon: 'bambu',
+    idPlaceholder: 'h2d',
+    customPlaceholder: 'BigBoy',
+    models: ['H2D', 'H2S', 'X1C', 'X1E', 'P1S', 'P1P', 'A1', 'A1 mini', 'Custom Bambu'],
+  },
+  voron: {
+    label: 'Voron / Klipper',
+    connType: 'moonraker',
+    icon: 'voron',
+    idPlaceholder: 'voron24',
+    customPlaceholder: 'Greyhound Elite V2',
+    models: ['Voron 2.4 250', 'Voron 2.4 300', 'Voron 2.4 350', 'Voron Trident 250', 'Voron Trident 300', 'Voron Trident 350', 'Voron 0.1', 'Voron 0.2', 'Voron Switchwire', 'Custom Voron / Klipper'],
+  },
+  snapmaker_u1: {
+    label: 'Snapmaker',
+    connType: 'snapmaker_u1',
+    icon: 'generic',
+    idPlaceholder: 'u1',
+    customPlaceholder: 'Printer Beast',
+    models: ['Snapmaker U1'],
+  },
+  moonraker: {
+    label: 'Other Moonraker',
+    connType: 'moonraker',
+    icon: 'generic',
+    idPlaceholder: 'my_printer',
+    customPlaceholder: 'Workshop Beast',
+    models: ['Sovol SV08', 'Qidi', 'FLSUN', 'IdeaFormer IR3 V2', 'Custom Moonraker'],
+  },
+  simulated: {
+    label: 'Simulated',
+    connType: 'simulated',
+    icon: 'generic',
+    idPlaceholder: 'demo_printer',
+    customPlaceholder: 'Demo Printer',
+    models: ['Simulated Printer'],
+  },
+};
+
+const _CUSTOM_MODEL_RE = /custom|other/i;
+const _PRINTER_MODEL_BUILD_VOLUME = {
+  'H2D': { x: 350, y: 320, z: 325 },
+  'H2S': { x: 340, y: 320, z: 340 },
+  'X1C': { x: 256, y: 256, z: 256 },
+  'X1E': { x: 256, y: 256, z: 256 },
+  'P1S': { x: 256, y: 256, z: 256 },
+  'P1P': { x: 256, y: 256, z: 256 },
+  'A1': { x: 256, y: 256, z: 256 },
+  'A1 mini': { x: 180, y: 180, z: 180 },
+  'Voron 2.4 250': { x: 250, y: 250, z: 250 },
+  'Voron 2.4 300': { x: 300, y: 300, z: 300 },
+  'Voron 2.4 350': { x: 350, y: 350, z: 350 },
+  'Voron Trident 250': { x: 250, y: 250, z: 250 },
+  'Voron Trident 300': { x: 300, y: 300, z: 250 },
+  'Voron Trident 350': { x: 350, y: 350, z: 250 },
+  'Voron 0.1': { x: 120, y: 120, z: 120 },
+  'Voron 0.2': { x: 120, y: 120, z: 120 },
+  'Voron Switchwire': { x: 250, y: 210, z: 220 },
+  'Snapmaker U1': { x: 270, y: 270, z: 270 },
+  'Sovol SV08': { x: 350, y: 350, z: 345 },
+};
+
+function _setupFamilyForPrinter(printer) {
+  const connType = printer?.connection?.type || 'moonraker';
+  const model = String(printer?.model_name || '').toLowerCase();
+  if (connType === 'bambu') return 'bambu';
+  if (connType === 'snapmaker_u1') return 'snapmaker_u1';
+  if (connType === 'simulated') return 'simulated';
+  if (model.includes('voron') || printer?.icon === 'voron') return 'voron';
+  return 'moonraker';
+}
+
+function _setupFamilyForConnType(connType, modelName = '') {
+  if (connType === 'bambu') return 'bambu';
+  if (connType === 'snapmaker_u1') return 'snapmaker_u1';
+  if (connType === 'simulated') return 'simulated';
+  return String(modelName || '').toLowerCase().includes('voron') ? 'voron' : 'moonraker';
+}
+
+function _modelOptionsHtml(familyId, selectedModel = '') {
+  const family = _PRINTER_SETUP_FAMILIES[familyId] || _PRINTER_SETUP_FAMILIES.moonraker;
+  const selected = String(selectedModel || '');
+  const hasExact = family.models.some(m => m === selected);
+  return family.models.map(model => `<option value="${esc(model)}"${model === selected || (!selected && model === family.models[0]) ? ' selected' : ''}>${esc(model)}</option>`).join('')
+    + (selected && !hasExact ? `<option value="__custom__" selected>Custom</option>` : '');
+}
+
+function _setBuildVolumeFields(el, volume = {}) {
+  const set = (id, value) => {
+    const field = el.querySelector(`#${id}`);
+    if (field) field.value = value ?? '';
+  };
+  set('p-bed-x', volume.x);
+  set('p-bed-y', volume.y);
+  set('p-bed-z', volume.z);
+}
+
+function _readBuildVolumeFields(el) {
+  const n = id => {
+    const value = Number(el.querySelector(`#${id}`)?.value || 0);
+    return Number.isFinite(value) && value > 0 ? value : null;
+  };
+  const x = n('p-bed-x');
+  const y = n('p-bed-y');
+  const z = n('p-bed-z');
+  return x && y ? { x, y, ...(z ? { z } : {}) } : null;
+}
+
 function _printersCategoryHtml(printers) {
   const list = printers.length
     ? printers.map(p => {
@@ -9533,13 +9645,14 @@ function _printersCategoryHtml(printers) {
         <input type="hidden" id="p-editing-id" value="">
 
         <div class="settings-form-row">
-          <label class="settings-label">Connection Type</label>
-          <div class="settings-type-toggle">
-            <button type="button" class="type-btn type-btn-active" data-conn-type="moonraker">Moonraker</button>
-            <button type="button" class="type-btn" data-conn-type="snapmaker_u1">Snapmaker U1</button>
-            <button type="button" class="type-btn" data-conn-type="bambu">Bambu</button>
-            <button type="button" class="type-btn" data-conn-type="simulated">Simulated</button>
-          </div>
+          <label class="settings-label" for="p-printer-family">Printer</label>
+          <select class="settings-input" id="p-printer-family" style="max-width:18rem">
+            <option value="bambu">Bambu</option>
+            <option value="voron">Voron / Klipper</option>
+            <option value="snapmaker_u1">Snapmaker</option>
+            <option value="moonraker">Other Moonraker</option>
+            <option value="simulated">Simulated</option>
+          </select>
         </div>
 
         <div class="settings-form-row">
@@ -9551,9 +9664,22 @@ function _printersCategoryHtml(printers) {
         </div>
 
         <div class="settings-form-row">
-          <label class="settings-label" for="p-model">Model Name</label>
-          <input class="settings-input" id="p-model" type="text"
-            placeholder="Sovol SV08" required>
+          <label class="settings-label" for="p-model-select">Model Name</label>
+          <select class="settings-input" id="p-model-select" style="max-width:18rem">
+            ${_modelOptionsHtml('bambu', 'H2D')}
+          </select>
+          <input id="p-model" type="hidden" value="H2D">
+          <input class="settings-input" id="p-model-custom" type="text"
+            placeholder="Custom model" hidden>
+        </div>
+
+        <div class="settings-form-row">
+          <label class="settings-label">Build Plate <span class="settings-hint">(mm)</span></label>
+          <div class="settings-inline-fields">
+            <input class="settings-input" id="p-bed-x" type="number" min="1" max="1000" value="350" placeholder="X" style="max-width:6rem">
+            <input class="settings-input" id="p-bed-y" type="number" min="1" max="1000" value="320" placeholder="Y" style="max-width:6rem">
+            <input class="settings-input" id="p-bed-z" type="number" min="1" max="1000" value="325" placeholder="Z" style="max-width:6rem">
+          </div>
         </div>
 
         <div class="settings-form-row">
@@ -9683,38 +9809,67 @@ function _printersCategoryHtml(printers) {
 }
 
 function _attachPrintersEvents(el) {
-  let connType = 'moonraker';
+  let connType = 'bambu';
 
-  const setConnType = type => {
+  const syncModelValue = (applyBuildVolume = true) => {
+    const modelSelect = el.querySelector('#p-model-select');
+    const modelInput = el.querySelector('#p-model');
+    const customModel = el.querySelector('#p-model-custom');
+    const selected = modelSelect?.value || '';
+    const isCustom = selected === '__custom__' || _CUSTOM_MODEL_RE.test(selected);
+    if (customModel) customModel.hidden = !isCustom;
+    const modelName = isCustom ? (customModel?.value.trim() || '') : selected;
+    if (modelInput) modelInput.value = modelName;
+    if (applyBuildVolume && !isCustom && _PRINTER_MODEL_BUILD_VOLUME[modelName]) {
+      _setBuildVolumeFields(el, _PRINTER_MODEL_BUILD_VOLUME[modelName]);
+    }
+  };
+
+  const setPrinterFamily = (familyId, opts = {}) => {
+    const family = _PRINTER_SETUP_FAMILIES[familyId] || _PRINTER_SETUP_FAMILIES.bambu;
     const previousType = connType;
-    connType = type;
+    const previousFamily = el.querySelector('#p-printer-family')?.value || _setupFamilyForConnType(connType);
+    connType = family.connType;
     const idInput = el.querySelector('#p-id');
     const modelInput = el.querySelector('#p-model');
+    const modelSelect = el.querySelector('#p-model-select');
+    const customModel = el.querySelector('#p-model-custom');
     const customInput = el.querySelector('#p-custom');
+    const familySelect = el.querySelector('#p-printer-family');
+    if (familySelect) familySelect.value = familyId;
     if (previousType === 'snapmaker_u1' && connType !== 'snapmaker_u1') {
-      if (modelInput?.dataset.autoSnapmaker === '1') {
+      if (modelInput?.dataset.autoSnapmaker === '1' || modelInput?.value === 'Snapmaker U1') {
         modelInput.value = '';
         delete modelInput.dataset.autoSnapmaker;
       }
       if (customInput?.value === 'Snapmaker U1') customInput.value = '';
     }
-    if (idInput) idInput.placeholder = connType === 'snapmaker_u1' ? 'u1' : 'my_printer';
-    if (modelInput) modelInput.placeholder = connType === 'snapmaker_u1' ? 'Snapmaker U1' : 'Sovol SV08';
-    if (customInput) customInput.placeholder = connType === 'snapmaker_u1' ? 'Printer Beast' : 'Workshop Beast';
-    el.querySelectorAll('[data-conn-type]').forEach(b =>
-      b.classList.toggle('type-btn-active', b.dataset.connType === connType)
-    );
+    if (idInput) idInput.placeholder = family.idPlaceholder;
+    if (customInput) customInput.placeholder = family.customPlaceholder;
+    const selectedModel = opts.modelName || (opts.preserveModel ? modelInput?.value : '');
+    if (modelSelect) modelSelect.innerHTML = _modelOptionsHtml(familyId, selectedModel);
+    const selected = modelSelect?.value || family.models[0] || '';
+    if (customModel) {
+      const isCustom = selected === '__custom__' || _CUSTOM_MODEL_RE.test(selected);
+      customModel.hidden = !isCustom;
+      customModel.placeholder = `Custom ${family.label} model`;
+      customModel.value = opts.modelName && !family.models.includes(opts.modelName) ? opts.modelName : '';
+    }
+    syncModelValue(!opts.keepBuildVolume);
     el.querySelector('#moonraker-fields').hidden = !['moonraker', 'snapmaker_u1'].includes(connType);
     el.querySelector('#bambu-fields').hidden     = connType !== 'bambu';
     el.querySelector('#simulated-fields').hidden = connType !== 'simulated';
+    const icon = el.querySelector(`input[name="icon"][value="${family.icon}"]`);
+    if (icon) icon.checked = true;
     if (connType === 'bambu') {
-      el.querySelector('input[name="icon"][value="bambu"]').checked = true;
+      const bambuCam = el.querySelector('#p-bambu-cam');
+      if (bambuCam) bambuCam.checked = true;
     } else if (connType === 'snapmaker_u1') {
-      el.querySelector('input[name="icon"][value="generic"]').checked = true;
-      if (!modelInput?.value) {
+      if (!modelInput?.value || modelInput?.dataset.autoSnapmaker === '1') {
         modelInput.value = 'Snapmaker U1';
         modelInput.dataset.autoSnapmaker = '1';
       }
+      if (modelInput?.value === 'Snapmaker U1') modelInput.dataset.autoSnapmaker = '1';
       if (customInput?.value === 'Snapmaker U1') customInput.value = '';
       if (el.querySelector('#p-cam-type')?.value === 'none') el.querySelector('#p-cam-type').value = 'mjpeg_direct';
       el.querySelector('#mjpeg-fields').hidden = el.querySelector('#p-cam-type')?.value !== 'mjpeg_direct';
@@ -9723,10 +9878,19 @@ function _attachPrintersEvents(el) {
       const host = el.querySelector('#p-host')?.value;
       if (stream && _isGenericMjpegUrl(stream.value, 'stream')) stream.value = _snapmakerMjpegUrl(host);
       if (snapshot && _isGenericMjpegUrl(snapshot.value, 'snapshot')) snapshot.value = _snapmakerSnapshotUrl(host);
-    } else if (connType === 'simulated') {
-      el.querySelector('input[name="icon"][value="generic"]').checked = true;
+    } else if (previousFamily !== familyId && ['moonraker'].includes(connType)) {
+      if (el.querySelector('#p-cam-type')?.value == null) el.querySelector('#p-cam-type').value = 'none';
     }
   };
+
+  const setConnType = (type, modelName = '') => setPrinterFamily(_setupFamilyForConnType(type, modelName), { modelName });
+
+  el.querySelector('#p-printer-family')?.addEventListener('change', e => {
+    setPrinterFamily(e.target.value);
+  });
+  el.querySelector('#p-model-select')?.addEventListener('change', () => syncModelValue(true));
+  el.querySelector('#p-model-custom')?.addEventListener('input', () => syncModelValue(false));
+  setPrinterFamily('bambu', { modelName: 'H2D' });
 
   el.querySelectorAll('[data-conn-type]').forEach(btn => {
     btn.addEventListener('click', () => setConnType(btn.dataset.connType));
@@ -9800,6 +9964,8 @@ function _collectFormData(el, connType) {
     icon,
     temperature_presets: { hotend, bed },
   };
+  const buildVolume = _readBuildVolumeFields(el);
+  if (buildVolume) base.build_volume = buildVolume;
 
   if (connType === 'moonraker' || connType === 'snapmaker_u1') {
     const host    = v('p-host');
@@ -9837,10 +10003,21 @@ function _populatePrinterForm(el, printer, setConnType) {
     if (field) field.value = value ?? '';
   };
   const conn = printer.connection || { type: 'moonraker' };
-  setConnType(conn.type || 'moonraker');
+  setConnType(conn.type || 'moonraker', printer.model_name || '');
   set('p-editing-id', printer.id);
   set('p-id', printer.id);
   set('p-model', printer.model_name || '');
+  const familyId = _setupFamilyForPrinter(printer);
+  const family = _PRINTER_SETUP_FAMILIES[familyId] || _PRINTER_SETUP_FAMILIES.moonraker;
+  const modelSelect = el.querySelector('#p-model-select');
+  const customModel = el.querySelector('#p-model-custom');
+  if (modelSelect && printer.model_name && !family.models.includes(printer.model_name)) {
+    modelSelect.value = '__custom__';
+    if (customModel) {
+      customModel.hidden = false;
+      customModel.value = printer.model_name;
+    }
+  }
   set('p-custom', printer.custom_name || '');
   delete el.querySelector('#p-model')?.dataset.autoSnapmaker;
   const icon = el.querySelector(`input[name="icon"][value="${printer.icon || 'generic'}"]`);
@@ -9864,6 +10041,7 @@ function _populatePrinterForm(el, printer, setConnType) {
   el.querySelector('#mjpeg-fields').hidden = camType !== 'mjpeg_direct';
   set('p-stream-url', camera?.stream_url || '');
   set('p-snap-url', camera?.snapshot_url || '');
+  _setBuildVolumeFields(el, printer.build_volume || _PRINTER_MODEL_BUILD_VOLUME[printer.model_name] || {});
   const bambuCam = el.querySelector('#p-bambu-cam');
   if (bambuCam) bambuCam.checked = camera?.type === 'bambu_rtsp' || conn.type === 'bambu';
 
@@ -9890,7 +10068,7 @@ function _resetPrinterForm(el, setConnType) {
   el.querySelector('#settings-cancel-edit')?.setAttribute('hidden', '');
   form.querySelector('button[type="submit"]').textContent = 'Add Printer';
   el.querySelector('#settings-form-error')?.setAttribute('hidden', '');
-  setConnType('moonraker');
+  setConnType('bambu', 'H2D');
   el.querySelector('#mjpeg-fields').hidden = true;
 }
 

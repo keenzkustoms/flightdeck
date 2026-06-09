@@ -10445,6 +10445,13 @@ select optgroup {
 
 .settings-type-toggle { display: flex; gap: 0.375rem; }
 
+.settings-inline-fields {
+  display: flex;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
 .type-btn {
   padding: 0.4rem 1rem;
   border: 1px solid var(--border);
