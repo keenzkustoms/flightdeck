@@ -321,6 +321,15 @@
         { key: 'data', label: 'Demo data', ok: true, level: 'ok', detail: 'Simulated fleet loaded', optional: false },
       ],
     });
+    if (path === '/api/setup/logs/download' || path === '/api/setup/logs/support') {
+      return new Response('Flightdeck demo support bundle\n', {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/zip',
+          'Content-Disposition': 'attachment; filename="flightdeck-demo-support.zip"',
+        },
+      });
+    }
     if (path === '/api/printers') return jsonResponse(clone(demoPrinters));
     if (path.match(/^\/api\/printers\/[^/]+\/camera$/)) {
       const id = decodeURIComponent(path.split('/')[3]);

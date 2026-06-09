@@ -3041,6 +3041,14 @@ class SlicerProfileDefaultsRequest(BaseModel):
     filament_profile: str = ""
 
 
+class SupportBundleRequest(BaseModel):
+    name: str = ""
+    email: str = ""
+    problem: str = ""
+    expected: str = ""
+    notes: str = ""
+
+
 @app.get("/api/settings")
 async def get_settings():
     return db.get_all_settings()
@@ -3738,6 +3746,42 @@ def _diagnostic_json(value) -> str:
     return json.dumps(value, indent=2, sort_keys=True, default=_dt_default) + "\n"
 
 
+def _diagnostic_support_field(value, max_len: int = 4000) -> str:
+    text = str(value or "")
+    text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", " ", text).strip()
+    if len(text) > max_len:
+        text = text[:max_len].rstrip() + "\n[truncated]"
+    return text
+
+
+def _diagnostic_support_payload(payload: dict | None) -> dict:
+    payload = payload or {}
+    fields = {
+        "name": 200,
+        "email": 320,
+        "problem": 4000,
+        "expected": 4000,
+        "notes": 4000,
+    }
+    return {key: _diagnostic_support_field(payload.get(key), max_len) for key, max_len in fields.items()}
+
+
+def _diagnostic_support_text(support: dict) -> str:
+    labels = [
+        ("name", "Name"),
+        ("email", "Email"),
+        ("problem", "Problem / what happened"),
+        ("expected", "Expected / what they were trying to do"),
+        ("notes", "Extra notes"),
+    ]
+    lines = ["Flightdeck support request", ""]
+    for key, label in labels:
+        value = support.get(key) or ""
+        lines.extend([label, value or "(blank)", ""])
+    lines.append("Send this zip to flightdeck3dprinters@gmail.com.")
+    return "\n".join(lines) + "\n"
+
+
 def _diagnostic_recent_decisions(limit: int = 250) -> list[dict]:
     try:
         with sqlite3.connect(DB_PATH) as conn:
@@ -3772,8 +3816,9 @@ def _diagnostic_command(name: str, args: list[str], timeout: int = 5) -> tuple[s
         return name, f"{name} unavailable: {exc}\n"
 
 
-async def _diagnostic_bundle_bytes() -> bytes:
+async def _diagnostic_bundle_bytes(support: dict | None = None) -> bytes:
     now = datetime.now(timezone.utc)
+    support_payload = _diagnostic_support_payload(support) if support is not None else None
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         def add_text(name: str, text: str) -> None:
@@ -3787,6 +3832,18 @@ async def _diagnostic_bundle_bytes() -> bytes:
             "Known secret-like settings are redacted, but review before sharing publicly.",
             "",
         ]))
+        if support_payload is not None:
+            add_text("support-request.txt", _diagnostic_support_text(support_payload))
+            add_text("support-request.json", _diagnostic_json({
+                "generated_at": now.isoformat(),
+                "contact": {
+                    "name": support_payload.get("name", ""),
+                    "email": support_payload.get("email", ""),
+                },
+                "problem": support_payload.get("problem", ""),
+                "expected": support_payload.get("expected", ""),
+                "notes": support_payload.get("notes", ""),
+            }))
         add_text("version.json", _diagnostic_json(_app_version_info(include_remote=False)))
         add_text("instance.json", _diagnostic_json({
             "app": "flightdeck",
@@ -3857,6 +3914,20 @@ async def download_setup_logs():
         media_type="application/zip",
         headers={
             "Content-Disposition": f'attachment; filename="flightdeck-diagnostics-{stamp}.zip"',
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+@app.post("/api/setup/logs/support")
+async def download_support_logs(body: SupportBundleRequest):
+    data = await _diagnostic_bundle_bytes(support=body.model_dump())
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    return Response(
+        content=data,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="flightdeck-support-{stamp}.zip"',
             "Cache-Control": "no-store",
         },
     )

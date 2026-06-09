@@ -11146,7 +11146,7 @@ function _setupVersionHtml(version) {
         <span class="setup-health-badge setup-ready-${updateClass}" id="setup-update-state">${esc(updateText)}</span>
         <button type="button" class="settings-save-btn" id="setup-check-update">Check</button>
         <button type="button" class="settings-save-btn setup-update-btn" id="setup-run-update" data-update-state="${version?.dirty ? 'blocked' : version?.behind ? 'available' : 'idle'}">${version?.dirty ? 'Blocked' : 'Update'}</button>
-        <a class="settings-save-btn setup-log-download-btn" href="/api/setup/logs/download" download>Download logs</a>
+        <button type="button" class="settings-save-btn setup-log-download-btn" id="setup-support-bundle">Download logs</button>
       </div>
     </div>
     <div class="setup-version-meta">
@@ -11157,6 +11157,109 @@ function _setupVersionHtml(version) {
     ${notes ? `<ul class="setup-version-notes">${notes}</ul>` : ''}
     <div class="settings-hint" id="setup-update-message">Updates use <code>git pull --ff-only</code>. Restart Flightdeck after a successful update. Download logs creates a redacted diagnostic zip for support.</div>
   </div>`;
+}
+
+function _downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename || 'flightdeck-support.zip';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function _filenameFromDisposition(value, fallback) {
+  const header = String(value || '');
+  const utf8 = header.match(/filename\*=UTF-8''([^;]+)/i);
+  if (utf8) {
+    try { return decodeURIComponent(utf8[1].trim()); } catch {}
+  }
+  const plain = header.match(/filename="?([^";]+)"?/i);
+  return plain ? plain[1].trim() : fallback;
+}
+
+function _openSupportBundleModal() {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay setup-support-overlay';
+  overlay.innerHTML = `
+    <div class="modal-box setup-support-modal" role="dialog" aria-modal="true" aria-label="Download support logs">
+      <div class="setup-support-head">
+        <div>
+          <div class="settings-section-title">Support bundle</div>
+          <div class="settings-hint">Add the issue context and Flightdeck will include it inside the redacted diagnostic zip.</div>
+        </div>
+        <button type="button" class="modal-close-btn" data-support-close>&times;</button>
+      </div>
+      <form class="setup-support-form">
+        <div class="setup-support-grid">
+          <label class="setup-support-field">
+            <span>Name</span>
+            <input name="name" type="text" autocomplete="name" maxlength="200" placeholder="Optional">
+          </label>
+          <label class="setup-support-field">
+            <span>Email</span>
+            <input name="email" type="email" autocomplete="email" maxlength="320" placeholder="Optional">
+          </label>
+        </div>
+        <label class="setup-support-field">
+          <span>Problem / what happened</span>
+          <textarea name="problem" rows="4" maxlength="4000" placeholder="What broke, froze, failed, or looked wrong?"></textarea>
+        </label>
+        <label class="setup-support-field">
+          <span>Expected / what you were trying to do</span>
+          <textarea name="expected" rows="3" maxlength="4000" placeholder="What should Flightdeck have done instead?"></textarea>
+        </label>
+        <label class="setup-support-field">
+          <span>Extra notes</span>
+          <textarea name="notes" rows="3" maxlength="4000" placeholder="Printer name, page, recent actions, screenshots sent separately..."></textarea>
+        </label>
+        <div class="settings-hint setup-support-email">After it downloads, email the zip to <strong>flightdeck3dprinters@gmail.com</strong>.</div>
+        <div class="modal-actions">
+          <a class="modal-btn setup-support-fallback" href="/api/setup/logs/download" download>Quick zip</a>
+          <button type="button" class="modal-btn" data-support-close>Cancel</button>
+          <button type="submit" class="modal-btn setup-support-primary" data-support-submit>Download zip</button>
+        </div>
+      </form>
+    </div>`;
+  document.body.appendChild(overlay);
+  const form = overlay.querySelector('.setup-support-form');
+  const first = form.querySelector('input, textarea');
+  const close = () => overlay.remove();
+  overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+  overlay.querySelectorAll('[data-support-close]').forEach(btn => btn.addEventListener('click', close));
+  overlay.addEventListener('keydown', e => { if (e.key === 'Escape') close(); });
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const submit = form.querySelector('[data-support-submit]');
+    const old = submit.textContent;
+    submit.disabled = true;
+    submit.textContent = 'Preparing...';
+    const fd = new FormData(form);
+    const payload = Object.fromEntries(['name', 'email', 'problem', 'expected', 'notes'].map(key => [key, String(fd.get(key) || '').trim()]));
+    try {
+      const r = await fetch('/api/setup/logs/support', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!r.ok) {
+        const data = await r.json().catch(() => ({}));
+        throw new Error(data.detail || 'Support bundle failed');
+      }
+      const blob = await r.blob();
+      const filename = _filenameFromDisposition(r.headers.get('Content-Disposition'), 'flightdeck-support.zip');
+      _downloadBlob(blob, filename);
+      close();
+      showToast('Support bundle ready', 'Email the zip to flightdeck3dprinters@gmail.com.', 'success');
+    } catch (err) {
+      showToast('Download logs failed', err.message || '', 'error');
+      submit.disabled = false;
+      submit.textContent = old;
+    }
+  });
+  setTimeout(() => first?.focus(), 30);
 }
 
 function _setupHealthHtml(health, context = {}) {
@@ -11295,6 +11398,7 @@ function _attachSetupEvents(el) {
       setMessage(err.message || 'Update failed', 'warn');
     }
   });
+  el.querySelector('#setup-support-bundle')?.addEventListener('click', _openSupportBundleModal);
 }
 
 async function _saveSetting(key, value) {
