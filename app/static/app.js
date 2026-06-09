@@ -12648,7 +12648,7 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
   const printer = _latestPrinters.find(p => p.id === printerId);
   const title = `${printer?.custom_name || printerId} · ${slotLabel}`;
   const overlay = document.createElement('div');
-  overlay.className = 'modal-overlay';
+  overlay.className = 'modal-overlay slot-modal-overlay';
   overlay.innerHTML = `
     <div class="modal-box slot-modal">
       <div class="modal-header">

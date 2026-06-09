@@ -6,9 +6,11 @@ Latest GitHub/Pi state:
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
-- Refresh cachebust currently: ?cachebust=426 / style.css?v=343
+- Refresh cachebust currently: ?cachebust=427 / style.css?v=344
 
 Recent work:
+- AMS Profile Doctor modal now fits within the viewport at normal 100% browser scale. The slot editor gets its own overlay class, the modal is capped to the viewport, the body scrolls internally, and the footer/Close action stays reachable instead of falling below the screen. Static cache bumped to `app.js?v=427` and `style.css?v=344`; frontend refresh only.
+  - Verification: `node --check app/static/app.js` and `git diff --check` passed.
 - Windows update-block recovery: the Windows checkout at `C:\Users\Kidabah\flightdeck` is now clean and current at `a047a5c`, and the uvicorn worker has been restarted on port 8000. Both `http://127.0.0.1:8000/api/update/status?check_remote=true` and `http://100.112.171.88:8000/api/update/status?check_remote=true` report `dirty=false`, `behind=false`, `commit=a047a5c`, `remote_commit=a047a5c`. If the Windows browser still shows `Blocked`/old commit, it is stale browser state rather than the backend checkout; hard refresh or reopen the Windows Flightdeck page.
   - Verification: Windows worker local profile sync returned `Orca Local` with 6,826 filament profiles, 290 Siddament filament profiles, 1,393 machine profiles, and 2,898 process profiles.
 - Slicer profile sync can now relay local Orca profiles from the configured Windows worker. This fixes the live Pi case where the Pi cannot read `C:\Users\Kidabah\AppData\Roaming\OrcaSlicer`, so `Orca Local` was missing in both Slicer defaults and the AMS Profile Doctor even though the Windows Orca worker had Siddament profiles. `POST /api/slicer/profiles/sync` now scans local profiles on the server and, when `orcaslicer_worker_url` is set, also asks `{worker}/api/slicer/profiles/sync?include_worker=false` for its `Orca Local` vendor and stores that result in the Pi catalogue. Worker relay calls are non-recursive.

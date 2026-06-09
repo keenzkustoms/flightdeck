@@ -6424,13 +6424,42 @@ button.live-route-node:hover {
   border-style: dashed;
 }
 
+.slot-modal-overlay {
+  align-items: flex-start;
+  padding: clamp(0.5rem, 2vh, 1.25rem) 1rem;
+  overflow: hidden;
+}
+
 .slot-modal {
+  width: min(760px, calc(100vw - 2rem));
   max-width: 760px;
+  max-height: calc(100vh - clamp(1rem, 4vh, 2.5rem));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+}
+
+.slot-modal .modal-header {
+  flex: 0 0 auto;
+  padding: 1.15rem 1.5rem 0.6rem;
 }
 
 .slot-modal-body {
+  min-height: 0;
   display: grid;
   gap: 1rem;
+  overflow: auto;
+  padding: 0 1.5rem 1rem;
+}
+
+.slot-modal .modal-actions {
+  position: sticky;
+  bottom: 0;
+  flex: 0 0 auto;
+  padding: 0.75rem 1.5rem 1rem;
+  border-top: 1px solid rgba(122,162,216,0.14);
+  background: linear-gradient(180deg, rgba(15,23,42,0.86), var(--surface) 42%);
 }
 
 .slot-current,
