@@ -6,9 +6,10 @@ Latest GitHub/Pi state:
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
-- Refresh cachebust currently: ?cachebust=412 / style.css?v=338
+- Refresh cachebust currently: ?cachebust=413 / style.css?v=338
 
 Recent work:
+- AMS slot picker now treats Flightdeck assignments in a live-empty printer slot as movable stale-location candidates. If a spool still says it is in H2D AMS 1 S2 but the printer reports that slot empty, it appears in another slot doctor's picker as an `Empty source slot` option and moving it relocates the same physical spool instead of blocking it as already assigned. Static cache bumped to `app.js?v=413`; frontend refresh required.
 - AMS Profile Doctor now has an explicit Bambu slot profile override panel for the assigned spool. The spool remains the Flightdeck identity; by default Trust Flightdeck still uses the existing spool-to-AMS mapping, including custom aliases like Siddament ASA. If the operator ticks/edits the override panel, Trust Flightdeck sends the chosen profile name, material, colour, temperature range, and generic Bambu family tray ID to the AMS slot. This mirrors the useful part of Bambuddy's Configure AMS Slot flow without making slicer sync silently become spool identity. Static cache bumped to `app.js?v=412` and `style.css?v=338`; backend restart required because `/api/spools/{id}/move` now accepts the optional `ams_profile` payload and the Bambu MQTT sender accepts an override.
   - Verification: `node --check app/static/app.js` passed; `python -m py_compile app/main.py app/printers/bambu.py` passed with the usual Windows embedded-Python prefix warning. Local server on `localhost:8765` served `app.js?v=412` and `style.css?v=338`, but the demo runtime stayed on `Connecting...`, so live Pi UI verification is still needed after deploy/restart.
   - Deploy note: GitHub was pushed and the Pi repo fast-forwarded to commit `ef07507` via `/api/update`; updater reported `restart_required: true`, so run `sudo systemctl restart flightdeck` before testing the new AMS profile override.

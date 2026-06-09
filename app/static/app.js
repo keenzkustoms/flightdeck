@@ -12004,6 +12004,35 @@ function _slotReport(printer, slotIndex) {
   return null;
 }
 
+function _spoolAssignedSlotSource(spool) {
+  if (!spool?.location_printer_id || spool.location_slot === null || spool.location_slot === undefined) return null;
+  const printer = _latestPrinters.find(p => p.id === spool.location_printer_id);
+  const slotIndex = Number(spool.location_slot);
+  if (!printer || !Number.isFinite(slotIndex)) return null;
+  const report = _slotReport(printer, slotIndex);
+  return {
+    printer,
+    report,
+    slotIndex,
+    slotLabel: _amsSlotLabel(printer, slotIndex),
+  };
+}
+
+function _spoolIsAssignableToSlot(spool) {
+  if (!spool || spool.archived_at) return false;
+  if (!spool.location_printer_id) return true;
+  const source = _spoolAssignedSlotSource(spool);
+  return !!source?.report?.empty;
+}
+
+function _spoolAssignableLocationLabel(spool) {
+  if (!spool?.location_printer_id) return _spoolStorageLocationName(spool?.storage_location_id);
+  const source = _spoolAssignedSlotSource(spool);
+  const printerName = source?.printer?.custom_name || source?.printer?.model_name || spool.location_printer_id;
+  const slotLabel = source?.slotLabel || `S${Number(spool.location_slot) + 1}`;
+  return `${printerName} · ${slotLabel} empty`;
+}
+
 const _AMS_PROFILE_MATERIALS = ['PLA', 'PETG', 'PCTG', 'ABS', 'ASA', 'TPU', 'PC', 'PA', 'NYLON', 'PVA', 'HIPS', 'PP', 'PET'];
 
 function _amsProfileParts(name, fallbackSpool = null) {
@@ -12149,10 +12178,10 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
     const mismatch = _slotMismatch(current, report);
     const doctor = _slotDoctorState(current, report);
     const candidates = spools
-      .filter(s => !s.archived_at && !s.location_printer_id)
+      .filter(s => _spoolIsAssignableToSlot(s) && (!current || String(s.id) !== String(current.id)))
       .sort((a, b) =>
         _slotCandidateScore(a, report) - _slotCandidateScore(b, report) ||
-        _spoolStorageLocationName(a.storage_location_id).localeCompare(_spoolStorageLocationName(b.storage_location_id)) ||
+        _spoolAssignableLocationLabel(a).localeCompare(_spoolAssignableLocationLabel(b)) ||
         (a.material || '').localeCompare(b.material || '') ||
         (a.color_name || '').localeCompare(b.color_name || '')
       );
@@ -12196,8 +12225,9 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
     const matchCount = lowConfidenceReport ? 0 : candidates.filter(s => _slotCandidateScore(s, report) < 320).length;
     const locationCounts = new Map();
     for (const s of candidates) {
-      const key = String(s.storage_location_id || '');
-      const currentCount = locationCounts.get(key) || { id: key, name: _spoolStorageLocationName(s.storage_location_id), count: 0 };
+      const source = _spoolAssignedSlotSource(s);
+      const key = source?.report?.empty ? `empty:${s.location_printer_id}:${s.location_slot}` : `loc:${s.storage_location_id || ''}`;
+      const currentCount = locationCounts.get(key) || { id: key, name: _spoolAssignableLocationLabel(s), count: 0 };
       currentCount.count += 1;
       locationCounts.set(key, currentCount);
     }
@@ -12208,11 +12238,12 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
       <div class="slot-filter-chips" role="group" aria-label="Filter stored spools">
         <button type="button" class="slot-filter-chip active" data-slot-filter="all">All <span>${candidates.length}</span></button>
         ${report && !report.empty && !lowConfidenceReport ? `<button type="button" class="slot-filter-chip" data-slot-filter="match">Matches <span>${matchCount}</span></button>` : ''}
-        ${locationFilters.map(loc => `<button type="button" class="slot-filter-chip" data-slot-filter="loc:${esc(loc.id)}">${esc(loc.name)} <span>${loc.count}</span></button>`).join('')}
+        ${locationFilters.map(loc => `<button type="button" class="slot-filter-chip" data-slot-filter="${esc(loc.id)}">${esc(loc.name)} <span>${loc.count}</span></button>`).join('')}
       </div>` : '';
     const pickerRows = candidates.length ? candidates.map(s => {
       const pct = s.label_weight_g > 0 ? Math.round(s.remaining_g * 100 / s.label_weight_g) : 0;
-      const loc = _spoolStorageLocationName(s.storage_location_id);
+      const loc = _spoolAssignableLocationLabel(s);
+      const staleEmptySource = !!_spoolAssignedSlotSource(s)?.report?.empty;
       const score = _slotCandidateScore(s, report);
       const suggested = !lowConfidenceReport && score < 96;
       const nearMatch = !lowConfidenceReport && !suggested && score < 320;
@@ -12221,9 +12252,11 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
         suggested ? 'Suggested' : '',
         nearMatch ? 'Near match' : '',
         homeShelf ? 'Home shelf' : '',
+        staleEmptySource ? 'Empty source slot' : '',
       ].filter(Boolean);
       const searchable = `${loc} ${s.material || ''} ${s.subtype || ''} ${s.brand || ''} ${s.color_name || ''} ${s.color_hex || ''} #${s.id}`.toLowerCase();
-      return `<button type="button" class="slot-spool-option" data-slot-spool-id="${s.id}" data-search="${esc(searchable)}" data-score="${score}" data-location-id="${esc(String(s.storage_location_id || ''))}">
+      const filterKey = staleEmptySource ? `empty:${s.location_printer_id}:${s.location_slot}` : `loc:${s.storage_location_id || ''}`;
+      return `<button type="button" class="slot-spool-option" data-slot-spool-id="${s.id}" data-search="${esc(searchable)}" data-score="${score}" data-location-id="${esc(filterKey)}">
         <span class="location-spool-swatch" style="${_spoolColorStyle(s)}"></span>
         <span class="slot-spool-option-main">
           <strong>${esc(s.color_name || s.color_hex || 'Colour')} · ${esc(s.material)}${s.subtype ? ` ${esc(s.subtype)}` : ''}</strong>
@@ -12398,7 +12431,7 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
         const matchesFilter =
           activeFilter === 'all'
           || (activeFilter === 'match' && Number(row.dataset.score || 9999) < 320)
-          || (activeFilter.startsWith('loc:') && String(row.dataset.locationId || '') === activeFilter.slice(4));
+          || ((activeFilter.startsWith('loc:') || activeFilter.startsWith('empty:')) && String(row.dataset.locationId || '') === activeFilter);
         row.hidden = !(matchesSearch && matchesFilter);
       });
     };
