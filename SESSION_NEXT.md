@@ -2,13 +2,17 @@
 
 Latest GitHub/Pi state:
 - Branch: main
-- Latest commit: current HEAD after this handoff (`Clarify support bundle fallback label`)
+- Latest commit: current HEAD after this handoff (`Update handoff for required support bundles`)
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
-- Refresh cachebust currently: ?cachebust=417 / style.css?v=341
+- Refresh cachebust currently: ?cachebust=418 / style.css?v=341
 
 Recent work:
+- Support bundles now require context during early testing. The visible `Diagnostics only` fallback was removed from the modal, the copy now asks users to fill in as much information as possible, then click `Download zip`, attach it to an email, and send it to `flightdeck3dprinters@gmail.com`. Frontend and backend both require name, email, and problem/what happened before generating `/api/setup/logs/support`. The plain `/api/setup/logs/download` endpoint remains available for internal direct use, but it is no longer offered in the modal. Static cache bumped to `app.js?v=418`.
+  - Journal log capture was improved: diagnostic bundles now append a clear remediation note when `journalctl` cannot read service logs, Setup Health includes an optional `Journal logs` check, and `scripts/install-systemd.sh` writes `SupplementaryGroups=systemd-journal adm` so freshly installed/refreshed systemd units can read journal output.
+  - Verification: `node --check app/static/app.js` passed; `python -m py_compile app/main.py` and `.venv/Scripts/python.exe -m py_compile app/main.py` passed with the usual Windows embedded-Python prefix warning. Local smoke test confirmed missing name/email/problem is rejected with 422 and a filled support bundle still contains `support-request.txt`.
+  - Deploy note: GitHub was pushed and the Pi repo fast-forwarded to commit `757834f` via `/api/update`; updater reported `restart_required: true`. Run `sudo systemctl restart flightdeck` for the backend changes. To fully apply the journal permission unit change on an existing Pi install, run `cd /home/flightdeck/flightdeck && ./scripts/install-systemd.sh` once, or apply `sudo usermod -aG systemd-journal flightdeck && sudo systemctl restart flightdeck`.
 - Support bundle modal fallback wording was clarified: the left-side plain diagnostics path now says `Diagnostics only` instead of `Quick zip`, while the main support-notes path remains `Download zip`. Static cache bumped to `app.js?v=417`; frontend refresh only.
   - Verification: `node --check app/static/app.js` passed.
   - Deploy note: GitHub was pushed and the Pi repo fast-forwarded to commit `35e170b` via `/api/update`; updater reported `restart_required: true`, but this specific change is frontend/static-only, so a hard browser refresh should pick up `app.js?v=417`.
