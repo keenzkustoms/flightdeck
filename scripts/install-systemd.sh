@@ -14,6 +14,7 @@ After=network.target
 
 [Service]
 User=${SERVICE_USER}
+SupplementaryGroups=systemd-journal adm
 WorkingDirectory=${APP_DIR}
 EnvironmentFile=-${APP_DIR}/.env
 ExecStart=${APP_DIR}/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000

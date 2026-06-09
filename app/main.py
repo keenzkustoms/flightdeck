@@ -3811,9 +3811,40 @@ def _diagnostic_command(name: str, args: list[str], timeout: int = 5) -> tuple[s
         output = (proc.stdout or "") + (("\n" + proc.stderr) if proc.stderr else "")
         if not output.strip():
             output = f"{name} exited {proc.returncode} with no output\n"
+        if name == "journal-flightdeck.txt" and (
+            "No journal files were opened due to insufficient permissions" in output
+            or "Hint: You are currently not seeing messages" in output
+        ):
+            output += (
+                "\nFlightdeck could not read systemd journal logs from the running service user.\n"
+                "Refresh the systemd unit with scripts/install-systemd.sh, or run:\n"
+                "  sudo usermod -aG systemd-journal flightdeck\n"
+                "  sudo systemctl restart flightdeck\n"
+            )
         return name, _diagnostic_redact_text(output)
     except Exception as exc:
         return name, f"{name} unavailable: {exc}\n"
+
+
+def _journal_status() -> tuple[bool, str]:
+    runtime = os.environ.get("FLIGHTDECK_RUNTIME", "").strip().lower()
+    if os.name == "nt" or runtime in {"windows", "tray", "windows-tray"}:
+        return True, "Windows runtime"
+    if runtime in {"docker", "container", "portainer"} or Path("/.dockerenv").exists():
+        return True, "Container-managed logs"
+    try:
+        proc = subprocess.run(
+            ["journalctl", "-u", "flightdeck.service", "-n", "1", "--no-pager", "--quiet"],
+            text=True,
+            capture_output=True,
+            timeout=3,
+        )
+        output = (proc.stdout or "") + (("\n" + proc.stderr) if proc.stderr else "")
+        if "No journal files were opened due to insufficient permissions" in output:
+            return False, "Service user cannot read journal logs; rerun scripts/install-systemd.sh or add flightdeck to systemd-journal"
+        return proc.returncode == 0, "Readable" if proc.returncode == 0 else (output.strip() or f"journalctl exited {proc.returncode}")
+    except Exception as exc:
+        return False, str(exc)
 
 
 async def _diagnostic_bundle_bytes(support: dict | None = None) -> bytes:
@@ -3921,7 +3952,16 @@ async def download_setup_logs():
 
 @app.post("/api/setup/logs/support")
 async def download_support_logs(body: SupportBundleRequest):
-    data = await _diagnostic_bundle_bytes(support=body.model_dump())
+    support = body.model_dump()
+    required = {
+        "name": "Name",
+        "email": "Email",
+        "problem": "Problem / what happened",
+    }
+    missing = [label for key, label in required.items() if not _diagnostic_support_field(support.get(key))]
+    if missing:
+        raise HTTPException(status_code=422, detail=f"Please fill in: {', '.join(missing)}")
+    data = await _diagnostic_bundle_bytes(support=support)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     return Response(
         content=data,
@@ -4291,6 +4331,15 @@ async def setup_health():
         systemd_detail,
         level="ok" if container_managed and systemd_ok else None,
         optional=not container_managed,
+    ))
+    journal_ok, journal_detail = _journal_status()
+    checks.append(_setup_check(
+        "journal",
+        "Journal logs",
+        journal_ok,
+        journal_detail,
+        level="ok" if journal_ok else "warn",
+        optional=True,
     ))
 
     required = [c for c in checks if not c["optional"]]

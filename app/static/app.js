@@ -11188,24 +11188,24 @@ function _openSupportBundleModal() {
       <div class="setup-support-head">
         <div>
           <div class="settings-section-title">Support bundle</div>
-          <div class="settings-hint">Add the issue context and Flightdeck will include it inside the redacted diagnostic zip.</div>
+          <div class="settings-hint">Please fill in as much information as possible. Once completed, click Download zip, attach it to an email, and send it to flightdeck3dprinters@gmail.com.</div>
         </div>
         <button type="button" class="modal-close-btn" data-support-close>&times;</button>
       </div>
       <form class="setup-support-form">
         <div class="setup-support-grid">
           <label class="setup-support-field">
-            <span>Name</span>
-            <input name="name" type="text" autocomplete="name" maxlength="200" placeholder="Optional">
+            <span>Name *</span>
+            <input name="name" type="text" autocomplete="name" maxlength="200" placeholder="Your name" required>
           </label>
           <label class="setup-support-field">
-            <span>Email</span>
-            <input name="email" type="email" autocomplete="email" maxlength="320" placeholder="Optional">
+            <span>Email *</span>
+            <input name="email" type="email" autocomplete="email" maxlength="320" placeholder="you@example.com" required>
           </label>
         </div>
         <label class="setup-support-field">
-          <span>Problem / what happened</span>
-          <textarea name="problem" rows="4" maxlength="4000" placeholder="What broke, froze, failed, or looked wrong?"></textarea>
+          <span>Problem / what happened *</span>
+          <textarea name="problem" rows="4" maxlength="4000" placeholder="What broke, froze, failed, or looked wrong?" required></textarea>
         </label>
         <label class="setup-support-field">
           <span>Expected / what you were trying to do</span>
@@ -11217,7 +11217,6 @@ function _openSupportBundleModal() {
         </label>
         <div class="settings-hint setup-support-email">After it downloads, email the zip to <strong>flightdeck3dprinters@gmail.com</strong>.</div>
         <div class="modal-actions">
-          <a class="modal-btn setup-support-fallback" href="/api/setup/logs/download" download>Diagnostics only</a>
           <button type="button" class="modal-btn" data-support-close>Cancel</button>
           <button type="submit" class="modal-btn setup-support-primary" data-support-submit>Download zip</button>
         </div>
@@ -11238,6 +11237,12 @@ function _openSupportBundleModal() {
     submit.textContent = 'Preparing...';
     const fd = new FormData(form);
     const payload = Object.fromEntries(['name', 'email', 'problem', 'expected', 'notes'].map(key => [key, String(fd.get(key) || '').trim()]));
+    if (!payload.name || !payload.email || !payload.problem) {
+      showToast('Support details needed', 'Please add your name, email, and what happened.', 'warn');
+      submit.disabled = false;
+      submit.textContent = old;
+      return;
+    }
     try {
       const r = await fetch('/api/setup/logs/support', {
         method: 'POST',
