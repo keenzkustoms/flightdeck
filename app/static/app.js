@@ -11958,16 +11958,27 @@ async function _openSliceModelDialog({ sourceId, path, file, printers }) {
         errEl.textContent = `${data.filename} is sliced and ready in the Print Vault.`;
       }
       if (actionsEl) {
+        const previewUrl = data.preview_url || (data.path
+          ? `/api/files/source/preview?${new URLSearchParams({ source_id: 'library', path: data.path, view: 'top' }).toString()}`
+          : '');
+        const previewLabel = data.filename ? `${data.filename} preview` : 'Sliced job preview';
         actionsEl.hidden = false;
         actionsEl.innerHTML = `
           <div class="filedesk-slice-steps">
             <strong>Sliced job ready</strong>
-            <span>${esc(data.filename)} is now printer-ready. Queue it, open Orca, or leave it in the vault.</span>
+            <span>${esc(data.filename)} is now printer-ready. Preview uses the thumbnail embedded in the sliced output when available.</span>
           </div>
+          ${previewUrl ? `<div class="filedesk-slice-preview">
+            <img src="${esc(_mediaUrl(previewUrl, previewLabel))}" alt="${esc(previewLabel)}" loading="eager" data-slice-preview-img>
+            <span>Preview unavailable</span>
+          </div>` : `<div class="filedesk-slice-preview is-missing"><span>Preview unavailable</span></div>`}
           <div class="filedesk-slice-buttons">
             <button class="filedesk-slice-link filedesk-slice-queue" type="button" data-queue-sliced="${esc(data.path || data.filename)}" data-printer-id="${esc(data.printer_id || runBtn.dataset.printerId)}">Queue sliced job</button>
             <button class="filedesk-slice-link" type="button" data-check-slice-output="${esc(data.filename)}">Check vault</button>
           </div>`;
+        actionsEl.querySelector('[data-slice-preview-img]')?.addEventListener('error', event => {
+          event.currentTarget.closest('.filedesk-slice-preview')?.classList.add('is-missing');
+        });
       }
       _fileDeskLastHtml = '';
       _printerBayLastHtml = '';

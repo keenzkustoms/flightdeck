@@ -15356,6 +15356,37 @@ select optgroup {
   color: var(--text);
   font-size: 0.82rem;
 }
+.filedesk-slice-preview {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-height: 10rem;
+  max-height: 18rem;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border: 1px solid rgba(59,130,246,0.32);
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, rgba(96,165,250,0.08), rgba(15,23,42,0.38)),
+    rgba(2,6,23,0.72);
+}
+.filedesk-slice-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.filedesk-slice-preview span {
+  display: none;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+.filedesk-slice-preview.is-missing img {
+  display: none;
+}
+.filedesk-slice-preview.is-missing span {
+  display: inline-flex;
+}
 .filedesk-slice-buttons {
   display: flex;
   flex-wrap: wrap;

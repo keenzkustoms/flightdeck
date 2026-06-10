@@ -6,9 +6,11 @@ Latest GitHub/Pi state:
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
-- Refresh cachebust currently: ?cachebust=445 / style.css?v=360
+- Refresh cachebust currently: ?cachebust=446 / style.css?v=361
 
 Recent work:
+- Slice Model now shows a practical first-pass preview after `Slice in Flightdeck` succeeds. `/api/slicer/run` returns a `preview_url` for generated `.gcode.3mf` outputs, backed by new `GET /api/files/source/preview`, which reads the embedded 3MF thumbnail/top preview from the Print Vault file. The ready panel now shows that thumbnail above `Queue sliced job` and `Check vault`, with a quiet `Preview unavailable` state if the slicer did not embed an image. Demo mode now exercises the same ready/preview path. Static cache bumped to `app.js?v=446`, `style.css?v=361`, and `demo-runtime.js?v=7`; backend restart required.
+  - Verification: `python -m py_compile app/main.py`, `node --check app/static/app.js`, `node --check app/static/demo-runtime.js`, and `git diff --check` passed.
 - Slice Model next-stage flow started. The slice dialog now selects a target printer first, then shows per-slice profile dropdown/search inputs for Printer/nozzle, Process/layer, and Filament/profile, followed by Plate type, Supports, and Brim. These profile choices default from the selected printer's saved slicer defaults but can be changed for the current slice only. `/api/slicer/plan` and `/api/slicer/run` now accept optional `printer_profile`, `process_profile`, and `filament_profile` overrides. After `Slice in Flightdeck` succeeds, the modal stays open and flips to a blue `Queue sliced job` action for the generated Print Vault output instead of closing/flashing the vault list. Static cache bumped to `app.js?v=445` and `style.css?v=360`; backend restart required.
   - Verification: `python -m py_compile app/main.py`, `node --check app/static/app.js`, and `git diff --check` passed.
 - Slicer worker fallback fixed after live test showed `Slicer API unreachable: [WinError 10061]` when `orcaslicer_api_url` on port 3003 was configured but not running. The Windows worker on port 8000 was healthy and had Orca available, but `/api/slicer/worker/slice` tried the sidecar first and failed immediately. Worker slicing now catches sidecar/API 502 connection failures and falls back to local Orca with the same plate/support/brim options.

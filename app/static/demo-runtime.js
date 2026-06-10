@@ -409,13 +409,35 @@
     if (path === '/api/files') return jsonResponse(filesDemo());
     if (path === '/api/files/reprints') return jsonResponse([]);
     if (path === '/api/files/queue' || path === '/api/files/library/copy') return jsonResponse({ ok: true, demo: true });
+    if (path === '/api/files/source/preview') return fetch('/static/demo-assets/can-opener-preview.png', { cache: 'no-store' });
     if (path === '/api/slicer/plan') return jsonResponse({
       ok: true,
-      ready: false,
-      message: 'Set the OrcaSlicer Docker URL in Settings -> Slicer before Flightdeck can slice this model.',
+      ready: true,
+      can_background_slice: true,
+      message: 'Demo slice plan ready.',
       source: { filename: 'HULA_H2D_feet.stl', kind: 'stl', size: 2400000 },
       target: { id: 'h2d', kind: 'bambu', model_name: 'H2D', custom_name: 'BigBoy' },
       output: { filename: 'HULA_H2D_feet_h2d.gcode.3mf', kind: 'gcode.3mf' },
+      profiles: {
+        printer: 'Bambu Lab H2D 0.4 nozzle',
+        process: '0.20mm Balanced Strength @BBL H2D',
+        filament: 'Bambu ASA @BBL H2D 0.4 nozzle',
+      },
+      slice_options: { bed_type: 'Textured PEI Plate', support: 'Profile default', brim: 'Profile default' },
+    });
+    if (path === '/api/slicer/run') return jsonResponse({
+      ok: true,
+      filename: 'HULA_H2D_feet_h2d_demo.gcode.3mf',
+      path: 'HULA_H2D_feet_h2d_demo.gcode.3mf',
+      kind: 'gcode.3mf',
+      size: 2450000,
+      printer_id: 'h2d',
+      preview_url: '/static/demo-assets/can-opener-preview.png',
+      profiles: {
+        printer: 'Bambu Lab H2D 0.4 nozzle',
+        process: '0.20mm Balanced Strength @BBL H2D',
+        filament: 'Bambu ASA @BBL H2D 0.4 nozzle',
+      },
       slice_options: { bed_type: 'Textured PEI Plate', support: 'Profile default', brim: 'Profile default' },
     });
     if (path === '/api/slicer/check') return jsonResponse({ ok: true, kind: 'demo', status: 200, version: 'demo reachable' });

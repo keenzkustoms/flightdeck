@@ -1531,6 +1531,33 @@ async def download_file_desk_source(source_id: str, path: str):
     )
 
 
+@app.get("/api/files/source/preview")
+async def preview_file_desk_source(source_id: str, path: str, view: Optional[str] = None):
+    source_id = source_id.strip()
+    source_path = path.strip().lstrip("/")
+    if not source_id or not source_path:
+        raise HTTPException(status_code=422, detail="Source and path required")
+    filename, data = await _read_file_desk_source(source_id, source_path)
+    if not filename.lower().endswith(".gcode.3mf") and _queue_file_extension(filename) != ".3mf":
+        raise HTTPException(status_code=404, detail="No preview available")
+    try:
+        from .printers.bambu_ftp import _parse_3mf
+        preview = _parse_3mf(io.BytesIO(data))
+    except Exception as exc:
+        raise HTTPException(status_code=404, detail="No preview available") from exc
+    prefer_top = (view or "").strip().lower() == "top"
+    png = preview.top_image_png if prefer_top and preview and preview.top_image_png else None
+    if not png and preview:
+        png = preview.image_png or preview.top_image_png
+    if not png:
+        raise HTTPException(status_code=404, detail="No preview available")
+    return Response(
+        content=png,
+        media_type="image/png",
+        headers={"Cache-Control": "no-store, max-age=0"},
+    )
+
+
 @app.post("/api/slicer/plan")
 async def plan_slice_from_file_desk(body: SlicePlanRequest):
     printer_id = body.printer_id.strip()
@@ -1879,6 +1906,14 @@ async def run_slice_from_file_desk(body: SliceRunRequest):
     dest = _unique_library_destination(library_root, sliced_name or output_filename)
     dest.write_bytes(sliced_data)
     stat = dest.stat()
+    output_path = dest.relative_to(library_root).as_posix()
+    preview_url = None
+    if dest.name.lower().endswith(".gcode.3mf") or _queue_file_extension(dest.name) == ".3mf":
+        preview_url = "/api/files/source/preview?" + urllib.parse.urlencode({
+            "source_id": "library",
+            "path": output_path,
+            "view": "top",
+        })
     db.log_decision(printer_id, "slicer_run", json.dumps({
         "source": filename,
         "output": dest.name,
@@ -1889,10 +1924,11 @@ async def run_slice_from_file_desk(body: SliceRunRequest):
     return {
         "ok": True,
         "filename": dest.name,
-        "path": dest.relative_to(library_root).as_posix(),
+        "path": output_path,
         "kind": _file_kind(dest.name),
         "size": stat.st_size,
         "printer_id": printer_id,
+        "preview_url": preview_url,
         "profiles": profiles,
         "slice_options": slice_options,
     }
