@@ -1701,21 +1701,38 @@ async def slicer_worker_slice(
     }
     sidecar_url = (sidecar_url or "").strip().rstrip("/")
     if sidecar_url:
-        name, data, _log = await asyncio.to_thread(
-            _run_orca_slice_sidecar,
-            sidecar_url=sidecar_url,
-            filename=source_name,
-            data=source_data,
-            profiles=profiles,
-            output_kind=output_kind,
-            output_filename=output_filename,
-            plate=plate,
-            all_plates=all_plates,
-            arrange=arrange,
-            bed_type=bed_type,
-            support_mode=support_mode,
-            brim_mode=brim_mode,
-        )
+        try:
+            name, data, _log = await asyncio.to_thread(
+                _run_orca_slice_sidecar,
+                sidecar_url=sidecar_url,
+                filename=source_name,
+                data=source_data,
+                profiles=profiles,
+                output_kind=output_kind,
+                output_filename=output_filename,
+                plate=plate,
+                all_plates=all_plates,
+                arrange=arrange,
+                bed_type=bed_type,
+                support_mode=support_mode,
+                brim_mode=brim_mode,
+            )
+        except HTTPException as exc:
+            if exc.status_code != 502:
+                raise
+            log.warning("slicer sidecar unreachable on worker, falling back to local Orca: %s", exc.detail)
+            name, data, _log = await asyncio.to_thread(
+                _run_orca_slice_local,
+                filename=source_name,
+                data=source_data,
+                profiles=profiles,
+                output_kind=output_kind,
+                output_filename=output_filename,
+                plate=plate,
+                all_plates=all_plates,
+                support_mode=support_mode,
+                brim_mode=brim_mode,
+            )
     else:
         name, data, _log = await asyncio.to_thread(
             _run_orca_slice_local,
