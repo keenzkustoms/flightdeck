@@ -13220,7 +13220,7 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
       const r = await fetch(`/api/spools/${id}/move`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ printer_id: printerId, slot: Number(slotIndex), ams_profile: amsProfile }),
+        body: JSON.stringify({ printer_id: printerId, slot: Number(slotIndex), ams_profile: amsProfile, sync_ams: true }),
       });
       if (!r.ok) showToast('AMS sync failed', 'Flightdeck could not push this spool to the printer slot.', 'error');
       else _spoolMoveSyncToast(await r.json().catch(() => ({})), printer?.custom_name || printerId, slotLabel);

@@ -6,9 +6,11 @@ Latest GitHub/Pi state:
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
-- Refresh cachebust currently: ?cachebust=438 / style.css?v=355
+- Refresh cachebust currently: ?cachebust=439 / style.css?v=355
 
 Recent work:
+- Trust Flightdeck explicit AMS sync restored: the conservative AMS inventory changes made ordinary spool moves inventory-only, but the Doctor's `Trust Flightdeck` button still used the same move endpoint. When no profile override checkbox was enabled, the backend returned without `ams_sync`, so the button flashed and did not show `AMS profile sent`. `SpoolMove` now has `sync_ams`, and only the Trust Flightdeck button sends it. Normal assigning remains inventory-only; Trust Flightdeck is again an explicit write-to-Bambu action. Static cache bumped to `app.js?v=439`; backend restart required.
+  - Verification: `python -m py_compile app/main.py`, `node --check app/static/app.js`, and `git diff --check` passed.
 - AMS inventory auto-claim/write disabled: diagnostics after `445690f` showed the remaining mutation was `spool_auto_claimed` moving `#3` from Shelf #3 into `h2d:128` purely because Bambu's stale AMS HT report still said `Siddament ASA`, then later assigning `#89` wrote a profile again. `_reconcile_reported_loaded_slots` is now a no-op, so Bambu reports can suggest matches in the doctor but cannot move shelved inventory by themselves. `POST /api/spools/{id}/move` now updates Flightdeck inventory only; it writes to Bambu only when an explicit AMS profile override is supplied. `Trust Flightdeck` remains the deliberate write-to-Bambu path. Backend restart required.
   - Verification: `python -m py_compile app/main.py` and `git diff --check` passed.
 - AMS same-slot move no-op fix: after disabling background replay, live diagnostics still showed `Spool #89 h2d:128 -> h2d:128` followed by `ams_slot_synced`, meaning the move endpoint wrote the AMS profile even when the spool was already assigned to that exact slot. `POST /api/spools/{id}/move` now only syncs to Bambu when the destination actually changes or an explicit AMS profile override is supplied, and `db.move_spool` no longer logs no-op moves as real moves. Backend restart required.
