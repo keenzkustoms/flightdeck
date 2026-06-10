@@ -3867,6 +3867,11 @@ def _friendly_slicer_error(detail: str) -> str:
     return summary[-500:] if summary else text[-500:]
 
 
+def _looks_like_h2d_slice_profile(profiles: dict) -> bool:
+    haystack = " ".join(str(profiles.get(key) or "") for key in ("printer", "process", "filament"))
+    return "h2d" in haystack.lower()
+
+
 def _slicer_model_mime(filename: str) -> str:
     lower = (filename or "").lower()
     if lower.endswith(".stl"):
@@ -4096,7 +4101,18 @@ def _run_orca_slice_local(
         proc = subprocess.run(args, text=True, capture_output=True, timeout=900)
         if proc.returncode not in (0, None):
             detail = (proc.stderr or proc.stdout or f"OrcaSlicer exited {proc.returncode}").strip()
-            raise HTTPException(status_code=502, detail=_friendly_slicer_error(detail))
+            source_ext = _queue_file_extension(safe_source)
+            friendly = _friendly_slicer_error(detail)
+            if (
+                _looks_like_h2d_slice_profile(profiles)
+                and source_ext in {".stl", ".obj"}
+                and "slic3r::cli::run found error" in detail.lower()
+            ):
+                friendly = (
+                    "Orca local CLI can slice this STL for single-toolhead printers, but this Orca build rejects "
+                    "the H2D loose STL slice profile. Open Orca for this H2D STL or start the Orca slicer API sidecar."
+                )
+            raise HTTPException(status_code=502, detail=friendly)
         if output_kind != "gcode.3mf" and not output_path.exists():
             generated = sorted(tmp.glob("*.gcode"), key=lambda p: p.stat().st_mtime, reverse=True)
             if generated:
