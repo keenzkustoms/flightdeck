@@ -431,6 +431,7 @@ Flightdeck is open-source and built from a real mixed-printer workshop. If it he
 
 - The Voron, Klipper, and Moonraker communities for keeping the open ecosystem alive.
 - [`bambulabs-api`](https://github.com/mchrisgm/bambulabs_api) for making the Bambu side hackable at all.
+- [`Bambuddy`](https://github.com/maziggy/bambuddy) for documenting and validating Bambu AMS/AMS-HT protocol behaviour in the open.
 - Julian Schill's [`klipper_led_effect`](https://github.com/julianschill/klipper_led_effect) — not part of Flightdeck, but it's the reason my Voron's LEDs aren't a perpetual source of suffering.
 - igiannakas, for Cartographer/Happy Hare wisdom passed along at exactly the right moments.
 

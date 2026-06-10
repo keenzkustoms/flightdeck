@@ -706,6 +706,7 @@ class BambuPrinter:
                     "command": "ams_filament_setting",
                     "ams_id": ams_id,
                     "tray_id": tray_id,
+                    "slot_id": 0 if ams_id >= 128 else tray_id,
                     "tray_info_idx": "",
                     "tray_color": "00000000",
                     "nozzle_temp_min": 0,
@@ -713,6 +714,7 @@ class BambuPrinter:
                     "tray_type": "",
                     "tray_sub_brands": "",
                     "tray_id_name": "",
+                    "sequence_id": "0",
                 }
             })
 
@@ -1376,18 +1378,17 @@ def _ams_filament_setting_payload(spool: dict, color: str, ams_id: int, tray_id:
     profile = str(alias.get("profile") or " ".join(
         str(spool.get(k) or "").strip() for k in ("brand", "material", "subtype")
     ).strip()).strip()
-    return {
-        "command": "ams_filament_setting",
-        "ams_id": ams_id,
-        "tray_id": tray_id,
-        "tray_info_idx": alias.get("tray_info_idx") or filament.tray_info_idx,
-        "tray_color": f"{color}FF",
-        "nozzle_temp_min": alias.get("nozzle_temp_min", filament.nozzle_temp_min),
-        "nozzle_temp_max": alias.get("nozzle_temp_max", filament.nozzle_temp_max),
-        "tray_type": alias.get("tray_type") or filament.tray_type,
-        "tray_sub_brands": brand,
-        "tray_id_name": profile,
-    }
+    return _ams_filament_command(
+        ams_id=ams_id,
+        tray_id=tray_id,
+        tray_info_idx=alias.get("tray_info_idx") or filament.tray_info_idx,
+        tray_color=f"{color}FF",
+        nozzle_temp_min=alias.get("nozzle_temp_min", filament.nozzle_temp_min),
+        nozzle_temp_max=alias.get("nozzle_temp_max", filament.nozzle_temp_max),
+        tray_type=alias.get("tray_type") or filament.tray_type,
+        tray_sub_brands=brand,
+        tray_id_name=profile,
+    )
 
 
 _GENERIC_BAMBU_FILAMENT_IDS = {
@@ -1424,6 +1425,50 @@ def _generic_bambu_filament_id(material: str) -> str:
     )
 
 
+def _bambu_setting_id_for_filament_id(tray_info_idx: str) -> str:
+    idx = str(tray_info_idx or "").strip()
+    if re.fullmatch(r"GFS[A-Z0-9]+", idx):
+        return idx
+    if re.fullmatch(r"GF[A-Z0-9]+", idx):
+        return f"GFS{idx[2:]}"
+    if re.fullmatch(r"P[0-9A-Fa-f]+", idx):
+        return idx
+    return ""
+
+
+def _ams_filament_command(
+    *,
+    ams_id: int,
+    tray_id: int,
+    tray_info_idx: str,
+    tray_color: str,
+    nozzle_temp_min: int,
+    nozzle_temp_max: int,
+    tray_type: str,
+    tray_sub_brands: str,
+    tray_id_name: str = "",
+    setting_id: str = "",
+) -> dict:
+    command = {
+        "command": "ams_filament_setting",
+        "ams_id": ams_id,
+        "tray_id": tray_id,
+        "slot_id": 0 if int(ams_id) >= 128 else tray_id,
+        "tray_info_idx": tray_info_idx,
+        "tray_color": tray_color,
+        "nozzle_temp_min": nozzle_temp_min,
+        "nozzle_temp_max": nozzle_temp_max,
+        "tray_type": tray_type,
+        "tray_sub_brands": tray_sub_brands,
+        "tray_id_name": tray_id_name,
+        "sequence_id": "0",
+    }
+    setting_id = str(setting_id or "").strip() or _bambu_setting_id_for_filament_id(tray_info_idx)
+    if setting_id:
+        command["setting_id"] = setting_id
+    return command
+
+
 def _ams_profile_override_payload(spool: dict, profile: dict, ams_id: int, tray_id: int) -> dict:
     fallback = _ams_filament_setting_payload(
         spool,
@@ -1447,18 +1492,18 @@ def _ams_profile_override_payload(spool: dict, profile: dict, ams_id: int, tray_
     if temp_min <= 0 or temp_max <= 0 or temp_max < temp_min:
         temp_min = int(fallback.get("nozzle_temp_min") or 0)
         temp_max = int(fallback.get("nozzle_temp_max") or 0)
-    return {
-        "command": "ams_filament_setting",
-        "ams_id": ams_id,
-        "tray_id": tray_id,
-        "tray_info_idx": tray_info_idx,
-        "tray_color": f"{color.upper()}FF",
-        "nozzle_temp_min": temp_min,
-        "nozzle_temp_max": temp_max,
-        "tray_type": material,
-        "tray_sub_brands": brand or name.replace("@", " @").split(" @", 1)[0].strip(),
-        "tray_id_name": name,
-    }
+    return _ams_filament_command(
+        ams_id=ams_id,
+        tray_id=tray_id,
+        tray_info_idx=tray_info_idx,
+        tray_color=f"{color.upper()}FF",
+        nozzle_temp_min=temp_min,
+        nozzle_temp_max=temp_max,
+        tray_type=material,
+        tray_sub_brands=brand or name.replace("@", " @").split(" @", 1)[0].strip(),
+        tray_id_name=name,
+        setting_id=str(profile.get("setting_id") or "").strip(),
+    )
 
 
 def _filament_for_spool(spool: dict):
