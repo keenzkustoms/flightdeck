@@ -871,6 +871,8 @@ class SlicePlanRequest(BaseModel):
     printer_id: str
     plate: str = "auto"
     bed_type: str = "Textured PEI Plate"
+    support_mode: str = "profile"
+    brim_mode: str = "profile"
     all_plates: bool = False
 
 
@@ -1540,6 +1542,7 @@ async def plan_slice_from_file_desk(body: SlicePlanRequest):
     output_ext = ".gcode.3mf" if target_kind == "bambu" else ".gcode"
     base_name = _file_archive_key(filename) or "sliced_model"
     target = next((p for p in await _gather_all() if p.get("id") == printer_id), None)
+    slice_options = _slice_option_summary(body.bed_type, body.support_mode, body.brim_mode)
     profiles = {
         "printer": settings.get(_slicer_profile_key(printer_id, "printer"), ""),
         "process": settings.get(_slicer_profile_key(printer_id, "process"), ""),
@@ -1579,6 +1582,7 @@ async def plan_slice_from_file_desk(body: SlicePlanRequest):
             "kind": "gcode.3mf" if target_kind == "bambu" else "gcode",
         },
         "profiles": profiles,
+        "slice_options": slice_options,
         "missing_profiles": missing_profiles,
         "plate": body.plate or "auto",
         "all_plates": bool(body.all_plates),
@@ -1683,6 +1687,8 @@ async def slicer_worker_slice(
     sidecar_url: str = Form(""),
     arrange: bool = Form(False),
     bed_type: str = Form("Textured PEI Plate"),
+    support_mode: str = Form("profile"),
+    brim_mode: str = Form("profile"),
 ):
     output_kind = "gcode.3mf" if output_kind == "gcode.3mf" else "gcode"
     source_name = _safe_basename(file.filename, "flightdeck-model.stl")
@@ -1707,6 +1713,8 @@ async def slicer_worker_slice(
             all_plates=all_plates,
             arrange=arrange,
             bed_type=bed_type,
+            support_mode=support_mode,
+            brim_mode=brim_mode,
         )
     else:
         name, data, _log = await asyncio.to_thread(
@@ -1718,6 +1726,8 @@ async def slicer_worker_slice(
             output_filename=output_filename,
             plate=plate,
             all_plates=all_plates,
+            support_mode=support_mode,
+            brim_mode=brim_mode,
         )
     media = "application/octet-stream"
     return Response(
@@ -1762,6 +1772,7 @@ async def run_slice_from_file_desk(body: SliceRunRequest):
     target = _printer_meta(printer_id) or {}
     target_name = " ".join(str(v or "") for v in ((target or {}).get("model_name"), (target or {}).get("custom_name"), profiles["printer"]))
     arrange = target_kind == "bambu" and ("h2d" in target_name.lower() or filename.lower().endswith(".3mf"))
+    slice_options = _slice_option_summary(body.bed_type, body.support_mode, body.brim_mode)
 
     if worker_url:
         form = {
@@ -1774,7 +1785,9 @@ async def run_slice_from_file_desk(body: SliceRunRequest):
             "all_plates": str(bool(body.all_plates)).lower(),
             "sidecar_url": sidecar_url,
             "arrange": str(bool(arrange)).lower(),
-            "bed_type": body.bed_type or "Textured PEI Plate",
+            "bed_type": slice_options["bed_type"],
+            "support_mode": slice_options["support_mode"],
+            "brim_mode": slice_options["brim_mode"],
         }
         files = {"file": (filename, data, "application/octet-stream")}
         try:
@@ -1796,7 +1809,9 @@ async def run_slice_from_file_desk(body: SliceRunRequest):
                 plate=body.plate or "1",
                 all_plates=bool(body.all_plates),
                 arrange=arrange,
-                bed_type=body.bed_type or "Textured PEI Plate",
+                bed_type=slice_options["bed_type"],
+                support_mode=slice_options["support_mode"],
+                brim_mode=slice_options["brim_mode"],
             )
         else:
             if resp.status_code >= 400:
@@ -1820,7 +1835,9 @@ async def run_slice_from_file_desk(body: SliceRunRequest):
             plate=body.plate or "1",
             all_plates=bool(body.all_plates),
             arrange=arrange,
-            bed_type=body.bed_type or "Textured PEI Plate",
+            bed_type=slice_options["bed_type"],
+            support_mode=slice_options["support_mode"],
+            brim_mode=slice_options["brim_mode"],
         )
     else:
         sliced_name, sliced_data, _log = await asyncio.to_thread(
@@ -1832,6 +1849,8 @@ async def run_slice_from_file_desk(body: SliceRunRequest):
             output_filename=output_filename,
             plate=body.plate or "1",
             all_plates=bool(body.all_plates),
+            support_mode=slice_options["support_mode"],
+            brim_mode=slice_options["brim_mode"],
         )
 
     library_root = _print_library_path().resolve()
@@ -1845,6 +1864,7 @@ async def run_slice_from_file_desk(body: SliceRunRequest):
         "output": dest.name,
         "worker": worker_url or "local",
         "profiles": profiles,
+        "slice_options": slice_options,
     }))
     return {
         "ok": True,
@@ -1854,6 +1874,7 @@ async def run_slice_from_file_desk(body: SliceRunRequest):
         "size": stat.st_size,
         "printer_id": printer_id,
         "profiles": profiles,
+        "slice_options": slice_options,
     }
 
 
@@ -3801,6 +3822,80 @@ def _slicer_model_mime(filename: str) -> str:
     return "application/octet-stream"
 
 
+_SLICE_SUPPORT_MODES = {
+    "profile": "Profile default",
+    "off": "Supports off",
+    "normal_auto": "Normal auto",
+    "tree_auto": "Tree auto",
+    "tree_strong": "Tree strong",
+}
+
+_SLICE_BRIM_MODES = {
+    "profile": "Profile default",
+    "off": "No brim",
+    "outer": "Outer brim",
+}
+
+
+def _normalise_slice_support_mode(value: str | None) -> str:
+    key = str(value or "").strip().lower().replace("-", "_")
+    return key if key in _SLICE_SUPPORT_MODES else "profile"
+
+
+def _normalise_slice_brim_mode(value: str | None) -> str:
+    key = str(value or "").strip().lower().replace("-", "_")
+    return key if key in _SLICE_BRIM_MODES else "profile"
+
+
+def _slice_option_summary(bed_type: str | None, support_mode: str | None, brim_mode: str | None) -> dict:
+    support = _normalise_slice_support_mode(support_mode)
+    brim = _normalise_slice_brim_mode(brim_mode)
+    return {
+        "bed_type": (bed_type or "Textured PEI Plate").strip() or "Textured PEI Plate",
+        "support": _SLICE_SUPPORT_MODES[support],
+        "brim": _SLICE_BRIM_MODES[brim],
+        "support_mode": support,
+        "brim_mode": brim,
+    }
+
+
+def _apply_slice_process_overrides(process_data: bytes, *, support_mode: str | None = "profile", brim_mode: str | None = "profile") -> bytes:
+    support = _normalise_slice_support_mode(support_mode)
+    brim = _normalise_slice_brim_mode(brim_mode)
+    if support == "profile" and brim == "profile":
+        return process_data
+    try:
+        profile = json.loads(process_data.decode("utf-8-sig"))
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail="Selected process profile could not be adjusted for supports/brim") from exc
+    if not isinstance(profile, dict):
+        raise HTTPException(status_code=422, detail="Selected process profile is not a valid Orca profile")
+
+    if support == "off":
+        profile["enable_support"] = "0"
+    elif support == "normal_auto":
+        profile["enable_support"] = "1"
+        profile["support_type"] = "normal(auto)"
+        profile["support_style"] = "default"
+    elif support == "tree_auto":
+        profile["enable_support"] = "1"
+        profile["support_type"] = "tree(auto)"
+        profile["support_style"] = "default"
+    elif support == "tree_strong":
+        profile["enable_support"] = "1"
+        profile["support_type"] = "tree(auto)"
+        profile["support_style"] = "tree_strong"
+
+    if brim == "off":
+        profile["brim_type"] = "no_brim"
+    elif brim == "outer":
+        profile["brim_type"] = "outer_only"
+        profile.setdefault("brim_width", "5")
+        profile.setdefault("brim_object_gap", "0.1")
+
+    return json.dumps(profile, ensure_ascii=False, indent=4).encode("utf-8")
+
+
 def _run_orca_slice_sidecar(
     *,
     sidecar_url: str,
@@ -3813,11 +3908,14 @@ def _run_orca_slice_sidecar(
     all_plates: bool = False,
     arrange: bool = False,
     bed_type: str = "Textured PEI Plate",
+    support_mode: str = "profile",
+    brim_mode: str = "profile",
 ) -> tuple[str, bytes, str]:
     exe = _orca_executable()
     machine_name, machine_data = _slicer_profile_blob(str(profiles.get("printer") or ""), "machine", exe)
     process_name, process_data = _slicer_profile_blob(str(profiles.get("process") or ""), "process", exe)
     filament_name, filament_data = _slicer_profile_blob(str(profiles.get("filament") or ""), "filament", exe)
+    process_data = _apply_slice_process_overrides(process_data, support_mode=support_mode, brim_mode=brim_mode)
 
     safe_source = _safe_basename(filename, "flightdeck-model.stl")
     requested = _safe_basename(output_filename, f"{_file_archive_key(safe_source)}.gcode.3mf")
@@ -3895,6 +3993,8 @@ def _run_orca_slice_local(
     output_filename: str,
     plate: str = "1",
     all_plates: bool = False,
+    support_mode: str = "profile",
+    brim_mode: str = "profile",
 ) -> tuple[str, bytes, str]:
     exe = _orca_executable()
     if not exe:
@@ -3911,12 +4011,16 @@ def _run_orca_slice_local(
         tmp = Path(tmp_raw)
         source_path = tmp / f"source{suffix}"
         source_path.write_bytes(data)
+        process_for_slice = process
+        if _normalise_slice_support_mode(support_mode) != "profile" or _normalise_slice_brim_mode(brim_mode) != "profile":
+            process_for_slice = tmp / "flightdeck-process-overrides.json"
+            process_for_slice.write_bytes(_apply_slice_process_overrides(process.read_bytes(), support_mode=support_mode, brim_mode=brim_mode))
         args = [str(exe)]
         datadir = _orca_datadir()
         if datadir:
             args += ["--datadir", str(datadir)]
         args += [
-            "--load-settings", f"{machine};{process}",
+            "--load-settings", f"{machine};{process_for_slice}",
             "--load-filaments", str(filament),
             "--allow-newer-file",
             "--slice", "0" if all_plates else str(plate or "1"),

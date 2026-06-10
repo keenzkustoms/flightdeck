@@ -11652,6 +11652,18 @@ function _openSliceModelDialog({ sourceId, path, file, printers }) {
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay filedesk-slice-dialog';
   const bedTypes = ['Textured PEI Plate', 'Smooth PEI Plate', 'High Temp Plate', 'Cool Plate', 'Engineering Plate'];
+  const supportModes = [
+    ['profile', 'Profile default'],
+    ['off', 'Supports off'],
+    ['normal_auto', 'Normal auto'],
+    ['tree_auto', 'Tree auto'],
+    ['tree_strong', 'Tree strong'],
+  ];
+  const brimModes = [
+    ['profile', 'Profile default'],
+    ['off', 'No brim'],
+    ['outer', 'Outer brim'],
+  ];
   overlay.innerHTML = `
     <div class="modal-box filedesk-queue-box filedesk-slice-box" role="dialog" aria-modal="true" aria-label="Slice model">
       <div class="filedesk-queue-head">
@@ -11676,6 +11688,18 @@ function _openSliceModelDialog({ sourceId, path, file, printers }) {
         <span>Plate type</span>
         <select id="slice-bed-type">
           ${bedTypes.map(name => `<option value="${esc(name)}">${esc(name)}</option>`).join('')}
+        </select>
+      </label>
+      <label class="filedesk-slice-field">
+        <span>Supports</span>
+        <select id="slice-support-mode">
+          ${supportModes.map(([value, label]) => `<option value="${esc(value)}">${esc(label)}</option>`).join('')}
+        </select>
+      </label>
+      <label class="filedesk-slice-field">
+        <span>Brim</span>
+        <select id="slice-brim-mode">
+          ${brimModes.map(([value, label]) => `<option value="${esc(value)}">${esc(label)}</option>`).join('')}
         </select>
       </label>
       <div class="filedesk-dialog-error" id="slice-plan-result" hidden></div>
@@ -11713,6 +11737,8 @@ function _openSliceModelDialog({ sourceId, path, file, printers }) {
           printer_id: choice.dataset.printerId,
           plate: 'auto',
           bed_type: overlay.querySelector('#slice-bed-type')?.value || 'Textured PEI Plate',
+          support_mode: overlay.querySelector('#slice-support-mode')?.value || 'profile',
+          brim_mode: overlay.querySelector('#slice-brim-mode')?.value || 'profile',
           all_plates: !!overlay.querySelector('#slice-all-plates')?.checked,
         }),
       });
@@ -11736,13 +11762,19 @@ function _openSliceModelDialog({ sourceId, path, file, printers }) {
           ['Process', profiles.process],
           ['Filament', profiles.filament],
         ].map(([label, value]) => `<div><span>${esc(label)}</span><strong>${esc(value || 'Not set')}</strong></div>`).join('');
+        const sliceOptions = data.slice_options || {};
+        const optionRows = [
+          ['Plate', sliceOptions.bed_type],
+          ['Supports', sliceOptions.support],
+          ['Brim', sliceOptions.brim],
+        ].map(([label, value]) => `<div><span>${esc(label)}</span><strong>${esc(value || 'Profile default')}</strong></div>`).join('');
         actionsEl.hidden = false;
         actionsEl.innerHTML = `
           <div class="filedesk-slice-steps">
             <strong>Slice handoff</strong>
             <span>Download the model, open Orca, import it, use the profiles below, then export as ${esc(outputName)} back into the Print Vault.</span>
           </div>
-          <div class="filedesk-slice-profiles">${profileRows}</div>
+          <div class="filedesk-slice-profiles">${profileRows}${optionRows}</div>
           <div class="filedesk-slice-buttons">
             ${canBackgroundSlice ? `<button class="filedesk-slice-link filedesk-slice-run" type="button" data-run-slice="${esc(outputName)}" data-printer-id="${esc(data.target?.id || choice.dataset.printerId)}">Slice in Flightdeck</button>` : ''}
             ${sourceUrl ? `<a class="filedesk-slice-link" href="${esc(sourceUrl)}" download>Download model</a>` : ''}
@@ -11817,6 +11849,8 @@ function _openSliceModelDialog({ sourceId, path, file, printers }) {
           output_filename: runBtn.dataset.runSlice || '',
           plate: '1',
           bed_type: overlay.querySelector('#slice-bed-type')?.value || 'Textured PEI Plate',
+          support_mode: overlay.querySelector('#slice-support-mode')?.value || 'profile',
+          brim_mode: overlay.querySelector('#slice-brim-mode')?.value || 'profile',
           all_plates: !!overlay.querySelector('#slice-all-plates')?.checked,
         }),
       });

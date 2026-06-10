@@ -416,6 +416,7 @@
       source: { filename: 'HULA_H2D_feet.stl', kind: 'stl', size: 2400000 },
       target: { id: 'h2d', kind: 'bambu', model_name: 'H2D', custom_name: 'BigBoy' },
       output: { filename: 'HULA_H2D_feet_h2d.gcode.3mf', kind: 'gcode.3mf' },
+      slice_options: { bed_type: 'Textured PEI Plate', support: 'Profile default', brim: 'Profile default' },
     });
     if (path === '/api/slicer/check') return jsonResponse({ ok: true, kind: 'demo', status: 200, version: 'demo reachable' });
     if (path.match(/^\/api\/files\/bambu\/[^/]+\/clear$/)) return jsonResponse({ ok: true, demo: true });
