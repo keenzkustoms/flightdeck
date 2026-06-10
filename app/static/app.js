@@ -9904,7 +9904,7 @@ function _printersCategoryHtml(printers) {
           </div>
         </div>
 
-        <div class="settings-form-row">
+        <div class="settings-form-row printer-temp-presets-row">
           <label class="settings-label">Temp Presets</label>
           <table class="preset-table">
             <thead>
