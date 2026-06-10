@@ -7777,6 +7777,9 @@ async function renderMissionControl() {
           <small>${esc(p ? _dashboardPrinterName(p) : j.printer_id)} · ${ready.label}</small>
         </a>`;
       }).join('') || '<div class="mission-empty-list">No blocked queue items.</div>';
+    const actionInbox = _missionActionInbox(jobs, printers, spools, maint);
+    const fixIt = _missionFixItPanel(jobs, printers, spools);
+    const dispatchIntel = _missionDispatchIntel(jobs, printers, spools, maint);
 
     const html = `
       <section class="mission-hero">
@@ -7796,24 +7799,30 @@ async function renderMissionControl() {
         <div class="mission-filters">${filterBar}</div>
         ${simToggle}
       </section>
-      <section class="mission-grid">
-        <div class="mission-lanes">${lanes}</div>
-        <aside class="mission-sidebar-panel">
-          <div class="mission-panel-title">Action Inbox</div>
-          <div class="mission-action-list">${_missionActionInbox(jobs, printers, spools, maint)}</div>
-          <div class="mission-panel-title">Legend</div>
-          <div class="mission-note">Action Inbox is for current operator work. Reliability history stays on dashboard cards and Failure Review.</div>
-          <div class="mission-panel-title">Dispatch Ready</div>
+      <section class="mission-dispatch-board" aria-label="Dispatch board">
+        <div class="mission-dispatch-panel mission-dispatch-primary">
+          <div class="mission-panel-title">Run Now</div>
           <div class="mission-job-list">${dispatchReady}</div>
+        </div>
+        <div class="mission-dispatch-panel">
+          <div class="mission-panel-title">Needs Action</div>
+          <div class="mission-action-list">${actionInbox}</div>
+        </div>
+        <div class="mission-dispatch-panel">
           <div class="mission-panel-title">Blocked</div>
           <div class="mission-job-list">${blockedJobs}</div>
-          <div class="mission-panel-title">Fix It</div>
-          <div class="mission-fix-list">${_missionFixItPanel(jobs, printers, spools)}</div>
+        </div>
+        <div class="mission-dispatch-panel mission-dispatch-wide">
           <div class="mission-panel-title">Dispatch Intel</div>
-          <div class="mission-intel-list">${_missionDispatchIntel(jobs, printers, spools, maint)}</div>
-          <div class="mission-panel-title">Operator Notes</div>
-          <div class="mission-note">Dispatch intel is advisory only. It scores printers by availability, loaded matching filament, stock, health, maintenance, and current queue target.</div>
-        </aside>
+          <div class="mission-intel-list">${dispatchIntel}</div>
+        </div>
+        <div class="mission-dispatch-panel mission-dispatch-wide">
+          <div class="mission-panel-title">Fix It</div>
+          <div class="mission-fix-list">${fixIt}</div>
+        </div>
+      </section>
+      <section class="mission-grid">
+        <div class="mission-lanes">${lanes}</div>
       </section>`;
     if (html !== _missionLastHtml) {
       _missionLastHtml = html;

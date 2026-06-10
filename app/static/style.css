@@ -259,15 +259,12 @@ body.sidebar-resizing {
 }
 
 .mission-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) clamp(20rem, 28vw, 24rem);
-  gap: 1rem;
-  align-items: start;
+  display: block;
 }
 
 .mission-lanes {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: repeat(auto-fill, minmax(21rem, 1fr));
   gap: 0.9rem;
   min-width: 0;
 }
@@ -276,21 +273,13 @@ body.sidebar-resizing {
   max-width: none;
 }
 
-.mission-page-dense .mission-grid {
-  grid-template-columns: minmax(0, 1fr);
-}
-
 .mission-page-dense .mission-lanes {
   grid-template-columns: repeat(auto-fill, minmax(19rem, 1fr));
 }
 
-.mission-page-dense .mission-sidebar-panel {
-  position: static;
-  order: -1;
-}
-
 .mission-lane,
-.mission-sidebar-panel {
+.mission-sidebar-panel,
+.mission-dispatch-panel {
   border: 1px solid var(--border);
   border-radius: 0.65rem;
   background: var(--surface);
@@ -484,6 +473,32 @@ body.sidebar-resizing {
 .mission-signal-ok { color: #86efac; background: rgba(34,197,94,0.08); }
 .mission-signal-warn { color: #fcd34d; background: rgba(245,158,11,0.1); }
 .mission-signal-bad { color: #fca5a5; background: rgba(239,68,68,0.1); }
+
+.mission-dispatch-board {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.9rem;
+  margin-bottom: 1rem;
+}
+
+.mission-dispatch-panel {
+  min-width: 0;
+  padding: 0.85rem;
+}
+
+.mission-dispatch-primary {
+  border-color: rgba(34,197,94,0.32);
+  background: linear-gradient(135deg, rgba(20,83,45,0.14), rgba(15,23,42,0.7));
+}
+
+.mission-dispatch-wide {
+  grid-column: span 3;
+}
+
+.mission-dispatch-wide .mission-intel-list,
+.mission-dispatch-wide .mission-fix-list {
+  grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+}
 
 .mission-sidebar-panel {
   position: sticky;

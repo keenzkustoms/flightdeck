@@ -6,9 +6,11 @@ Latest GitHub/Pi state:
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
-- Refresh cachebust currently: ?cachebust=436 / style.css?v=353
+- Refresh cachebust currently: ?cachebust=437 / style.css?v=354
 
 Recent work:
+- Flight Tower first dispatch-board pass: the former right sidebar sections are promoted into a top `Dispatch Board` with `Run Now`, `Needs Action`, `Blocked`, `Dispatch Intel`, and `Fix It` panels. Printer lanes now sit below as supporting printer context in a responsive grid instead of competing with a sticky sidebar. Static cache bumped to `app.js?v=437` and `style.css?v=354`; frontend refresh only.
+  - Verification: `node --check app/static/app.js` and `git diff --check` passed.
 - Dashboard printer-first briefing boxes now keep the same printer order as the printer cards below, so each top box lines up with its matching printer card instead of resorting by severity. Static cache bumped to `app.js?v=436` and `style.css?v=353`; frontend refresh only.
   - Verification: `node --check app/static/app.js` and `git diff --check` passed.
 - Dashboard Flight Briefing wrapper frame/padding was removed so the top printer handover boxes line up on the same columns and gaps as the printer cards below. Static cache bumped to `app.js?v=435` and `style.css?v=352`; frontend refresh only.
