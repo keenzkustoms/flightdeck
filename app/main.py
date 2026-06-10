@@ -1585,6 +1585,10 @@ async def plan_slice_from_file_desk(body: SlicePlanRequest):
     missing_profiles = [label for label, value in profiles.items() if not str(value or "").strip()]
     can_slice = bool(worker_url or api_url or _orca_executable()) and not missing_profiles and not is_step_source
     can_handoff = is_step_source and not missing_profiles
+    h2d_loose_mesh = _h2d_loose_mesh_requires_sidecar(filename, profiles)
+    if h2d_loose_mesh and not api_url:
+        can_slice = False
+        can_handoff = not missing_profiles
     return {
         "ok": True,
         "ready": can_slice or can_handoff,
@@ -1621,6 +1625,8 @@ async def plan_slice_from_file_desk(body: SlicePlanRequest):
         "plate": body.plate or "auto",
         "all_plates": bool(body.all_plates),
         "message": (
+            "H2D STL/OBJ background slicing needs the slicer API sidecar. Use Open Orca, or configure the sidecar API URL first."
+            if h2d_loose_mesh and not api_url and not missing_profiles else
             "STEP models need Orca GUI import; use Download model/Open Orca, then export the sliced job back to the Print Vault."
             if can_handoff else
             "Slicer API configured. Flightdeck can slice this in the background."
@@ -1754,6 +1760,8 @@ async def slicer_worker_slice(
         except HTTPException as exc:
             if exc.status_code != 502:
                 raise
+            if _h2d_loose_mesh_requires_sidecar(source_name, profiles):
+                raise HTTPException(status_code=502, detail=_h2d_sidecar_required_message()) from exc
             log.warning("slicer sidecar unreachable on worker, falling back to local Orca: %s", exc.detail)
             name, data, _log = await asyncio.to_thread(
                 _run_orca_slice_local,
@@ -1768,6 +1776,8 @@ async def slicer_worker_slice(
                 brim_mode=brim_mode,
             )
     else:
+        if _h2d_loose_mesh_requires_sidecar(source_name, profiles):
+            raise HTTPException(status_code=422, detail=_h2d_sidecar_required_message())
         name, data, _log = await asyncio.to_thread(
             _run_orca_slice_local,
             filename=source_name,
@@ -1820,6 +1830,9 @@ async def run_slice_from_file_desk(body: SliceRunRequest):
     target_name = " ".join(str(v or "") for v in ((target or {}).get("model_name"), (target or {}).get("custom_name"), profiles["printer"]))
     arrange = target_kind == "bambu" and ("h2d" in target_name.lower() or filename.lower().endswith(".3mf"))
     slice_options = _slice_option_summary(body.bed_type, body.support_mode, body.brim_mode)
+    h2d_loose_mesh = _h2d_loose_mesh_requires_sidecar(filename, profiles)
+    if h2d_loose_mesh and not sidecar_url:
+        raise HTTPException(status_code=422, detail=_h2d_sidecar_required_message())
 
     if worker_url:
         form = {
@@ -3872,6 +3885,22 @@ def _looks_like_h2d_slice_profile(profiles: dict) -> bool:
     return "h2d" in haystack.lower()
 
 
+def _is_loose_mesh_source(filename: str) -> bool:
+    return _queue_file_extension(filename) in {".stl", ".obj"}
+
+
+def _h2d_loose_mesh_requires_sidecar(filename: str, profiles: dict) -> bool:
+    return _is_loose_mesh_source(filename) and _looks_like_h2d_slice_profile(profiles)
+
+
+def _h2d_sidecar_required_message() -> str:
+    return (
+        "H2D loose STL/OBJ slicing needs the Orca/Bambu slicer API sidecar. "
+        "Flightdeck local Orca can slice this file for single-toolhead printers, "
+        "but this Orca CLI build rejects the H2D loose-mesh profile path."
+    )
+
+
 def _slicer_model_mime(filename: str) -> str:
     lower = (filename or "").lower()
     if lower.endswith(".stl"):
@@ -3920,17 +3949,34 @@ def _slice_option_summary(bed_type: str | None, support_mode: str | None, brim_m
     }
 
 
+def _normalise_slicer_profile_type(profile_data: bytes, category: str) -> bytes:
+    profile_type = {"machine": "machine", "process": "process", "filament": "filament"}.get(category)
+    if not profile_type:
+        return profile_data
+    try:
+        profile = json.loads(profile_data.decode("utf-8-sig"))
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"Selected {category} profile is not valid JSON") from exc
+    if not isinstance(profile, dict):
+        raise HTTPException(status_code=422, detail=f"Selected {category} profile is not a valid Orca profile")
+    if profile.get("type") != profile_type:
+        profile["type"] = profile_type
+    return json.dumps(profile, ensure_ascii=False, indent=4).encode("utf-8")
+
+
 def _apply_slice_process_overrides(process_data: bytes, *, support_mode: str | None = "profile", brim_mode: str | None = "profile") -> bytes:
     support = _normalise_slice_support_mode(support_mode)
     brim = _normalise_slice_brim_mode(brim_mode)
-    if support == "profile" and brim == "profile":
-        return process_data
     try:
         profile = json.loads(process_data.decode("utf-8-sig"))
     except Exception as exc:
         raise HTTPException(status_code=422, detail="Selected process profile could not be adjusted for supports/brim") from exc
     if not isinstance(profile, dict):
         raise HTTPException(status_code=422, detail="Selected process profile is not a valid Orca profile")
+
+    profile["type"] = "process"
+    if support == "profile" and brim == "profile":
+        return json.dumps(profile, ensure_ascii=False, indent=4).encode("utf-8")
 
     if support == "off":
         profile["enable_support"] = "0"
@@ -3976,7 +4022,9 @@ def _run_orca_slice_sidecar(
     machine_name, machine_data = _slicer_profile_blob(str(profiles.get("printer") or ""), "machine", exe)
     process_name, process_data = _slicer_profile_blob(str(profiles.get("process") or ""), "process", exe)
     filament_name, filament_data = _slicer_profile_blob(str(profiles.get("filament") or ""), "filament", exe)
+    machine_data = _normalise_slicer_profile_type(machine_data, "machine")
     process_data = _apply_slice_process_overrides(process_data, support_mode=support_mode, brim_mode=brim_mode)
+    filament_data = _normalise_slicer_profile_type(filament_data, "filament")
 
     safe_source = _safe_basename(filename, "flightdeck-model.stl")
     requested = _safe_basename(output_filename, f"{_file_archive_key(safe_source)}.gcode.3mf")
@@ -4072,17 +4120,19 @@ def _run_orca_slice_local(
         tmp = Path(tmp_raw)
         source_path = tmp / f"source{suffix}"
         source_path.write_bytes(data)
-        process_for_slice = process
-        if _normalise_slice_support_mode(support_mode) != "profile" or _normalise_slice_brim_mode(brim_mode) != "profile":
-            process_for_slice = tmp / "flightdeck-process-overrides.json"
-            process_for_slice.write_bytes(_apply_slice_process_overrides(process.read_bytes(), support_mode=support_mode, brim_mode=brim_mode))
+        machine_for_slice = tmp / "flightdeck-machine.json"
+        process_for_slice = tmp / "flightdeck-process.json"
+        filament_for_slice = tmp / "flightdeck-filament.json"
+        machine_for_slice.write_bytes(_normalise_slicer_profile_type(machine.read_bytes(), "machine"))
+        process_for_slice.write_bytes(_apply_slice_process_overrides(process.read_bytes(), support_mode=support_mode, brim_mode=brim_mode))
+        filament_for_slice.write_bytes(_normalise_slicer_profile_type(filament.read_bytes(), "filament"))
         args = [str(exe)]
         datadir = _orca_datadir()
         if datadir:
             args += ["--datadir", str(datadir)]
         args += [
-            "--load-settings", f"{machine};{process_for_slice}",
-            "--load-filaments", str(filament),
+            "--load-settings", f"{machine_for_slice};{process_for_slice}",
+            "--load-filaments", str(filament_for_slice),
             "--allow-newer-file",
             "--slice", "0" if all_plates else str(plate or "1"),
         ]
