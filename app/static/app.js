@@ -1529,11 +1529,23 @@ function _renderDashboardBriefing(printers) {
   sorted.forEach(p => {
     const target = _printerWarningTarget(p);
     if (target) {
+      const issue = _dashboardIssueText(p);
+      const title = _printerPrintLocked(p)
+        ? 'Dispatch locked'
+        : p.state === 'offline'
+          ? 'Offline'
+          : p.state === 'paused'
+            ? 'Paused'
+            : p.state === 'error'
+              ? 'Printer fault'
+              : p.state === 'estop'
+                ? 'E-stop active'
+                : 'Printer attention';
       addRow(p.id, {
         tone: _dashboardBriefingTone(p),
         kicker: _printerPrintLocked(p) ? 'Locked' : p.state === 'offline' ? 'Signal' : p.state === 'paused' ? 'Paused' : 'Watch',
-        title: _printerPrintLocked(p) ? 'Dispatch locked' : _dashboardIssueText(p),
-        detail: _printerPrintLocked(p) ? _printerLockoutReason(p) : _dashboardIssueText(p),
+        title,
+        detail: _printerPrintLocked(p) ? _printerLockoutReason(p) : issue,
         target,
         href: target.hash || `#/printer/${encodeURIComponent(p.id)}`,
       });
