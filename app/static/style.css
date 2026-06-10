@@ -6927,8 +6927,13 @@ button.live-route-node:hover {
 
 @media (max-width: 720px) {
   .printer-scan-result {
-    grid-template-columns: 1fr;
+    grid-template-columns: auto 1fr;
     align-items: stretch;
+  }
+
+  .printer-scan-tags,
+  .printer-scan-use {
+    grid-column: 2;
   }
 
   .printer-scan-tags {
@@ -10371,7 +10376,7 @@ button.live-route-node:hover {
 
 .printer-scan-result {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 0.75rem;
   padding: 0.75rem;
@@ -10382,6 +10387,22 @@ button.live-route-node:hover {
 
 .printer-scan-result.already-configured {
   opacity: 0.66;
+}
+
+.printer-scan-result.not-auto-addable .printer-scan-check {
+  opacity: 0.45;
+}
+
+.printer-scan-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.printer-scan-check input {
+  width: 1rem;
+  height: 1rem;
+  accent-color: #22c55e;
 }
 
 .printer-scan-main {

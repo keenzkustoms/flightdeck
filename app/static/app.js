@@ -9649,6 +9649,7 @@ function _printersCategoryHtml(printers) {
         <input class="settings-input" id="printer-scan-cidr" type="text"
           placeholder="Auto /24 subnet or 192.168.1.0/24" autocomplete="off">
         <button type="button" class="ctrl-btn" id="printer-scan-run">Scan LAN</button>
+        <button type="button" class="settings-save-btn" id="printer-scan-add-selected" disabled>Add selected</button>
       </div>
       <div class="printer-scan-results" id="printer-scan-results">
         <div class="settings-empty">No scan run yet.</div>
@@ -9906,8 +9907,11 @@ function _attachPrintersEvents(el) {
 
   const renderScanResults = (payload, message = '') => {
     const box = el.querySelector('#printer-scan-results');
+    const addSelected = el.querySelector('#printer-scan-add-selected');
     if (!box) return;
     scanCandidates = Array.isArray(payload?.found) ? payload.found : [];
+    const autoAddable = scanCandidates.filter(row => _scanCandidateCanAutoAdd(row)).length;
+    if (addSelected) addSelected.disabled = true;
     if (message) {
       box.innerHTML = `<div class="settings-empty">${esc(message)}</div>`;
       return;
@@ -9917,7 +9921,10 @@ function _attachPrintersEvents(el) {
       return;
     }
     box.innerHTML = scanCandidates.map((row, idx) => `
-      <div class="printer-scan-result${row.already_configured ? ' already-configured' : ''}">
+      <div class="printer-scan-result${row.already_configured ? ' already-configured' : ''}${_scanCandidateCanAutoAdd(row) ? '' : ' not-auto-addable'}">
+        <label class="printer-scan-check" title="${esc(_scanCandidateCanAutoAdd(row) ? 'Select for bulk add' : _scanCandidateDisabledReason(row))}">
+          <input type="checkbox" data-scan-check="${idx}" ${_scanCandidateCanAutoAdd(row) ? '' : 'disabled'}>
+        </label>
         <div class="printer-scan-main">
           <strong>${esc(row.custom_name || row.host)}</strong>
           <span>${esc(row.model_name || row.family || 'Printer')} · ${esc(row.host)}${row.port ? `:${esc(row.port)}` : ''}</span>
@@ -9930,6 +9937,95 @@ function _attachPrintersEvents(el) {
         </div>
         <button type="button" class="settings-save-btn printer-scan-use" data-scan-index="${idx}" ${row.already_configured ? 'disabled' : ''}>Use</button>
       </div>`).join('');
+    if (!autoAddable) {
+      box.insertAdjacentHTML('afterbegin', '<div class="settings-empty">Only unconfigured Moonraker/Snapmaker results can be bulk added. Bambu results need access code and serial first.</div>');
+    }
+  };
+
+  const _scanCandidateCanAutoAdd = candidate => {
+    if (!candidate || candidate.already_configured) return false;
+    return ['moonraker', 'snapmaker_u1'].includes(candidate.connection_type);
+  };
+
+  const _scanCandidateDisabledReason = candidate => {
+    if (candidate?.already_configured) return 'Already configured';
+    if (candidate?.connection_type === 'bambu') return 'Bambu needs access code and serial before adding';
+    return 'Not enough information to add automatically';
+  };
+
+  const _scanCandidateEntry = candidate => {
+    const model = candidate.model_name || (candidate.connection_type === 'snapmaker_u1' ? 'Snapmaker U1' : 'Custom Moonraker');
+    const volume = _PRINTER_MODEL_BUILD_VOLUME[model] || null;
+    const hotend = _DEFAULT_PRESETS.map(p => ({ label: p.label, value: p.hotend }));
+    const bed = _DEFAULT_PRESETS.map(p => ({ label: p.label, value: p.bed }));
+    const entry = {
+      id: candidate.suggested_id || '',
+      model_name: model,
+      custom_name: candidate.custom_name || candidate.host || model,
+      icon: candidate.family === 'voron' ? 'voron' : 'generic',
+      connection: {
+        type: candidate.connection_type || 'moonraker',
+        host: candidate.host || '',
+        port: Number(candidate.port) || 7125,
+      },
+      temperature_presets: { hotend, bed },
+    };
+    if (volume) entry.build_volume = volume;
+    if (candidate.camera_type === 'mjpeg_direct' && candidate.stream_url) {
+      entry.camera = {
+        type: 'mjpeg_direct',
+        stream_url: candidate.stream_url,
+        ...(candidate.snapshot_url ? { snapshot_url: candidate.snapshot_url } : {}),
+      };
+    }
+    return entry;
+  };
+
+  const updateBulkAddState = () => {
+    const addSelected = el.querySelector('#printer-scan-add-selected');
+    if (!addSelected) return;
+    const checked = el.querySelectorAll('[data-scan-check]:checked').length;
+    addSelected.disabled = checked === 0;
+    addSelected.textContent = checked ? `Add selected (${checked})` : 'Add selected';
+  };
+
+  const addSelectedScanCandidates = async () => {
+    const addSelected = el.querySelector('#printer-scan-add-selected');
+    const selected = Array.from(el.querySelectorAll('[data-scan-check]:checked'))
+      .map(input => scanCandidates[Number(input.dataset.scanCheck)])
+      .filter(_scanCandidateCanAutoAdd);
+    if (!selected.length) return;
+    const original = addSelected?.textContent || 'Add selected';
+    if (addSelected) {
+      addSelected.disabled = true;
+      addSelected.textContent = 'Adding...';
+    }
+    let added = 0;
+    const errors = [];
+    for (const candidate of selected) {
+      const entry = _scanCandidateEntry(candidate);
+      try {
+        const r = await fetch('/api/config/printers', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(entry),
+        });
+        const body = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(body.detail || `Failed to add ${entry.custom_name}`);
+        added += 1;
+        candidate.already_configured = true;
+      } catch (err) {
+        errors.push(`${candidate.custom_name || candidate.host}: ${err.message || 'failed'}`);
+      }
+    }
+    renderScanResults({ found: scanCandidates });
+    if (added) {
+      showToast('Printers added', `${added} printer${added === 1 ? '' : 's'} added from LAN scan`, 'success');
+      await refreshPrinters();
+      _renderSettingsContent('printers');
+    }
+    if (errors.length) showToast('Some printers were not added', errors.slice(0, 2).join(' · '), 'error');
+    if (addSelected) addSelected.textContent = original;
   };
 
   const applyScanCandidate = candidate => {
@@ -9995,9 +10091,14 @@ function _attachPrintersEvents(el) {
 
   el.querySelector('#printer-scan-results')?.addEventListener('click', e => {
     const btn = e.target.closest('[data-scan-index]');
-    if (!btn) return;
-    applyScanCandidate(scanCandidates[Number(btn.dataset.scanIndex)]);
+    if (btn) {
+      applyScanCandidate(scanCandidates[Number(btn.dataset.scanIndex)]);
+      return;
+    }
+    if (e.target.matches('[data-scan-check]')) updateBulkAddState();
   });
+
+  el.querySelector('#printer-scan-add-selected')?.addEventListener('click', addSelectedScanCandidates);
 
   el.querySelector('#p-printer-family')?.addEventListener('change', e => {
     setPrinterFamily(e.target.value);
