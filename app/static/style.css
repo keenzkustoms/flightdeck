@@ -2627,7 +2627,7 @@ header {
 
 .briefing-list {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: 0.65rem;
   min-width: 0;
 }
@@ -2697,9 +2697,6 @@ header {
 .briefing-group-rows {
   grid-column: 1 / -1;
   min-width: 0;
-  max-height: 9rem;
-  overflow-y: auto;
-  padding-right: 0.18rem;
   display: grid;
   gap: 0.35rem;
 }
@@ -2717,6 +2714,33 @@ header {
 
 .briefing-group-rows .briefing-row-main small {
   font-size: 0.67rem;
+}
+
+.briefing-printer-clear {
+  grid-column: 1 / -1;
+  border: 1px solid rgba(34,197,94,0.18);
+  border-radius: 0.5rem;
+  background: rgba(20,83,45,0.08);
+  padding: 0.45rem 0.5rem;
+}
+
+.briefing-printer-clear strong,
+.briefing-printer-clear span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.briefing-printer-clear strong {
+  color: #86efac;
+  font-size: 0.74rem;
+}
+
+.briefing-printer-clear span {
+  margin-top: 0.12rem;
+  color: var(--muted);
+  font-size: 0.66rem;
 }
 
 .briefing-row,

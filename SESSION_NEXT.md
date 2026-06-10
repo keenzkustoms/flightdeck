@@ -6,9 +6,11 @@ Latest GitHub/Pi state:
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
-- Refresh cachebust currently: ?cachebust=431 / style.css?v=348
+- Refresh cachebust currently: ?cachebust=432 / style.css?v=349
 
 Recent work:
+- Dashboard Flight Briefing is now printer-first instead of fault-type-first. The top handover renders compact boxes per printer, with that printer's dispatch locks, failed-print watch, active/paused print, low loaded spools, and AMS moisture watch signals grouped together. Attention printers sort first, clear printers stay as small stable cards, and the inner scroll area was removed so polling no longer jumps the briefing scrollbar back to the top. Static cache bumped to `app.js?v=432` and `style.css?v=349`; frontend refresh only.
+  - Verification: `node --check app/static/app.js` and `git diff --check` passed.
 - Dashboard Flight Briefing grouped cards now render every actionable row instead of hiding rows behind a non-clickable `+N more` note. Long groups use an internal scroll area, so all low spool/watch rows remain accessible without stretching the whole dashboard. Static cache bumped to `app.js?v=431` and `style.css?v=348`; frontend refresh only.
   - Verification: `node --check app/static/app.js` and `git diff --check` passed.
 - Dashboard Flight Briefing now groups the operator handover instead of showing a flat run of warning tiles. It builds separate briefing cards for Printer attention, Dispatch locked, Spool watch, and In flight; each card shows the count, the top actionable rows, and a `+N more` note when the shop has more items than fit cleanly. Existing links/AMS slot warning buttons are preserved inside the grouped rows. Static cache bumped to `app.js?v=430` and `style.css?v=347`; frontend refresh only.

@@ -1452,19 +1452,21 @@ function _dashboardBriefingRow(row) {
   return `<div class="briefing-row briefing-${row.tone || 'info'}">${content}</div>`;
 }
 
-function _dashboardBriefingGroup(group) {
+function _dashboardPrinterBriefingCard(group) {
   const rows = (group.rows || []).filter(Boolean);
   const body = rows.length
     ? `<div class="briefing-group-rows">${rows.map(_dashboardBriefingRow).join('')}</div>`
-    : '';
-  const count = group.countLabel || String(rows.length);
+    : `<div class="briefing-printer-clear">
+        <strong>Clear</strong>
+        <span>No current actions for this printer.</span>
+      </div>`;
   return `<article class="briefing-group briefing-${group.tone || 'info'}">
     <div class="briefing-group-head">
-      <span>${esc(group.kicker)}</span>
+      <span>${esc(group.model || 'Printer')}</span>
       <strong>${esc(group.title)}</strong>
       <small>${esc(group.detail || '')}</small>
     </div>
-    <b class="briefing-group-count">${esc(count)}</b>
+    <b class="briefing-group-count">${rows.length}</b>
     ${body}
   </article>`;
 }
@@ -1482,12 +1484,11 @@ function _dashboardLoadedLowRows(printers) {
     .sort((a, b) => a.pct - b.pct || Number(a.spool.remaining_g || 0) - Number(b.spool.remaining_g || 0))
     .map(({ printerId, spool, pct }) => {
       const p = printerById[printerId];
-      const where = p
-        ? `${_dashboardPrinterName(p)} · ${spool.location_slot != null ? _amsSlotLabel(p, Number(spool.location_slot)) : 'loaded'}`
-        : 'Loaded';
+      const where = p && spool.location_slot != null ? _amsSlotLabel(p, Number(spool.location_slot)) : 'Loaded';
       const title = `#${spool.id} ${spool.color_name || spool.material || 'spool'}`;
       const detail = `${where} · ${Math.round(Number(spool.remaining_g || 0))}g · ${pct}%`;
       return {
+        printerId,
         tone: 'warn',
         kicker: 'Spool watch',
         title,
@@ -1497,31 +1498,46 @@ function _dashboardLoadedLowRows(printers) {
     });
 }
 
+function _dashboardMoistureRowsByPrinter(printers) {
+  const rows = {};
+  _moistureWatch(_statsRhReadings(printers))
+    .filter(item => item.level !== 'ok')
+    .forEach(item => {
+      if (!rows[item.printerId]) rows[item.printerId] = [];
+      rows[item.printerId].push({
+        tone: item.level === 'bad' ? 'critical' : 'warn',
+        kicker: 'Moisture',
+        title: item.title,
+        detail: item.detail,
+        href: '#/stats?focus=rh',
+      });
+    });
+  return rows;
+}
+
 function _renderDashboardBriefing(printers) {
   const sorted = [...(printers || [])].sort((a, b) =>
     _dashboardStateRank(a) - _dashboardStateRank(b) ||
     _dashboardPrinterName(a).localeCompare(_dashboardPrinterName(b))
   );
-  const groups = {
-    attention: [],
-    locked: [],
-    active: [],
-    spools: _dashboardLoadedLowRows(sorted),
+  const rowsByPrinter = Object.fromEntries(sorted.map(p => [p.id, []]));
+  const addRow = (printerId, row) => {
+    if (!rowsByPrinter[printerId]) rowsByPrinter[printerId] = [];
+    rowsByPrinter[printerId].push(row);
   };
 
   sorted.forEach(p => {
     const target = _printerWarningTarget(p);
-    if (!target) return;
-    const row = {
-      tone: _dashboardBriefingTone(p),
-      kicker: _printerPrintLocked(p) ? 'Locked' : p.state === 'offline' ? 'Signal' : p.state === 'paused' ? 'Paused' : 'Watch',
-      title: _dashboardPrinterName(p),
-      detail: _dashboardIssueText(p),
-      target,
-      href: target.hash || `#/printer/${encodeURIComponent(p.id)}`,
-    };
-    if (_printerPrintLocked(p)) groups.locked.push(row);
-    else groups.attention.push(row);
+    if (target) {
+      addRow(p.id, {
+        tone: _dashboardBriefingTone(p),
+        kicker: _printerPrintLocked(p) ? 'Locked' : p.state === 'offline' ? 'Signal' : p.state === 'paused' ? 'Paused' : 'Watch',
+        title: _printerPrintLocked(p) ? 'Dispatch locked' : _dashboardIssueText(p),
+        detail: _printerPrintLocked(p) ? _printerLockoutReason(p) : _dashboardIssueText(p),
+        target,
+        href: target.hash || `#/printer/${encodeURIComponent(p.id)}`,
+      });
+    }
   });
 
   sorted
@@ -1530,73 +1546,66 @@ function _renderDashboardBriefing(printers) {
       const activeJob = _activePrinterJob(p);
       const job = activeJob ? jobDisplayName(activeJob) : _dashboardIssueText(p);
       const pct = activeJob?.progress != null ? `${Math.round(activeJob.progress * 100)}%` : p.state;
-      groups.active.push({
+      addRow(p.id, {
         tone: p.state === 'paused' ? 'warn' : 'ok',
         kicker: p.state === 'paused' ? 'Hold' : 'In flight',
-        title: _dashboardPrinterName(p),
-        detail: `${job} · ${pct}`,
+        title: job,
+        detail: pct,
         href: `#/printer/${encodeURIComponent(p.id)}`,
       });
     });
 
-  Object.keys(groups).forEach(key => {
+  _dashboardLoadedLowRows(sorted).forEach(row => {
+    if (row.printerId) addRow(row.printerId, row);
+  });
+
+  const moistureRows = _dashboardMoistureRowsByPrinter(sorted);
+  Object.entries(moistureRows).forEach(([printerId, rows]) => {
+    rows.forEach(row => addRow(printerId, row));
+  });
+
+  Object.keys(rowsByPrinter).forEach(key => {
     const unique = [];
     const seen = new Set();
-    groups[key].forEach(row => {
+    rowsByPrinter[key].forEach(row => {
       const rowKey = `${row.kicker}:${row.title}:${row.detail}`;
       if (seen.has(rowKey)) return;
       seen.add(rowKey);
       unique.push(row);
     });
-    groups[key] = unique;
+    rowsByPrinter[key] = unique;
   });
 
-  const cards = [];
-  if (groups.attention.length) {
-    cards.push(_dashboardBriefingGroup({
-      tone: groups.attention.some(row => row.tone === 'critical') ? 'critical' : 'warn',
-      kicker: 'Printer attention',
-      title: `${groups.attention.length} item${groups.attention.length === 1 ? '' : 's'} need eyes`,
-      detail: groups.attention[0]?.detail || '',
-      rows: groups.attention,
-    }));
-  }
-  if (groups.locked.length) {
-    cards.push(_dashboardBriefingGroup({
-      tone: 'warn',
-      kicker: 'Dispatch locked',
-      title: `${groups.locked.length} printer${groups.locked.length === 1 ? '' : 's'} on hold`,
-      detail: groups.locked[0]?.detail || '',
-      rows: groups.locked,
-    }));
-  }
-  if (groups.spools.length) {
-    cards.push(_dashboardBriefingGroup({
-      tone: 'warn',
-      kicker: 'Spool watch',
-      title: `${groups.spools.length} loaded spool${groups.spools.length === 1 ? '' : 's'} below ${_latestLowStockPct}%`,
-      detail: groups.spools[0]?.detail || '',
-      rows: groups.spools,
-    }));
-  }
-  if (groups.active.length) {
-    const paused = groups.active.filter(row => row.tone === 'warn').length;
-    cards.push(_dashboardBriefingGroup({
-      tone: paused ? 'warn' : 'ok',
-      kicker: 'In flight',
-      title: `${groups.active.length} active print${groups.active.length === 1 ? '' : 's'}`,
-      detail: paused ? `${paused} paused` : 'Jobs moving',
-      rows: groups.active,
-    }));
-  }
+  const cardModels = sorted.map(p => {
+    const rows = rowsByPrinter[p.id] || [];
+    const tone = rows.some(row => row.tone === 'critical')
+      ? 'critical'
+      : rows.some(row => row.tone === 'warn')
+        ? 'warn'
+        : rows.some(row => row.tone === 'ok')
+          ? 'ok'
+          : 'info';
+    return {
+      hasRows: rows.length > 0,
+      severity: tone === 'critical' ? 0 : tone === 'warn' ? 1 : tone === 'ok' ? 2 : 3,
+      name: _dashboardPrinterName(p),
+      html: _dashboardPrinterBriefingCard({
+        tone,
+        title: _dashboardPrinterName(p),
+        model: _printerSecondaryLabel(p) || p.model || p.type || 'Printer',
+        detail: rows.length ? `${rows.length} item${rows.length === 1 ? '' : 's'} to review` : 'No current faults',
+        rows,
+      }),
+    };
+  }).sort((a, b) => a.severity - b.severity || a.name.localeCompare(b.name));
 
-  const calm = !cards.length;
+  const calm = !cardModels.some(card => card.hasRows);
   const body = calm
     ? `<div class="briefing-clear">
         <strong>Clear skies</strong>
         <span>No active printer faults, AMS profile warnings, or loaded spool risks.</span>
       </div>`
-    : cards.join('');
+    : cardModels.map(card => card.html).join('');
 
   return `<section class="dashboard-briefing" aria-label="Flight briefing">
     <div class="briefing-head">
