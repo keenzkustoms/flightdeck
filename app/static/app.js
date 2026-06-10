@@ -1454,12 +1454,8 @@ function _dashboardBriefingRow(row) {
 
 function _dashboardBriefingGroup(group) {
   const rows = (group.rows || []).filter(Boolean);
-  const visible = rows.slice(0, group.limit || 3);
-  const more = rows.length > visible.length
-    ? `<span class="briefing-group-more">+${rows.length - visible.length} more</span>`
-    : '';
-  const body = visible.length
-    ? `<div class="briefing-group-rows">${visible.map(_dashboardBriefingRow).join('')}${more}</div>`
+  const body = rows.length
+    ? `<div class="briefing-group-rows">${rows.map(_dashboardBriefingRow).join('')}</div>`
     : '';
   const count = group.countLabel || String(rows.length);
   return `<article class="briefing-group briefing-${group.tone || 'info'}">

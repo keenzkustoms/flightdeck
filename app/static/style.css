@@ -2697,6 +2697,9 @@ header {
 .briefing-group-rows {
   grid-column: 1 / -1;
   min-width: 0;
+  max-height: 9rem;
+  overflow-y: auto;
+  padding-right: 0.18rem;
   display: grid;
   gap: 0.35rem;
 }
@@ -2714,13 +2717,6 @@ header {
 
 .briefing-group-rows .briefing-row-main small {
   font-size: 0.67rem;
-}
-
-.briefing-group-more {
-  color: var(--muted);
-  font-size: 0.68rem;
-  font-weight: 800;
-  padding: 0.1rem 0.2rem;
 }
 
 .briefing-row,

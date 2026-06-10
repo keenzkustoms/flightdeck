@@ -6,9 +6,11 @@ Latest GitHub/Pi state:
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
-- Refresh cachebust currently: ?cachebust=430 / style.css?v=347
+- Refresh cachebust currently: ?cachebust=431 / style.css?v=348
 
 Recent work:
+- Dashboard Flight Briefing grouped cards now render every actionable row instead of hiding rows behind a non-clickable `+N more` note. Long groups use an internal scroll area, so all low spool/watch rows remain accessible without stretching the whole dashboard. Static cache bumped to `app.js?v=431` and `style.css?v=348`; frontend refresh only.
+  - Verification: `node --check app/static/app.js` and `git diff --check` passed.
 - Dashboard Flight Briefing now groups the operator handover instead of showing a flat run of warning tiles. It builds separate briefing cards for Printer attention, Dispatch locked, Spool watch, and In flight; each card shows the count, the top actionable rows, and a `+N more` note when the shop has more items than fit cleanly. Existing links/AMS slot warning buttons are preserved inside the grouped rows. Static cache bumped to `app.js?v=430` and `style.css?v=347`; frontend refresh only.
   - Verification: `node --check app/static/app.js` and `git diff --check` passed.
 - LAN Scan results now support bulk add for safe candidates. Scan rows include checkboxes and an `Add selected` button; unconfigured Moonraker/Snapmaker U1 results can be selected and added in one pass through the existing printer config API. Bambu scan rows remain prefill-only because access code and serial are still required before adding. Static cache bumped to `app.js?v=429` and `style.css?v=346`; frontend refresh only.
