@@ -337,33 +337,14 @@ def _assigned_spool_matches_report(spool: dict, slot: dict) -> bool:
 
 
 def _replay_assigned_bambu_profiles(printer_status: dict) -> None:
-    """Keep Flightdeck-assigned AMS slots authoritative over stale Bambu profiles."""
-    printer_id = printer_status.get("id")
-    if not printer_id:
-        return
-    loaded_by_slot = db.get_spools_by_printer(str(printer_id))
-    if not loaded_by_slot:
-        return
-    for slot in _flatten_reported_ams_slots(printer_status, include_empty=True):
-        flat_slot = slot.get("flat_slot")
-        if flat_slot is None:
-            continue
-        spool = loaded_by_slot.get(int(flat_slot))
-        if not spool:
-            continue
-        if _reported_slot_is_stale_empty(slot):
-            continue
-        if _assigned_spool_matches_report(spool, slot):
-            continue
-        if _recent_profile_replay(str(printer_id), int(flat_slot), int(spool["id"])):
-            continue
-        full_spool = db.get_spool(int(spool["id"])) or spool
-        asyncio.create_task(_sync_bambu_ams_slot(str(printer_id), int(flat_slot), full_spool))
-        db.log_decision(
-            str(printer_id),
-            "ams_slot_profile_replayed",
-            f"{printer_id}:{flat_slot} spool #{spool['id']} overwrote stale printer profile",
-        )
+    """Never background-write AMS profiles.
+
+    The AMS Profile Doctor/Trust Flightdeck button is the operator-approved
+    path for writing a Flightdeck spool profile back to Bambu. Auto-replaying
+    here fought real spool swaps on AMS HT because a stale Flightdeck assignment
+    could overwrite the printer every poll cycle.
+    """
+    return
 
 
 def _remaining_g(spool: dict) -> float:
