@@ -9618,6 +9618,8 @@ const _PRINTER_SETUP_FAMILIES = {
   },
 };
 
+const _PRINTER_FAMILY_ORDER = ['bambu', 'voron', 'snapmaker_u1', 'moonraker', 'simulated'];
+
 const _CUSTOM_MODEL_RE = /custom|other/i;
 const _PRINTER_MODEL_BUILD_VOLUME = {
   'H2D': { x: 350, y: 320, z: 325 },
@@ -9762,15 +9764,24 @@ function _printersCategoryHtml(printers) {
       <form id="settings-add-form" class="settings-form" novalidate>
         <input type="hidden" id="p-editing-id" value="">
 
-        <div class="settings-form-row">
+        <div class="settings-form-row printer-family-row">
           <label class="settings-label" for="p-printer-family">Printer</label>
-          <select class="settings-input" id="p-printer-family" style="max-width:18rem">
+          <select class="settings-input printer-family-select" id="p-printer-family" aria-label="Printer family">
             <option value="bambu">Bambu</option>
             <option value="voron">Voron / Klipper</option>
             <option value="snapmaker_u1">Snapmaker</option>
             <option value="moonraker">Other Moonraker</option>
             <option value="simulated">Simulated</option>
           </select>
+          <div class="printer-family-picker" role="radiogroup" aria-label="Printer family">
+            ${_PRINTER_FAMILY_ORDER.map(id => {
+              const family = _PRINTER_SETUP_FAMILIES[id];
+              return `<button type="button" class="printer-family-option" data-printer-family-option="${esc(id)}" aria-pressed="${id === 'bambu' ? 'true' : 'false'}">
+                <span class="printer-family-icon">${getIcon(family.icon)}</span>
+                <span>${esc(family.label)}</span>
+              </button>`;
+            }).join('')}
+          </div>
         </div>
 
         <div class="settings-form-row">
@@ -9958,6 +9969,11 @@ function _attachPrintersEvents(el) {
     const customInput = el.querySelector('#p-custom');
     const familySelect = el.querySelector('#p-printer-family');
     if (familySelect) familySelect.value = familyId;
+    el.querySelectorAll('[data-printer-family-option]').forEach(btn => {
+      const active = btn.dataset.printerFamilyOption === familyId;
+      btn.classList.toggle('active', active);
+      btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+    });
     if (previousType === 'snapmaker_u1' && connType !== 'snapmaker_u1') {
       if (modelInput?.dataset.autoSnapmaker === '1' || modelInput?.value === 'Snapmaker U1') {
         modelInput.value = '';
@@ -10204,6 +10220,9 @@ function _attachPrintersEvents(el) {
 
   el.querySelector('#p-printer-family')?.addEventListener('change', e => {
     setPrinterFamily(e.target.value);
+  });
+  el.querySelectorAll('[data-printer-family-option]').forEach(btn => {
+    btn.addEventListener('click', () => setPrinterFamily(btn.dataset.printerFamilyOption));
   });
   el.querySelector('#p-model-select')?.addEventListener('change', () => syncModelValue(true));
   el.querySelector('#p-model-custom')?.addEventListener('input', () => syncModelValue(false));
