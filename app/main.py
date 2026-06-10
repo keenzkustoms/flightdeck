@@ -489,66 +489,13 @@ def _best_spool_for_reported_slot(slot: dict, candidates: list[dict], preferred_
 
 
 def _reconcile_reported_loaded_slots(printer_status: dict) -> None:
-    """Claim a shelved spool when Bambu reports a loaded RFID/profile slot."""
-    printer_id = printer_status.get("id")
-    if not printer_id:
-        return
+    """Do not move inventory based only on Bambu AMS reports.
 
-    loaded_by_slot = db.get_spools_by_printer(str(printer_id))
-    available = [
-        spool for spool in db.get_spools()
-        if spool.get("location_printer_id") is None and not spool.get("archived_at")
-    ]
-    if not available:
-        return
-
-    for slot in _flatten_reported_ams_slots(printer_status, include_empty=True):
-        if slot.get("empty"):
-            continue
-        flat_slot = slot.get("flat_slot")
-        if flat_slot is None or loaded_by_slot.get(int(flat_slot)):
-            continue
-        preferred_spool_id = db.get_recent_spool_for_slot(str(printer_id), int(flat_slot))
-        slot_available = available
-        if _reported_slot_is_generic(slot):
-            if preferred_spool_id is None:
-                continue
-            slot_available = [
-                spool for spool in available
-                if int(spool.get("id") or 0) == int(preferred_spool_id)
-            ]
-            if not slot_available:
-                continue
-        best = _best_spool_for_reported_slot(slot, slot_available, preferred_spool_id)
-        if not best:
-            continue
-
-        spool, score, reason = best
-        result = db.move_spool(
-            int(spool["id"]),
-            str(printer_id),
-            int(flat_slot),
-            spool.get("storage_location_id") or spool.get("home_storage_location_id"),
-        )
-        if not result.get("ok"):
-            continue
-        source_location = _spool_location_label(spool.get("storage_location_id") or spool.get("home_storage_location_id"))
-        reported = " ".join(
-            str(slot.get(key) or "").strip()
-            for key in ("brand", "type", "profile_name")
-            if str(slot.get(key) or "").strip()
-        ) or "filament"
-        db.log_decision(
-            str(printer_id),
-            "spool_auto_claimed",
-            (
-                f"Spool #{spool['id']} auto-claimed from {source_location} "
-                f"to {slot.get('label') or flat_slot}; matched printer report "
-                f"{reported} {slot.get('color') or ''} (score {score:.0f}: {reason})"
-            ),
-        )
-        loaded_by_slot[int(flat_slot)] = spool
-        available = [candidate for candidate in available if int(candidate["id"]) != int(spool["id"])]
+    Bambu can retain stale tray profile data after the physical spool changes,
+    especially on AMS HT. The AMS Profile Doctor still scores and suggests
+    likely shelf matches, but stock movement must be operator-approved.
+    """
+    return
 
 
 async def _grab_snapshot(printer_id: str) -> Optional[bytes]:
@@ -5758,12 +5705,7 @@ async def move_spool(spool_id: int, body: SpoolMove):
     if body.printer_id and body.slot is not None:
         spool = db.get_spool(spool_id)
         profile_override = body.ams_profile.model_dump(exclude_none=True) if body.ams_profile else None
-        destination_changed = (
-            not before
-            or before.get("location_printer_id") != body.printer_id
-            or before.get("location_slot") != body.slot
-        )
-        if destination_changed or profile_override:
+        if profile_override:
             ams_sync = await _sync_bambu_ams_slot(body.printer_id, body.slot, spool, profile_override)
     return {
         "ok": True,
