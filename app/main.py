@@ -11,6 +11,7 @@ import re
 import shutil
 import socket
 import sqlite3
+import struct
 import subprocess
 import tempfile
 import time
@@ -2862,7 +2863,96 @@ def _guess_moonraker_model(hostname: str, info: dict) -> tuple[str, str, str]:
     return ("moonraker", "Custom Moonraker", "Moonraker")
 
 
-async def _probe_printer_host(host: str, existing_hosts: set[str]) -> Optional[dict]:
+_BAMBU_SSDP_ADDR = "239.255.255.250"
+_BAMBU_SSDP_PORT = 2021
+_BAMBU_SSDP_TARGET = "urn:bambulab-com:device:3dprinter:1"
+_BAMBU_SSDP_MSEARCH = (
+    "M-SEARCH * HTTP/1.1\r\n"
+    f"HOST: {_BAMBU_SSDP_ADDR}:{_BAMBU_SSDP_PORT}\r\n"
+    'MAN: "ssdp:discover"\r\n'
+    "MX: 2\r\n"
+    f"ST: {_BAMBU_SSDP_TARGET}\r\n"
+    "\r\n"
+)
+
+
+def _parse_bambu_ssdp_response(message: str, host: str) -> Optional[dict]:
+    if _BAMBU_SSDP_TARGET not in message and "bambulab" not in message.lower():
+        return None
+    serial_match = re.search(r"USN:\s*(?:uuid:)?([^\s\r\n]+)", message, re.IGNORECASE)
+    serial = serial_match.group(1).strip() if serial_match else ""
+    name_match = re.search(r"DevName\.bambu\.com:\s*(.+?)(?:\r\n|\n|$)", message, re.IGNORECASE)
+    model_match = re.search(r"DevModel\.bambu\.com:\s*(.+?)(?:\r\n|\n|$)", message, re.IGNORECASE)
+    if not model_match:
+        model_match = re.search(r"NT:\s*urn:bambulab-com:device:([^:]+)", message, re.IGNORECASE)
+    model = model_match.group(1).strip() if model_match else ""
+    name = name_match.group(1).strip() if name_match else ""
+    if not (serial or name or model):
+        return None
+    return {
+        "host": host,
+        "serial": serial,
+        "name": name or serial,
+        "model": model,
+    }
+
+
+async def _scan_bambu_ssdp(duration: float = 2.6) -> dict[str, dict]:
+    """Best-effort Bambu SSDP metadata discovery.
+
+    Bambu exposes serial/model/name through local SSDP on UDP 2021. It does not
+    expose the LAN access code; that remains a user-entered secret.
+    """
+    found: dict[str, dict] = {}
+
+    def run() -> dict[str, dict]:
+        sock = None
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            try:
+                sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 2)
+            except OSError:
+                pass
+            sock.settimeout(0.15)
+            sock.bind(("", 0))
+            try:
+                mreq = struct.pack("4sl", socket.inet_aton(_BAMBU_SSDP_ADDR), socket.INADDR_ANY)
+                sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+            except OSError:
+                pass
+            deadline = time.monotonic() + max(0.5, duration)
+            last_send = 0.0
+            while time.monotonic() < deadline:
+                now = time.monotonic()
+                if now - last_send > 0.8:
+                    try:
+                        sock.sendto(_BAMBU_SSDP_MSEARCH.encode("utf-8"), (_BAMBU_SSDP_ADDR, _BAMBU_SSDP_PORT))
+                    except OSError:
+                        pass
+                    last_send = now
+                try:
+                    data, addr = sock.recvfrom(4096)
+                except socket.timeout:
+                    continue
+                except OSError:
+                    break
+                parsed = _parse_bambu_ssdp_response(data.decode("utf-8", errors="ignore"), addr[0])
+                if parsed:
+                    found[addr[0]] = parsed
+            return found
+        finally:
+            if sock:
+                try:
+                    sock.close()
+                except OSError:
+                    pass
+
+    return await asyncio.to_thread(run)
+
+
+async def _probe_printer_host(host: str, existing_hosts: set[str], existing_serials: set[str], bambu_ssdp: dict[str, dict]) -> Optional[dict]:
     async with httpx.AsyncClient(timeout=httpx.Timeout(connect=0.6, read=0.8, write=0.6, pool=0.6)) as client:
         try:
             r = await client.get(f"http://{host}:7125/server/info")
@@ -2889,17 +2979,22 @@ async def _probe_printer_host(host: str, existing_hosts: set[str]) -> Optional[d
         except Exception:
             pass
 
-    if await _tcp_port_open(host, 8883):
+    bambu_info = bambu_ssdp.get(host) or {}
+    if bambu_info or await _tcp_port_open(host, 8883):
+        model = str(bambu_info.get("model") or "H2D").strip()
+        name = str(bambu_info.get("name") or f"Bambu {host.split('.')[-1]}").strip()
+        serial = str(bambu_info.get("serial") or "").strip()
         return {
             "host": host,
             "family": "bambu",
             "connection_type": "bambu",
-            "model_name": "H2D",
-            "custom_name": f"Bambu {host.split('.')[-1]}",
-            "suggested_id": _printer_scan_id("bambu", host),
-            "confidence": "medium",
-            "reason": "Bambu LAN MQTT port 8883 is open; access code and serial still required",
-            "already_configured": host in existing_hosts,
+            "model_name": model,
+            "custom_name": name,
+            "suggested_id": _printer_scan_id(name or "bambu", host),
+            "serial": serial,
+            "confidence": "high" if serial else "medium",
+            "reason": "Bambu SSDP advertised serial/model; access code still required" if serial else "Bambu LAN MQTT port 8883 is open; access code and serial still required",
+            "already_configured": host in existing_hosts or (serial and serial in existing_serials),
         }
     return None
 
@@ -2913,12 +3008,18 @@ async def scan_config_printers(payload: PrinterScanRequest):
         for entry in cfg.printers
         if str(getattr(entry.connection, "host", "")).strip()
     }
+    existing_serials = {
+        str(getattr(entry.connection, "serial", "")).strip()
+        for entry in cfg.printers
+        if str(getattr(entry.connection, "serial", "")).strip()
+    }
     hosts = [str(ip) for ip in network.hosts()]
+    bambu_ssdp = await _scan_bambu_ssdp()
     sem = asyncio.Semaphore(64)
 
     async def bounded(host: str) -> Optional[dict]:
         async with sem:
-            return await _probe_printer_host(host, existing_hosts)
+            return await _probe_printer_host(host, existing_hosts, existing_serials, bambu_ssdp)
 
     found = [row for row in await asyncio.gather(*(bounded(host) for host in hosts)) if row]
     found.sort(key=lambda row: (row.get("already_configured", False), row.get("family") != "bambu", _ipv4_sort_key(row.get("host", ""))))

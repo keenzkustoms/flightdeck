@@ -10028,7 +10028,7 @@ function _attachPrintersEvents(el) {
         </label>
         <div class="printer-scan-main">
           <strong>${esc(row.custom_name || row.host)}</strong>
-          <span>${esc(row.model_name || row.family || 'Printer')} · ${esc(row.host)}${row.port ? `:${esc(row.port)}` : ''}</span>
+          <span>${esc(row.model_name || row.family || 'Printer')} · ${esc(row.host)}${row.port ? `:${esc(row.port)}` : ''}${row.serial ? ` · SN ${esc(row.serial)}` : ''}</span>
           <small>${esc(row.reason || '')}</small>
         </div>
         <div class="printer-scan-tags">
@@ -10150,6 +10150,7 @@ function _attachPrintersEvents(el) {
     set('p-custom', candidate.custom_name || '');
     if (candidate.connection_type === 'bambu') {
       set('p-bambu-host', candidate.host || '');
+      set('p-serial', candidate.serial || '');
     } else {
       set('p-host', candidate.host || '');
       set('p-port', candidate.port || 7125);

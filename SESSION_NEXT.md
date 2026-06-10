@@ -6,9 +6,11 @@ Latest GitHub/Pi state:
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
-- Refresh cachebust currently: ?cachebust=439 / style.css?v=355
+- Refresh cachebust currently: ?cachebust=440 / style.css?v=355
 
 Recent work:
+- LAN Scan now tries Bambu SSDP discovery on UDP 2021 before falling back to the existing port 8883 probe. When a Bambu printer advertises itself, scan results include the printer serial, model, and device name, and clicking `Use` pre-fills the serial field. The access code still cannot be discovered safely; Bambu treats it as the local LAN password, so the operator still enters it from the printer screen. Static cache bumped to `app.js?v=440`; backend restart required for the SSDP scanner.
+  - Verification: `python -m py_compile app/main.py`, `node --check app/static/app.js`, SSDP parser smoke test, and `git diff --check` passed.
 - AMS/AMS-HT Trust Flightdeck command aligned with the Bambuddy/Bambu Studio protocol shape. Bambuddy confirms AMS-HT uses `ams_id >= 128` with local `tray_id=0`, so Flightdeck's HT slot mapping was basically right. The fix is the command shape and flow: `ams_filament_setting` now includes `slot_id`, `sequence_id`, and derived `setting_id` where possible, and explicit Trust Flightdeck sends the set command directly instead of clearing a mismatched slot, waiting, then setting it. This should stop HT stale profile writes from bouncing through a clear-first sequence while keeping normal AMS behaviour consistent. README acknowledgements now credit Bambuddy for open AMS/AMS-HT protocol validation. Backend restart required.
   - Verification: `python -m py_compile app/main.py app/printers/bambu.py`, `.venv\Scripts\python.exe` payload smoke test for HT normal/profile override commands, and `git diff --check` passed.
 - Trust Flightdeck explicit AMS sync restored: the conservative AMS inventory changes made ordinary spool moves inventory-only, but the Doctor's `Trust Flightdeck` button still used the same move endpoint. When no profile override checkbox was enabled, the backend returned without `ams_sync`, so the button flashed and did not show `AMS profile sent`. `SpoolMove` now has `sync_ams`, and only the Trust Flightdeck button sends it. Normal assigning remains inventory-only; Trust Flightdeck is again an explicit write-to-Bambu action. Static cache bumped to `app.js?v=439`; backend restart required.
