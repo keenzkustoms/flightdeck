@@ -313,6 +313,7 @@ let _missionLastHtml = '';
 const _cameraUrlCache = {};     // printer_id → url string or null
 const _cameraMetaCache = {};    // printer_id → camera metadata
 const _CAMERA_STREAM_REFRESH_MS = 120000;
+const _CAMERA_SIGNAL_STALE_MS = 45000;
 let _renderedDetailId = null;
 let _renderedDetailSubtab = null;
 let _renderedDetailOk = false;
@@ -1848,7 +1849,7 @@ function _renderAddPrinterCard(empty = false) {
       <div>
         <span>First run</span>
         <strong>Add your first printer</strong>
-        <p>Connect a Bambu, Moonraker/Klipper, or simulated printer to start building live status, history, queue, and spool tracking.</p>
+        <p>Connect a Bambu, Moonraker/Klipper, or Snapmaker printer to start building live status, history, queue, and spool tracking.</p>
       </div>
       <a class="dashboard-add-printer-primary" href="#/settings/printers">Add Printer</a>
     </section>`;
@@ -6474,9 +6475,15 @@ function _pollPrintBayIfVisible() {
 }
 
 setInterval(_pollPrintBayIfVisible, 5000);
-setInterval(_refreshVisibleCameraStreams, 30000);
+setInterval(() => {
+  _refreshVisibleCameraStreams();
+  _refreshCameraSignals();
+}, 30000);
 document.addEventListener('visibilitychange', () => {
-  if (!document.hidden) _refreshVisibleCameraStreams(true);
+  if (!document.hidden) {
+    _refreshVisibleCameraStreams(true);
+    _refreshCameraSignals();
+  }
 });
 
 async function renderFileDeskView() {
@@ -8126,8 +8133,65 @@ function _fleetWallCameraFeedHtml(cameraId, label) {
 
 function _setCameraImageSrc(img, baseUrl, key = 't') {
   if (!img || !baseUrl) return;
+  _setCameraSignal(img, 'refreshing');
   img.src = `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}${key}=${Date.now()}`;
   img.dataset.streamLoadedAt = String(Date.now());
+}
+
+function _cameraSignalText(img, state) {
+  const fleetStill = img?.dataset?.fleetStill === '1';
+  const loadedAt = Number(img?.dataset?.streamLoadedAt || 0);
+  if (state === 'waiting') return fleetStill ? 'Waiting for frame' : 'Opening stream';
+  if (state === 'refreshing') return fleetStill ? 'Refreshing frame' : 'Refreshing stream';
+  if (state === 'reconnecting') return 'Reconnecting';
+  if (state === 'stale') return fleetStill ? 'Frame stale' : 'Stream quiet';
+  if (state === 'live') {
+    if (!fleetStill) return 'Stream live';
+    if (!loadedAt) return 'Frame live';
+    const ageSec = Math.max(0, Math.round((Date.now() - loadedAt) / 1000));
+    return ageSec <= 2 ? 'Frame now' : `Frame ${ageSec}s`;
+  }
+  return 'Camera';
+}
+
+function _ensureCameraSignal(img) {
+  if (!img?.parentElement) return null;
+  let signal = img.parentElement.querySelector(':scope > .camera-signal');
+  if (!signal) {
+    signal = document.createElement('span');
+    signal.className = 'camera-signal';
+    signal.setAttribute('aria-live', 'polite');
+    img.parentElement.appendChild(signal);
+  }
+  return signal;
+}
+
+function _setCameraSignal(img, state) {
+  const signal = _ensureCameraSignal(img);
+  if (!signal) return;
+  const nextState = state || 'waiting';
+  img.dataset.cameraSignalState = nextState;
+  signal.dataset.cameraSignalState = nextState;
+  signal.textContent = _cameraSignalText(img, nextState);
+  const loadedAt = Number(img.dataset.streamLoadedAt || 0);
+  signal.title = loadedAt
+    ? `Camera ${signal.textContent} · last load ${new Date(loadedAt).toLocaleTimeString([], _clockOpts({ second: '2-digit' }))}`
+    : `Camera ${signal.textContent}`;
+}
+
+function _refreshCameraSignals(root = document) {
+  if (document.hidden) return;
+  const now = Date.now();
+  root.querySelectorAll('img[data-camera-id]').forEach(img => {
+    const current = img.dataset.cameraSignalState || 'waiting';
+    if (current === 'reconnecting' || current === 'refreshing') return;
+    const loadedAt = Number(img.dataset.streamLoadedAt || 0);
+    if (img.dataset.fleetStill === '1' && loadedAt && (now - loadedAt) > _CAMERA_SIGNAL_STALE_MS) {
+      _setCameraSignal(img, 'stale');
+      return;
+    }
+    _setCameraSignal(img, loadedAt ? 'live' : 'waiting');
+  });
 }
 
 function _loadCameraUrl(printerId, onResolved) {
@@ -8154,7 +8218,10 @@ function _loadCameraUrl(printerId, onResolved) {
 
 function _attachCameraRetries(root) {
   root.querySelectorAll('img[data-camera-id]').forEach(img => {
-    img.dataset.streamLoadedAt = img.dataset.streamLoadedAt || String(Date.now());
+    const isFleetStill = img.dataset.fleetStill === '1';
+    const hasLoadedImage = img.complete && img.naturalWidth > 0 && !(isFleetStill && String(img.src || '').startsWith('data:'));
+    img.dataset.streamLoadedAt = hasLoadedImage ? (img.dataset.streamLoadedAt || String(Date.now())) : (img.dataset.streamLoadedAt || '');
+    _setCameraSignal(img, hasLoadedImage ? 'live' : 'waiting');
     let tries = 0;
     const cameraId = img.dataset.cameraId;
     const meta = _cameraMetaCache[cameraId] || {};
@@ -8183,7 +8250,13 @@ function _attachCameraRetries(root) {
             if (!img.isConnected || img.dataset.fleetToken !== token || img.dataset.fleetActive !== '1') return;
             img.src = nextSrc;
             img.dataset.streamLoadedAt = String(Date.now());
+            _setCameraSignal(img, 'live');
           };
+          preloader.onerror = () => {
+            if (!img.isConnected || img.dataset.fleetToken !== token || img.dataset.fleetActive !== '1') return;
+            _setCameraSignal(img, 'reconnecting');
+          };
+          _setCameraSignal(img, img.dataset.streamLoadedAt ? 'refreshing' : 'waiting');
           preloader.src = nextSrc;
           window.setTimeout(refreshFleetStill, refreshMs);
         };
@@ -8193,6 +8266,7 @@ function _attachCameraRetries(root) {
     if (img.dataset.retryAttached === '1') return;
     img.dataset.retryAttached = '1';
     img.addEventListener('error', () => {
+      _setCameraSignal(img, 'reconnecting');
       if (tries >= 3) return;
       tries += 1;
       const url = img.dataset.fleetSrc || _cameraUrlCache[cameraId];
@@ -8204,8 +8278,10 @@ function _attachCameraRetries(root) {
     img.addEventListener('load', () => {
       tries = 0;
       img.dataset.streamLoadedAt = String(Date.now());
+      _setCameraSignal(img, 'live');
     });
   });
+  _refreshCameraSignals(root);
 }
 
 function _refreshVisibleCameraStreams(force = false) {
@@ -9618,7 +9694,7 @@ const _PRINTER_SETUP_FAMILIES = {
   },
 };
 
-const _PRINTER_FAMILY_ORDER = ['bambu', 'voron', 'snapmaker_u1', 'moonraker', 'simulated'];
+const _PRINTER_FAMILY_ORDER = ['bambu', 'voron', 'snapmaker_u1', 'moonraker'];
 
 const _CUSTOM_MODEL_RE = /custom|other/i;
 const _PRINTER_MODEL_BUILD_VOLUME = {
@@ -9771,7 +9847,6 @@ function _printersCategoryHtml(printers) {
             <option value="voron">Voron / Klipper</option>
             <option value="snapmaker_u1">Snapmaker</option>
             <option value="moonraker">Other Moonraker</option>
-            <option value="simulated">Simulated</option>
           </select>
           <div class="printer-family-picker" role="radiogroup" aria-label="Printer family">
             ${_PRINTER_FAMILY_ORDER.map(id => {

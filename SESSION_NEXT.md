@@ -2,13 +2,17 @@
 
 Latest GitHub/Pi state:
 - Branch: main
-- Latest commit: current HEAD after this handoff (`Update handoff for printer name labels`)
+- Latest commit: current HEAD after this handoff (`Add camera feed status badges`)
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
-- Refresh cachebust currently: ?cachebust=442 / style.css?v=357
+- Refresh cachebust currently: ?cachebust=443 / style.css?v=358
 
 Recent work:
+- Camera feeds now get a small status pill overlay so black/waiting feeds are less mysterious. Live/Print Watch/Fleet Wall camera images show `Opening stream`, `Stream live`, `Waiting for frame`, `Frame now`, `Refreshing frame`, `Frame stale`, or `Reconnecting` depending on browser image load/retry state. Fleet Wall still-refresh feeds report real frame age; continuous MJPEG streams report stream state because the browser image element does not expose every individual MJPEG frame. Static cache bumped to `app.js?v=443` and `style.css?v=358`; frontend refresh only.
+  - Verification: `node --check app/static/app.js` and `git diff --check` passed.
+- The normal Add Printer picker no longer shows the Simulated option now that demo mode lives separately. Underlying simulated support remains for demo/dev fixtures, but user-facing setup offers Bambu, Voron/Klipper, Snapmaker, and Other Moonraker. The first-run Add Printer copy was updated accordingly.
+  - Verification: `node --check app/static/app.js` and `git diff --check` passed.
 - Add Printer now shows printer type as compact icon cards instead of a plain protocol dropdown. Bambu, Voron/Klipper, Snapmaker, Other Moonraker, and Simulated each show the same printer-family icon language used elsewhere, while the native select remains in place behind the picker for accessibility/fallback. Static cache bumped to `app.js?v=442` and `style.css?v=357`; frontend refresh only.
   - Verification: `node --check app/static/app.js` and `git diff --check` passed. Live browser check on the Pi confirmed five icon buttons with SVGs, Bambu active by default, and `app.js?v=442` plus `style.css?v=357` served.
 - Add Printer layout was compacted so setup fits much better on one screen. The form now uses a 3-column desktop grid, short field blocks for internal ID/name/host/access/serial/camera values, and the temperature presets sit alongside the main connection fields instead of as a full-width section. Mobile still stacks to one column. Static cache bumped to `app.js?v=441` and `style.css?v=356`; frontend refresh only.
