@@ -1452,6 +1452,27 @@ function _dashboardBriefingRow(row) {
   return `<div class="briefing-row briefing-${row.tone || 'info'}">${content}</div>`;
 }
 
+function _dashboardBriefingGroup(group) {
+  const rows = (group.rows || []).filter(Boolean);
+  const visible = rows.slice(0, group.limit || 3);
+  const more = rows.length > visible.length
+    ? `<span class="briefing-group-more">+${rows.length - visible.length} more</span>`
+    : '';
+  const body = visible.length
+    ? `<div class="briefing-group-rows">${visible.map(_dashboardBriefingRow).join('')}${more}</div>`
+    : '';
+  const count = group.countLabel || String(rows.length);
+  return `<article class="briefing-group briefing-${group.tone || 'info'}">
+    <div class="briefing-group-head">
+      <span>${esc(group.kicker)}</span>
+      <strong>${esc(group.title)}</strong>
+      <small>${esc(group.detail || '')}</small>
+    </div>
+    <b class="briefing-group-count">${esc(count)}</b>
+    ${body}
+  </article>`;
+}
+
 function _dashboardLoadedLowRows(printers) {
   const printerById = Object.fromEntries((printers || []).map(p => [p.id, p]));
   return Object.entries(_latestSpoolsByPrinter || {})
@@ -1463,7 +1484,6 @@ function _dashboardLoadedLowRows(printers) {
     })
     .filter(x => x.pct < _latestLowStockPct)
     .sort((a, b) => a.pct - b.pct || Number(a.spool.remaining_g || 0) - Number(b.spool.remaining_g || 0))
-    .slice(0, 3)
     .map(({ printerId, spool, pct }) => {
       const p = printerById[printerId];
       const where = p
@@ -1482,23 +1502,30 @@ function _dashboardLoadedLowRows(printers) {
 }
 
 function _renderDashboardBriefing(printers) {
-  const rows = [];
   const sorted = [...(printers || [])].sort((a, b) =>
     _dashboardStateRank(a) - _dashboardStateRank(b) ||
     _dashboardPrinterName(a).localeCompare(_dashboardPrinterName(b))
   );
+  const groups = {
+    attention: [],
+    locked: [],
+    active: [],
+    spools: _dashboardLoadedLowRows(sorted),
+  };
 
   sorted.forEach(p => {
     const target = _printerWarningTarget(p);
     if (!target) return;
-    rows.push({
+    const row = {
       tone: _dashboardBriefingTone(p),
       kicker: _printerPrintLocked(p) ? 'Locked' : p.state === 'offline' ? 'Signal' : p.state === 'paused' ? 'Paused' : 'Watch',
       title: _dashboardPrinterName(p),
       detail: _dashboardIssueText(p),
       target,
       href: target.hash || `#/printer/${encodeURIComponent(p.id)}`,
-    });
+    };
+    if (_printerPrintLocked(p)) groups.locked.push(row);
+    else groups.attention.push(row);
   });
 
   sorted
@@ -1507,7 +1534,7 @@ function _renderDashboardBriefing(printers) {
       const activeJob = _activePrinterJob(p);
       const job = activeJob ? jobDisplayName(activeJob) : _dashboardIssueText(p);
       const pct = activeJob?.progress != null ? `${Math.round(activeJob.progress * 100)}%` : p.state;
-      rows.push({
+      groups.active.push({
         tone: p.state === 'paused' ? 'warn' : 'ok',
         kicker: p.state === 'paused' ? 'Hold' : 'In flight',
         title: _dashboardPrinterName(p),
@@ -1516,24 +1543,64 @@ function _renderDashboardBriefing(printers) {
       });
     });
 
-  rows.push(..._dashboardLoadedLowRows(sorted));
-
-  const unique = [];
-  const seen = new Set();
-  rows.forEach(row => {
-    const key = `${row.kicker}:${row.title}:${row.detail}`;
-    if (seen.has(key)) return;
-    seen.add(key);
-    unique.push(row);
+  Object.keys(groups).forEach(key => {
+    const unique = [];
+    const seen = new Set();
+    groups[key].forEach(row => {
+      const rowKey = `${row.kicker}:${row.title}:${row.detail}`;
+      if (seen.has(rowKey)) return;
+      seen.add(rowKey);
+      unique.push(row);
+    });
+    groups[key] = unique;
   });
 
-  const calm = !unique.length;
+  const cards = [];
+  if (groups.attention.length) {
+    cards.push(_dashboardBriefingGroup({
+      tone: groups.attention.some(row => row.tone === 'critical') ? 'critical' : 'warn',
+      kicker: 'Printer attention',
+      title: `${groups.attention.length} item${groups.attention.length === 1 ? '' : 's'} need eyes`,
+      detail: groups.attention[0]?.detail || '',
+      rows: groups.attention,
+    }));
+  }
+  if (groups.locked.length) {
+    cards.push(_dashboardBriefingGroup({
+      tone: 'warn',
+      kicker: 'Dispatch locked',
+      title: `${groups.locked.length} printer${groups.locked.length === 1 ? '' : 's'} on hold`,
+      detail: groups.locked[0]?.detail || '',
+      rows: groups.locked,
+    }));
+  }
+  if (groups.spools.length) {
+    cards.push(_dashboardBriefingGroup({
+      tone: 'warn',
+      kicker: 'Spool watch',
+      title: `${groups.spools.length} loaded spool${groups.spools.length === 1 ? '' : 's'} below ${_latestLowStockPct}%`,
+      detail: groups.spools[0]?.detail || '',
+      rows: groups.spools,
+    }));
+  }
+  if (groups.active.length) {
+    const paused = groups.active.filter(row => row.tone === 'warn').length;
+    cards.push(_dashboardBriefingGroup({
+      tone: paused ? 'warn' : 'ok',
+      kicker: 'In flight',
+      title: `${groups.active.length} active print${groups.active.length === 1 ? '' : 's'}`,
+      detail: paused ? `${paused} paused` : 'Jobs moving',
+      rows: groups.active,
+    }));
+  }
+
+  const calm = !cards.length;
   const body = calm
     ? `<div class="briefing-clear">
         <strong>Clear skies</strong>
         <span>No active printer faults, AMS profile warnings, or loaded spool risks.</span>
       </div>`
-    : unique.slice(0, 6).map(_dashboardBriefingRow).join('');
+    : cards.join('');
 
   return `<section class="dashboard-briefing" aria-label="Flight briefing">
     <div class="briefing-head">
