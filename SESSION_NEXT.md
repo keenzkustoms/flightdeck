@@ -6,9 +6,11 @@ Latest GitHub/Pi state:
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
-- Refresh cachebust currently: ?cachebust=433 / style.css?v=350
+- Refresh cachebust currently: ?cachebust=434 / style.css?v=351
 
 Recent work:
+- Dashboard aesthetics pass: the Flight Briefing heading is now centred above the handover boxes, and those boxes use the same `320px` grid rhythm as the printer cards below. The dashboard no longer appends the Add Printer tile after the printer cards. The left sidebar Settings item now expands on hover/focus to show direct Setup, Printers, Hardware, Preferences, Appearance, Slicer, and Locations links. Static cache bumped to `app.js?v=434` and `style.css?v=351`; frontend refresh only.
+  - Verification: `node --check app/static/app.js` and `git diff --check` passed.
 - Dashboard printer-first briefing rows now use stable action titles like `Printer attention`, `Dispatch locked`, `Paused`, or `Offline`, with the specific reason in the detail line. This removes duplicate rows such as `1 failed print in 14d / 1 failed print in 14d`. Static cache bumped to `app.js?v=433` and `style.css?v=350`; frontend refresh only.
   - Verification: `node --check app/static/app.js` and `git diff --check` passed.
 - Dashboard Flight Briefing is now printer-first instead of fault-type-first. The top handover renders compact boxes per printer, with that printer's dispatch locks, failed-print watch, active/paused print, low loaded spools, and AMS moisture watch signals grouped together. Attention printers sort first, clear printers stay as small stable cards, and the inner scroll area was removed so polling no longer jumps the briefing scrollbar back to the top. Static cache bumped to `app.js?v=432` and `style.css?v=349`; frontend refresh only.

@@ -1252,6 +1252,38 @@ header {
   box-shadow: inset 3px 0 0 var(--tab-accent, var(--accent));
 }
 
+.tab-flyout {
+  position: relative;
+}
+
+.tab-settings-root::after {
+  content: "⌄";
+  margin-left: auto;
+  color: color-mix(in srgb, var(--sidebar-text) 62%, transparent);
+  font-size: 0.78rem;
+}
+
+.tab-flyout-menu {
+  display: none;
+  margin: 0.2rem 0 0.35rem 0.55rem;
+  padding: 0.25rem;
+  border-left: 1px solid rgba(122,162,216,0.22);
+  background: rgba(2,6,23,0.16);
+  border-radius: 0.45rem;
+}
+
+.tab-flyout:hover .tab-flyout-menu,
+.tab-flyout:focus-within .tab-flyout-menu {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.tab-settings-child {
+  min-height: 1.7rem;
+  padding: 0.24rem 0.55rem;
+  font-size: 0.74rem;
+}
+
 .tab-section {
   margin: 0.9rem 0 0.25rem;
   padding: 0.55rem 0.65rem 0;
@@ -2584,20 +2616,19 @@ header {
   background: linear-gradient(135deg, rgba(15,23,42,0.96), rgba(17,24,39,0.9));
   border: 1px solid rgba(59,130,246,0.22);
   border-radius: 0.75rem;
-  padding: 0.85rem;
-  display: grid;
-  grid-template-columns: minmax(170px, 220px) minmax(0, 1fr);
-  gap: 0.85rem;
-  align-items: stretch;
+  padding: 0.85rem 0.85rem 1rem;
+  display: block;
   box-shadow: 0 12px 30px rgba(0,0,0,0.18);
 }
 
 .briefing-head {
   display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  gap: 0.65rem;
-  padding: 0.25rem 0.35rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0 0 0.8rem;
+  position: relative;
+  text-align: center;
 }
 
 .briefing-head span {
@@ -2617,7 +2648,9 @@ header {
 }
 
 .briefing-head a {
-  width: fit-content;
+  position: absolute;
+  right: 0.1rem;
+  top: 0.25rem;
   color: #93c5fd;
   font-size: 0.74rem;
   text-decoration: none;
@@ -2627,7 +2660,7 @@ header {
 
 .briefing-list {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: 0.65rem;
   min-width: 0;
 }
@@ -2857,7 +2890,7 @@ button.briefing-row {
 
 @media (max-width: 760px) {
   .dashboard-briefing {
-    grid-template-columns: 1fr;
+    padding: 0.85rem;
   }
 
   .dashboard-first-run {
@@ -2866,9 +2899,15 @@ button.briefing-row {
   }
 
   .briefing-head {
-    flex-direction: row;
-    align-items: flex-end;
-    padding: 0.1rem;
+    align-items: flex-start;
+    justify-content: flex-start;
+    padding-bottom: 0.75rem;
+    text-align: left;
+  }
+
+  .briefing-head a {
+    position: static;
+    margin-left: auto;
   }
 
   .briefing-list {

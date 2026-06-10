@@ -2847,6 +2847,9 @@ function buildTabs(printers) {
       ${progress ? `<span class="tab-printer-progress">${progress}</span>` : ''}
     </a>`;
   }).join('');
+  const settingsLinks = _SETTINGS_CATEGORIES.map(c =>
+    `<a class="tab-settings-child tab" href="#/settings/${c.id}">${esc(c.label)}</a>`
+  ).join('');
   nav.innerHTML = [
     `<a class="tab" href="#/">Dashboard</a>`,
     `<a class="tab" href="#/fleet">Fleet Wall</a>`,
@@ -2862,7 +2865,10 @@ function buildTabs(printers) {
     `<div class="tab-section">System</div>`,
     `<a class="tab" href="#/demo">Demo Mode</a>`,
     `<a class="tab" href="#/manual">Flight Manual</a>`,
-    `<a class="tab" href="#/settings">Settings</a>`,
+    `<div class="tab-flyout">
+      <a class="tab tab-settings-root" href="#/settings">Settings</a>
+      <div class="tab-flyout-menu">${settingsLinks}</div>
+    </div>`,
   ].join('');
   _tabsBuilt = true;
   router();
@@ -9062,7 +9068,7 @@ function updateDashboard(printers) {
 
   const grid = document.getElementById('printer-grid');
   const printerCards = sortedPrinters.length
-    ? `${sortedPrinters.map(renderCard).join('')}${_renderAddPrinterCard()}`
+    ? sortedPrinters.map(renderCard).join('')
     : _renderAddPrinterCard(true);
   grid.innerHTML = `${_renderDashboardBriefing(sortedPrinters)}${printerCards}`;
 
