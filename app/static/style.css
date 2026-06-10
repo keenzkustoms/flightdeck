@@ -2613,12 +2613,12 @@ header {
 
 .dashboard-briefing {
   grid-column: 1 / -1;
-  background: linear-gradient(135deg, rgba(15,23,42,0.96), rgba(17,24,39,0.9));
-  border: 1px solid rgba(59,130,246,0.22);
-  border-radius: 0.75rem;
-  padding: 0.85rem 0.85rem 1rem;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
   display: block;
-  box-shadow: 0 12px 30px rgba(0,0,0,0.18);
+  box-shadow: none;
 }
 
 .briefing-head {
@@ -2626,7 +2626,7 @@ header {
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
-  padding: 0 0 0.8rem;
+  padding: 0.1rem 0 0.85rem;
   position: relative;
   text-align: center;
 }
@@ -2661,7 +2661,7 @@ header {
 .briefing-list {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-  gap: 0.65rem;
+  gap: 1.5rem;
   min-width: 0;
 }
 

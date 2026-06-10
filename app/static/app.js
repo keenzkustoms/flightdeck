@@ -1609,7 +1609,7 @@ function _renderDashboardBriefing(printers) {
         rows,
       }),
     };
-  }).sort((a, b) => a.severity - b.severity || a.name.localeCompare(b.name));
+  });
 
   const calm = !cardModels.some(card => card.hasRows);
   const body = calm
