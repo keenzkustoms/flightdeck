@@ -6172,6 +6172,14 @@ button.live-route-node:hover {
 
 .modal-btn:hover { background: rgba(255,255,255,0.07); }
 
+.modal-btn-primary {
+  background: rgba(37,99,235,0.28);
+  border-color: rgba(59,130,246,0.75);
+  color: #dbeafe;
+}
+
+.modal-btn-primary:hover { background: rgba(37,99,235,0.42); }
+
 .modal-btn-danger {
   background: rgba(127,29,29,0.45);
   border-color: #b91c1c;
@@ -15230,7 +15238,7 @@ select optgroup {
   padding: 0.7rem;
 }
 .filedesk-queue-box { max-width: 520px; padding: 1rem; }
-.filedesk-slice-box { max-width: 560px; }
+.filedesk-slice-box { max-width: 680px; }
 .filedesk-queue-head { display: flex; justify-content: space-between; gap: 0.8rem; margin-bottom: 0.9rem; }
 .filedesk-queue-head h3 { margin: 0.18rem 0 0; color: var(--text); font-size: 1rem; line-height: 1.25; word-break: break-word; }
 .filedesk-queue-head span { display: block; margin-top: 0.25rem; color: var(--muted); font-size: 0.72rem; word-break: break-word; }
@@ -15245,6 +15253,20 @@ select optgroup {
 }
 .filedesk-dialog-close:hover { color: var(--text); border-color: var(--accent); }
 .filedesk-queue-options { display: grid; gap: 0.5rem; margin-bottom: 0.9rem; }
+.filedesk-printer-choice.selected {
+  border-color: rgba(59,130,246,0.75);
+  background: rgba(59,130,246,0.12);
+}
+.filedesk-slice-profile-fields {
+  display: grid;
+  gap: 0.55rem;
+  margin-bottom: 0.75rem;
+}
+@media (min-width: 760px) {
+  .filedesk-slice-profile-fields {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
 .filedesk-slice-toggle {
   display: inline-flex;
   align-items: center;
@@ -15273,6 +15295,10 @@ select optgroup {
   font-size: 0.85rem;
   font-weight: 700;
   padding: 0.35rem 0.55rem;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.filedesk-slice-field input {
   text-transform: none;
   letter-spacing: 0;
 }
@@ -15354,6 +15380,14 @@ select optgroup {
   border-color: rgba(96,165,250,0.85);
   background: rgba(59,130,246,0.22);
   color: #fff;
+}
+.filedesk-slice-queue {
+  border-color: rgba(59,130,246,0.85);
+  background: rgba(37,99,235,0.28);
+  color: #dbeafe;
+}
+.filedesk-slice-queue:hover:not(:disabled) {
+  background: rgba(37,99,235,0.42);
 }
 .filedesk-printer-choice {
   display: flex;

@@ -11647,10 +11647,16 @@ async function _uploadSourceModel(file) {
   }
 }
 
-function _openSliceModelDialog({ sourceId, path, file, printers }) {
+async function _openSliceModelDialog({ sourceId, path, file, printers }) {
   document.querySelector('.filedesk-slice-dialog')?.remove();
+  const profileData = _slicerProfileData || await fetch('/api/slicer/profiles').then(r => r.ok ? r.json() : null).catch(() => null);
+  if (profileData) _slicerProfileData = profileData;
+  const printerProfiles = _slicerProfileOptions(profileData, 'printer');
+  const processProfiles = _slicerProfileOptions(profileData, 'process');
+  const filamentProfiles = _slicerProfileOptions(profileData, 'filament');
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay filedesk-slice-dialog';
+  let selectedPrinterId = printers[0]?.id || '';
   const bedTypes = ['Textured PEI Plate', 'Smooth PEI Plate', 'High Temp Plate', 'Cool Plate', 'Engineering Plate'];
   const supportModes = [
     ['profile', 'Profile default'],
@@ -11675,10 +11681,27 @@ function _openSliceModelDialog({ sourceId, path, file, printers }) {
         <button class="filedesk-dialog-close" data-dialog-close aria-label="Close">x</button>
       </div>
       <div class="filedesk-queue-options">
-        ${printers.map(p => `<button class="filedesk-printer-choice" data-printer-id="${esc(p.id)}">
+        ${printers.map((p, index) => `<button class="filedesk-printer-choice${index === 0 ? ' selected' : ''}" type="button" data-printer-id="${esc(p.id)}">
           <strong>${esc(p.custom_name || p.model_name || p.id)}</strong>
           <span>${esc([p.model_name, p.kind].filter(Boolean).join(' · '))}</span>
         </button>`).join('')}
+      </div>
+      <div class="filedesk-slice-profile-fields">
+        <label class="filedesk-slice-field">
+          <span>Printer/nozzle</span>
+          <input id="slice-printer-profile" class="settings-input slicer-profile-input" data-profile-slot="printer" data-profile-list-id="slice-printer-profiles" placeholder="Printer/nozzle profile">
+        </label>
+        <label class="filedesk-slice-field">
+          <span>Process/layer</span>
+          <input id="slice-process-profile" class="settings-input slicer-profile-input" data-profile-slot="process" data-profile-list-id="slice-process-profiles" placeholder="Process/layer profile">
+        </label>
+        <label class="filedesk-slice-field">
+          <span>Filament/profile</span>
+          <input id="slice-filament-profile" class="settings-input slicer-profile-input" data-profile-slot="filament" data-profile-list-id="slice-filament-profiles" placeholder="Filament profile">
+        </label>
+        ${_slicerDatalist('slice-printer-profiles', printerProfiles)}
+        ${_slicerDatalist('slice-process-profiles', processProfiles)}
+        ${_slicerDatalist('slice-filament-profiles', filamentProfiles)}
       </div>
       <label class="filedesk-slice-toggle">
         <input type="checkbox" id="slice-all-plates">
@@ -11706,23 +11729,65 @@ function _openSliceModelDialog({ sourceId, path, file, printers }) {
       <div class="filedesk-slice-actions" id="slice-handoff-actions" hidden></div>
       <div class="settings-hint">Source models are portable. Flightdeck will create a printer-specific sliced job before queueing or sending it.</div>
       <div class="modal-actions">
+        <button class="modal-btn modal-btn-primary" id="slice-prepare-plan" type="button">Prepare slice</button>
         <button class="modal-btn" data-dialog-close>Close</button>
       </div>
     </div>`;
   document.body.appendChild(overlay);
   const close = () => overlay.remove();
-  overlay.addEventListener('click', async e => {
-    if (e.target === overlay || e.target.closest('[data-dialog-close]')) {
-      close();
-      return;
+  const profilePayload = () => ({
+    printer_profile: overlay.querySelector('#slice-printer-profile')?.value.trim() || '',
+    process_profile: overlay.querySelector('#slice-process-profile')?.value.trim() || '',
+    filament_profile: overlay.querySelector('#slice-filament-profile')?.value.trim() || '',
+  });
+  const setProfilesForPrinter = printerId => {
+    selectedPrinterId = printerId || selectedPrinterId;
+    const printer = printers.find(p => p.id === selectedPrinterId) || printers[0] || {};
+    const defaults = profileData?.defaults?.[selectedPrinterId] || {};
+    const fallback = [printer.model_name, printer.custom_name, printer.id].filter(Boolean).join(' ');
+    const filteredPrinters = _slicerFilterRowsForPrinter(printerProfiles, fallback, fallback);
+    const printerValue = defaults.printer_profile || filteredPrinters[0]?.name || '';
+    const filteredProcesses = _slicerFilterRowsForPrinter(processProfiles, printerValue, fallback);
+    const filteredFilaments = _slicerFilterRowsForPrinter(filamentProfiles, printerValue, fallback);
+    const printerInput = overlay.querySelector('#slice-printer-profile');
+    const processInput = overlay.querySelector('#slice-process-profile');
+    const filamentInput = overlay.querySelector('#slice-filament-profile');
+    if (printerInput) {
+      printerInput.value = printerValue;
+      printerInput.placeholder = filteredPrinters[0]?.name || 'Printer/nozzle profile';
     }
-    const choice = e.target.closest('[data-printer-id]');
-    if (!choice) return;
+    if (processInput) {
+      processInput.value = defaults.process_profile || filteredProcesses[0]?.name || '';
+      processInput.placeholder = filteredProcesses[0]?.name || 'Process/layer profile';
+    }
+    if (filamentInput) {
+      filamentInput.value = defaults.filament_profile || filteredFilaments[0]?.name || '';
+      filamentInput.placeholder = filteredFilaments[0]?.name || 'Filament profile';
+    }
+    _slicerReplaceDatalist('slice-printer-profiles', filteredPrinters);
+    _slicerReplaceDatalist('slice-process-profiles', filteredProcesses);
+    _slicerReplaceDatalist('slice-filament-profiles', filteredFilaments);
+    overlay.querySelectorAll('[data-printer-id]').forEach(btn => {
+      btn.classList.toggle('selected', btn.dataset.printerId === selectedPrinterId);
+    });
+    const actionsEl = overlay.querySelector('#slice-handoff-actions');
+    const errEl = overlay.querySelector('#slice-plan-result');
+    if (actionsEl) {
+      actionsEl.hidden = true;
+      actionsEl.innerHTML = '';
+    }
+    if (errEl) errEl.hidden = true;
+  };
+  const preparePlan = async () => {
+    if (!selectedPrinterId) return;
     const errEl = overlay.querySelector('#slice-plan-result');
     const actionsEl = overlay.querySelector('#slice-handoff-actions');
+    const prepareBtn = overlay.querySelector('#slice-prepare-plan');
     overlay.querySelectorAll('.filedesk-printer-choice').forEach(b => { b.disabled = true; });
-    choice.classList.add('is-working');
-    choice.querySelector('span').textContent = 'Preparing slice plan...';
+    if (prepareBtn) {
+      prepareBtn.disabled = true;
+      prepareBtn.textContent = 'Preparing...';
+    }
     if (actionsEl) {
       actionsEl.hidden = true;
       actionsEl.innerHTML = '';
@@ -11734,7 +11799,8 @@ function _openSliceModelDialog({ sourceId, path, file, printers }) {
         body: JSON.stringify({
           source_id: sourceId,
           path,
-          printer_id: choice.dataset.printerId,
+          printer_id: selectedPrinterId,
+          ...profilePayload(),
           plate: 'auto',
           bed_type: overlay.querySelector('#slice-bed-type')?.value || 'Textured PEI Plate',
           support_mode: overlay.querySelector('#slice-support-mode')?.value || 'profile',
@@ -11748,7 +11814,7 @@ function _openSliceModelDialog({ sourceId, path, file, printers }) {
       errEl.textContent = data.ready
         ? (data.manual_handoff && data.message
           ? data.message
-          : `Prepare ${data.output?.filename || 'a printer-specific sliced job'} for ${data.target?.custom_name || data.target?.model_name || choice.dataset.printerId}.`)
+          : `Prepare ${data.output?.filename || 'a printer-specific sliced job'} for ${data.target?.custom_name || data.target?.model_name || selectedPrinterId}.`)
         : data.message || 'Set the slicer settings in Settings -> Slicer first.';
       errEl.classList.toggle('filedesk-dialog-ok', !!data.ready);
       if (data.ready && actionsEl) {
@@ -11772,11 +11838,11 @@ function _openSliceModelDialog({ sourceId, path, file, printers }) {
         actionsEl.innerHTML = `
           <div class="filedesk-slice-steps">
             <strong>Slice handoff</strong>
-            <span>Download the model, open Orca, import it, use the profiles below, then export as ${esc(outputName)} back into the Print Vault.</span>
+            <span>Slice with the selected profile set, then queue the generated printer-ready file.</span>
           </div>
           <div class="filedesk-slice-profiles">${profileRows}${optionRows}</div>
           <div class="filedesk-slice-buttons">
-            ${canBackgroundSlice ? `<button class="filedesk-slice-link filedesk-slice-run" type="button" data-run-slice="${esc(outputName)}" data-printer-id="${esc(data.target?.id || choice.dataset.printerId)}">Slice in Flightdeck</button>` : ''}
+            ${canBackgroundSlice ? `<button class="filedesk-slice-link filedesk-slice-run" type="button" data-run-slice="${esc(outputName)}" data-printer-id="${esc(data.target?.id || selectedPrinterId)}">Slice in Flightdeck</button>` : ''}
             ${sourceUrl ? `<a class="filedesk-slice-link" href="${esc(sourceUrl)}" download>Download model</a>` : ''}
             ${browserUrl ? `<a class="filedesk-slice-link" href="${esc(browserUrl)}" target="_blank" rel="noreferrer">Open Orca</a>` : ''}
             <button class="filedesk-slice-link" type="button" data-copy-slice-name="${esc(outputName)}">Copy output name</button>
@@ -11788,9 +11854,35 @@ function _openSliceModelDialog({ sourceId, path, file, printers }) {
       errEl.textContent = err.message || 'Unable to prepare slice';
       errEl.hidden = false;
     } finally {
-      choice.classList.remove('is-working');
       overlay.querySelectorAll('.filedesk-printer-choice').forEach(b => { b.disabled = false; });
+      if (prepareBtn) {
+        prepareBtn.disabled = false;
+        prepareBtn.textContent = 'Prepare slice';
+      }
     }
+  };
+  setProfilesForPrinter(selectedPrinterId);
+  _attachSlicerProfileDropdowns(overlay);
+  overlay.querySelector('#slice-printer-profile')?.addEventListener('change', () => {
+    const row = overlay.querySelector('.filedesk-slice-profile-fields');
+    if (!row) return;
+    const printerText = overlay.querySelector('#slice-printer-profile')?.value || '';
+    const printer = printers.find(p => p.id === selectedPrinterId) || {};
+    const fallback = [printer.model_name, printer.custom_name, printer.id].filter(Boolean).join(' ');
+    const processRows = _slicerFilterRowsForPrinter(processProfiles, printerText, fallback);
+    const filamentRows = _slicerFilterRowsForPrinter(filamentProfiles, printerText, fallback);
+    _slicerReplaceDatalist('slice-process-profiles', processRows);
+    _slicerReplaceDatalist('slice-filament-profiles', filamentRows);
+  });
+  overlay.querySelector('#slice-prepare-plan')?.addEventListener('click', preparePlan);
+  overlay.addEventListener('click', e => {
+    if (e.target === overlay || e.target.closest('[data-dialog-close]')) {
+      close();
+      return;
+    }
+    const choice = e.target.closest('[data-printer-id]');
+    if (!choice) return;
+    setProfilesForPrinter(choice.dataset.printerId);
   });
   overlay.addEventListener('click', e => {
     const copyBtn = e.target.closest('[data-copy-slice-name]');
@@ -11846,6 +11938,7 @@ function _openSliceModelDialog({ sourceId, path, file, printers }) {
           source_id: sourceId,
           path,
           printer_id: runBtn.dataset.printerId,
+          ...profilePayload(),
           output_filename: runBtn.dataset.runSlice || '',
           plate: '1',
           bed_type: overlay.querySelector('#slice-bed-type')?.value || 'Textured PEI Plate',
@@ -11857,18 +11950,43 @@ function _openSliceModelDialog({ sourceId, path, file, printers }) {
       const data = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(typeof data.detail === 'string' ? data.detail : data.detail?.message || 'Slice failed');
       showToast('Sliced job ready', `${data.filename} · ${_fmtBytes(data.size)}`, 'success');
-      close();
+      const actionsEl = overlay.querySelector('#slice-handoff-actions');
+      const errEl = overlay.querySelector('#slice-plan-result');
+      if (errEl) {
+        errEl.hidden = false;
+        errEl.classList.add('filedesk-dialog-ok');
+        errEl.textContent = `${data.filename} is sliced and ready in the Print Vault.`;
+      }
+      if (actionsEl) {
+        actionsEl.hidden = false;
+        actionsEl.innerHTML = `
+          <div class="filedesk-slice-steps">
+            <strong>Sliced job ready</strong>
+            <span>${esc(data.filename)} is now printer-ready. Queue it, open Orca, or leave it in the vault.</span>
+          </div>
+          <div class="filedesk-slice-buttons">
+            <button class="filedesk-slice-link filedesk-slice-queue" type="button" data-queue-sliced="${esc(data.path || data.filename)}" data-printer-id="${esc(data.printer_id || runBtn.dataset.printerId)}">Queue sliced job</button>
+            <button class="filedesk-slice-link" type="button" data-check-slice-output="${esc(data.filename)}">Check vault</button>
+          </div>`;
+      }
       _fileDeskLastHtml = '';
       _printerBayLastHtml = '';
-      const route = parseRoute();
-      if (route.view === 'printer' && route.subtab === 'bay') _renderPrinterBayBody(route.id);
-      else renderFileDeskView();
     } catch (err) {
       showToast('Slice failed', err.message || '', 'error');
     } finally {
       runBtn.disabled = false;
       runBtn.textContent = old;
     }
+  });
+  overlay.addEventListener('click', async e => {
+    const queueBtn = e.target.closest('[data-queue-sliced]');
+    if (!queueBtn) return;
+    await _queueFileToPrinter({
+      sourceId: 'library',
+      path: queueBtn.dataset.queueSliced || '',
+      printerId: queueBtn.dataset.printerId || selectedPrinterId,
+      button: queueBtn,
+    });
   });
 
 }

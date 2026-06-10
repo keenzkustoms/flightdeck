@@ -869,6 +869,9 @@ class SlicePlanRequest(BaseModel):
     source_id: str
     path: str
     printer_id: str
+    printer_profile: str = ""
+    process_profile: str = ""
+    filament_profile: str = ""
     plate: str = "auto"
     bed_type: str = "Textured PEI Plate"
     support_mode: str = "profile"
@@ -887,6 +890,14 @@ class SliceRunRequest(SlicePlanRequest):
 class SlicerConnectionCheckRequest(BaseModel):
     kind: str
     url: str
+
+
+def _slice_request_profiles(body: SlicePlanRequest, settings: dict, printer_id: str) -> dict:
+    return {
+        "printer": (body.printer_profile or settings.get(_slicer_profile_key(printer_id, "printer"), "") or "").strip(),
+        "process": (body.process_profile or settings.get(_slicer_profile_key(printer_id, "process"), "") or "").strip(),
+        "filament": (body.filament_profile or settings.get(_slicer_profile_key(printer_id, "filament"), "") or "").strip(),
+    }
 
 
 class BambuSdClearRequest(BaseModel):
@@ -1543,11 +1554,7 @@ async def plan_slice_from_file_desk(body: SlicePlanRequest):
     base_name = _file_archive_key(filename) or "sliced_model"
     target = next((p for p in await _gather_all() if p.get("id") == printer_id), None)
     slice_options = _slice_option_summary(body.bed_type, body.support_mode, body.brim_mode)
-    profiles = {
-        "printer": settings.get(_slicer_profile_key(printer_id, "printer"), ""),
-        "process": settings.get(_slicer_profile_key(printer_id, "process"), ""),
-        "filament": settings.get(_slicer_profile_key(printer_id, "filament"), ""),
-    }
+    profiles = _slice_request_profiles(body, settings, printer_id)
     missing_profiles = [label for label, value in profiles.items() if not str(value or "").strip()]
     can_slice = bool(worker_url or api_url or _orca_executable()) and not missing_profiles and not is_step_source
     can_handoff = is_step_source and not missing_profiles
@@ -1771,11 +1778,7 @@ async def run_slice_from_file_desk(body: SliceRunRequest):
         raise HTTPException(status_code=422, detail="Only source model files can be sliced")
 
     settings = db.get_all_settings()
-    profiles = {
-        "printer": settings.get(_slicer_profile_key(printer_id, "printer"), ""),
-        "process": settings.get(_slicer_profile_key(printer_id, "process"), ""),
-        "filament": settings.get(_slicer_profile_key(printer_id, "filament"), ""),
-    }
+    profiles = _slice_request_profiles(body, settings, printer_id)
     missing_profiles = [label for label, value in profiles.items() if not str(value or "").strip()]
     if missing_profiles:
         raise HTTPException(status_code=422, detail=f"Set slicer defaults for {', '.join(missing_profiles)} first")
