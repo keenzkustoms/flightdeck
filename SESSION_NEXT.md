@@ -2,13 +2,15 @@
 
 Latest GitHub/Pi state:
 - Branch: main
-- Latest commit: current HEAD after this handoff (`Add camera feed status badges`)
+- Latest commit: current HEAD after this handoff (`Soften camera feed status badges`)
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
-- Refresh cachebust currently: ?cachebust=443 / style.css?v=358
+- Refresh cachebust currently: ?cachebust=443 / style.css?v=359
 
 Recent work:
+- Camera feed status badges were softened after live review. They now sit in the bottom-right like a TV-style watermark, with smaller type, lower opacity, a lighter translucent background, and a slightly stronger warning treatment only for stale/reconnecting states. Static cache bumped to `style.css?v=359`; frontend refresh only.
+  - Verification: `node --check app/static/app.js` and `git diff --check` passed.
 - Camera feeds now get a small status pill overlay so black/waiting feeds are less mysterious. Live/Print Watch/Fleet Wall camera images show `Opening stream`, `Stream live`, `Waiting for frame`, `Frame now`, `Refreshing frame`, `Frame stale`, or `Reconnecting` depending on browser image load/retry state. Fleet Wall still-refresh feeds report real frame age; continuous MJPEG streams report stream state because the browser image element does not expose every individual MJPEG frame. Static cache bumped to `app.js?v=443` and `style.css?v=358`; frontend refresh only.
   - Verification: `node --check app/static/app.js` and `git diff --check` passed. Live browser check on the Pi confirmed Fleet Wall served `app.js?v=443`/`style.css?v=358` and showed three camera images with `Frame now` status badges.
 - The normal Add Printer picker no longer shows the Simulated option now that demo mode lives separately. Underlying simulated support remains for demo/dev fixtures, but user-facing setup offers Bambu, Voron/Klipper, Snapmaker, and Other Moonraker. The first-run Add Printer copy was updated accordingly.

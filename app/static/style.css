@@ -4176,17 +4176,18 @@ button.briefing-row {
 
 .camera-signal {
   position: absolute;
-  top: 0.65rem;
-  right: 0.65rem;
+  right: 0.55rem;
+  bottom: 0.55rem;
   z-index: 3;
   max-width: calc(100% - 1.3rem);
-  border: 1px solid rgba(96,165,250,0.42);
+  border: 1px solid rgba(96,165,250,0.22);
   border-radius: 999px;
-  background: rgba(3,7,18,0.72);
-  color: #bfdbfe;
-  box-shadow: 0 8px 22px rgba(0,0,0,0.36);
-  padding: 0.22rem 0.55rem;
-  font-size: 0.63rem;
+  background: rgba(3,7,18,0.34);
+  color: rgba(191,219,254,0.74);
+  box-shadow: 0 6px 18px rgba(0,0,0,0.22);
+  opacity: 0.58;
+  padding: 0.18rem 0.46rem;
+  font-size: 0.55rem;
   font-weight: 900;
   letter-spacing: 0.06em;
   line-height: 1;
@@ -4195,34 +4196,43 @@ button.briefing-row {
   pointer-events: none;
 }
 
+.fleet-wall-feed:hover .camera-signal,
+.camera-hero:hover .camera-signal,
+.print-watch-feed:hover .camera-signal,
+.cam-tile-feed:hover .camera-signal {
+  opacity: 0.86;
+}
+
 .camera-signal::before {
   content: "";
   display: inline-block;
-  width: 0.42rem;
-  height: 0.42rem;
-  margin-right: 0.35rem;
+  width: 0.34rem;
+  height: 0.34rem;
+  margin-right: 0.28rem;
   border-radius: 999px;
   background: #22c55e;
-  box-shadow: 0 0 10px rgba(34,197,94,0.75);
+  box-shadow: 0 0 8px rgba(34,197,94,0.55);
   vertical-align: 0.05rem;
 }
 
 .camera-signal[data-camera-signal-state="waiting"]::before,
 .camera-signal[data-camera-signal-state="refreshing"]::before {
   background: #f59e0b;
-  box-shadow: 0 0 10px rgba(245,158,11,0.7);
+  box-shadow: 0 0 8px rgba(245,158,11,0.58);
 }
 
 .camera-signal[data-camera-signal-state="reconnecting"],
 .camera-signal[data-camera-signal-state="stale"] {
-  border-color: rgba(248,113,113,0.52);
-  color: #fecaca;
+  border-color: rgba(248,113,113,0.36);
+  color: rgba(254,202,202,0.86);
+  background: rgba(69,10,10,0.42);
+  opacity: 0.78;
 }
 
 .camera-signal[data-camera-signal-state="reconnecting"]::before,
 .camera-signal[data-camera-signal-state="stale"]::before {
   background: #ef4444;
-  box-shadow: 0 0 10px rgba(239,68,68,0.72);
+  box-shadow: 0 0 8px rgba(239,68,68,0.62);
 }
 
 .camera-hero-offline {
@@ -9172,10 +9182,10 @@ button.live-route-node:hover {
 }
 
 .fleet-wall-xsmall .camera-signal {
-  top: 0.4rem;
-  right: 0.4rem;
-  padding: 0.18rem 0.42rem;
-  font-size: 0.54rem;
+  right: 0.35rem;
+  bottom: 0.35rem;
+  padding: 0.14rem 0.36rem;
+  font-size: 0.5rem;
 }
 
 .fleet-wall-card-body {
