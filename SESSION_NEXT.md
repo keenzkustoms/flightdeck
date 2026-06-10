@@ -6,9 +6,12 @@ Latest GitHub/Pi state:
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
-- Refresh cachebust currently: ?cachebust=427 / style.css?v=344
+- Refresh cachebust currently: ?cachebust=428 / style.css?v=345
 
 Recent work:
+- Add Printer now has a LAN Scan helper in Settings > Printers. The new backend `POST /api/config/printers/scan` scans the local IPv4 /24 by default, or a user-entered IPv4 CIDR up to /24, and returns likely printer candidates. It detects Moonraker/Snapmaker U1-style printers through the Moonraker API on port 7125 and flags Bambu-looking hosts when LAN MQTT port 8883 is open. The frontend shows confidence/reason/configured state and `Use` pre-fills the existing Add Printer form with host, model family, suggested ID/name, build volume, camera URL guesses, and connection type. Bambu results still require the operator to enter access code and serial. Static cache bumped to `app.js?v=428` and `style.css?v=345`.
+  - Verification: `node --check app/static/app.js`, `python -m py_compile app/main.py`, and `git diff --check` passed. Venv TestClient smoke test `POST /api/config/printers/scan` with `127.0.0.0/30` returned 200 with `scanned=2`.
+  - Deploy note: backend restart required after Pi pull for the new scan endpoint: `sudo systemctl restart flightdeck`.
 - AMS Profile Doctor modal now fits within the viewport at normal 100% browser scale. The slot editor gets its own overlay class, the modal is capped to the viewport, the body scrolls internally, and the footer/Close action stays reachable instead of falling below the screen. Static cache bumped to `app.js?v=427` and `style.css?v=344`; frontend refresh only.
   - Verification: `node --check app/static/app.js` and `git diff --check` passed.
 - Windows update-block recovery: the Windows checkout at `C:\Users\Kidabah\flightdeck` is now clean and current at `a047a5c`, and the uvicorn worker has been restarted on port 8000. Both `http://127.0.0.1:8000/api/update/status?check_remote=true` and `http://100.112.171.88:8000/api/update/status?check_remote=true` report `dirty=false`, `behind=false`, `commit=a047a5c`, `remote_commit=a047a5c`. If the Windows browser still shows `Blocked`/old commit, it is stale browser state rather than the backend checkout; hard refresh or reopen the Windows Flightdeck page.

@@ -9642,6 +9642,19 @@ function _printersCategoryHtml(printers) {
       <div class="settings-printer-list">${list}</div>
     </div>
 
+    <div class="settings-section printer-scan-panel">
+      <div class="settings-section-title">LAN Scan</div>
+      <div class="settings-hint">Find likely printers on the local subnet, then use a result to prefill the Add Printer form.</div>
+      <div class="printer-scan-controls">
+        <input class="settings-input" id="printer-scan-cidr" type="text"
+          placeholder="Auto /24 subnet or 192.168.1.0/24" autocomplete="off">
+        <button type="button" class="ctrl-btn" id="printer-scan-run">Scan LAN</button>
+      </div>
+      <div class="printer-scan-results" id="printer-scan-results">
+        <div class="settings-empty">No scan run yet.</div>
+      </div>
+    </div>
+
     <div class="settings-section">
       <div class="settings-section-title" id="settings-printer-form-title">Add Printer</div>
       <form id="settings-add-form" class="settings-form" novalidate>
@@ -9815,6 +9828,7 @@ function _printersCategoryHtml(printers) {
 
 function _attachPrintersEvents(el) {
   let connType = 'bambu';
+  let scanCandidates = [];
 
   const syncModelValue = (applyBuildVolume = true) => {
     const modelSelect = el.querySelector('#p-model-select');
@@ -9889,6 +9903,101 @@ function _attachPrintersEvents(el) {
   };
 
   const setConnType = (type, modelName = '') => setPrinterFamily(_setupFamilyForConnType(type, modelName), { modelName });
+
+  const renderScanResults = (payload, message = '') => {
+    const box = el.querySelector('#printer-scan-results');
+    if (!box) return;
+    scanCandidates = Array.isArray(payload?.found) ? payload.found : [];
+    if (message) {
+      box.innerHTML = `<div class="settings-empty">${esc(message)}</div>`;
+      return;
+    }
+    if (!scanCandidates.length) {
+      box.innerHTML = `<div class="settings-empty">No likely printers found on ${esc(payload?.cidr || 'this subnet')}.</div>`;
+      return;
+    }
+    box.innerHTML = scanCandidates.map((row, idx) => `
+      <div class="printer-scan-result${row.already_configured ? ' already-configured' : ''}">
+        <div class="printer-scan-main">
+          <strong>${esc(row.custom_name || row.host)}</strong>
+          <span>${esc(row.model_name || row.family || 'Printer')} · ${esc(row.host)}${row.port ? `:${esc(row.port)}` : ''}</span>
+          <small>${esc(row.reason || '')}</small>
+        </div>
+        <div class="printer-scan-tags">
+          <span class="printer-scan-tag">${esc(row.family || row.connection_type || 'printer')}</span>
+          <span class="printer-scan-tag ${row.confidence === 'high' ? 'scan-high' : 'scan-medium'}">${esc(row.confidence || 'found')}</span>
+          ${row.already_configured ? '<span class="printer-scan-tag scan-muted">Configured</span>' : ''}
+        </div>
+        <button type="button" class="settings-save-btn printer-scan-use" data-scan-index="${idx}" ${row.already_configured ? 'disabled' : ''}>Use</button>
+      </div>`).join('');
+  };
+
+  const applyScanCandidate = candidate => {
+    if (!candidate || candidate.already_configured) return;
+    const form = el.querySelector('#settings-add-form');
+    if (!form) return;
+    form.reset();
+    delete el.querySelector('#p-model')?.dataset.autoSnapmaker;
+    el.querySelector('#p-editing-id').value = '';
+    el.querySelector('#p-id').disabled = false;
+    el.querySelector('#settings-printer-form-title').textContent = 'Add Printer';
+    el.querySelector('#settings-cancel-edit')?.setAttribute('hidden', '');
+    form.querySelector('button[type="submit"]').textContent = 'Add Printer';
+    const familyId = candidate.family || _setupFamilyForConnType(candidate.connection_type, candidate.model_name);
+    setPrinterFamily(familyId, { modelName: candidate.model_name || '', keepBuildVolume: false });
+    const set = (id, value = '') => {
+      const field = el.querySelector(`#${id}`);
+      if (field) field.value = value ?? '';
+    };
+    set('p-id', candidate.suggested_id || '');
+    set('p-custom', candidate.custom_name || '');
+    if (candidate.connection_type === 'bambu') {
+      set('p-bambu-host', candidate.host || '');
+    } else {
+      set('p-host', candidate.host || '');
+      set('p-port', candidate.port || 7125);
+      if (candidate.camera_type === 'mjpeg_direct') {
+        set('p-cam-type', 'mjpeg_direct');
+        el.querySelector('#mjpeg-fields').hidden = false;
+        set('p-stream-url', candidate.stream_url || '');
+        set('p-snap-url', candidate.snapshot_url || '');
+      }
+    }
+    el.querySelector('#settings-form-error')?.setAttribute('hidden', '');
+    form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    showToast('Printer details filled', candidate.custom_name || candidate.host || 'LAN scan result', 'success');
+  };
+
+  el.querySelector('#printer-scan-run')?.addEventListener('click', async () => {
+    const btn = el.querySelector('#printer-scan-run');
+    const cidr = el.querySelector('#printer-scan-cidr')?.value.trim() || '';
+    const original = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Scanning...';
+    renderScanResults(null, 'Scanning local subnet...');
+    try {
+      const r = await fetch('/api/config/printers/scan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cidr: cidr || null }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.detail || 'LAN scan failed');
+      renderScanResults(data);
+      showToast('LAN scan complete', `${data.found?.length || 0} likely printer${(data.found?.length || 0) === 1 ? '' : 's'} found`, 'success');
+    } catch (err) {
+      renderScanResults(null, err.message || 'LAN scan failed');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = original;
+    }
+  });
+
+  el.querySelector('#printer-scan-results')?.addEventListener('click', e => {
+    const btn = e.target.closest('[data-scan-index]');
+    if (!btn) return;
+    applyScanCandidate(scanCandidates[Number(btn.dataset.scanIndex)]);
+  });
 
   el.querySelector('#p-printer-family')?.addEventListener('change', e => {
     setPrinterFamily(e.target.value);

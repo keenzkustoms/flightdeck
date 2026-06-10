@@ -2,6 +2,7 @@ from __future__ import annotations
 import asyncio
 import csv
 import gzip
+import ipaddress
 import io
 import json
 import logging
@@ -2864,6 +2865,141 @@ async def get_printer_objects(printer_id: str):
 async def get_config_printers():
     cfg = load()
     return [e.model_dump(mode="json", exclude_none=True) for e in cfg.printers]
+
+
+class PrinterScanRequest(BaseModel):
+    cidr: Optional[str] = None
+
+
+def _local_lan_cidr() -> str:
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.settimeout(0.2)
+            sock.connect(("8.8.8.8", 80))
+            ip = sock.getsockname()[0]
+    except Exception:
+        try:
+            ip = socket.gethostbyname(socket.gethostname())
+        except Exception:
+            ip = "192.168.1.1"
+    return str(ipaddress.ip_network(f"{ip}/24", strict=False))
+
+
+def _scan_network_from_request(cidr: Optional[str]) -> ipaddress.IPv4Network:
+    raw = (cidr or "").strip() or _local_lan_cidr()
+    try:
+        network = ipaddress.ip_network(raw, strict=False)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"Invalid CIDR: {raw}") from exc
+    if network.version != 4:
+        raise HTTPException(status_code=422, detail="LAN scan currently supports IPv4 networks only")
+    if network.num_addresses > 256:
+        raise HTTPException(status_code=422, detail="Scan range is capped at /24 or smaller")
+    return network
+
+
+async def _tcp_port_open(host: str, port: int, timeout: float = 0.45) -> bool:
+    try:
+        reader, writer = await asyncio.wait_for(asyncio.open_connection(host, port), timeout=timeout)
+        writer.close()
+        try:
+            await writer.wait_closed()
+        except Exception:
+            pass
+        return True
+    except Exception:
+        return False
+
+
+def _printer_scan_id(name: str, host: str) -> str:
+    base = re.sub(r"[^a-z0-9_-]+", "_", (name or "").lower()).strip("_")
+    if not base or not re.match(r"^[a-z]", base):
+        base = f"printer_{host.split('.')[-1]}"
+    return base[:40]
+
+
+def _ipv4_sort_key(host: str) -> int:
+    try:
+        return int(ipaddress.ip_address(host))
+    except ValueError:
+        return 0
+
+
+def _guess_moonraker_model(hostname: str, info: dict) -> tuple[str, str, str]:
+    text = " ".join(str(v) for v in [hostname, info.get("software_version"), info.get("hostname"), info.get("klipper_path")] if v).lower()
+    if "snapmaker" in text or re.search(r"\bu1\b", text):
+        return ("snapmaker_u1", "Snapmaker U1", "Snapmaker U1")
+    if "voron" in text:
+        return ("voron", "Voron 2.4 350", "Voron")
+    return ("moonraker", "Custom Moonraker", "Moonraker")
+
+
+async def _probe_printer_host(host: str, existing_hosts: set[str]) -> Optional[dict]:
+    async with httpx.AsyncClient(timeout=httpx.Timeout(connect=0.6, read=0.8, write=0.6, pool=0.6)) as client:
+        try:
+            r = await client.get(f"http://{host}:7125/server/info")
+            if r.status_code == 200:
+                info = r.json() if r.content else {}
+                family, model, label = _guess_moonraker_model(str(info.get("hostname") or ""), info if isinstance(info, dict) else {})
+                cam_stream = f"http://{host}/webcam/stream.mjpg" if family == "snapmaker_u1" else f"http://{host}/webcam/?action=stream"
+                cam_snapshot = f"http://{host}/webcam/snapshot.jpg" if family == "snapmaker_u1" else f"http://{host}/webcam/?action=snapshot"
+                return {
+                    "host": host,
+                    "port": 7125,
+                    "family": family,
+                    "connection_type": "snapmaker_u1" if family == "snapmaker_u1" else "moonraker",
+                    "model_name": model,
+                    "custom_name": str(info.get("hostname") or label),
+                    "suggested_id": _printer_scan_id(str(info.get("hostname") or label), host),
+                    "camera_type": "mjpeg_direct",
+                    "stream_url": cam_stream,
+                    "snapshot_url": cam_snapshot,
+                    "confidence": "high",
+                    "reason": "Moonraker API responded on port 7125",
+                    "already_configured": host in existing_hosts,
+                }
+        except Exception:
+            pass
+
+    if await _tcp_port_open(host, 8883):
+        return {
+            "host": host,
+            "family": "bambu",
+            "connection_type": "bambu",
+            "model_name": "H2D",
+            "custom_name": f"Bambu {host.split('.')[-1]}",
+            "suggested_id": _printer_scan_id("bambu", host),
+            "confidence": "medium",
+            "reason": "Bambu LAN MQTT port 8883 is open; access code and serial still required",
+            "already_configured": host in existing_hosts,
+        }
+    return None
+
+
+@app.post("/api/config/printers/scan")
+async def scan_config_printers(payload: PrinterScanRequest):
+    network = _scan_network_from_request(payload.cidr)
+    cfg = load()
+    existing_hosts = {
+        str(getattr(entry.connection, "host", "")).strip()
+        for entry in cfg.printers
+        if str(getattr(entry.connection, "host", "")).strip()
+    }
+    hosts = [str(ip) for ip in network.hosts()]
+    sem = asyncio.Semaphore(64)
+
+    async def bounded(host: str) -> Optional[dict]:
+        async with sem:
+            return await _probe_printer_host(host, existing_hosts)
+
+    found = [row for row in await asyncio.gather(*(bounded(host) for host in hosts)) if row]
+    found.sort(key=lambda row: (row.get("already_configured", False), row.get("family") != "bambu", _ipv4_sort_key(row.get("host", ""))))
+    return {
+        "ok": True,
+        "cidr": str(network),
+        "scanned": len(hosts),
+        "found": found,
+    }
 
 
 @app.post("/api/config/printers", status_code=201)
