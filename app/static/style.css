@@ -4822,6 +4822,25 @@ button.live-route-node:hover {
   opacity: 0.84;
 }
 
+.live-filament-route-warning .live-route-source {
+  border-color: rgba(245,158,11,0.62);
+  background: rgba(245,158,11,0.1);
+  box-shadow: 0 0 0 1px rgba(245,158,11,0.18);
+}
+
+.live-filament-route-warning .live-route-fed {
+  border-color: rgba(245,158,11,0.72);
+  background: rgba(245,158,11,0.16);
+  color: #fbbf24;
+}
+
+.live-filament-route-warning .live-route-line {
+  background:
+    repeating-linear-gradient(90deg, rgba(251,191,36,0.32) 0 0.32rem, transparent 0.32rem 0.74rem),
+    linear-gradient(90deg, var(--route-colour), rgba(245,158,11,0.82));
+  box-shadow: 0 0 12px rgba(245,158,11,0.28);
+}
+
 .live-route-line::after {
   content: '';
   position: absolute;

@@ -3100,7 +3100,7 @@ function _detailLiveAmsLoadoutRows(p) {
       const grams = loadedSpool ? Math.round(Number(loadedSpool.remaining_g || 0)) : null;
       const label = _amsSlotLabel(p, flatSlot);
       const stateLabel = loadedSpool
-        ? (routeActive ? 'Feeding' : mismatch ? 'Review' : 'Ready')
+        ? (mismatch ? 'Review' : routeActive ? 'Feeding' : 'Ready')
         : (slot.empty ? 'Empty' : 'Unassigned');
       const title = [
         label,
@@ -3390,6 +3390,7 @@ function _detailFilamentRoute(p) {
       if (!_slotRouteActive(p, unit, slot)) continue;
       const flatSlot = _amsFlatSlot(unit, slot);
       const spool = loaded.find(s => Number(s.location_slot) === flatSlot);
+      const mismatch = _slotMismatch(spool, slot);
       const colour = spool?.color_hex || slot.color || '#22c55e';
       const textColour = _spoolTextColor(colour);
       const slotLabel = _amsSlotLabel(p, flatSlot);
@@ -3398,9 +3399,10 @@ function _detailFilamentRoute(p) {
         : _slotProfileLabel(slot) || slot.type || 'Loaded filament';
       const dest = _routeDestinationLabel(p, unit);
       const fedNow = _slotRouteFed(p, unit, slot);
-      const routeClass = fedNow ? '' : ' live-filament-route-idle';
-      const routeBadge = fedNow ? 'Fed now' : 'Ready';
-      const title = `${slotLabel} ${fedNow ? 'feeding' : 'ready for'} ${dest}${spoolLabel ? ' · ' + spoolLabel : ''}`;
+      const routeClass = `${fedNow ? '' : ' live-filament-route-idle'}${mismatch ? ' live-filament-route-warning' : ''}`;
+      const routeBadge = mismatch ? 'Review' : fedNow ? 'Fed now' : 'Ready';
+      const routeStatus = mismatch ? 'needs review for' : fedNow ? 'feeding' : 'ready for';
+      const title = `${slotLabel} ${routeStatus} ${dest}${spoolLabel ? ' · ' + spoolLabel : ''}${mismatch ? ' · ' + mismatch : ''}`;
       if (FLIGHTDECK_DEMO) {
         routes.push(`<div class="demo-filament-route${routeClass}${_isAmsHtUnit(unit) ? ' demo-filament-route-ht' : ''}" style="--route-colour:${colour};--route-text:${textColour};--route-slot:${Number(slot.idx || 0)}" title="${esc(title)}">
           <span class="demo-route-port" aria-hidden="true"></span>
