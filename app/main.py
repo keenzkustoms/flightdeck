@@ -5758,7 +5758,13 @@ async def move_spool(spool_id: int, body: SpoolMove):
     if body.printer_id and body.slot is not None:
         spool = db.get_spool(spool_id)
         profile_override = body.ams_profile.model_dump(exclude_none=True) if body.ams_profile else None
-        ams_sync = await _sync_bambu_ams_slot(body.printer_id, body.slot, spool, profile_override)
+        destination_changed = (
+            not before
+            or before.get("location_printer_id") != body.printer_id
+            or before.get("location_slot") != body.slot
+        )
+        if destination_changed or profile_override:
+            ams_sync = await _sync_bambu_ams_slot(body.printer_id, body.slot, spool, profile_override)
     return {
         "ok": True,
         "ams_sync": ams_sync,
