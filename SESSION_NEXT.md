@@ -6,9 +6,11 @@ Latest GitHub/Pi state:
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
-- Refresh cachebust currently: app.js?v=449 / style.css?v=363
+- Refresh cachebust currently: app.js?v=450 / style.css?v=364
 
 Recent work:
+- Managed Docker Orca status now handles the real Pi + Windows split-brain setup. If the Browser Orca/Worker URL points at another host and the current Flightdeck host has Docker but no local `flightdeck-orcaslicer`/`orca-slicer-api` containers, the Slicer panel now says `Remote Orca configured` and disables local Restart/Update instead of showing both containers as missing. Static cache bumped to `app.js?v=450` and `style.css?v=364`; frontend refresh only.
+  - Verification: `node --check app/static/app.js` and `git diff --check` passed.
 - Slicer settings now include a managed Docker Orca panel so operators update Orca from Flightdeck instead of clicking the update prompt inside the remote Orca desktop. New backend endpoints report Docker/Orca container status, restart the browser Orca/API sidecar containers, and update the browser Orca container by pulling `lscr.io/linuxserver/orcaslicer:latest`, recreating `flightdeck-orcaslicer` with its existing env/mounts/ports/restart policy, and leaving a stopped rollback copy. The API sidecar is shown/restartable but not image-updated because it is a custom local `flightdeck-orca-slicer-api:orca2.4.0-alpha` image. Static cache bumped to `app.js?v=449` and `style.css?v=363`; backend restart required.
   - Verification: `python -m py_compile app/main.py`, `node --check app/static/app.js`, `git diff --check`, direct `_orca_docker_status()` smoke test against Windows Docker, and browser check on local Settings > Slicer all passed. Browser check confirmed Docker 29.5.3, `flightdeck-orcaslicer` running on `3011->3001/tcp` with managed update, and `orca-slicer-api` running/healthy on `3003->3000/tcp`.
 - Slice Model now shows an active slicing progress state instead of sitting silently while `/api/slicer/run` works. After `Slice in Flightdeck`, the modal disables the slice inputs, shows staged progress text with elapsed time, an animated progress bar, and keeps an `Open Orca` action available when the browser slicer URL is configured. Success still swaps to the preview/`Queue sliced job` panel, now with `Open Orca`; failures keep the modal open with `Try again` and `Open Orca`. Static cache bumped to `app.js?v=448` and `style.css?v=362`; frontend refresh only.

@@ -11512,6 +11512,12 @@ select optgroup {
   color: #fcd34d;
 }
 
+.slicer-managed-status[data-tone="info"] {
+  border-color: rgba(96,165,250,0.32);
+  background: rgba(30,64,175,0.14);
+  color: #bfdbfe;
+}
+
 .slicer-managed-status[data-tone="busy"] {
   border-color: rgba(96,165,250,0.35);
   color: #bfdbfe;

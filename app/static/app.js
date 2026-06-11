@@ -11073,15 +11073,59 @@ function _updateSlicerDockerLaunch(el) {
   btn.href = url;
 }
 
+function _slicerUrlHost(value = '') {
+  try {
+    return new URL(value).hostname.toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
+function _slicerHostLooksRemote(host = '') {
+  const clean = String(host || '').trim().toLowerCase();
+  if (!clean) return false;
+  const here = String(location.hostname || '').trim().toLowerCase();
+  return !['localhost', '127.0.0.1', '::1', here].includes(clean);
+}
+
+function _setSlicerDockerActionAvailability(el, disabled, reason = '') {
+  el.querySelectorAll('[data-orca-docker-action="restart"], [data-orca-docker-action="update"]').forEach(btn => {
+    btn.disabled = !!disabled;
+    btn.title = disabled ? reason : '';
+  });
+}
+
 function _renderSlicerDockerStatus(el, data = {}) {
   const box = el.querySelector('#slicer-docker-status');
   if (!box) return;
+  const browserHost = _slicerUrlHost(el.querySelector('[data-pref-key="orcaslicer_docker_url"]')?.value || _serverSettings.orcaslicer_docker_url || '');
+  const workerHost = _slicerUrlHost(el.querySelector('[data-pref-key="orcaslicer_worker_url"]')?.value || _serverSettings.orcaslicer_worker_url || '');
+  const remoteHost = _slicerHostLooksRemote(browserHost) ? browserHost : (_slicerHostLooksRemote(workerHost) ? workerHost : '');
   if (!data.available) {
+    _setSlicerDockerActionAvailability(el, true, data.message || 'Docker is unavailable on this Flightdeck host');
     box.dataset.tone = 'warn';
     box.innerHTML = `<strong>Docker unavailable</strong><span>${esc(data.message || 'Docker is not responding on this Flightdeck host.')}</span>`;
     return;
   }
   const containers = Array.isArray(data.containers) ? data.containers : [];
+  const anyLocalOrca = containers.some(c => c && c.exists);
+  if (remoteHost && !anyLocalOrca) {
+    _setSlicerDockerActionAvailability(el, true, `Orca is configured on ${remoteHost}, not this Flightdeck host`);
+    box.dataset.tone = 'info';
+    box.innerHTML = `
+      <strong>Remote Orca configured</strong>
+      <span>This Flightdeck host can see Docker ${esc(data.version || '')}, but the Orca containers are not local here. Orca is configured on ${esc(remoteHost)}, so run managed Restart/Update from that Windows Flightdeck host.</span>
+      <div class="slicer-managed-list">
+        ${containers.map(c => `
+          <div class="slicer-managed-row" data-tone="warn">
+            <span>${esc(c.name || 'container')}</span>
+            <strong>not on this host</strong>
+            <em>${esc(c.image || '')}</em>
+          </div>`).join('')}
+      </div>`;
+    return;
+  }
+  _setSlicerDockerActionAvailability(el, false);
   const rows = containers.map(c => {
     const exists = !!c.exists;
     const running = !!c.running || c.status === 'running';
