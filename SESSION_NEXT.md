@@ -6,9 +6,11 @@ Latest GitHub/Pi state:
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
-- Refresh cachebust currently: app.js?v=450 / style.css?v=364
+- Refresh cachebust currently: app.js?v=451 / style.css?v=364
 
 Recent work:
+- Browser Orca launch URLs now force HTTPS on port `3011`. This fixes the `400 Bad Request: The plain HTTP request was sent to HTTPS port` page when clicking `Open Orca` from Settings or the Slice Model dialog. The Browser Orca default URL now uses `https://`, saving the Browser Orca URL normalises `http://...:3011` to `https://...:3011`, and Test Browser Orca uses the same launch-normalised URL. Static cache bumped to `app.js?v=451`; frontend refresh only.
+  - Verification: `node --check app/static/app.js`, `git diff --check`, and a Node URL-normalisation smoke test passed.
 - Managed Docker Orca status now handles the real Pi + Windows split-brain setup. If the Browser Orca/Worker URL points at another host and the current Flightdeck host has Docker but no local `flightdeck-orcaslicer`/`orca-slicer-api` containers, the Slicer panel now says `Remote Orca configured` and disables local Restart/Update instead of showing both containers as missing. Static cache bumped to `app.js?v=450` and `style.css?v=364`; frontend refresh only.
   - Verification: `node --check app/static/app.js` and `git diff --check` passed.
 - Slicer settings now include a managed Docker Orca panel so operators update Orca from Flightdeck instead of clicking the update prompt inside the remote Orca desktop. New backend endpoints report Docker/Orca container status, restart the browser Orca/API sidecar containers, and update the browser Orca container by pulling `lscr.io/linuxserver/orcaslicer:latest`, recreating `flightdeck-orcaslicer` with its existing env/mounts/ports/restart policy, and leaving a stopped rollback copy. The API sidecar is shown/restartable but not image-updated because it is a custom local `flightdeck-orca-slicer-api:orca2.4.0-alpha` image. Static cache bumped to `app.js?v=449` and `style.css?v=363`; backend restart required.

@@ -11036,8 +11036,7 @@ function _slicerCategoryHtml(profileData = null, printers = []) {
 }
 
 function _slicerDockerDefaultUrl() {
-  const proto = location.protocol === 'https:' ? 'https:' : location.protocol;
-  return `${proto}//${location.hostname}:3011`;
+  return `https://${location.hostname}:3011`;
 }
 
 function _slicerApiDefaultUrl() {
@@ -11045,7 +11044,17 @@ function _slicerApiDefaultUrl() {
 }
 
 function _slicerDockerLaunchUrl(value = '') {
-  return (value || '').trim().replace(/\/+$/, '');
+  const raw = (value || '').trim().replace(/\/+$/, '');
+  if (!raw) return '';
+  try {
+    const url = new URL(raw);
+    if (url.protocol === 'http:' && url.port === '3011') {
+      url.protocol = 'https:';
+    }
+    return url.toString().replace(/\/+$/, '');
+  } catch {
+    return raw;
+  }
 }
 
 function _updateSlicerDockerLaunch(el) {
@@ -11179,7 +11188,7 @@ function _attachSlicerEvents(el) {
   el.querySelectorAll('.slicer-docker-input').forEach(input => {
     input.addEventListener('change', async () => {
       const key = input.dataset.prefKey;
-      let value = input.value.trim().replace(/\/+$/, '');
+      let value = _slicerDockerLaunchUrl(input.value);
       try {
         const saved = await _saveSetting(key, value);
         input.value = saved;
@@ -11218,7 +11227,8 @@ function _attachSlicerEvents(el) {
           : '[data-pref-key="orcaslicer_docker_url"]';
       const input = el.querySelector(selector);
       const fallback = kind === 'api' ? _slicerApiDefaultUrl() : (kind === 'browser' ? _slicerDockerDefaultUrl() : '');
-      const url = (input?.value || fallback || '').trim().replace(/\/+$/, '');
+      const rawUrl = (input?.value || fallback || '').trim().replace(/\/+$/, '');
+      const url = kind === 'browser' ? _slicerDockerLaunchUrl(rawUrl) : rawUrl;
       if (!url) {
         showToast('Slicer test needs a URL', 'Set the URL first.', 'warning');
         return;
@@ -11971,7 +11981,7 @@ async function _openSliceModelDialog({ sourceId, path, file, printers }) {
       errEl.classList.toggle('filedesk-dialog-ok', !!data.ready);
       if (data.ready && actionsEl) {
         const sourceUrl = data.source?.download_url || `/api/files/source/download?${new URLSearchParams({ source_id: sourceId, path }).toString()}`;
-        const browserUrl = data.browser_url || data.sidecar_url || '';
+        const browserUrl = _slicerDockerLaunchUrl(data.browser_url || data.sidecar_url || '');
         const outputName = data.output?.filename || 'sliced-output';
         const profiles = data.profiles || {};
         const canBackgroundSlice = data.can_background_slice !== false;
