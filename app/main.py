@@ -1586,7 +1586,10 @@ async def plan_slice_from_file_desk(body: SlicePlanRequest):
     can_slice = bool(worker_url or api_url or _orca_executable()) and not missing_profiles and not is_step_source
     can_handoff = is_step_source and not missing_profiles
     h2d_loose_mesh = _h2d_loose_mesh_requires_sidecar(filename, profiles)
-    if h2d_loose_mesh and not api_url:
+    slicer_api_probe = None
+    if h2d_loose_mesh and api_url:
+        slicer_api_probe = await _probe_slicer_api(api_url)
+    if h2d_loose_mesh and not (slicer_api_probe or {}).get("ok"):
         can_slice = False
         can_handoff = not missing_profiles
     return {
@@ -1597,6 +1600,7 @@ async def plan_slice_from_file_desk(body: SlicePlanRequest):
         "sidecar_url": browser_url,
         "browser_url": browser_url,
         "api_url": api_url,
+        "api_health": slicer_api_probe,
         "worker_url": worker_url,
         "source": {
             "source_id": source_id,
@@ -1625,8 +1629,8 @@ async def plan_slice_from_file_desk(body: SlicePlanRequest):
         "plate": body.plate or "auto",
         "all_plates": bool(body.all_plates),
         "message": (
-            "H2D STL/OBJ background slicing needs the slicer API sidecar. Use Open Orca, or configure the sidecar API URL first."
-            if h2d_loose_mesh and not api_url and not missing_profiles else
+            f"H2D STL/OBJ background slicing needs a running slicer API sidecar. {(slicer_api_probe or {}).get('detail') or 'Configure the sidecar API URL first.'} Use Open Orca until it is online."
+            if h2d_loose_mesh and not (slicer_api_probe or {}).get("ok") and not missing_profiles else
             "STEP models need Orca GUI import; use Download model/Open Orca, then export the sliced job back to the Print Vault."
             if can_handoff else
             "Slicer API configured. Flightdeck can slice this in the background."
@@ -1672,6 +1676,34 @@ async def slicer_worker_status():
         "profile_roots": [str(p) for p in _orca_profile_roots(exe)],
         "platform": os.name,
     }
+
+
+async def _probe_slicer_api(api_url: str, *, timeout: float = 3.0) -> dict:
+    base_url = (api_url or "").strip().rstrip("/")
+    if not base_url:
+        return {"configured": False, "ok": False, "detail": "Slicer API URL is not configured"}
+    parsed = urllib.parse.urlparse(base_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return {"configured": True, "ok": False, "detail": "Slicer API URL must be a full http:// or https:// URL"}
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(connect=timeout, read=timeout, write=timeout, pool=timeout), follow_redirects=True) as client:
+            resp = await client.get(f"{base_url}/health")
+    except Exception as exc:
+        return {"configured": True, "ok": False, "detail": f"Could not reach slicer API: {exc}"}
+    if resp.status_code >= 400:
+        return {"configured": True, "ok": False, "detail": f"Slicer API /health returned HTTP {resp.status_code}"}
+    payload = None
+    try:
+        payload = resp.json()
+    except Exception:
+        payload = None
+    version = ""
+    if isinstance(payload, dict):
+        version = str(payload.get("version") or payload.get("slicer") or payload.get("name") or "")
+    detail = f"{base_url}/health OK"
+    if version:
+        detail += f" ({version})"
+    return {"configured": True, "ok": True, "detail": detail, "payload": payload}
 
 
 @app.post("/api/slicer/check")
@@ -4063,6 +4095,19 @@ def _run_orca_slice_sidecar(
             )
         except Exception:
             detail = response.text
+        if _h2d_loose_mesh_requires_sidecar(safe_source, profiles):
+            raw = str(detail or "").strip()
+            lowered = raw.lower()
+            if "failed to slice" in lowered or "slic3r::cli" in lowered or response.status_code >= 500:
+                raise HTTPException(
+                    status_code=response.status_code,
+                    detail=(
+                        "The slicer API sidecar is reachable, but Orca still rejected this H2D STL/OBJ slice. "
+                        "That means the sidecar is running, but this loose mesh still needs manual Open Orca/export "
+                        "or the next preset-bundle slicing lane. Raw slicer detail: "
+                        f"{_friendly_slicer_error(raw)}"
+                    ),
+                )
         raise HTTPException(status_code=response.status_code, detail=_friendly_slicer_error(str(detail)))
 
     content_type = response.headers.get("content-type", "")
@@ -5019,6 +5064,21 @@ async def setup_health():
 
     base_ok, base_detail = _tailnet_hint(settings.get("system_base_url", ""))
     checks.append(_setup_check("base_url", "Base URL", base_ok, base_detail))
+
+    slicer_api_url = str(settings.get("orcaslicer_api_url") or "").strip()
+    slicer_api = await _probe_slicer_api(slicer_api_url) if slicer_api_url else {
+        "configured": False,
+        "ok": False,
+        "detail": "Not configured",
+    }
+    checks.append(_setup_check(
+        "slicer_api",
+        "Slicer API sidecar",
+        bool(slicer_api.get("ok")),
+        str(slicer_api.get("detail") or "Unavailable"),
+        level="ok" if slicer_api.get("ok") else "warn",
+        optional=True,
+    ))
 
     scale_status = _scale.is_available()
     checks.append(_setup_check(
