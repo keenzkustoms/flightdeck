@@ -2,6 +2,7 @@ from __future__ import annotations
 import asyncio
 import csv
 import gzip
+import ipaddress
 import io
 import json
 import logging
@@ -10,6 +11,7 @@ import re
 import shutil
 import socket
 import sqlite3
+import struct
 import subprocess
 import tempfile
 import time
@@ -71,6 +73,9 @@ _label_printer = LabelPrinter()
 _MAX_PRINT_FILE_BYTES = int(os.getenv("FLIGHTDECK_MAX_PRINT_FILE_MB", "2048")) * 1024 * 1024
 _MAX_PROFILE_UPLOAD_BYTES = int(os.getenv("FLIGHTDECK_MAX_PROFILE_UPLOAD_MB", "64")) * 1024 * 1024
 _UPLOAD_READ_CHUNK_BYTES = 1024 * 1024
+_BAMBU_FILE_LIST_TIMEOUT_SECONDS = float(os.getenv("FLIGHTDECK_BAMBU_FILE_LIST_TIMEOUT", "2.5"))
+_FILE_DESK_TARGET_CACHE_SECONDS = float(os.getenv("FLIGHTDECK_FILE_DESK_TARGET_CACHE_SECONDS", "20"))
+_file_desk_target_cache: dict[str, dict] = {}
 
 
 def _dt_default(obj):
@@ -473,33 +478,14 @@ def _assigned_spool_matches_report(spool: dict, slot: dict) -> bool:
 
 
 def _replay_assigned_bambu_profiles(printer_status: dict) -> None:
-    """Keep Flightdeck-assigned AMS slots authoritative over stale Bambu profiles."""
-    printer_id = printer_status.get("id")
-    if not printer_id:
-        return
-    loaded_by_slot = db.get_spools_by_printer(str(printer_id))
-    if not loaded_by_slot:
-        return
-    for slot in _flatten_reported_ams_slots(printer_status, include_empty=True):
-        flat_slot = slot.get("flat_slot")
-        if flat_slot is None:
-            continue
-        spool = loaded_by_slot.get(int(flat_slot))
-        if not spool:
-            continue
-        if _reported_slot_is_stale_empty(slot):
-            continue
-        if _assigned_spool_matches_report(spool, slot):
-            continue
-        if _recent_profile_replay(str(printer_id), int(flat_slot), int(spool["id"])):
-            continue
-        full_spool = db.get_spool(int(spool["id"])) or spool
-        asyncio.create_task(_sync_bambu_ams_slot(str(printer_id), int(flat_slot), full_spool))
-        db.log_decision(
-            str(printer_id),
-            "ams_slot_profile_replayed",
-            f"{printer_id}:{flat_slot} spool #{spool['id']} overwrote stale printer profile",
-        )
+    """Never background-write AMS profiles.
+
+    The AMS Profile Doctor/Trust Flightdeck button is the operator-approved
+    path for writing a Flightdeck spool profile back to Bambu. Auto-replaying
+    here fought real spool swaps on AMS HT because a stale Flightdeck assignment
+    could overwrite the printer every poll cycle.
+    """
+    return
 
 
 def _remaining_g(spool: dict) -> float:
@@ -644,66 +630,13 @@ def _best_spool_for_reported_slot(slot: dict, candidates: list[dict], preferred_
 
 
 def _reconcile_reported_loaded_slots(printer_status: dict) -> None:
-    """Claim a shelved spool when Bambu reports a loaded RFID/profile slot."""
-    printer_id = printer_status.get("id")
-    if not printer_id:
-        return
+    """Do not move inventory based only on Bambu AMS reports.
 
-    loaded_by_slot = db.get_spools_by_printer(str(printer_id))
-    available = [
-        spool for spool in db.get_spools()
-        if spool.get("location_printer_id") is None and not spool.get("archived_at")
-    ]
-    if not available:
-        return
-
-    for slot in _flatten_reported_ams_slots(printer_status, include_empty=True):
-        if slot.get("empty"):
-            continue
-        flat_slot = slot.get("flat_slot")
-        if flat_slot is None or loaded_by_slot.get(int(flat_slot)):
-            continue
-        preferred_spool_id = db.get_recent_spool_for_slot(str(printer_id), int(flat_slot))
-        slot_available = available
-        if _reported_slot_is_generic(slot):
-            if preferred_spool_id is None:
-                continue
-            slot_available = [
-                spool for spool in available
-                if int(spool.get("id") or 0) == int(preferred_spool_id)
-            ]
-            if not slot_available:
-                continue
-        best = _best_spool_for_reported_slot(slot, slot_available, preferred_spool_id)
-        if not best:
-            continue
-
-        spool, score, reason = best
-        result = db.move_spool(
-            int(spool["id"]),
-            str(printer_id),
-            int(flat_slot),
-            spool.get("storage_location_id") or spool.get("home_storage_location_id"),
-        )
-        if not result.get("ok"):
-            continue
-        source_location = _spool_location_label(spool.get("storage_location_id") or spool.get("home_storage_location_id"))
-        reported = " ".join(
-            str(slot.get(key) or "").strip()
-            for key in ("brand", "type", "profile_name")
-            if str(slot.get(key) or "").strip()
-        ) or "filament"
-        db.log_decision(
-            str(printer_id),
-            "spool_auto_claimed",
-            (
-                f"Spool #{spool['id']} auto-claimed from {source_location} "
-                f"to {slot.get('label') or flat_slot}; matched printer report "
-                f"{reported} {slot.get('color') or ''} (score {score:.0f}: {reason})"
-            ),
-        )
-        loaded_by_slot[int(flat_slot)] = spool
-        available = [candidate for candidate in available if int(candidate["id"]) != int(spool["id"])]
+    Bambu can retain stale tray profile data after the physical spool changes,
+    especially on AMS HT. The AMS Profile Doctor still scores and suggests
+    likely shelf matches, but stock movement must be operator-approved.
+    """
+    return
 
 
 async def _grab_snapshot(printer_id: str) -> Optional[bytes]:
@@ -711,18 +644,11 @@ async def _grab_snapshot(printer_id: str) -> Optional[bytes]:
     # Bambu: pull latest frame from the RTSP proxy (already decoded JPEG)
     proxy = _cam_proxies.get(printer_id)
     if proxy is not None:
-        if proxy._latest:
-            return proxy._latest
-        # Proxy may be idle — try starting it briefly
         try:
-            await proxy._start()
-            for _ in range(30):  # up to 3 s
-                if proxy._latest:
-                    return proxy._latest
-                await asyncio.sleep(0.1)
+            return await proxy.snapshot(timeout=3.0)
         except Exception:
             pass
-        return proxy._latest  # may still be None if camera is down
+        return None
 
     # Moonraker: hit the crowsnest snapshot URL directly
     camera = _cameras.get(printer_id)
@@ -736,6 +662,21 @@ async def _grab_snapshot(printer_id: str) -> Optional[bytes]:
             log.warning("snapshot fetch failed for %s: %s", printer_id, exc)
 
     return None
+
+
+def _fetch_http_image_sync(url: str, timeout: float = 5.0) -> tuple[bytes, str]:
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    request = urllib.request.Request(
+        url,
+        headers={
+            "Cache-Control": "no-cache",
+            "Pragma": "no-cache",
+            "User-Agent": "Flightdeck camera snapshot",
+        },
+    )
+    with opener.open(request, timeout=timeout) as response:
+        content_type = (response.headers.get("content-type") or "image/jpeg").split(";", 1)[0] or "image/jpeg"
+        return response.read(), content_type
 
 
 def _fetch_mjpeg_frame_sync(url: str) -> tuple[bytes, str]:
@@ -1074,8 +1015,13 @@ class SlicePlanRequest(BaseModel):
     source_id: str
     path: str
     printer_id: str
+    printer_profile: str = ""
+    process_profile: str = ""
+    filament_profile: str = ""
     plate: str = "auto"
     bed_type: str = "Textured PEI Plate"
+    support_mode: str = "profile"
+    brim_mode: str = "profile"
     all_plates: bool = False
 
 
@@ -1087,9 +1033,27 @@ class SliceRunRequest(SlicePlanRequest):
     output_filename: Optional[str] = None
 
 
+class SlicerOpenRequest(BaseModel):
+    source_id: str
+    path: str
+    filename: str = ""
+
+
 class SlicerConnectionCheckRequest(BaseModel):
     kind: str
     url: str
+
+
+class OrcaDockerActionRequest(BaseModel):
+    target: str = "all"
+
+
+def _slice_request_profiles(body: SlicePlanRequest, settings: dict, printer_id: str) -> dict:
+    return {
+        "printer": (body.printer_profile or settings.get(_slicer_profile_key(printer_id, "printer"), "") or "").strip(),
+        "process": (body.process_profile or settings.get(_slicer_profile_key(printer_id, "process"), "") or "").strip(),
+        "filament": (body.filament_profile or settings.get(_slicer_profile_key(printer_id, "filament"), "") or "").strip(),
+    }
 
 
 class BambuSdClearRequest(BaseModel):
@@ -1534,14 +1498,24 @@ async def get_file_desk(printer_id: Optional[str] = None):
         }
 
     async def _bambu_target(p: BambuPrinter) -> dict:
+        cache_key = f"bambu:{p.id}"
+        cached = _file_desk_target_cache.get(cache_key)
+        if cached and (time.monotonic() - cached.get("at", 0)) < _FILE_DESK_TARGET_CACHE_SECONDS:
+            return dict(cached["target"])
         try:
             from .printers.bambu_ftp import list_bambu_files
-            files = await asyncio.to_thread(list_bambu_files, p._ip, p._access_code)
+            files = await asyncio.wait_for(
+                asyncio.to_thread(list_bambu_files, p._ip, p._access_code),
+                timeout=_BAMBU_FILE_LIST_TIMEOUT_SECONDS,
+            )
             error = None
+        except asyncio.TimeoutError:
+            files = []
+            error = "Printer file list timed out; retry in a moment."
         except Exception as exc:
             files = []
             error = str(exc)
-        return {
+        target = {
             "id": p.id,
             "label": p.custom_name or p.model_name,
             "model": p.model_name,
@@ -1550,6 +1524,9 @@ async def get_file_desk(printer_id: Optional[str] = None):
             "error": error,
             "actions": {"format_sd": True, "format_sd_ready": False},
         }
+        if error is None:
+            _file_desk_target_cache[cache_key] = {"at": time.monotonic(), "target": dict(target)}
+        return target
 
     async def _simulated_target(pid: str, model_name: str, custom_name: str, profile: str) -> dict:
         return {
@@ -1710,6 +1687,33 @@ async def download_file_desk_source(source_id: str, path: str):
     )
 
 
+@app.get("/api/files/source/preview")
+async def preview_file_desk_source(source_id: str, path: str, view: Optional[str] = None):
+    source_id = source_id.strip()
+    source_path = path.strip().lstrip("/")
+    if not source_id or not source_path:
+        raise HTTPException(status_code=422, detail="Source and path required")
+    filename, data = await _read_file_desk_source(source_id, source_path)
+    if not filename.lower().endswith(".gcode.3mf") and _queue_file_extension(filename) != ".3mf":
+        raise HTTPException(status_code=404, detail="No preview available")
+    try:
+        from .printers.bambu_ftp import _parse_3mf
+        preview = _parse_3mf(io.BytesIO(data))
+    except Exception as exc:
+        raise HTTPException(status_code=404, detail="No preview available") from exc
+    prefer_top = (view or "").strip().lower() == "top"
+    png = preview.top_image_png if prefer_top and preview and preview.top_image_png else None
+    if not png and preview:
+        png = preview.image_png or preview.top_image_png
+    if not png:
+        raise HTTPException(status_code=404, detail="No preview available")
+    return Response(
+        content=png,
+        media_type="image/png",
+        headers={"Cache-Control": "no-store, max-age=0"},
+    )
+
+
 @app.post("/api/slicer/plan")
 async def plan_slice_from_file_desk(body: SlicePlanRequest):
     printer_id = body.printer_id.strip()
@@ -1732,14 +1736,18 @@ async def plan_slice_from_file_desk(body: SlicePlanRequest):
     output_ext = ".gcode.3mf" if target_kind == "bambu" else ".gcode"
     base_name = _file_archive_key(filename) or "sliced_model"
     target = next((p for p in await _gather_all() if p.get("id") == printer_id), None)
-    profiles = {
-        "printer": settings.get(_slicer_profile_key(printer_id, "printer"), ""),
-        "process": settings.get(_slicer_profile_key(printer_id, "process"), ""),
-        "filament": settings.get(_slicer_profile_key(printer_id, "filament"), ""),
-    }
+    slice_options = _slice_option_summary(body.bed_type, body.support_mode, body.brim_mode)
+    profiles = _slice_request_profiles(body, settings, printer_id)
     missing_profiles = [label for label, value in profiles.items() if not str(value or "").strip()]
     can_slice = bool(worker_url or api_url or _orca_executable()) and not missing_profiles and not is_step_source
     can_handoff = is_step_source and not missing_profiles
+    h2d_loose_mesh = _h2d_loose_mesh_requires_sidecar(filename, profiles)
+    slicer_api_probe = None
+    if h2d_loose_mesh and api_url:
+        slicer_api_probe = await _probe_slicer_api(api_url)
+    if h2d_loose_mesh and not (slicer_api_probe or {}).get("ok"):
+        can_slice = False
+        can_handoff = not missing_profiles
     return {
         "ok": True,
         "ready": can_slice or can_handoff,
@@ -1748,6 +1756,7 @@ async def plan_slice_from_file_desk(body: SlicePlanRequest):
         "sidecar_url": browser_url,
         "browser_url": browser_url,
         "api_url": api_url,
+        "api_health": slicer_api_probe,
         "worker_url": worker_url,
         "source": {
             "source_id": source_id,
@@ -1771,10 +1780,13 @@ async def plan_slice_from_file_desk(body: SlicePlanRequest):
             "kind": "gcode.3mf" if target_kind == "bambu" else "gcode",
         },
         "profiles": profiles,
+        "slice_options": slice_options,
         "missing_profiles": missing_profiles,
         "plate": body.plate or "auto",
         "all_plates": bool(body.all_plates),
         "message": (
+            f"H2D STL/OBJ background slicing needs a running slicer API sidecar. {(slicer_api_probe or {}).get('detail') or 'Configure the sidecar API URL first.'} Use Open Orca until it is online."
+            if h2d_loose_mesh and not (slicer_api_probe or {}).get("ok") and not missing_profiles else
             "STEP models need Orca GUI import; use Download model/Open Orca, then export the sliced job back to the Print Vault."
             if can_handoff else
             "Slicer API configured. Flightdeck can slice this in the background."
@@ -1820,6 +1832,427 @@ async def slicer_worker_status():
         "profile_roots": [str(p) for p in _orca_profile_roots(exe)],
         "platform": os.name,
     }
+
+
+_ORCA_DOCKER_BROWSER_CONTAINER = "flightdeck-orcaslicer"
+_ORCA_DOCKER_API_CONTAINER = "orca-slicer-api"
+_ORCA_DOCKER_BROWSER_IMAGE = "lscr.io/linuxserver/orcaslicer:latest"
+_ORCA_DOCKER_CONFIG_TARGET = "/config"
+_ORCA_DOCKER_PRINTS_TARGET = "/prints"
+
+
+def _docker_binary() -> str | None:
+    return shutil.which("docker") or shutil.which("docker.exe")
+
+
+def _run_docker(args: list[str], *, timeout: int = 30, check: bool = True) -> subprocess.CompletedProcess:
+    docker = _docker_binary()
+    if not docker:
+        raise HTTPException(status_code=404, detail="Docker command not found on this Flightdeck host")
+    try:
+        proc = subprocess.run(
+            [docker, *args],
+            text=True,
+            capture_output=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise HTTPException(status_code=504, detail=f"Docker command timed out: docker {' '.join(args)}") from exc
+    if check and proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or "Docker command failed").strip()
+        raise HTTPException(status_code=502, detail=detail)
+    return proc
+
+
+def _docker_inspect_container(name: str) -> dict | None:
+    proc = _run_docker(["inspect", name], timeout=15, check=False)
+    if proc.returncode != 0:
+        return None
+    try:
+        payload = json.loads(proc.stdout or "[]")
+    except Exception:
+        return None
+    if not isinstance(payload, list) or not payload:
+        return None
+    return payload[0] if isinstance(payload[0], dict) else None
+
+
+def _docker_port_summary(port_bindings: dict | None) -> list[str]:
+    out: list[str] = []
+    if not isinstance(port_bindings, dict):
+        return out
+    for container_port, bindings in sorted(port_bindings.items()):
+        if not isinstance(bindings, list):
+            continue
+        for binding in bindings:
+            if not isinstance(binding, dict):
+                continue
+            host_ip = str(binding.get("HostIp") or "").strip()
+            host_port = str(binding.get("HostPort") or "").strip()
+            prefix = f"{host_ip}:" if host_ip else ""
+            if host_port:
+                out.append(f"{prefix}{host_port}->{container_port}")
+    return out
+
+
+def _docker_container_summary(name: str) -> dict:
+    info = _docker_inspect_container(name)
+    if not info:
+        return {
+            "name": name,
+            "exists": False,
+            "status": "missing",
+            "health": "",
+            "image": "",
+            "ports": [],
+            "restart": "",
+            "can_update": False,
+        }
+    state = info.get("State") if isinstance(info.get("State"), dict) else {}
+    config = info.get("Config") if isinstance(info.get("Config"), dict) else {}
+    host_config = info.get("HostConfig") if isinstance(info.get("HostConfig"), dict) else {}
+    health = ""
+    if isinstance(state.get("Health"), dict):
+        health = str(state["Health"].get("Status") or "")
+    image = str(config.get("Image") or info.get("Image") or "")
+    restart = ""
+    if isinstance(host_config.get("RestartPolicy"), dict):
+        restart = str(host_config["RestartPolicy"].get("Name") or "")
+    return {
+        "name": name,
+        "exists": True,
+        "status": str(state.get("Status") or ""),
+        "running": bool(state.get("Running")),
+        "health": health,
+        "image": image,
+        "image_id": str(info.get("Image") or ""),
+        "ports": _docker_port_summary(host_config.get("PortBindings")),
+        "restart": restart,
+        "can_update": name == _ORCA_DOCKER_BROWSER_CONTAINER and image == _ORCA_DOCKER_BROWSER_IMAGE,
+    }
+
+
+def _docker_bind_source(bind: str, target: str) -> str:
+    raw = str(bind or "")
+    for suffix in (f":{target}:rw", f":{target}:ro", f":{target}"):
+        if raw.endswith(suffix):
+            return raw[: -len(suffix)]
+    marker = f":{target}:"
+    if marker in raw:
+        return raw.rsplit(marker, 1)[0]
+    return ""
+
+
+def _orca_docker_config_dir() -> Path | None:
+    info = _docker_inspect_container(_ORCA_DOCKER_BROWSER_CONTAINER)
+    if not info:
+        return None
+    host_config = info.get("HostConfig") if isinstance(info.get("HostConfig"), dict) else {}
+    for bind in host_config.get("Binds") or []:
+        source = _docker_bind_source(str(bind), _ORCA_DOCKER_CONFIG_TARGET)
+        if source:
+            return Path(source)
+    mounts = info.get("Mounts") if isinstance(info.get("Mounts"), list) else []
+    for mount in mounts:
+        if not isinstance(mount, dict):
+            continue
+        if str(mount.get("Destination") or "") == _ORCA_DOCKER_CONFIG_TARGET:
+            source = str(mount.get("Source") or "").strip()
+            if source:
+                return Path(source)
+    return None
+
+
+def _orca_docker_prints_dir() -> Path | None:
+    info = _docker_inspect_container(_ORCA_DOCKER_BROWSER_CONTAINER)
+    if not info:
+        return None
+    host_config = info.get("HostConfig") if isinstance(info.get("HostConfig"), dict) else {}
+    for bind in host_config.get("Binds") or []:
+        source = _docker_bind_source(str(bind), _ORCA_DOCKER_PRINTS_TARGET)
+        if source:
+            return Path(source)
+    mounts = info.get("Mounts") if isinstance(info.get("Mounts"), list) else []
+    for mount in mounts:
+        if not isinstance(mount, dict):
+            continue
+        if str(mount.get("Destination") or "") == _ORCA_DOCKER_PRINTS_TARGET:
+            source = str(mount.get("Source") or "").strip()
+            if source:
+                return Path(source)
+    return None
+
+
+def _orca_container_path_for_library_file(path: Path) -> str:
+    prints_dir = _orca_docker_prints_dir()
+    if not prints_dir:
+        raise HTTPException(status_code=404, detail="Orca /prints mount was not found")
+    try:
+        rel = path.resolve().relative_to(prints_dir.resolve()).as_posix()
+    except ValueError:
+        library_root = _print_library_path().resolve()
+        try:
+            rel = path.resolve().relative_to(library_root).as_posix()
+        except ValueError:
+            raise HTTPException(status_code=400, detail="File is not inside the shared Print Vault")
+    return f"{_ORCA_DOCKER_PRINTS_TARGET}/{rel}"
+
+
+def _open_orca_container_file(container_path: str) -> None:
+    if not _docker_inspect_container(_ORCA_DOCKER_BROWSER_CONTAINER):
+        raise HTTPException(status_code=404, detail="Browser Orca container is not running on this Flightdeck host")
+    _run_docker(
+        [
+            "exec",
+            "-d",
+            "-u",
+            "abc",
+            "-e",
+            "HOME=/config",
+            "-e",
+            "DISPLAY=:1",
+            "-e",
+            "XDG_RUNTIME_DIR=/config/.XDG",
+            "-e",
+            "WAYLAND_DISPLAY=wayland-0",
+            _ORCA_DOCKER_BROWSER_CONTAINER,
+            "/opt/orcaslicer/bin/orca-slicer",
+            container_path,
+        ],
+        timeout=10,
+    )
+
+
+def _import_model_for_orca(filename: str, data: bytes) -> tuple[Path, str]:
+    library_root = _print_library_path().resolve()
+    library_root.mkdir(parents=True, exist_ok=True)
+    safe_name = _safe_basename(filename, "flightdeck-model.3mf")
+    dest = _unique_library_destination(library_root, safe_name)
+    dest.write_bytes(data)
+    return dest, dest.relative_to(library_root).as_posix()
+
+
+def _open_orca_model_bytes(filename: str, data: bytes) -> dict:
+    _enforce_file_size(len(data), label="Orca model")
+    dest, rel = _import_model_for_orca(filename, data)
+    container_path = _orca_container_path_for_library_file(dest)
+    _open_orca_container_file(container_path)
+    return {
+        "ok": True,
+        "filename": dest.name,
+        "path": rel,
+        "container_path": container_path,
+        "mode": "local-docker",
+    }
+
+
+def _suppress_orca_internal_update_prompt() -> dict:
+    result = {
+        "configured": False,
+        "stable_only": False,
+        "removed_downloads": [],
+        "message": "",
+    }
+    config_dir = _orca_docker_config_dir()
+    if not config_dir:
+        result["message"] = "Orca /config mount was not found"
+        return result
+    pref_path = config_dir / ".config" / "OrcaSlicer" / "OrcaSlicer.conf"
+    if pref_path.exists():
+        try:
+            payload = json.loads(pref_path.read_text(encoding="utf-8"))
+            if not isinstance(payload, dict):
+                payload = {}
+            app_prefs = payload.get("app")
+            if not isinstance(app_prefs, dict):
+                app_prefs = {}
+                payload["app"] = app_prefs
+            if app_prefs.get("check_stable_update_only") is not True:
+                app_prefs["check_stable_update_only"] = True
+                pref_path.write_text(json.dumps(payload, indent=4, sort_keys=False) + "\n", encoding="utf-8")
+            result["configured"] = True
+            result["stable_only"] = app_prefs.get("check_stable_update_only") is True
+        except Exception as exc:
+            result["message"] = f"Could not update Orca preferences: {exc}"
+    else:
+        result["message"] = "Orca preferences file has not been created yet"
+
+    downloads_dir = config_dir / "Downloads"
+    removed: list[str] = []
+    if downloads_dir.exists():
+        patterns = [
+            "OrcaSlicer_Windows_Installer_*beta*.exe",
+            "OrcaSlicer_Windows_Installer_V2.4.0-beta.exe",
+        ]
+        for pattern in patterns:
+            for candidate in downloads_dir.glob(pattern):
+                if not candidate.is_file():
+                    continue
+                try:
+                    candidate.unlink()
+                    removed.append(candidate.name)
+                except Exception as exc:
+                    result["message"] = f"Could not remove {candidate.name}: {exc}"
+    result["removed_downloads"] = sorted(set(removed))
+    if not result["message"]:
+        result["message"] = "Orca beta update prompt is suppressed"
+    return result
+
+
+def _orca_docker_status() -> dict:
+    docker = _docker_binary()
+    if not docker:
+        return {
+            "available": False,
+            "message": "Docker command not found on this Flightdeck host",
+            "containers": [],
+        }
+    proc = _run_docker(["version", "--format", "{{.Server.Version}}"], timeout=10, check=False)
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or "Docker is not responding").strip()
+        return {
+            "available": False,
+            "message": detail,
+            "containers": [],
+        }
+    containers = [
+        _docker_container_summary(_ORCA_DOCKER_BROWSER_CONTAINER),
+        _docker_container_summary(_ORCA_DOCKER_API_CONTAINER),
+    ]
+    prompt = _suppress_orca_internal_update_prompt() if containers[0].get("exists") else None
+    return {
+        "available": True,
+        "version": (proc.stdout or "").strip(),
+        "message": "Docker is available",
+        "containers": containers,
+        "orca_prompt": prompt,
+    }
+
+
+def _docker_restart_orca_containers(target: str = "all") -> dict:
+    target = (target or "all").strip().lower()
+    names = {
+        "browser": [_ORCA_DOCKER_BROWSER_CONTAINER],
+        "api": [_ORCA_DOCKER_API_CONTAINER],
+        "all": [_ORCA_DOCKER_BROWSER_CONTAINER, _ORCA_DOCKER_API_CONTAINER],
+    }.get(target)
+    if not names:
+        raise HTTPException(status_code=422, detail="target must be browser, api, or all")
+    restarted: list[str] = []
+    skipped: list[str] = []
+    prompt = _suppress_orca_internal_update_prompt() if _ORCA_DOCKER_BROWSER_CONTAINER in names else None
+    for name in names:
+        if not _docker_inspect_container(name):
+            skipped.append(name)
+            continue
+        _run_docker(["restart", name], timeout=90)
+        restarted.append(name)
+    status = _orca_docker_status()
+    status.update({"ok": True, "restarted": restarted, "skipped": skipped, "orca_prompt": prompt or status.get("orca_prompt")})
+    return status
+
+
+def _recreate_orca_browser_container() -> dict:
+    name = _ORCA_DOCKER_BROWSER_CONTAINER
+    info = _docker_inspect_container(name)
+    if not info:
+        raise HTTPException(status_code=404, detail=f"{name} container was not found")
+    config = info.get("Config") if isinstance(info.get("Config"), dict) else {}
+    host_config = info.get("HostConfig") if isinstance(info.get("HostConfig"), dict) else {}
+    image = str(config.get("Image") or "")
+    if image != _ORCA_DOCKER_BROWSER_IMAGE:
+        raise HTTPException(status_code=422, detail=f"{name} uses {image or 'an unknown image'}; managed update only supports {_ORCA_DOCKER_BROWSER_IMAGE}")
+
+    _run_docker(["pull", _ORCA_DOCKER_BROWSER_IMAGE], timeout=900)
+
+    env = [str(item) for item in (config.get("Env") or []) if str(item)]
+    binds = [str(item) for item in (host_config.get("Binds") or []) if str(item)]
+    port_bindings = host_config.get("PortBindings") if isinstance(host_config.get("PortBindings"), dict) else {}
+    restart_policy = host_config.get("RestartPolicy") if isinstance(host_config.get("RestartPolicy"), dict) else {}
+    restart_name = str(restart_policy.get("Name") or "").strip()
+    backup_name = f"{name}-backup-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+
+    run_args = ["run", "-d", "--name", name]
+    if restart_name and restart_name != "no":
+        run_args.extend(["--restart", restart_name])
+    for bind in binds:
+        run_args.extend(["-v", bind])
+    for container_port, bindings in sorted(port_bindings.items()):
+        if not isinstance(bindings, list):
+            continue
+        for binding in bindings:
+            if not isinstance(binding, dict):
+                continue
+            host_ip = str(binding.get("HostIp") or "").strip()
+            host_port = str(binding.get("HostPort") or "").strip()
+            if not host_port:
+                continue
+            published = f"{host_ip}:{host_port}:{container_port}" if host_ip else f"{host_port}:{container_port}"
+            run_args.extend(["-p", published])
+    for item in env:
+        run_args.extend(["-e", item])
+    run_args.append(_ORCA_DOCKER_BROWSER_IMAGE)
+
+    _run_docker(["stop", name], timeout=90, check=False)
+    _run_docker(["rename", name, backup_name], timeout=30)
+    try:
+        _run_docker(run_args, timeout=120)
+    except HTTPException:
+        _run_docker(["rm", "-f", name], timeout=30, check=False)
+        _run_docker(["rename", backup_name, name], timeout=30, check=False)
+        _run_docker(["start", name], timeout=60, check=False)
+        raise
+
+    # Keep one rollback container around briefly, but stop it so ports stay free.
+    _run_docker(["stop", backup_name], timeout=30, check=False)
+    prompt = _suppress_orca_internal_update_prompt()
+    _run_docker(["restart", name], timeout=90, check=False)
+    status = _orca_docker_status()
+    status.update({"ok": True, "updated": name, "backup": backup_name, "orca_prompt": prompt or status.get("orca_prompt")})
+    return status
+
+
+@app.get("/api/slicer/orca-docker/status")
+async def slicer_orca_docker_status():
+    return await asyncio.to_thread(_orca_docker_status)
+
+
+@app.post("/api/slicer/orca-docker/restart")
+async def slicer_orca_docker_restart(body: OrcaDockerActionRequest):
+    return await asyncio.to_thread(_docker_restart_orca_containers, body.target)
+
+
+@app.post("/api/slicer/orca-docker/update")
+async def slicer_orca_docker_update():
+    return await asyncio.to_thread(_recreate_orca_browser_container)
+
+
+async def _probe_slicer_api(api_url: str, *, timeout: float = 3.0) -> dict:
+    base_url = (api_url or "").strip().rstrip("/")
+    if not base_url:
+        return {"configured": False, "ok": False, "detail": "Slicer API URL is not configured"}
+    parsed = urllib.parse.urlparse(base_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return {"configured": True, "ok": False, "detail": "Slicer API URL must be a full http:// or https:// URL"}
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(connect=timeout, read=timeout, write=timeout, pool=timeout), follow_redirects=True) as client:
+            resp = await client.get(f"{base_url}/health")
+    except Exception as exc:
+        return {"configured": True, "ok": False, "detail": f"Could not reach slicer API: {exc}"}
+    if resp.status_code >= 400:
+        return {"configured": True, "ok": False, "detail": f"Slicer API /health returned HTTP {resp.status_code}"}
+    payload = None
+    try:
+        payload = resp.json()
+    except Exception:
+        payload = None
+    version = ""
+    if isinstance(payload, dict):
+        version = str(payload.get("version") or payload.get("slicer") or payload.get("name") or "")
+    detail = f"{base_url}/health OK"
+    if version:
+        detail += f" ({version})"
+    return {"configured": True, "ok": True, "detail": detail, "payload": payload}
 
 
 @app.post("/api/slicer/check")
@@ -1875,6 +2308,8 @@ async def slicer_worker_slice(
     sidecar_url: str = Form(""),
     arrange: bool = Form(False),
     bed_type: str = Form("Textured PEI Plate"),
+    support_mode: str = Form("profile"),
+    brim_mode: str = Form("profile"),
 ):
     output_kind = "gcode.3mf" if output_kind == "gcode.3mf" else "gcode"
     source_name = _safe_basename(file.filename, "flightdeck-model.stl")
@@ -1887,20 +2322,43 @@ async def slicer_worker_slice(
     }
     sidecar_url = (sidecar_url or "").strip().rstrip("/")
     if sidecar_url:
-        name, data, _log = await asyncio.to_thread(
-            _run_orca_slice_sidecar,
-            sidecar_url=sidecar_url,
-            filename=source_name,
-            data=source_data,
-            profiles=profiles,
-            output_kind=output_kind,
-            output_filename=output_filename,
-            plate=plate,
-            all_plates=all_plates,
-            arrange=arrange,
-            bed_type=bed_type,
-        )
+        try:
+            name, data, _log = await asyncio.to_thread(
+                _run_orca_slice_sidecar,
+                sidecar_url=sidecar_url,
+                filename=source_name,
+                data=source_data,
+                profiles=profiles,
+                output_kind=output_kind,
+                output_filename=output_filename,
+                plate=plate,
+                all_plates=all_plates,
+                arrange=arrange,
+                bed_type=bed_type,
+                support_mode=support_mode,
+                brim_mode=brim_mode,
+            )
+        except HTTPException as exc:
+            if exc.status_code != 502:
+                raise
+            if _h2d_loose_mesh_requires_sidecar(source_name, profiles):
+                raise HTTPException(status_code=502, detail=_h2d_sidecar_required_message()) from exc
+            log.warning("slicer sidecar unreachable on worker, falling back to local Orca: %s", exc.detail)
+            name, data, _log = await asyncio.to_thread(
+                _run_orca_slice_local,
+                filename=source_name,
+                data=source_data,
+                profiles=profiles,
+                output_kind=output_kind,
+                output_filename=output_filename,
+                plate=plate,
+                all_plates=all_plates,
+                support_mode=support_mode,
+                brim_mode=brim_mode,
+            )
     else:
+        if _h2d_loose_mesh_requires_sidecar(source_name, profiles):
+            raise HTTPException(status_code=422, detail=_h2d_sidecar_required_message())
         name, data, _log = await asyncio.to_thread(
             _run_orca_slice_local,
             filename=source_name,
@@ -1910,6 +2368,8 @@ async def slicer_worker_slice(
             output_filename=output_filename,
             plate=plate,
             all_plates=all_plates,
+            support_mode=support_mode,
+            brim_mode=brim_mode,
         )
     media = "application/octet-stream"
     return Response(
@@ -1920,6 +2380,59 @@ async def slicer_worker_slice(
             "X-Flightdeck-Sliced-Filename": name,
         },
     )
+
+
+@app.post("/api/slicer/worker/open")
+async def slicer_worker_open(file: UploadFile = File(...)):
+    source_name = _safe_basename(file.filename, "flightdeck-model.3mf")
+    source_data = await _read_upload_bytes(file, label="Orca model")
+    return await asyncio.to_thread(_open_orca_model_bytes, source_name, source_data)
+
+
+@app.post("/api/slicer/open")
+async def open_file_in_orca(body: SlicerOpenRequest):
+    source_id = body.source_id.strip()
+    source_path = body.path.strip().lstrip("/")
+    filename, data = await _read_file_desk_source(source_id, source_path)
+    if body.filename.strip():
+        filename = _safe_basename(body.filename, filename)
+
+    settings = db.get_all_settings()
+    worker_url = (settings.get("orcaslicer_worker_url") or "").strip().rstrip("/")
+    local_orca = _docker_inspect_container(_ORCA_DOCKER_BROWSER_CONTAINER)
+    if not local_orca and worker_url:
+        files = {"file": (filename, data, "application/octet-stream")}
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(connect=10.0, read=45.0, write=60.0, pool=10.0)) as client:
+                resp = await client.post(f"{worker_url}/api/slicer/worker/open", files=files)
+        except Exception as exc:
+            detail = str(exc).strip() or "connection timed out"
+            raise HTTPException(status_code=502, detail=f"Slicer worker unreachable: {detail}") from exc
+        payload = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
+        if resp.status_code >= 400:
+            detail = payload.get("detail") if isinstance(payload, dict) else resp.text
+            raise HTTPException(status_code=resp.status_code, detail=detail or "Slicer worker could not open Orca")
+        if isinstance(payload, dict):
+            payload["forwarded"] = True
+            payload["worker_url"] = worker_url
+            return payload
+        return {"ok": True, "forwarded": True, "worker_url": worker_url}
+
+    if source_id == "library" and local_orca:
+        source_file = _safe_library_path(source_path)
+        container_path = _orca_container_path_for_library_file(source_file)
+        await asyncio.to_thread(_open_orca_container_file, container_path)
+        return {
+            "ok": True,
+            "filename": source_file.name,
+            "path": source_file.relative_to(_print_library_path().resolve()).as_posix(),
+            "container_path": container_path,
+            "mode": "local-docker",
+            "forwarded": False,
+        }
+    result = await asyncio.to_thread(_open_orca_model_bytes, filename, data)
+    result["forwarded"] = False
+    return result
 
 
 @app.post("/api/slicer/run")
@@ -1936,11 +2449,7 @@ async def run_slice_from_file_desk(body: SliceRunRequest):
         raise HTTPException(status_code=422, detail="Only source model files can be sliced")
 
     settings = db.get_all_settings()
-    profiles = {
-        "printer": settings.get(_slicer_profile_key(printer_id, "printer"), ""),
-        "process": settings.get(_slicer_profile_key(printer_id, "process"), ""),
-        "filament": settings.get(_slicer_profile_key(printer_id, "filament"), ""),
-    }
+    profiles = _slice_request_profiles(body, settings, printer_id)
     missing_profiles = [label for label, value in profiles.items() if not str(value or "").strip()]
     if missing_profiles:
         raise HTTPException(status_code=422, detail=f"Set slicer defaults for {', '.join(missing_profiles)} first")
@@ -1954,6 +2463,10 @@ async def run_slice_from_file_desk(body: SliceRunRequest):
     target = _printer_meta(printer_id) or {}
     target_name = " ".join(str(v or "") for v in ((target or {}).get("model_name"), (target or {}).get("custom_name"), profiles["printer"]))
     arrange = target_kind == "bambu" and ("h2d" in target_name.lower() or filename.lower().endswith(".3mf"))
+    slice_options = _slice_option_summary(body.bed_type, body.support_mode, body.brim_mode)
+    h2d_loose_mesh = _h2d_loose_mesh_requires_sidecar(filename, profiles)
+    if h2d_loose_mesh and not sidecar_url:
+        raise HTTPException(status_code=422, detail=_h2d_sidecar_required_message())
 
     if worker_url:
         form = {
@@ -1966,7 +2479,9 @@ async def run_slice_from_file_desk(body: SliceRunRequest):
             "all_plates": str(bool(body.all_plates)).lower(),
             "sidecar_url": sidecar_url,
             "arrange": str(bool(arrange)).lower(),
-            "bed_type": body.bed_type or "Textured PEI Plate",
+            "bed_type": slice_options["bed_type"],
+            "support_mode": slice_options["support_mode"],
+            "brim_mode": slice_options["brim_mode"],
         }
         files = {"file": (filename, data, "application/octet-stream")}
         try:
@@ -1988,7 +2503,9 @@ async def run_slice_from_file_desk(body: SliceRunRequest):
                 plate=body.plate or "1",
                 all_plates=bool(body.all_plates),
                 arrange=arrange,
-                bed_type=body.bed_type or "Textured PEI Plate",
+                bed_type=slice_options["bed_type"],
+                support_mode=slice_options["support_mode"],
+                brim_mode=slice_options["brim_mode"],
             )
         else:
             if resp.status_code >= 400:
@@ -2012,7 +2529,9 @@ async def run_slice_from_file_desk(body: SliceRunRequest):
             plate=body.plate or "1",
             all_plates=bool(body.all_plates),
             arrange=arrange,
-            bed_type=body.bed_type or "Textured PEI Plate",
+            bed_type=slice_options["bed_type"],
+            support_mode=slice_options["support_mode"],
+            brim_mode=slice_options["brim_mode"],
         )
     else:
         sliced_name, sliced_data, _log = await asyncio.to_thread(
@@ -2024,6 +2543,8 @@ async def run_slice_from_file_desk(body: SliceRunRequest):
             output_filename=output_filename,
             plate=body.plate or "1",
             all_plates=bool(body.all_plates),
+            support_mode=slice_options["support_mode"],
+            brim_mode=slice_options["brim_mode"],
         )
 
     library_root = _print_library_path().resolve()
@@ -2032,20 +2553,31 @@ async def run_slice_from_file_desk(body: SliceRunRequest):
     dest = _unique_library_destination(library_root, sliced_name or output_filename)
     dest.write_bytes(sliced_data)
     stat = dest.stat()
+    output_path = dest.relative_to(library_root).as_posix()
+    preview_url = None
+    if dest.name.lower().endswith(".gcode.3mf") or _queue_file_extension(dest.name) == ".3mf":
+        preview_url = "/api/files/source/preview?" + urllib.parse.urlencode({
+            "source_id": "library",
+            "path": output_path,
+            "view": "top",
+        })
     db.log_decision(printer_id, "slicer_run", json.dumps({
         "source": filename,
         "output": dest.name,
         "worker": worker_url or "local",
         "profiles": profiles,
+        "slice_options": slice_options,
     }))
     return {
         "ok": True,
         "filename": dest.name,
-        "path": dest.relative_to(library_root).as_posix(),
+        "path": output_path,
         "kind": _file_kind(dest.name),
         "size": stat.st_size,
         "printer_id": printer_id,
+        "preview_url": preview_url,
         "profiles": profiles,
+        "slice_options": slice_options,
     }
 
 
@@ -2569,7 +3101,12 @@ async def control_ams_drying(printer_id: str, ams_id: int, req: AmsDryRequest):
 async def get_printer_camera(printer_id: str):
     """Return camera stream URL for the given printer, regardless of print state."""
     if _simulated_entry(printer_id):
-        return {"url": f"/api/camera/{printer_id}/simulated.svg", "type": "simulated", "fleet_url": f"/api/camera/{printer_id}/simulated.svg", "fleet_refresh_ms": 4000}
+        return {
+            "url": f"/api/camera/{printer_id}/simulated.svg",
+            "type": "simulated",
+            "fleet_url": f"/api/camera/{printer_id}/simulated.svg",
+            "fleet_refresh_ms": 4000,
+        }
     camera = _cameras.get(printer_id)
     if camera is None:
         raise HTTPException(status_code=404, detail="no camera configured")
@@ -2600,39 +3137,45 @@ async def get_printer_camera(printer_id: str):
             "fleet_refresh_ms": 3500,
         }
     if isinstance(camera, BambuRtspCamera):
-        return {"url": f"/api/camera/{printer_id}/stream", "type": "mjpeg", "fleet_url": f"/api/camera/{printer_id}/snapshot", "fleet_refresh_ms": 3000}
+        return {
+            "url": f"/api/camera/{printer_id}/stream",
+            "type": "mjpeg",
+            "fleet_url": f"/api/camera/{printer_id}/snapshot",
+            "fleet_refresh_ms": 3500,
+        }
     raise HTTPException(status_code=404, detail="unknown camera type")
 
 
 @app.get("/api/camera/{printer_id}/snapshot")
 async def camera_snapshot(printer_id: str):
     camera = _cameras.get(printer_id)
-    if isinstance(camera, AdaptiveCamera):
-        snapshot_url = camera.snapshot_url
-    elif isinstance(camera, WebrtcCamera) and camera.snapshot_url:
-        snapshot_url = camera.snapshot_url
-    elif isinstance(camera, MjpegDirectCamera) and camera.snapshot_url:
-        snapshot_url = camera.snapshot_url
-    else:
-        snapshot_url = ""
-
-    if not snapshot_url:
+    try:
+        if isinstance(camera, (AdaptiveCamera, WebrtcCamera)) and camera.snapshot_url:
+            content, content_type = await asyncio.to_thread(_fetch_http_image_sync, camera.snapshot_url, 5.0)
+            return Response(
+                content=content,
+                media_type=content_type,
+                headers={
+                    "Cache-Control": "no-cache, no-store, must-revalidate",
+                    "Pragma": "no-cache",
+                    "Expires": "0",
+                },
+            )
         if isinstance(camera, MjpegDirectCamera):
-            try:
+            if camera.snapshot_url:
+                content, content_type = await asyncio.to_thread(_fetch_http_image_sync, camera.snapshot_url, 5.0)
+            else:
                 content, content_type = await asyncio.to_thread(_fetch_mjpeg_frame_sync, camera.stream_url)
-                return Response(
-                    content=content,
-                    media_type=content_type,
-                    headers={
-                        "Cache-Control": "no-cache, no-store, must-revalidate",
-                        "Pragma": "no-cache",
-                        "Expires": "0",
-                    },
-                )
-            except Exception as exc:
-                log.warning("mjpeg snapshot failed for %s: %s", printer_id, exc)
-                return _camera_unavailable_response(printer_id)
-        if _cam_proxies.get(printer_id) is not None:
+            return Response(
+                content=content,
+                media_type=content_type,
+                headers={
+                    "Cache-Control": "no-cache, no-store, must-revalidate",
+                    "Pragma": "no-cache",
+                    "Expires": "0",
+                },
+            )
+        if isinstance(camera, BambuRtspCamera):
             content = await _grab_snapshot(printer_id)
             if content:
                 return Response(
@@ -2645,23 +3188,13 @@ async def camera_snapshot(printer_id: str):
                     },
                 )
             return _camera_unavailable_response(printer_id)
-        raise HTTPException(status_code=404, detail="snapshot not configured")
-
-    try:
-        content, content_type = await asyncio.to_thread(_fetch_adaptive_snapshot_sync, snapshot_url)
-        return Response(
-            content=content,
-            media_type=content_type,
-            headers={
-                "Cache-Control": "no-cache, no-store, must-revalidate",
-                "Pragma": "no-cache",
-                "Expires": "0",
-            },
-        )
     except Exception as exc:
-        log.warning("adaptive camera snapshot failed for %s: %s", printer_id, exc)
+        log.warning("camera snapshot failed for %s: %s", printer_id, exc)
         return _camera_unavailable_response(printer_id)
 
+    if _simulated_entry(printer_id):
+        return await simulated_camera(printer_id)
+    raise HTTPException(status_code=404, detail="snapshot not configured")
 
 def _simulated_camera_svg(printer_id: str, model_name: str, custom_name: str, icon: str, profile: str, scenario: str) -> str:
     status = simulated.status(printer_id, model_name, custom_name, icon, profile, scenario)
@@ -3124,6 +3657,241 @@ async def get_config_printers():
     return [e.model_dump(mode="json", exclude_none=True) for e in cfg.printers]
 
 
+class PrinterScanRequest(BaseModel):
+    cidr: Optional[str] = None
+
+
+def _local_lan_cidr() -> str:
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.settimeout(0.2)
+            sock.connect(("8.8.8.8", 80))
+            ip = sock.getsockname()[0]
+    except Exception:
+        try:
+            ip = socket.gethostbyname(socket.gethostname())
+        except Exception:
+            ip = "192.168.1.1"
+    return str(ipaddress.ip_network(f"{ip}/24", strict=False))
+
+
+def _scan_network_from_request(cidr: Optional[str]) -> ipaddress.IPv4Network:
+    raw = (cidr or "").strip() or _local_lan_cidr()
+    try:
+        network = ipaddress.ip_network(raw, strict=False)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"Invalid CIDR: {raw}") from exc
+    if network.version != 4:
+        raise HTTPException(status_code=422, detail="LAN scan currently supports IPv4 networks only")
+    if network.num_addresses > 256:
+        raise HTTPException(status_code=422, detail="Scan range is capped at /24 or smaller")
+    return network
+
+
+async def _tcp_port_open(host: str, port: int, timeout: float = 0.45) -> bool:
+    try:
+        reader, writer = await asyncio.wait_for(asyncio.open_connection(host, port), timeout=timeout)
+        writer.close()
+        try:
+            await writer.wait_closed()
+        except Exception:
+            pass
+        return True
+    except Exception:
+        return False
+
+
+def _printer_scan_id(name: str, host: str) -> str:
+    base = re.sub(r"[^a-z0-9_-]+", "_", (name or "").lower()).strip("_")
+    if not base or not re.match(r"^[a-z]", base):
+        base = f"printer_{host.split('.')[-1]}"
+    return base[:40]
+
+
+def _ipv4_sort_key(host: str) -> int:
+    try:
+        return int(ipaddress.ip_address(host))
+    except ValueError:
+        return 0
+
+
+def _guess_moonraker_model(hostname: str, info: dict) -> tuple[str, str, str]:
+    text = " ".join(str(v) for v in [hostname, info.get("software_version"), info.get("hostname"), info.get("klipper_path")] if v).lower()
+    if "snapmaker" in text or re.search(r"\bu1\b", text):
+        return ("snapmaker_u1", "Snapmaker U1", "Snapmaker U1")
+    if "voron" in text:
+        return ("voron", "Voron 2.4 350", "Voron")
+    return ("moonraker", "Custom Moonraker", "Moonraker")
+
+
+_BAMBU_SSDP_ADDR = "239.255.255.250"
+_BAMBU_SSDP_PORT = 2021
+_BAMBU_SSDP_TARGET = "urn:bambulab-com:device:3dprinter:1"
+_BAMBU_SSDP_MSEARCH = (
+    "M-SEARCH * HTTP/1.1\r\n"
+    f"HOST: {_BAMBU_SSDP_ADDR}:{_BAMBU_SSDP_PORT}\r\n"
+    'MAN: "ssdp:discover"\r\n'
+    "MX: 2\r\n"
+    f"ST: {_BAMBU_SSDP_TARGET}\r\n"
+    "\r\n"
+)
+
+
+def _parse_bambu_ssdp_response(message: str, host: str) -> Optional[dict]:
+    if _BAMBU_SSDP_TARGET not in message and "bambulab" not in message.lower():
+        return None
+    serial_match = re.search(r"USN:\s*(?:uuid:)?([^\s\r\n]+)", message, re.IGNORECASE)
+    serial = serial_match.group(1).strip() if serial_match else ""
+    name_match = re.search(r"DevName\.bambu\.com:\s*(.+?)(?:\r\n|\n|$)", message, re.IGNORECASE)
+    model_match = re.search(r"DevModel\.bambu\.com:\s*(.+?)(?:\r\n|\n|$)", message, re.IGNORECASE)
+    if not model_match:
+        model_match = re.search(r"NT:\s*urn:bambulab-com:device:([^:]+)", message, re.IGNORECASE)
+    model = model_match.group(1).strip() if model_match else ""
+    name = name_match.group(1).strip() if name_match else ""
+    if not (serial or name or model):
+        return None
+    return {
+        "host": host,
+        "serial": serial,
+        "name": name or serial,
+        "model": model,
+    }
+
+
+async def _scan_bambu_ssdp(duration: float = 2.6) -> dict[str, dict]:
+    """Best-effort Bambu SSDP metadata discovery.
+
+    Bambu exposes serial/model/name through local SSDP on UDP 2021. It does not
+    expose the LAN access code; that remains a user-entered secret.
+    """
+    found: dict[str, dict] = {}
+
+    def run() -> dict[str, dict]:
+        sock = None
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            try:
+                sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 2)
+            except OSError:
+                pass
+            sock.settimeout(0.15)
+            sock.bind(("", 0))
+            try:
+                mreq = struct.pack("4sl", socket.inet_aton(_BAMBU_SSDP_ADDR), socket.INADDR_ANY)
+                sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+            except OSError:
+                pass
+            deadline = time.monotonic() + max(0.5, duration)
+            last_send = 0.0
+            while time.monotonic() < deadline:
+                now = time.monotonic()
+                if now - last_send > 0.8:
+                    try:
+                        sock.sendto(_BAMBU_SSDP_MSEARCH.encode("utf-8"), (_BAMBU_SSDP_ADDR, _BAMBU_SSDP_PORT))
+                    except OSError:
+                        pass
+                    last_send = now
+                try:
+                    data, addr = sock.recvfrom(4096)
+                except socket.timeout:
+                    continue
+                except OSError:
+                    break
+                parsed = _parse_bambu_ssdp_response(data.decode("utf-8", errors="ignore"), addr[0])
+                if parsed:
+                    found[addr[0]] = parsed
+            return found
+        finally:
+            if sock:
+                try:
+                    sock.close()
+                except OSError:
+                    pass
+
+    return await asyncio.to_thread(run)
+
+
+async def _probe_printer_host(host: str, existing_hosts: set[str], existing_serials: set[str], bambu_ssdp: dict[str, dict]) -> Optional[dict]:
+    async with httpx.AsyncClient(timeout=httpx.Timeout(connect=0.6, read=0.8, write=0.6, pool=0.6)) as client:
+        try:
+            r = await client.get(f"http://{host}:7125/server/info")
+            if r.status_code == 200:
+                info = r.json() if r.content else {}
+                family, model, label = _guess_moonraker_model(str(info.get("hostname") or ""), info if isinstance(info, dict) else {})
+                cam_stream = f"http://{host}/webcam/stream.mjpg" if family == "snapmaker_u1" else f"http://{host}/webcam/?action=stream"
+                cam_snapshot = f"http://{host}/webcam/snapshot.jpg" if family == "snapmaker_u1" else f"http://{host}/webcam/?action=snapshot"
+                return {
+                    "host": host,
+                    "port": 7125,
+                    "family": family,
+                    "connection_type": "snapmaker_u1" if family == "snapmaker_u1" else "moonraker",
+                    "model_name": model,
+                    "custom_name": str(info.get("hostname") or label),
+                    "suggested_id": _printer_scan_id(str(info.get("hostname") or label), host),
+                    "camera_type": "mjpeg_direct",
+                    "stream_url": cam_stream,
+                    "snapshot_url": cam_snapshot,
+                    "confidence": "high",
+                    "reason": "Moonraker API responded on port 7125",
+                    "already_configured": host in existing_hosts,
+                }
+        except Exception:
+            pass
+
+    bambu_info = bambu_ssdp.get(host) or {}
+    if bambu_info or await _tcp_port_open(host, 8883):
+        model = str(bambu_info.get("model") or "H2D").strip()
+        name = str(bambu_info.get("name") or f"Bambu {host.split('.')[-1]}").strip()
+        serial = str(bambu_info.get("serial") or "").strip()
+        return {
+            "host": host,
+            "family": "bambu",
+            "connection_type": "bambu",
+            "model_name": model,
+            "custom_name": name,
+            "suggested_id": _printer_scan_id(name or "bambu", host),
+            "serial": serial,
+            "confidence": "high" if serial else "medium",
+            "reason": "Bambu SSDP advertised serial/model; access code still required" if serial else "Bambu LAN MQTT port 8883 is open; access code and serial still required",
+            "already_configured": host in existing_hosts or (serial and serial in existing_serials),
+        }
+    return None
+
+
+@app.post("/api/config/printers/scan")
+async def scan_config_printers(payload: PrinterScanRequest):
+    network = _scan_network_from_request(payload.cidr)
+    cfg = load()
+    existing_hosts = {
+        str(getattr(entry.connection, "host", "")).strip()
+        for entry in cfg.printers
+        if str(getattr(entry.connection, "host", "")).strip()
+    }
+    existing_serials = {
+        str(getattr(entry.connection, "serial", "")).strip()
+        for entry in cfg.printers
+        if str(getattr(entry.connection, "serial", "")).strip()
+    }
+    hosts = [str(ip) for ip in network.hosts()]
+    bambu_ssdp = await _scan_bambu_ssdp()
+    sem = asyncio.Semaphore(64)
+
+    async def bounded(host: str) -> Optional[dict]:
+        async with sem:
+            return await _probe_printer_host(host, existing_hosts, existing_serials, bambu_ssdp)
+
+    found = [row for row in await asyncio.gather(*(bounded(host) for host in hosts)) if row]
+    found.sort(key=lambda row: (row.get("already_configured", False), row.get("family") != "bambu", _ipv4_sort_key(row.get("host", ""))))
+    return {
+        "ok": True,
+        "cidr": str(network),
+        "scanned": len(hosts),
+        "found": found,
+    }
+
+
 @app.post("/api/config/printers", status_code=201)
 async def add_printer(entry: PrinterEntry):
     if not re.match(r"^[a-z][a-z0-9_-]*$", entry.id):
@@ -3402,6 +4170,14 @@ class SlicerProfileDefaultsRequest(BaseModel):
     filament_profile: str = ""
 
 
+class SupportBundleRequest(BaseModel):
+    name: str = ""
+    email: str = ""
+    problem: str = ""
+    expected: str = ""
+    notes: str = ""
+
+
 @app.get("/api/settings")
 async def get_settings():
     return db.get_all_settings()
@@ -3418,6 +4194,8 @@ async def put_setting(key: str, body: SettingUpdate):
 
 _ORCA_PROFILE_VENDORS = ["BBL", "Sovol", "Voron", "Prusa", "Anycubic", "Creality"]
 _ORCA_PROFILE_BASE = "https://raw.githubusercontent.com/OrcaSlicer/OrcaSlicer/main/resources/profiles"
+_ORCA_LOCAL_VENDOR = "Orca Local"
+_ORCA_LOCAL_PROFILE_LIMIT = 20000
 
 
 def _slicer_profile_key(printer_id: str, slot: str) -> str:
@@ -3464,6 +4242,13 @@ def _fetch_orca_profile_vendor(vendor: str) -> dict:
     return _normalise_orca_profile_vendor(vendor, payload)
 
 
+def _profile_name_from_json(payload: dict, source_path: str) -> str:
+    name = str(payload.get("name") or "").strip()
+    if name:
+        return name
+    return Path(source_path).stem.strip()
+
+
 def _profile_bucket_from_json(payload: dict, source_path: str = "") -> Optional[str]:
     text = " ".join(str(payload.get(k) or "") for k in ("type", "preset_type", "inherits", "name")).lower()
     path = source_path.replace("\\", "/").lower()
@@ -3474,6 +4259,137 @@ def _profile_bucket_from_json(payload: dict, source_path: str = "") -> Optional[
     if "machine" in path or "printer" in path or "machine" in text:
         return "machines"
     return None
+
+
+def _profile_relative_path(path: Path, roots: list[Path]) -> str:
+    for root in roots:
+        try:
+            return path.resolve().relative_to(root.resolve()).as_posix()
+        except Exception:
+            continue
+    return path.name
+
+
+def _local_orca_profile_paths(roots: list[Path]) -> list[Path]:
+    out: list[Path] = []
+    seen: set[str] = set()
+    for root in roots:
+        try:
+            iterator = root.rglob("*.json")
+        except Exception:
+            continue
+        for path in iterator:
+            if len(out) >= _ORCA_LOCAL_PROFILE_LIMIT:
+                return out
+            parts = {p.lower() for p in path.parts}
+            if "cache" in parts or "log" in parts:
+                continue
+            key = str(path.resolve()).lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(path)
+    def sort_key(path: Path) -> tuple[int, float, str]:
+        backup = 1 if any(part.lower().startswith("user_backup") for part in path.parts) else 0
+        try:
+            mtime = -path.stat().st_mtime
+        except Exception:
+            mtime = 0.0
+        return (backup, mtime, str(path).lower())
+
+    return sorted(out, key=sort_key)[:_ORCA_LOCAL_PROFILE_LIMIT]
+
+
+def _sync_local_orca_profiles() -> dict:
+    roots = _orca_profile_roots(_orca_executable())
+    payload = {
+        "vendor": _ORCA_LOCAL_VENDOR,
+        "name": _ORCA_LOCAL_VENDOR,
+        "version": None,
+        "source": "Local OrcaSlicer AppData/config profiles",
+        "source_url": "",
+        "machines": [],
+        "machine_models": [],
+        "processes": [],
+        "filaments": [],
+    }
+    seen: dict[str, set[str]] = {key: set() for key in ("machines", "machine_models", "processes", "filaments")}
+    scanned = 0
+    errors = 0
+    for path in _local_orca_profile_paths(roots):
+        scanned += 1
+        try:
+            profile = json.loads(path.read_text(encoding="utf-8-sig"))
+        except Exception:
+            errors += 1
+            continue
+        if not isinstance(profile, dict):
+            continue
+        bucket = _profile_bucket_from_json(profile, str(path))
+        if not bucket:
+            continue
+        name = _profile_name_from_json(profile, str(path))
+        if not name or name.startswith("fdm_") or name in seen[bucket]:
+            continue
+        item = {
+            "name": name,
+            "path": _profile_relative_path(path, roots),
+            "local_path": str(path),
+        }
+        payload[bucket].append(item)
+        seen[bucket].add(name)
+    for key in ("machines", "machine_models", "processes", "filaments"):
+        payload[key] = sorted(payload[key], key=lambda row: row.get("name", "").lower())
+    return {
+        "payload": payload,
+        "scanned": scanned,
+        "errors": errors,
+        "added": {
+            "machines": len(payload["machines"]),
+            "processes": len(payload["processes"]),
+            "filaments": len(payload["filaments"]),
+        },
+    }
+
+
+def _profile_vendor_payload_counts(payload: dict) -> dict:
+    return {
+        "machines": len(payload.get("machines") or []),
+        "processes": len(payload.get("processes") or []),
+        "filaments": len(payload.get("filaments") or []),
+    }
+
+
+def _sync_worker_orca_profiles(worker_url: str) -> Optional[dict]:
+    worker_url = (worker_url or "").strip().rstrip("/")
+    if not worker_url:
+        return None
+    parsed = urllib.parse.urlparse(worker_url)
+    if not parsed.scheme or not parsed.netloc:
+        return None
+    try:
+        with httpx.Client(timeout=httpx.Timeout(connect=3.0, read=90.0, write=10.0, pool=5.0)) as client:
+            resp = client.post(
+                f"{worker_url}/api/slicer/profiles/sync?include_worker=false",
+                json={"vendors": ["local"]},
+            )
+    except Exception as exc:
+        return {"error": str(exc)}
+    if resp.status_code >= 400:
+        return {"error": f"HTTP {resp.status_code}: {resp.text[:240]}"}
+    try:
+        payload = resp.json()
+    except Exception as exc:
+        return {"error": f"Invalid JSON: {exc}"}
+    local = next(
+        (vendor for vendor in payload.get("vendors") or [] if vendor.get("vendor") == _ORCA_LOCAL_VENDOR),
+        None,
+    )
+    if not local:
+        return {"error": "Worker did not return Orca Local profiles"}
+    local["source"] = f"Local OrcaSlicer profiles from worker {worker_url}"
+    local["source_url"] = worker_url
+    return {"payload": local, "added": _profile_vendor_payload_counts(local)}
 
 
 def _custom_profile_payload() -> dict:
@@ -3506,7 +4422,7 @@ def _custom_profile_payload() -> dict:
 def _add_custom_profile(payload: dict, profile: dict, source_path: str) -> Optional[str]:
     if not isinstance(profile, dict):
         return None
-    name = str(profile.get("name") or Path(source_path).stem).strip()
+    name = _profile_name_from_json(profile, source_path)
     if not name or name.startswith("fdm_"):
         return None
     bucket = _profile_bucket_from_json(profile, source_path)
@@ -3626,11 +4542,18 @@ def _orca_profile_file(profile_name: str, category: str, exe: Path | None = None
     if not name:
         raise HTTPException(status_code=422, detail=f"{category} profile is not set")
     filename = f"{name}.json".lower()
-    for root in _orca_profile_roots(exe):
-        candidates = list(root.glob(f"*/{category}/*.json")) + list(root.glob(f"{category}/*.json"))
-        for path in candidates:
-            if path.name.lower() == filename:
-                return path
+    bucket = {"machine": "machines", "process": "processes", "filament": "filaments"}.get(category)
+    for path in _local_orca_profile_paths(_orca_profile_roots(exe)):
+        if path.name.lower() == filename:
+            return path
+        try:
+            profile = json.loads(path.read_text(encoding="utf-8-sig"))
+        except Exception:
+            continue
+        if _profile_bucket_from_json(profile, str(path)) != bucket:
+            continue
+        if _profile_name_from_json(profile, str(path)).lower() == name.lower():
+            return path
     raise HTTPException(status_code=422, detail=f"Orca {category} profile not found on worker: {name}")
 
 
@@ -3647,8 +4570,15 @@ def _slicer_catalog_profile_blob(profile_name: str, category: str) -> tuple[str,
         for row in vendor.get(bucket) or []:
             if str(row.get("name") or "").strip().lower() != name.lower():
                 continue
+            local_path = str(row.get("local_path") or "").strip()
+            if local_path:
+                path = Path(local_path)
+                if path.exists() and path.is_file():
+                    return path.name, path.read_bytes()
             rel_path = str(row.get("path") or "").strip()
             if not vendor_key or not rel_path:
+                continue
+            if vendor_key == _ORCA_LOCAL_VENDOR:
                 continue
             url = f"{_ORCA_PROFILE_BASE}/{urllib.parse.quote(vendor_key, safe='')}/{urllib.parse.quote(rel_path, safe='/')}"
             try:
@@ -3662,7 +4592,28 @@ def _slicer_catalog_profile_blob(profile_name: str, category: str) -> tuple[str,
     raise HTTPException(status_code=422, detail=f"Orca {category} profile not found in synced catalog: {name}")
 
 
+def _local_catalog_profile_blob(profile_name: str, category: str) -> Optional[tuple[str, bytes]]:
+    name = (profile_name or "").strip()
+    bucket = {"machine": "machines", "process": "processes", "filament": "filaments"}.get(category)
+    if not name or not bucket:
+        return None
+    for vendor in db.get_slicer_profile_vendors():
+        for row in vendor.get(bucket) or []:
+            if str(row.get("name") or "").strip().lower() != name.lower():
+                continue
+            local_path = str(row.get("local_path") or "").strip()
+            if not local_path:
+                continue
+            path = Path(local_path)
+            if path.exists() and path.is_file():
+                return path.name, path.read_bytes()
+    return None
+
+
 def _slicer_profile_blob(profile_name: str, category: str, exe: Path | None = None) -> tuple[str, bytes]:
+    local = _local_catalog_profile_blob(profile_name, category)
+    if local:
+        return local
     try:
         path = _orca_profile_file(profile_name, category, exe)
         return path.name, path.read_bytes()
@@ -3700,6 +4651,27 @@ def _friendly_slicer_error(detail: str) -> str:
     return summary[-500:] if summary else text[-500:]
 
 
+def _looks_like_h2d_slice_profile(profiles: dict) -> bool:
+    haystack = " ".join(str(profiles.get(key) or "") for key in ("printer", "process", "filament"))
+    return "h2d" in haystack.lower()
+
+
+def _is_loose_mesh_source(filename: str) -> bool:
+    return _queue_file_extension(filename) in {".stl", ".obj"}
+
+
+def _h2d_loose_mesh_requires_sidecar(filename: str, profiles: dict) -> bool:
+    return _is_loose_mesh_source(filename) and _looks_like_h2d_slice_profile(profiles)
+
+
+def _h2d_sidecar_required_message() -> str:
+    return (
+        "H2D loose STL/OBJ slicing needs the Orca/Bambu slicer API sidecar. "
+        "Flightdeck local Orca can slice this file for single-toolhead printers, "
+        "but this Orca CLI build rejects the H2D loose-mesh profile path."
+    )
+
+
 def _slicer_model_mime(filename: str) -> str:
     lower = (filename or "").lower()
     if lower.endswith(".stl"):
@@ -3709,6 +4681,97 @@ def _slicer_model_mime(filename: str) -> str:
     if lower.endswith(".3mf"):
         return "model/3mf"
     return "application/octet-stream"
+
+
+_SLICE_SUPPORT_MODES = {
+    "profile": "Profile default",
+    "off": "Supports off",
+    "normal_auto": "Normal auto",
+    "tree_auto": "Tree auto",
+    "tree_strong": "Tree strong",
+}
+
+_SLICE_BRIM_MODES = {
+    "profile": "Profile default",
+    "off": "No brim",
+    "outer": "Outer brim",
+}
+
+
+def _normalise_slice_support_mode(value: str | None) -> str:
+    key = str(value or "").strip().lower().replace("-", "_")
+    return key if key in _SLICE_SUPPORT_MODES else "profile"
+
+
+def _normalise_slice_brim_mode(value: str | None) -> str:
+    key = str(value or "").strip().lower().replace("-", "_")
+    return key if key in _SLICE_BRIM_MODES else "profile"
+
+
+def _slice_option_summary(bed_type: str | None, support_mode: str | None, brim_mode: str | None) -> dict:
+    support = _normalise_slice_support_mode(support_mode)
+    brim = _normalise_slice_brim_mode(brim_mode)
+    return {
+        "bed_type": (bed_type or "Textured PEI Plate").strip() or "Textured PEI Plate",
+        "support": _SLICE_SUPPORT_MODES[support],
+        "brim": _SLICE_BRIM_MODES[brim],
+        "support_mode": support,
+        "brim_mode": brim,
+    }
+
+
+def _normalise_slicer_profile_type(profile_data: bytes, category: str) -> bytes:
+    profile_type = {"machine": "machine", "process": "process", "filament": "filament"}.get(category)
+    if not profile_type:
+        return profile_data
+    try:
+        profile = json.loads(profile_data.decode("utf-8-sig"))
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"Selected {category} profile is not valid JSON") from exc
+    if not isinstance(profile, dict):
+        raise HTTPException(status_code=422, detail=f"Selected {category} profile is not a valid Orca profile")
+    if profile.get("type") != profile_type:
+        profile["type"] = profile_type
+    return json.dumps(profile, ensure_ascii=False, indent=4).encode("utf-8")
+
+
+def _apply_slice_process_overrides(process_data: bytes, *, support_mode: str | None = "profile", brim_mode: str | None = "profile") -> bytes:
+    support = _normalise_slice_support_mode(support_mode)
+    brim = _normalise_slice_brim_mode(brim_mode)
+    try:
+        profile = json.loads(process_data.decode("utf-8-sig"))
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail="Selected process profile could not be adjusted for supports/brim") from exc
+    if not isinstance(profile, dict):
+        raise HTTPException(status_code=422, detail="Selected process profile is not a valid Orca profile")
+
+    profile["type"] = "process"
+    if support == "profile" and brim == "profile":
+        return json.dumps(profile, ensure_ascii=False, indent=4).encode("utf-8")
+
+    if support == "off":
+        profile["enable_support"] = "0"
+    elif support == "normal_auto":
+        profile["enable_support"] = "1"
+        profile["support_type"] = "normal(auto)"
+        profile["support_style"] = "default"
+    elif support == "tree_auto":
+        profile["enable_support"] = "1"
+        profile["support_type"] = "tree(auto)"
+        profile["support_style"] = "default"
+    elif support == "tree_strong":
+        profile["enable_support"] = "1"
+        profile["support_type"] = "tree(auto)"
+        profile["support_style"] = "tree_strong"
+
+    if brim == "off":
+        profile["brim_type"] = "no_brim"
+    elif brim == "outer":
+        profile["brim_type"] = "outer_only"
+        profile.setdefault("brim_width", "5")
+        profile.setdefault("brim_object_gap", "0.1")
+
+    return json.dumps(profile, ensure_ascii=False, indent=4).encode("utf-8")
 
 
 def _run_orca_slice_sidecar(
@@ -3723,11 +4786,16 @@ def _run_orca_slice_sidecar(
     all_plates: bool = False,
     arrange: bool = False,
     bed_type: str = "Textured PEI Plate",
+    support_mode: str = "profile",
+    brim_mode: str = "profile",
 ) -> tuple[str, bytes, str]:
     exe = _orca_executable()
     machine_name, machine_data = _slicer_profile_blob(str(profiles.get("printer") or ""), "machine", exe)
     process_name, process_data = _slicer_profile_blob(str(profiles.get("process") or ""), "process", exe)
     filament_name, filament_data = _slicer_profile_blob(str(profiles.get("filament") or ""), "filament", exe)
+    machine_data = _normalise_slicer_profile_type(machine_data, "machine")
+    process_data = _apply_slice_process_overrides(process_data, support_mode=support_mode, brim_mode=brim_mode)
+    filament_data = _normalise_slicer_profile_type(filament_data, "filament")
 
     safe_source = _safe_basename(filename, "flightdeck-model.stl")
     requested = _safe_basename(output_filename, f"{_file_archive_key(safe_source)}.gcode.3mf")
@@ -3766,6 +4834,19 @@ def _run_orca_slice_sidecar(
             )
         except Exception:
             detail = response.text
+        if _h2d_loose_mesh_requires_sidecar(safe_source, profiles):
+            raw = str(detail or "").strip()
+            lowered = raw.lower()
+            if "failed to slice" in lowered or "slic3r::cli" in lowered or response.status_code >= 500:
+                raise HTTPException(
+                    status_code=response.status_code,
+                    detail=(
+                        "The slicer API sidecar is reachable, but Orca still rejected this H2D STL/OBJ slice. "
+                        "That means the sidecar is running, but this loose mesh still needs manual Open Orca/export "
+                        "or the next preset-bundle slicing lane. Raw slicer detail: "
+                        f"{_friendly_slicer_error(raw)}"
+                    ),
+                )
         raise HTTPException(status_code=response.status_code, detail=_friendly_slicer_error(str(detail)))
 
     content_type = response.headers.get("content-type", "")
@@ -3805,6 +4886,8 @@ def _run_orca_slice_local(
     output_filename: str,
     plate: str = "1",
     all_plates: bool = False,
+    support_mode: str = "profile",
+    brim_mode: str = "profile",
 ) -> tuple[str, bytes, str]:
     exe = _orca_executable()
     if not exe:
@@ -3821,13 +4904,19 @@ def _run_orca_slice_local(
         tmp = Path(tmp_raw)
         source_path = tmp / f"source{suffix}"
         source_path.write_bytes(data)
+        machine_for_slice = tmp / "flightdeck-machine.json"
+        process_for_slice = tmp / "flightdeck-process.json"
+        filament_for_slice = tmp / "flightdeck-filament.json"
+        machine_for_slice.write_bytes(_normalise_slicer_profile_type(machine.read_bytes(), "machine"))
+        process_for_slice.write_bytes(_apply_slice_process_overrides(process.read_bytes(), support_mode=support_mode, brim_mode=brim_mode))
+        filament_for_slice.write_bytes(_normalise_slicer_profile_type(filament.read_bytes(), "filament"))
         args = [str(exe)]
         datadir = _orca_datadir()
         if datadir:
             args += ["--datadir", str(datadir)]
         args += [
-            "--load-settings", f"{machine};{process}",
-            "--load-filaments", str(filament),
+            "--load-settings", f"{machine_for_slice};{process_for_slice}",
+            "--load-filaments", str(filament_for_slice),
             "--allow-newer-file",
             "--slice", "0" if all_plates else str(plate or "1"),
         ]
@@ -3846,7 +4935,18 @@ def _run_orca_slice_local(
         proc = subprocess.run(args, text=True, capture_output=True, timeout=900)
         if proc.returncode not in (0, None):
             detail = (proc.stderr or proc.stdout or f"OrcaSlicer exited {proc.returncode}").strip()
-            raise HTTPException(status_code=502, detail=_friendly_slicer_error(detail))
+            source_ext = _queue_file_extension(safe_source)
+            friendly = _friendly_slicer_error(detail)
+            if (
+                _looks_like_h2d_slice_profile(profiles)
+                and source_ext in {".stl", ".obj"}
+                and "slic3r::cli::run found error" in detail.lower()
+            ):
+                friendly = (
+                    "Orca local CLI can slice this STL for single-toolhead printers, but this Orca build rejects "
+                    "the H2D loose STL slice profile. Open Orca for this H2D STL or start the Orca slicer API sidecar."
+                )
+            raise HTTPException(status_code=502, detail=friendly)
         if output_kind != "gcode.3mf" and not output_path.exists():
             generated = sorted(tmp.glob("*.gcode"), key=lambda p: p.stat().st_mtime, reverse=True)
             if generated:
@@ -3891,11 +4991,10 @@ async def get_slicer_profiles():
 
 
 @app.post("/api/slicer/profiles/sync")
-async def sync_slicer_profiles(body: SlicerProfileSyncRequest):
+async def sync_slicer_profiles(body: SlicerProfileSyncRequest, include_worker: bool = True):
+    settings = db.get_all_settings()
     vendors = [v.strip() for v in (body.vendors or []) if v.strip()] or ["BBL", "Sovol", "Voron", "Prusa", "Anycubic"]
     vendors = [v for v in vendors if v in _ORCA_PROFILE_VENDORS]
-    if not vendors:
-        raise HTTPException(status_code=422, detail="No supported profile vendors selected")
     synced = []
     errors = []
     for vendor in vendors:
@@ -3905,6 +5004,24 @@ async def sync_slicer_profiles(body: SlicerProfileSyncRequest):
             synced.append(vendor)
         except Exception as exc:
             errors.append({"vendor": vendor, "error": str(exc)})
+    try:
+        local = await asyncio.to_thread(_sync_local_orca_profiles)
+        if any(local["added"].values()):
+            db.save_slicer_profile_vendor(_ORCA_LOCAL_VENDOR, local["payload"])
+            synced.append(_ORCA_LOCAL_VENDOR)
+        elif not vendors:
+            errors.append({"vendor": _ORCA_LOCAL_VENDOR, "error": "No local Orca profiles found"})
+    except Exception as exc:
+        errors.append({"vendor": _ORCA_LOCAL_VENDOR, "error": str(exc)})
+    worker_url = (settings.get("orcaslicer_worker_url") or "").strip().rstrip("/")
+    if include_worker and worker_url:
+        worker = await asyncio.to_thread(_sync_worker_orca_profiles, worker_url)
+        if worker and worker.get("payload"):
+            db.save_slicer_profile_vendor(_ORCA_LOCAL_VENDOR, worker["payload"])
+            if _ORCA_LOCAL_VENDOR not in synced:
+                synced.append(_ORCA_LOCAL_VENDOR)
+        elif worker and worker.get("error") and _ORCA_LOCAL_VENDOR not in synced:
+            errors.append({"vendor": f"{_ORCA_LOCAL_VENDOR} worker", "error": worker["error"]})
     if errors and not synced:
         raise HTTPException(status_code=502, detail={"message": "Profile sync failed", "errors": errors})
     return {"ok": True, "synced": synced, "errors": errors, "vendors": db.get_slicer_profile_vendors()}
@@ -4004,10 +5121,48 @@ def _git_text(args: list[str], fallback: str = "", timeout: int = 8) -> str:
     return fallback
 
 
+_SAFE_UPDATE_DIRTY_PREFIXES = (
+    "logs/",
+    "tmp/",
+    "temp/",
+)
+_SAFE_UPDATE_DIRTY_FILENAMES = {
+    "00000.log",
+}
+
+
+def _git_dirty_entries() -> list[str]:
+    raw = _git_text(["status", "--porcelain"], "")
+    entries: list[str] = []
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        path = line[3:].strip() if len(line) > 3 else line
+        if " -> " in path:
+            path = path.split(" -> ", 1)[1].strip()
+        entries.append(path.replace("\\", "/"))
+    return entries
+
+
+def _is_safe_update_dirty_entry(path: str) -> bool:
+    clean = path.strip().lstrip("./").replace("\\", "/")
+    if clean in _SAFE_UPDATE_DIRTY_FILENAMES:
+        return True
+    if re.fullmatch(r"\d{5}\.log", clean):
+        return True
+    return any(clean.startswith(prefix) for prefix in _SAFE_UPDATE_DIRTY_PREFIXES)
+
+
+def _blocking_git_dirty_entries() -> list[str]:
+    return [path for path in _git_dirty_entries() if not _is_safe_update_dirty_entry(path)]
+
+
 def _app_version_info(include_remote: bool = False) -> dict:
     branch = _git_text(["rev-parse", "--abbrev-ref", "HEAD"], "unknown")
     commit = _git_text(["rev-parse", "--short", "HEAD"], "unknown")
-    dirty = bool(_git_text(["status", "--porcelain"], ""))
+    dirty_entries = _blocking_git_dirty_entries()
+    dirty = bool(dirty_entries)
     info = {
         "version": APP_VERSION,
         "name": APP_VERSION_NAME,
@@ -4015,6 +5170,7 @@ def _app_version_info(include_remote: bool = False) -> dict:
         "branch": branch,
         "commit": commit,
         "dirty": dirty,
+        "dirty_entries": dirty_entries[:20],
         "runtime": os.environ.get("FLIGHTDECK_RUNTIME", "").strip() or ("docker" if Path("/.dockerenv").exists() else "systemd"),
         "remote": _git_text(["config", "--get", "remote.origin.url"], ""),
     }
@@ -4049,6 +5205,46 @@ def _setup_check(
     return {"key": key, "label": label, "ok": ok, "level": level, "detail": detail, "optional": optional}
 
 
+_TESTED_FFMPEG_MAJOR_VERSIONS = {"5", "6", "7", "8"}
+_TESTED_FFMPEG_DETAIL = "Tested with Raspberry Pi OS/Debian apt FFmpeg 5.x and Gyan Windows FFmpeg 8.x"
+
+
+def _ffmpeg_compatibility() -> dict:
+    ffmpeg_path = shutil.which("ffmpeg")
+    if not ffmpeg_path:
+        return {
+            "available": False,
+            "tested": False,
+            "version_line": "",
+            "detail": "ffmpeg not found; Bambu camera streams will not work",
+        }
+    try:
+        proc = subprocess.run(
+            [ffmpeg_path, "-version"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        version_line = (proc.stdout or proc.stderr or "").splitlines()[0].strip()
+    except Exception as exc:
+        return {
+            "available": True,
+            "tested": False,
+            "version_line": "",
+            "detail": f"{ffmpeg_path} found but version check failed: {exc}",
+        }
+    match = re.search(r"ffmpeg version\s+([0-9]+)(?:\.([0-9]+))?", version_line, re.IGNORECASE)
+    major = match.group(1) if match else ""
+    tested = bool(major in _TESTED_FFMPEG_MAJOR_VERSIONS)
+    return {
+        "available": True,
+        "tested": tested,
+        "version_line": version_line,
+        "detail": f"{version_line} ({_TESTED_FFMPEG_DETAIL if tested else 'untested FFmpeg major version for Flightdeck camera proxy'})",
+    }
+
+
 def _is_writable_dir(path: Path) -> bool:
     path.mkdir(parents=True, exist_ok=True)
     probe = path / ".flightdeck-write-test"
@@ -4058,6 +5254,272 @@ def _is_writable_dir(path: Path) -> bool:
         return True
     except Exception:
         return False
+
+
+_DIAGNOSTIC_MAX_TEXT_BYTES = 320 * 1024
+_DIAGNOSTIC_SECRET_KEY_RE = re.compile(
+    r"(access[_-]?code|serial|token|secret|password|passwd|passcode|api[_-]?key|mqtt[_-]?password)",
+    re.IGNORECASE,
+)
+_DIAGNOSTIC_ASSIGNMENT_RE = re.compile(
+    r"^(\s*(?:[A-Za-z0-9_.-]*(?:access[_-]?code|serial|token|secret|password|passwd|passcode|api[_-]?key|mqtt[_-]?password)[A-Za-z0-9_.-]*)\s*[:=]\s*).*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def _diagnostic_redact_value(key: str, value):
+    if _DIAGNOSTIC_SECRET_KEY_RE.search(str(key or "")):
+        return "[redacted]"
+    if isinstance(value, dict):
+        return {k: _diagnostic_redact_value(k, v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_diagnostic_redact_value(key, item) for item in value]
+    return value
+
+
+def _diagnostic_redact_text(text: str) -> str:
+    return _DIAGNOSTIC_ASSIGNMENT_RE.sub(r"\1[redacted]", text)
+
+
+def _diagnostic_tail_text(path: Path, max_bytes: int = _DIAGNOSTIC_MAX_TEXT_BYTES) -> str:
+    data = path.read_bytes()
+    if len(data) > max_bytes:
+        data = data[-max_bytes:]
+        prefix = f"[truncated to last {max_bytes} bytes from {path}]\n"
+    else:
+        prefix = ""
+    return prefix + _diagnostic_redact_text(data.decode("utf-8", errors="replace"))
+
+
+def _diagnostic_json(value) -> str:
+    return json.dumps(value, indent=2, sort_keys=True, default=_dt_default) + "\n"
+
+
+def _diagnostic_support_field(value, max_len: int = 4000) -> str:
+    text = str(value or "")
+    text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", " ", text).strip()
+    if len(text) > max_len:
+        text = text[:max_len].rstrip() + "\n[truncated]"
+    return text
+
+
+def _diagnostic_support_payload(payload: dict | None) -> dict:
+    payload = payload or {}
+    fields = {
+        "name": 200,
+        "email": 320,
+        "problem": 4000,
+        "expected": 4000,
+        "notes": 4000,
+    }
+    return {key: _diagnostic_support_field(payload.get(key), max_len) for key, max_len in fields.items()}
+
+
+def _diagnostic_support_text(support: dict) -> str:
+    labels = [
+        ("name", "Name"),
+        ("email", "Email"),
+        ("problem", "Problem / what happened"),
+        ("expected", "Expected / what they were trying to do"),
+        ("notes", "Extra notes"),
+    ]
+    lines = ["Flightdeck support request", ""]
+    for key, label in labels:
+        value = support.get(key) or ""
+        lines.extend([label, value or "(blank)", ""])
+    lines.append("Send this zip to flightdeck3dprinters@gmail.com.")
+    return "\n".join(lines) + "\n"
+
+
+def _diagnostic_recent_decisions(limit: int = 250) -> list[dict]:
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                """SELECT id, print_id, printer_id, event, detail, logged_at
+                   FROM decisions
+                   ORDER BY logged_at DESC
+                   LIMIT ?""",
+                (limit,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+    except Exception as exc:
+        return [{"error": str(exc)}]
+
+
+def _diagnostic_recent_notifications(limit: int = 120) -> list[dict]:
+    try:
+        return db.list_notifications(limit=limit, include_cleared=True)
+    except Exception as exc:
+        return [{"error": str(exc)}]
+
+
+def _diagnostic_command(name: str, args: list[str], timeout: int = 5) -> tuple[str, str]:
+    try:
+        proc = subprocess.run(args, text=True, capture_output=True, timeout=timeout)
+        output = (proc.stdout or "") + (("\n" + proc.stderr) if proc.stderr else "")
+        if not output.strip():
+            output = f"{name} exited {proc.returncode} with no output\n"
+        if name == "journal-flightdeck.txt" and (
+            "No journal files were opened due to insufficient permissions" in output
+            or "Hint: You are currently not seeing messages" in output
+        ):
+            output += (
+                "\nFlightdeck could not read systemd journal logs from the running service user.\n"
+                "Refresh the systemd unit with scripts/install-systemd.sh, or run:\n"
+                "  sudo usermod -aG systemd-journal flightdeck\n"
+                "  sudo systemctl restart flightdeck\n"
+            )
+        return name, _diagnostic_redact_text(output)
+    except Exception as exc:
+        return name, f"{name} unavailable: {exc}\n"
+
+
+def _journal_status() -> tuple[bool, str]:
+    runtime = os.environ.get("FLIGHTDECK_RUNTIME", "").strip().lower()
+    if os.name == "nt" or runtime in {"windows", "tray", "windows-tray"}:
+        return True, "Windows runtime"
+    if runtime in {"docker", "container", "portainer"} or Path("/.dockerenv").exists():
+        return True, "Container-managed logs"
+    try:
+        proc = subprocess.run(
+            ["journalctl", "-u", "flightdeck.service", "-n", "1", "--no-pager", "--quiet"],
+            text=True,
+            capture_output=True,
+            timeout=3,
+        )
+        output = (proc.stdout or "") + (("\n" + proc.stderr) if proc.stderr else "")
+        if "No journal files were opened due to insufficient permissions" in output:
+            return False, "Service user cannot read journal logs; rerun scripts/install-systemd.sh or add flightdeck to systemd-journal"
+        return proc.returncode == 0, "Readable" if proc.returncode == 0 else (output.strip() or f"journalctl exited {proc.returncode}")
+    except Exception as exc:
+        return False, str(exc)
+
+
+async def _diagnostic_bundle_bytes(support: dict | None = None) -> bytes:
+    now = datetime.now(timezone.utc)
+    support_payload = _diagnostic_support_payload(support) if support is not None else None
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        def add_text(name: str, text: str) -> None:
+            zf.writestr(name, text)
+
+        add_text("README.txt", "\n".join([
+            "Flightdeck diagnostic bundle",
+            f"Generated: {now.isoformat()}",
+            "",
+            "This bundle is intended for support/debugging.",
+            "Known secret-like settings are redacted, but review before sharing publicly.",
+            "",
+        ]))
+        if support_payload is not None:
+            add_text("support-request.txt", _diagnostic_support_text(support_payload))
+            add_text("support-request.json", _diagnostic_json({
+                "generated_at": now.isoformat(),
+                "contact": {
+                    "name": support_payload.get("name", ""),
+                    "email": support_payload.get("email", ""),
+                },
+                "problem": support_payload.get("problem", ""),
+                "expected": support_payload.get("expected", ""),
+                "notes": support_payload.get("notes", ""),
+            }))
+        add_text("version.json", _diagnostic_json(_app_version_info(include_remote=False)))
+        add_text("instance.json", _diagnostic_json({
+            "app": "flightdeck",
+            "version": APP_VERSION,
+            "version_name": APP_VERSION_NAME,
+            "address": _local_ipv4(),
+            "hardware": _hardware_label(),
+            "runtime": os.environ.get("FLIGHTDECK_RUNTIME", "").strip() or ("docker" if Path("/.dockerenv").exists() else "systemd"),
+            "host": _host_health(),
+            "camera_workers": _camera_worker_status(),
+        }))
+        add_text("setup-health.json", _diagnostic_json(await setup_health()))
+        add_text("settings.redacted.json", _diagnostic_json(_diagnostic_redact_value("", db.get_all_settings())))
+        add_text("recent-decisions.json", _diagnostic_json(_diagnostic_recent_decisions()))
+        add_text("recent-notifications.json", _diagnostic_json(_diagnostic_recent_notifications()))
+
+        if PRINTERS_CONFIG_PATH.exists():
+            add_text("printers.redacted.yaml", _diagnostic_tail_text(PRINTERS_CONFIG_PATH, max_bytes=512 * 1024))
+        else:
+            add_text("printers.redacted.yaml", f"Missing printer config: {PRINTERS_CONFIG_PATH}\n")
+
+        env_keys = {
+            key: value
+            for key, value in os.environ.items()
+            if key.startswith("FLIGHTDECK_") or key in {"PATH", "PYTHONPATH", "LOCALAPPDATA"}
+        }
+        add_text("environment.redacted.json", _diagnostic_json(_diagnostic_redact_value("", env_keys)))
+
+        log_dirs = [DATA_DIR / "logs", APP_DIR / "logs"]
+        seen_logs: set[Path] = set()
+        for log_dir in log_dirs:
+            if not log_dir.exists():
+                continue
+            for path in sorted(log_dir.glob("*.log"), key=lambda p: p.stat().st_mtime if p.exists() else 0, reverse=True)[:8]:
+                resolved = path.resolve()
+                if resolved in seen_logs or not path.is_file():
+                    continue
+                seen_logs.add(resolved)
+                add_text(f"logs/{path.name}", _diagnostic_tail_text(path))
+
+        for name, args in [
+            ("git-status.txt", ["git", "-C", str(APP_DIR), "status", "--short", "--branch"]),
+            ("git-log.txt", ["git", "-C", str(APP_DIR), "log", "--oneline", "-20"]),
+            ("python-version.txt", [shutil.which("python") or "python", "--version"]),
+            ("ffmpeg-version.txt", [shutil.which("ffmpeg") or "ffmpeg", "-version"]),
+        ]:
+            command_name, output = _diagnostic_command(name, args)
+            add_text(f"commands/{command_name}", output)
+
+        if os.name != "nt":
+            for name, args in [
+                ("systemd-flightdeck.txt", ["systemctl", "status", "flightdeck.service", "--no-pager"]),
+                ("journal-flightdeck.txt", ["journalctl", "-u", "flightdeck.service", "-n", "250", "--no-pager"]),
+                ("processes.txt", ["ps", "-eo", "pid,ppid,comm,args"]),
+            ]:
+                command_name, output = _diagnostic_command(name, args, timeout=8)
+                add_text(f"commands/{command_name}", output)
+
+    return buffer.getvalue()
+
+
+@app.get("/api/setup/logs/download")
+async def download_setup_logs():
+    data = await _diagnostic_bundle_bytes()
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    return Response(
+        content=data,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="flightdeck-diagnostics-{stamp}.zip"',
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+@app.post("/api/setup/logs/support")
+async def download_support_logs(body: SupportBundleRequest):
+    support = body.model_dump()
+    required = {
+        "name": "Name",
+        "email": "Email",
+        "problem": "Problem / what happened",
+    }
+    missing = [label for key, label in required.items() if not _diagnostic_support_field(support.get(key))]
+    if missing:
+        raise HTTPException(status_code=422, detail=f"Please fill in: {', '.join(missing)}")
+    data = await _diagnostic_bundle_bytes(support=support)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    return Response(
+        content=data,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="flightdeck-support-{stamp}.zip"',
+            "Cache-Control": "no-store",
+        },
+    )
 
 
 def _systemd_status() -> tuple[bool, str]:
@@ -4284,7 +5746,9 @@ async def update_status(check_remote: bool = False):
 async def run_update():
     info = _app_version_info(include_remote=False)
     if info.get("dirty"):
-        raise HTTPException(status_code=409, detail="Local changes are present. Commit or stash them before updating.")
+        entries = info.get("dirty_entries") or []
+        suffix = f": {', '.join(entries[:5])}" if entries else ""
+        raise HTTPException(status_code=409, detail=f"Local changes are present. Commit or stash them before updating{suffix}.")
     branch = str(info.get("branch") or "")
     if branch in {"", "unknown", "HEAD"}:
         raise HTTPException(status_code=409, detail="Flightdeck is not on a named Git branch.")
@@ -4381,6 +5845,21 @@ async def setup_health():
     base_ok, base_detail = _tailnet_hint(settings.get("system_base_url", ""))
     checks.append(_setup_check("base_url", "Base URL", base_ok, base_detail))
 
+    slicer_api_url = str(settings.get("orcaslicer_api_url") or "").strip()
+    slicer_api = await _probe_slicer_api(slicer_api_url) if slicer_api_url else {
+        "configured": False,
+        "ok": False,
+        "detail": "Not configured",
+    }
+    checks.append(_setup_check(
+        "slicer_api",
+        "Slicer API sidecar",
+        bool(slicer_api.get("ok")),
+        str(slicer_api.get("detail") or "Unavailable"),
+        level="ok" if slicer_api.get("ok") else "warn",
+        optional=True,
+    ))
+
     scale_status = _scale.is_available()
     checks.append(_setup_check(
         "scale",
@@ -4407,6 +5886,15 @@ async def setup_health():
         level="ok" if camera_workers_ok else "warn",
         optional=True,
     ))
+    ffmpeg = _ffmpeg_compatibility()
+    checks.append(_setup_check(
+        "ffmpeg",
+        "FFmpeg camera driver",
+        bool(ffmpeg.get("available") and ffmpeg.get("tested")),
+        str(ffmpeg.get("detail") or "Unknown"),
+        level="ok" if ffmpeg.get("tested") else "warn",
+        optional=True,
+    ))
 
     systemd_ok, systemd_detail = _systemd_status()
     container_managed = "managed" in systemd_detail.lower()
@@ -4418,6 +5906,15 @@ async def setup_health():
         systemd_detail,
         level="ok" if container_managed and systemd_ok else None,
         optional=not container_managed,
+    ))
+    journal_ok, journal_detail = _journal_status()
+    checks.append(_setup_check(
+        "journal",
+        "Journal logs",
+        journal_ok,
+        journal_detail,
+        level="ok" if journal_ok else "warn",
+        optional=True,
     ))
 
     required = [c for c in checks if not c["optional"]]
@@ -4530,6 +6027,69 @@ OPEN_FILAMENT_CSV_BASES = [
     "https://api.openfilamentdatabase.org/csv",
     "https://openfilamentcollective.github.io/open-filament-database/csv",
 ]
+SIDDAMENT_PRODUCTS_URL = "https://siddament.com.au/products.json"
+SIDDAMENT_PRODUCT_BASE_URL = "https://siddament.com.au/products"
+SIDDAMENT_FILAMENT_TYPES = {
+    "PLA": ("PLA", None),
+    "PLA PRO": ("PLA+", "Pro"),
+    "PLA MATTE": ("PLA", "Matte"),
+    "PLA SILK": ("PLA", "Silk"),
+    "PLA SINGLE ROLL": ("PLA", "Single Roll"),
+    "PLA SILK DUAL COLOR": ("PLA", "Silk Dual Colour"),
+    "PLA SILK TRI-COLOR": ("PLA", "Silk Tri Colour"),
+    "PLA RAINBOW": ("PLA", "Rainbow"),
+    "PLA STARLIGHT": ("PLA", "Starlight"),
+    "PLA MARBLE": ("PLA", "Marble"),
+    "PLA LUMINOUS": ("PLA", "Luminous"),
+    "PLA WOODEN": ("PLA", "Wood"),
+    "PLA-CFRP-CF": ("PLA-CF", "Carbon Fibre"),
+    "LW PLA": ("PLA", "LW"),
+    "HTPLA": ("HTPLA", None),
+    "PETG": ("PETG", None),
+    "PETG DUAL COLOR": ("PETG", "Dual Colour"),
+    "PETG SINGLE ROLL": ("PETG", "Single Roll"),
+    "ASA": ("ASA", None),
+    "ABS": ("ABS", None),
+    "ABS PRO": ("ABS", "Pro"),
+    "TPU": ("TPU", None),
+    "TPU 95A": ("TPU", "95A"),
+    "SILK TPU 95A": ("TPU", "Silk 95A"),
+    "SHOEFLEX": ("TPU", "ShoeFlex"),
+    "PCTG": ("PCTG", None),
+    "PC": ("PC", None),
+    "PCCF": ("PC-CF", None),
+    "PA12 CF": ("PA12-CF", None),
+    "PA6 CF": ("PA6-CF", None),
+    "PPA CF": ("PPA-CF", None),
+    "FILAMENT": ("PLA", None),
+}
+SIDDAMENT_NON_FILAMENT_TAGS = {"hidden", "printed-parts", "surcharge"}
+SIDDAMENT_COLOUR_HEX = {
+    "BLACK": "#111111",
+    "WHITE": "#F8FAFC",
+    "PURE WHITE": "#FFFFFF",
+    "GREY": "#808080",
+    "GRAY": "#808080",
+    "SILVER": "#C0C0C0",
+    "RED": "#EF4444",
+    "ORANGE": "#F97316",
+    "YELLOW": "#EAB308",
+    "GOLD": "#B8860B",
+    "GREEN": "#22C55E",
+    "PEAK GREEN": "#8EDD65",
+    "BLUE": "#3B82F6",
+    "NAVY BLUE": "#0F2A44",
+    "PURPLE": "#8B5CF6",
+    "PINK": "#EC4899",
+    "HOT PINK": "#FF4F8B",
+    "BROWN": "#7C4B00",
+    "BEIGE": "#D8C6A5",
+    "NATURAL": "#E7E5DA",
+    "TRANSPARENT": "#DDEEFF",
+    "CLEAR": "#DDEEFF",
+    "CARBON FIBRE": "#202020",
+    "CARBON FIBER": "#202020",
+}
 
 
 def _catalog_float(value: object) -> Optional[float]:
@@ -4557,6 +6117,177 @@ def _catalog_rows(name: str) -> list[dict]:
             last_error = exc
             _app_log.warning("catalogue fetch failed for %s: %s", url, exc)
     raise RuntimeError(f"Could not fetch {name}.csv: {last_error}")
+
+
+def _siddament_tags(product: dict) -> list[str]:
+    tags = product.get("tags") or []
+    if isinstance(tags, str):
+        return [t.strip() for t in tags.split(",") if t.strip()]
+    if isinstance(tags, list):
+        return [str(t).strip() for t in tags if str(t).strip()]
+    return []
+
+
+def _siddament_material(product: dict) -> tuple[Optional[str], Optional[str]]:
+    product_type = str(product.get("product_type") or "").strip().upper()
+    title = str(product.get("title") or "").strip()
+    tags = _siddament_tags(product)
+    if product_type in SIDDAMENT_FILAMENT_TYPES:
+        material, subtype = SIDDAMENT_FILAMENT_TYPES[product_type]
+    else:
+        text = " ".join([product_type, title, " ".join(tags)]).upper()
+        material, subtype = None, None
+        for key in sorted(SIDDAMENT_FILAMENT_TYPES, key=len, reverse=True):
+            if re.search(rf"\b{re.escape(key)}\b", text):
+                material, subtype = SIDDAMENT_FILAMENT_TYPES[key]
+                break
+        if not material:
+            return None, None
+    title_upper = title.upper()
+    if "PLA+" in title_upper or "PLA PLUS" in title_upper:
+        material = "PLA+"
+    if "CARBON FIB" in title_upper and material in {"PLA", "PETG", "ASA", "ABS", "PC"}:
+        subtype = "Carbon Fibre" if not subtype else subtype
+    return material, subtype
+
+
+def _siddament_colour(product: dict) -> tuple[str, str]:
+    title = str(product.get("title") or "").strip()
+    tags = _siddament_tags(product)
+    candidates = tags + [title]
+    for candidate in candidates:
+        upper = str(candidate or "").upper()
+        for name in sorted(SIDDAMENT_COLOUR_HEX, key=len, reverse=True):
+            if re.search(rf"\b{re.escape(name)}\b", upper):
+                label = name.title().replace("Pla", "PLA").replace("Petg", "PETG")
+                return label, SIDDAMENT_COLOUR_HEX[name]
+    cleaned = re.sub(
+        r"\b(PLA\+?|PLA PLUS|PETG|ASA|ABS|TPU|PCTG|PC|PA12|PA6|PPA|CF|CARBON|FIB(?:RE|ER)|MATTE|SILK|PRO|NORMAL|FILAMENT)\b",
+        "",
+        title,
+        flags=re.I,
+    )
+    cleaned = re.sub(r"[-_/]+", " ", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" -")
+    return (cleaned or "Siddament colour"), "#808080"
+
+
+def _siddament_filament_weight(title: str, variant: dict) -> Optional[float]:
+    text = " ".join([title, str(variant.get("title") or ""), str(variant.get("sku") or "")])
+    match = re.search(r"\b(\d+(?:\.\d+)?)\s*kg\b", text, flags=re.I)
+    if match:
+        return float(match.group(1)) * 1000
+    match = re.search(r"\b(\d{3,4})\s*g\b", text, flags=re.I)
+    if match:
+        return float(match.group(1))
+    grams = _catalog_float(variant.get("grams"))
+    if grams:
+        if 2500 <= grams <= 3600:
+            return 3000.0
+        if 1100 <= grams <= 1800:
+            return 1000.0
+        if 650 <= grams <= 950:
+            return 500.0
+    return None
+
+
+def _siddament_subtype(product: dict, material: str, fallback: Optional[str]) -> Optional[str]:
+    title = str(product.get("title") or "").strip()
+    bits = []
+    if fallback:
+        bits.append(fallback)
+    title_upper = title.upper()
+    for label, pattern in [
+        ("Matte", r"\bMATTE\b"),
+        ("Silk", r"\bSILK\b"),
+        ("Carbon Fibre", r"\bCARBON FIB(?:RE|ER)\b|\bCF\b"),
+        ("Glass Fibre", r"\bGLASS FIB(?:RE|ER)\b|\bGF\b"),
+        ("Dual Colour", r"\bDUAL COLOU?R\b"),
+        ("Tri Colour", r"\bTRI[-\s]?COLOU?R\b"),
+        ("Translucent", r"\bTRANSLUCENT\b|\bTRANSPARENT\b"),
+        ("Wood", r"\bWOOD(?:EN)?\b"),
+        ("Marble", r"\bMARBLE\b"),
+        ("Glow", r"\bGLOW\b|\bLUMINOUS\b"),
+        ("Sparkle", r"\bSPARKLE\b|STARDUST|STARLIGHT"),
+    ]:
+        if re.search(pattern, title_upper) and label not in bits:
+            bits.append(label)
+    if material == "PLA+" and "PLA+" not in bits:
+        bits.insert(0, "PLA+")
+    return " ".join(bits) or None
+
+
+def _sync_siddament_catalog() -> dict:
+    rows: list[dict] = []
+    page = 1
+    headers = {
+        "User-Agent": "Flightdeck/1.0 Siddament filament-catalog-sync",
+        "Accept": "application/json,*/*",
+    }
+    while page <= 20:
+        url = f"{SIDDAMENT_PRODUCTS_URL}?limit=250&page={page}"
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=45) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+        products = payload.get("products") or []
+        if not products:
+            break
+        for product in products:
+            tags = _siddament_tags(product)
+            tag_keys = {t.strip().lower() for t in tags}
+            if tag_keys & SIDDAMENT_NON_FILAMENT_TAGS:
+                continue
+            material, base_subtype = _siddament_material(product)
+            if not material:
+                continue
+            title = str(product.get("title") or "").strip()
+            colour_name, colour_hex = _siddament_colour(product)
+            subtype = _siddament_subtype(product, material, base_subtype)
+            product_url = f"{SIDDAMENT_PRODUCT_BASE_URL}/{product.get('handle')}" if product.get("handle") else ""
+            variants = product.get("variants") or [{}]
+            for variant in variants:
+                if variant.get("requires_shipping") is False:
+                    continue
+                filament_weight = _siddament_filament_weight(title, variant)
+                gross_weight = _catalog_float(variant.get("grams"))
+                tare = None
+                if gross_weight and filament_weight and gross_weight > filament_weight:
+                    tare = round(gross_weight - filament_weight, 1)
+                variant_title = str(variant.get("title") or "").strip()
+                row_colour = colour_name
+                if variant_title and variant_title.lower() != "default title":
+                    row_colour = f"{colour_name} {variant_title}".strip()
+                traits = {
+                    "source": "Siddament Shopify products.json",
+                    "product_url": product_url,
+                    "sku": variant.get("sku") or "",
+                    "barcode": variant.get("barcode") or "",
+                    "price_aud": variant.get("price"),
+                    "available": bool(variant.get("available")),
+                    "product_type": product.get("product_type") or "",
+                    "tags": tags,
+                    "gross_weight_g": gross_weight,
+                    "shop_updated_at": product.get("updated_at") or variant.get("updated_at") or "",
+                }
+                rows.append({
+                    "source_variant_id": str(variant.get("id") or product.get("id") or ""),
+                    "source_filament_id": str(product.get("id") or ""),
+                    "brand": "Siddament",
+                    "material": material,
+                    "product": title,
+                    "subtype": subtype,
+                    "color_name": row_colour,
+                    "color_hex": colour_hex,
+                    "filament_weight_g": filament_weight,
+                    "empty_spool_weight_g": tare,
+                    "diameter": 1.75,
+                    "traits": json.dumps(traits, sort_keys=True),
+                    "discontinued": (not bool(variant.get("available", True))) or ("discontinued" in tag_keys),
+                })
+        page += 1
+    count = db.replace_filament_catalog(rows, source="siddament")
+    db.log_decision("system", "filament_catalog_synced", f"Siddament rows imported: {count}")
+    return {"ok": True, "imported": count, **db.get_filament_catalog_status("siddament")}
 
 
 def _sync_open_filament_catalog() -> dict:
@@ -4611,18 +6342,49 @@ async def get_filament_costs():
 
 
 @app.get("/api/filament/catalog/status")
-async def get_filament_catalog_status():
-    return db.get_filament_catalog_status()
+async def get_filament_catalog_status(source: str = "open_filament_database"):
+    if source == "all":
+        return {
+            "sources": [
+                db.get_filament_catalog_status("open_filament_database"),
+                db.get_filament_catalog_status("siddament"),
+            ]
+        }
+    return db.get_filament_catalog_status(source)
 
 
 @app.post("/api/filament/catalog/sync")
-async def sync_filament_catalog():
-    try:
-        return await asyncio.to_thread(_sync_open_filament_catalog)
-    except Exception as exc:
-        _app_log.exception("filament catalog sync failed")
-        _notify("warn", "Filament catalogue sync failed", str(exc), link="#/settings/filament")
-        raise HTTPException(status_code=502, detail=f"Filament catalogue sync failed: {exc}")
+async def sync_filament_catalog(source: str = "all"):
+    source = (source or "all").strip().lower()
+    syncers = {
+        "open_filament_database": _sync_open_filament_catalog,
+        "ofd": _sync_open_filament_catalog,
+        "siddament": _sync_siddament_catalog,
+    }
+    if source not in {"all", *syncers.keys()}:
+        raise HTTPException(status_code=422, detail=f"Unknown catalogue source: {source}")
+    targets = [("open_filament_database", _sync_open_filament_catalog), ("siddament", _sync_siddament_catalog)]
+    if source != "all":
+        target_name = "open_filament_database" if source == "ofd" else source
+        targets = [(target_name, syncers[source])]
+    results: list[dict] = []
+    errors: list[dict] = []
+    for name, syncer in targets:
+        try:
+            result = await asyncio.to_thread(syncer)
+            result["source"] = name
+            results.append(result)
+        except Exception as exc:
+            _app_log.exception("%s filament catalog sync failed", name)
+            errors.append({"source": name, "error": str(exc)})
+    if not results:
+        detail = "; ".join(f"{e['source']}: {e['error']}" for e in errors) or "Catalogue sync failed"
+        _notify("warn", "Filament catalogue sync failed", detail, link="#/settings/filament")
+        raise HTTPException(status_code=502, detail=f"Filament catalogue sync failed: {detail}")
+    imported = sum(int(r.get("imported") or 0) for r in results)
+    if errors:
+        _notify("warn", "Filament catalogue partially synced", "; ".join(f"{e['source']}: {e['error']}" for e in errors), link="#/spools?view=catalogue")
+    return {"ok": not errors, "imported": imported, "results": results, "errors": errors}
 
 
 @app.get("/api/filament/catalog/search")
@@ -4682,10 +6444,22 @@ class SpoolUpdate(BaseModel):
     empty_spool_weight_g: Optional[float] = None
     notes: Optional[str] = None
 
+class AmsSlotProfileOverride(BaseModel):
+    profile_name: Optional[str] = None
+    tray_type: Optional[str] = None
+    tray_info_idx: Optional[str] = None
+    brand: Optional[str] = None
+    color: Optional[str] = None
+    nozzle_temp_min: Optional[int] = None
+    nozzle_temp_max: Optional[int] = None
+
 class SpoolMove(BaseModel):
     printer_id: Optional[str] = None
     slot: Optional[int] = None
     storage_location_id: Optional[int] = None
+    replace_existing: bool = False
+    ams_profile: Optional[AmsSlotProfileOverride] = None
+    sync_ams: bool = False
 
 class SpoolTrustPrinter(BaseModel):
     printer_id: str
@@ -5064,13 +6838,26 @@ async def reconcile_print_spool_usage(print_id: int, spool_id: int, body: SpoolU
 async def move_spool(spool_id: int, body: SpoolMove):
     before = db.get_spool(spool_id)
     result = db.move_spool(spool_id, body.printer_id, body.slot, body.storage_location_id)
+    replaced_spool = None
     if not result["ok"]:
         conflict = db.get_spool(result["conflict_spool_id"])
-        raise HTTPException(status_code=409, detail={
-            "message": "Slot occupied",
-            "conflict_spool_id": result["conflict_spool_id"],
-            "conflict_spool": conflict,
-        })
+        if body.replace_existing and body.printer_id and body.slot is not None and conflict:
+            replaced_spool = conflict
+            clear_result = db.move_spool(int(conflict["id"]), None, None, None)
+            if not clear_result["ok"]:
+                raise HTTPException(status_code=409, detail={
+                    "message": "Unable to return existing spool before assigning slot",
+                    "conflict_spool_id": conflict["id"],
+                    "conflict_spool": conflict,
+                })
+            result = db.move_spool(spool_id, body.printer_id, body.slot, body.storage_location_id)
+        if not result["ok"]:
+            conflict = db.get_spool(result["conflict_spool_id"])
+            raise HTTPException(status_code=409, detail={
+                "message": "Slot occupied",
+                "conflict_spool_id": result["conflict_spool_id"],
+                "conflict_spool": conflict,
+            })
     ams_sync = None
     if before and before.get("location_printer_id") and before.get("location_slot") is not None:
         moved_slot = (
@@ -5085,8 +6872,14 @@ async def move_spool(spool_id: int, body: SpoolMove):
             )
     if body.printer_id and body.slot is not None:
         spool = db.get_spool(spool_id)
-        ams_sync = await _sync_bambu_ams_slot(body.printer_id, body.slot, spool)
-    return {"ok": True, "ams_sync": ams_sync}
+        profile_override = body.ams_profile.model_dump(exclude_none=True) if body.ams_profile else None
+        if body.sync_ams or profile_override:
+            ams_sync = await _sync_bambu_ams_slot(body.printer_id, body.slot, spool, profile_override)
+    return {
+        "ok": True,
+        "ams_sync": ams_sync,
+        "replaced_spool_id": replaced_spool["id"] if replaced_spool else None,
+    }
 
 
 @app.post("/api/spools/{spool_id}/trust_printer")
@@ -5135,40 +6928,22 @@ async def trust_printer_spool(spool_id: int, body: SpoolTrustPrinter):
     return {"ok": True, "updated": fields}
 
 
-async def _sync_bambu_ams_slot(printer_id: str, slot: int, spool: Optional[dict]) -> Optional[bool]:
+async def _sync_bambu_ams_slot(
+    printer_id: str,
+    slot: int,
+    spool: Optional[dict],
+    profile_override: Optional[dict] = None,
+) -> Optional[bool]:
     for p in _bambu:
         if p.id != printer_id:
             continue
         try:
-            clear_first = False
-            if spool:
-                status = _latest_printers.get(printer_id)
-                reported = next(
-                    (
-                        s for s in _flatten_reported_ams_slots(status, include_empty=True)
-                        if int(s.get("flat_slot", -1)) == int(slot)
-                    ),
-                    None,
-                )
-                if reported and not reported.get("empty"):
-                    reported_material = _norm_material(reported.get("type"))
-                    spool_material = _norm_material(spool.get("material"))
-                    colour_mismatch = _hex_dist(reported.get("color"), spool.get("color_hex")) > 35
-                    material_mismatch = (
-                        reported_material
-                        and spool_material
-                        and not _spool_matches_material(spool, reported.get("type"))
-                    )
-                    clear_first = bool(colour_mismatch or material_mismatch)
-            if clear_first:
-                await asyncio.to_thread(p.set_ams_slot_filament, slot, None)
-                await asyncio.sleep(3)
-            ok = await asyncio.to_thread(p.set_ams_slot_filament, slot, spool)
+            ok = await asyncio.to_thread(p.set_ams_slot_filament, slot, spool, profile_override)
             action = "ams_slot_synced" if spool else "ams_slot_cleared"
             target = f"{printer_id}:{slot}"
             detail = f"{target} {'spool #' + str(spool['id']) if spool else 'empty'}"
-            if clear_first:
-                detail += " after clearing stale printer profile"
+            if profile_override and spool:
+                detail += f" profile={profile_override.get('profile_name') or profile_override.get('tray_type') or 'custom'}"
             db.log_decision(printer_id, action, detail)
             return bool(ok)
         except Exception as exc:

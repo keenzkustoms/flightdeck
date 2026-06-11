@@ -89,6 +89,7 @@ class PrinterEntry(BaseModel):
     camera: Optional[Camera] = None
 
     temperature_presets: Optional[dict] = None   # {hotend: [{label, value}], bed: [...]}
+    build_volume: Optional[dict] = None          # {x, y, z} in mm, used by bed maps/exclude-object layout
 
     # Future expansion fields — optional so old configs stay valid
     park_position: Optional[str] = None

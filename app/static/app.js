@@ -96,6 +96,10 @@ function _printerSecondaryLabel(p) {
   return p?.id && p.id !== primary ? p.id : '';
 }
 
+function _asList(value) {
+  return Array.isArray(value) ? value : [];
+}
+
 function _isMoonrakerFamily(p) {
   const kind = typeof p === 'string' ? p : (p?.kind || p?.connection?.type || '');
   return kind === 'moonraker' || kind === 'snapmaker_u1';
@@ -106,23 +110,19 @@ function _isSnapmakerU1(p) {
   return kind === 'snapmaker_u1';
 }
 
-function _list(value) {
-  return Array.isArray(value) ? value : [];
-}
-
-function _snapmakerMonitorUrl(host) {
-  const clean = String(host || '').trim().replace(/^https?:\/\//i, '').replace(/\/+$/, '');
-  return clean ? `http://${clean}/webcam/snapshot.jpg` : '';
-}
-
 function _snapmakerMjpegUrl(host) {
   const clean = String(host || '').trim().replace(/^https?:\/\//i, '').replace(/\/+$/, '');
   return clean ? `http://${clean}/webcam/stream.mjpg` : '';
 }
 
-function _snapmakerWebrtcUrl(host) {
+function _snapmakerSnapshotUrl(host) {
   const clean = String(host || '').trim().replace(/^https?:\/\//i, '').replace(/\/+$/, '');
-  return clean ? `http://${clean}/webcam/webrtc` : '';
+  return clean ? `http://${clean}/webcam/snapshot.jpg` : '';
+}
+
+function _isGenericMjpegUrl(value, mode) {
+  const path = mode === 'snapshot' ? 'snapshot' : 'stream';
+  return !value || new RegExp(`/webcam/\\?action=${path}$`, 'i').test(String(value).trim());
 }
 
 function _bambuLightWordHtml(p) {
@@ -310,9 +310,10 @@ let _latestPrinters = [];
 let _tabsBuilt = false;
 let _missionRenderInFlight = false;
 let _missionLastHtml = '';
-const _cameraUrlCache = {};     // printer_id -> url string or null
-const _cameraMetaCache = {};    // printer_id -> camera metadata
+const _cameraUrlCache = {};     // printer_id → url string or null
+const _cameraMetaCache = {};    // printer_id → camera metadata
 const _CAMERA_STREAM_REFRESH_MS = 120000;
+const _CAMERA_SIGNAL_STALE_MS = 45000;
 let _renderedDetailId = null;
 let _renderedDetailSubtab = null;
 let _renderedDetailOk = false;
@@ -1452,6 +1453,25 @@ function _dashboardBriefingRow(row) {
   return `<div class="briefing-row briefing-${row.tone || 'info'}">${content}</div>`;
 }
 
+function _dashboardPrinterBriefingCard(group) {
+  const rows = (group.rows || []).filter(Boolean);
+  const body = rows.length
+    ? `<div class="briefing-group-rows">${rows.map(_dashboardBriefingRow).join('')}</div>`
+    : `<div class="briefing-printer-clear">
+        <strong>Clear</strong>
+        <span>No current actions for this printer.</span>
+      </div>`;
+  return `<article class="briefing-group briefing-${group.tone || 'info'}">
+    <div class="briefing-group-head">
+      <span>${esc(group.model || 'Printer')}</span>
+      <strong>${esc(group.title)}</strong>
+      <small>${esc(group.detail || '')}</small>
+    </div>
+    <b class="briefing-group-count">${rows.length}</b>
+    ${body}
+  </article>`;
+}
+
 function _dashboardLoadedLowRows(printers) {
   const printerById = Object.fromEntries((printers || []).map(p => [p.id, p]));
   return Object.entries(_latestSpoolsByPrinter || {})
@@ -1463,15 +1483,13 @@ function _dashboardLoadedLowRows(printers) {
     })
     .filter(x => x.pct < _latestLowStockPct)
     .sort((a, b) => a.pct - b.pct || Number(a.spool.remaining_g || 0) - Number(b.spool.remaining_g || 0))
-    .slice(0, 3)
     .map(({ printerId, spool, pct }) => {
       const p = printerById[printerId];
-      const where = p
-        ? `${_dashboardPrinterName(p)} · ${spool.location_slot != null ? _amsSlotLabel(p, Number(spool.location_slot)) : 'loaded'}`
-        : 'Loaded';
+      const where = p && spool.location_slot != null ? _amsSlotLabel(p, Number(spool.location_slot)) : 'Loaded';
       const title = `#${spool.id} ${spool.color_name || spool.material || 'spool'}`;
       const detail = `${where} · ${Math.round(Number(spool.remaining_g || 0))}g · ${pct}%`;
       return {
+        printerId,
         tone: 'warn',
         kicker: 'Spool watch',
         title,
@@ -1481,24 +1499,58 @@ function _dashboardLoadedLowRows(printers) {
     });
 }
 
+function _dashboardMoistureRowsByPrinter(printers) {
+  const rows = {};
+  _moistureWatch(_statsRhReadings(printers))
+    .filter(item => item.level !== 'ok')
+    .forEach(item => {
+      if (!rows[item.printerId]) rows[item.printerId] = [];
+      rows[item.printerId].push({
+        tone: item.level === 'bad' ? 'critical' : 'warn',
+        kicker: 'Moisture',
+        title: item.title,
+        detail: item.detail,
+        href: '#/stats?focus=rh',
+      });
+    });
+  return rows;
+}
+
 function _renderDashboardBriefing(printers) {
-  const rows = [];
   const sorted = [...(printers || [])].sort((a, b) =>
     _dashboardStateRank(a) - _dashboardStateRank(b) ||
     _dashboardPrinterName(a).localeCompare(_dashboardPrinterName(b))
   );
+  const rowsByPrinter = Object.fromEntries(sorted.map(p => [p.id, []]));
+  const addRow = (printerId, row) => {
+    if (!rowsByPrinter[printerId]) rowsByPrinter[printerId] = [];
+    rowsByPrinter[printerId].push(row);
+  };
 
   sorted.forEach(p => {
     const target = _printerWarningTarget(p);
-    if (!target) return;
-    rows.push({
-      tone: _dashboardBriefingTone(p),
-      kicker: _printerPrintLocked(p) ? 'Locked' : p.state === 'offline' ? 'Signal' : p.state === 'paused' ? 'Paused' : 'Watch',
-      title: _dashboardPrinterName(p),
-      detail: _dashboardIssueText(p),
-      target,
-      href: target.hash || `#/printer/${encodeURIComponent(p.id)}`,
-    });
+    if (target) {
+      const issue = _dashboardIssueText(p);
+      const title = _printerPrintLocked(p)
+        ? 'Dispatch locked'
+        : p.state === 'offline'
+          ? 'Offline'
+          : p.state === 'paused'
+            ? 'Paused'
+            : p.state === 'error'
+              ? 'Printer fault'
+              : p.state === 'estop'
+                ? 'E-stop active'
+                : 'Printer attention';
+      addRow(p.id, {
+        tone: _dashboardBriefingTone(p),
+        kicker: _printerPrintLocked(p) ? 'Locked' : p.state === 'offline' ? 'Signal' : p.state === 'paused' ? 'Paused' : 'Watch',
+        title,
+        detail: _printerPrintLocked(p) ? _printerLockoutReason(p) : issue,
+        target,
+        href: target.hash || `#/printer/${encodeURIComponent(p.id)}`,
+      });
+    }
   });
 
   sorted
@@ -1507,33 +1559,66 @@ function _renderDashboardBriefing(printers) {
       const activeJob = _activePrinterJob(p);
       const job = activeJob ? jobDisplayName(activeJob) : _dashboardIssueText(p);
       const pct = activeJob?.progress != null ? `${Math.round(activeJob.progress * 100)}%` : p.state;
-      rows.push({
+      addRow(p.id, {
         tone: p.state === 'paused' ? 'warn' : 'ok',
         kicker: p.state === 'paused' ? 'Hold' : 'In flight',
-        title: _dashboardPrinterName(p),
-        detail: `${job} · ${pct}`,
+        title: job,
+        detail: pct,
         href: `#/printer/${encodeURIComponent(p.id)}`,
       });
     });
 
-  rows.push(..._dashboardLoadedLowRows(sorted));
-
-  const unique = [];
-  const seen = new Set();
-  rows.forEach(row => {
-    const key = `${row.kicker}:${row.title}:${row.detail}`;
-    if (seen.has(key)) return;
-    seen.add(key);
-    unique.push(row);
+  _dashboardLoadedLowRows(sorted).forEach(row => {
+    if (row.printerId) addRow(row.printerId, row);
   });
 
-  const calm = !unique.length;
+  const moistureRows = _dashboardMoistureRowsByPrinter(sorted);
+  Object.entries(moistureRows).forEach(([printerId, rows]) => {
+    rows.forEach(row => addRow(printerId, row));
+  });
+
+  Object.keys(rowsByPrinter).forEach(key => {
+    const unique = [];
+    const seen = new Set();
+    rowsByPrinter[key].forEach(row => {
+      const rowKey = `${row.kicker}:${row.title}:${row.detail}`;
+      if (seen.has(rowKey)) return;
+      seen.add(rowKey);
+      unique.push(row);
+    });
+    rowsByPrinter[key] = unique;
+  });
+
+  const cardModels = sorted.map(p => {
+    const rows = rowsByPrinter[p.id] || [];
+    const tone = rows.some(row => row.tone === 'critical')
+      ? 'critical'
+      : rows.some(row => row.tone === 'warn')
+        ? 'warn'
+        : rows.some(row => row.tone === 'ok')
+          ? 'ok'
+          : 'info';
+    return {
+      hasRows: rows.length > 0,
+      severity: tone === 'critical' ? 0 : tone === 'warn' ? 1 : tone === 'ok' ? 2 : 3,
+      name: _dashboardPrinterName(p),
+      html: _dashboardPrinterBriefingCard({
+        tone,
+        title: _dashboardPrinterName(p),
+        model: _printerSecondaryLabel(p) || p.model || p.type || 'Printer',
+        detail: rows.length ? `${rows.length} item${rows.length === 1 ? '' : 's'} to review` : 'No current faults',
+        rows,
+      }),
+    };
+  });
+
+  const calm = !cardModels.some(card => card.hasRows);
   const body = calm
     ? `<div class="briefing-clear">
         <strong>Clear skies</strong>
         <span>No active printer faults, AMS profile warnings, or loaded spool risks.</span>
       </div>`
-    : unique.slice(0, 6).map(_dashboardBriefingRow).join('');
+    : cardModels.map(card => card.html).join('');
 
   return `<section class="dashboard-briefing" aria-label="Flight briefing">
     <div class="briefing-head">
@@ -1764,7 +1849,7 @@ function _renderAddPrinterCard(empty = false) {
       <div>
         <span>First run</span>
         <strong>Add your first printer</strong>
-        <p>Connect a Bambu, Moonraker/Klipper, or simulated printer to start building live status, history, queue, and spool tracking.</p>
+        <p>Connect a Bambu, Moonraker/Klipper, or Snapmaker printer to start building live status, history, queue, and spool tracking.</p>
       </div>
       <a class="dashboard-add-printer-primary" href="#/settings/printers">Add Printer</a>
     </section>`;
@@ -2142,6 +2227,14 @@ document.addEventListener('click', e => {
 }, true);
 
 document.addEventListener('click', e => {
+  const printWatchPin = e.target.closest('[data-print-watch-pin]');
+  if (printWatchPin) {
+    e.preventDefault();
+    e.stopPropagation();
+    _togglePrintWatchPin(printWatchPin.dataset.printerId);
+    return;
+  }
+
   const fleetLive = e.target.closest('[data-fleet-live]');
   if (fleetLive) {
     e.preventDefault();
@@ -2593,7 +2686,7 @@ function parseRoute() {
   const spoolMatch = hash.match(/^#\/spool\/(\d+)/);
   if (spoolMatch) return { view: 'spool', id: parseInt(spoolMatch[1], 10) };
   if (hash === '#/mission' || hash.startsWith('#/mission?')) return { view: 'mission' };
-  if (hash === '#/cameras' || hash.startsWith('#/cameras?')) return { view: 'fleet', legacyCameras: true };
+  if (hash === '#/cameras' || hash.startsWith('#/cameras?')) return { view: 'fleet' };
   if (hash === '#/stats' || hash.startsWith('#/stats?')) return { view: 'stats' };
   if (hash === '#/queue') return { view: 'queue' };
   if (hash === '#/fleet') return { view: 'fleet' };
@@ -2618,11 +2711,15 @@ function _routeParams(prefix) {
   return new URLSearchParams(qs);
 }
 
+function _stopCameraImages(selector) {
+  document.querySelectorAll(selector).forEach(img => {
+    img.removeAttribute('src');
+    img.dataset.stopped = '1';
+  });
+}
+
 function router() {
   const route = parseRoute();
-  if (route.legacyCameras) {
-    history.replaceState(null, '', '#/fleet');
-  }
   if (route.legacyFilament) {
     _spoolsViewMode = 'catalogue';
     history.replaceState(null, '', '#/spools?view=catalogue');
@@ -2636,13 +2733,17 @@ function router() {
 
   // Abort MJPEG streams when leaving their view — mobile browsers don't close
   // orphaned <img> connections automatically, which exhausts connection pool slots.
-  if (route.view !== 'printer') {
-    const media = document.querySelector('#detail-cam-img, #printer-detail iframe[data-camera-id]');
-    if (media) { media.src = ''; media.dataset.stopped = '1'; }
+  if (route.view !== 'printer' || route.subtab !== 'live') _stopCameraImages('#detail-cam-img');
+  if (route.view !== 'cameras') {
+    _stopCameraImages('#cameras-grid img');
+    _camerasFull = false;
+    if (_printWatchTimer) {
+      clearInterval(_printWatchTimer);
+      _printWatchTimer = null;
+    }
   }
   if (route.view !== 'fleet') {
-    document.querySelectorAll('#fleet-wall-page img[data-fleet-still="1"]').forEach(media => { media.dataset.fleetActive = '0'; });
-    document.querySelectorAll('#fleet-wall-page img:not([data-fleet-still="1"]), #fleet-wall-page iframe').forEach(media => { media.src = ''; });
+    _stopCameraImages('#fleet-wall-page img');
     _fleetWallSignature = '';
   }
   const wasOnSettings = _onSettings;
@@ -2668,6 +2769,7 @@ function router() {
   document.getElementById('view-stats').hidden     = route.view !== 'stats';
   document.getElementById('view-printer').hidden   = route.view !== 'printer';
   document.getElementById('view-spool').hidden     = route.view !== 'spool';
+  document.getElementById('view-cameras').hidden   = route.view !== 'cameras';
   document.getElementById('view-queue').hidden     = route.view !== 'queue';
   document.getElementById('view-files').hidden     = route.view !== 'files';
   document.getElementById('view-memory').hidden    = route.view !== 'memory';
@@ -2709,6 +2811,7 @@ function router() {
     _renderedSpoolDetailId = route.id;
     renderSpoolDetail(route.id);
   }
+  if (route.view === 'cameras') renderCamerasView();
   if (route.view === 'queue') renderQueueView();
   if (route.view === 'files' && !_fileDeskRenderInFlight) renderFileDeskView();
   if (route.view === 'memory' && (!wasOnMemory || _lastMemoryRouteKey !== memoryRouteKey)) {
@@ -2745,6 +2848,9 @@ function buildTabs(printers) {
       ${progress ? `<span class="tab-printer-progress">${progress}</span>` : ''}
     </a>`;
   }).join('');
+  const settingsLinks = _SETTINGS_CATEGORIES.map(c =>
+    `<a class="tab-settings-child tab" href="#/settings/${c.id}">${esc(c.label)}</a>`
+  ).join('');
   nav.innerHTML = [
     `<a class="tab" href="#/">Dashboard</a>`,
     `<a class="tab" href="#/fleet">Fleet Wall</a>`,
@@ -2760,7 +2866,10 @@ function buildTabs(printers) {
     `<div class="tab-section">System</div>`,
     `<a class="tab" href="#/demo">Demo Mode</a>`,
     `<a class="tab" href="#/manual">Flight Manual</a>`,
-    `<a class="tab" href="#/settings">Settings</a>`,
+    `<div class="tab-flyout">
+      <a class="tab tab-settings-root" href="#/settings">Settings</a>
+      <div class="tab-flyout-menu">${settingsLinks}</div>
+    </div>`,
   ].join('');
   _tabsBuilt = true;
   router();
@@ -2844,7 +2953,6 @@ function _detailLiveHeader(p, printerColor, bannerTextColor) {
       </label>
     </div>
     ${_detailTransportControls(p.id, p)}
-    ${_detailLiveOps(p)}
     ${disabledNote ? `<div class="live-lockout-note">
       <strong>Dispatch locked</strong>
       <span>${esc(disabledNote)}</span>
@@ -2900,7 +3008,7 @@ function _detailLiveSignals(p) {
 
 function _amsMismatchSignals(p, loaded = []) {
   const mismatches = [];
-  _list(p.ams).forEach(unit => _list(unit.slots).forEach(slot => {
+  (p.ams || []).forEach(unit => (unit.slots || []).forEach(slot => {
     const flatSlot = _amsFlatSlot(unit, slot);
     const loadedSpool = loaded.find(s => Number(s.location_slot) === flatSlot);
     const mismatch = _slotMismatch(loadedSpool, slot);
@@ -2961,13 +3069,13 @@ function _detailLiveSpoolChips(p) {
 }
 
 function _detailLiveAmsRows(p) {
-  if (!_list(p.ams).length) return '';
+  if (!p.ams?.length) return '';
   return _detailLiveAmsLoadoutRows(p);
 }
 
 function _detailLiveAmsLoadoutRows(p) {
   const loaded = _latestSpoolsByPrinter[p.id] || [];
-  const units = _list(p.ams).map(unit => {
+  const units = p.ams.map(unit => {
     const drying = !!unit.drying;
     const preset = unit.dry_setting || {};
     const dryTime = unit.dry_time ? formatEta(unit.dry_time * 60) : '';
@@ -2981,7 +3089,7 @@ function _detailLiveAmsLoadoutRows(p) {
           data-ams-dry data-printer-id="${p.id}" data-ams-id="${unit.unit}" data-enabled="${drying ? 'false' : 'true'}"
           title="${drying ? 'Stop AMS drying' : 'Start AMS drying'}">${drying ? 'Stop' : 'Dry'}</button>`
       : '';
-    const slots = _list(unit.slots).map(slot => {
+    const slots = (unit.slots || []).map(slot => {
       const flatSlot = _amsFlatSlot(unit, slot);
       const loadedSpool = loaded.find(s => Number(s.location_slot) === flatSlot);
       const mismatch = _slotMismatch(loadedSpool, slot);
@@ -2993,7 +3101,7 @@ function _detailLiveAmsLoadoutRows(p) {
       const grams = loadedSpool ? Math.round(Number(loadedSpool.remaining_g || 0)) : null;
       const label = _amsSlotLabel(p, flatSlot);
       const stateLabel = loadedSpool
-        ? (routeActive ? 'Feeding' : mismatch ? 'Review' : 'Ready')
+        ? (mismatch ? 'Review' : routeActive ? 'Feeding' : 'Ready')
         : (slot.empty ? 'Empty' : 'Unassigned');
       const title = [
         label,
@@ -3033,7 +3141,7 @@ function _detailLiveAmsLoadoutRows(p) {
         <div class="ams-loadout-slots">${slots}</div>
       </div>
       <div class="ams-loadout-side">
-        <small>${isHt ? 'High-temp bay' : `${_list(unit.slots).length} slot loadout`}</small>
+        <small>${isHt ? 'High-temp bay' : `${(unit.slots || []).length} slot loadout`}</small>
         ${unit.dry_capable ? `<span class="ams-loadout-dry-state">${drying ? 'Drying' : 'Idle'}</span>` : ''}
         ${drying && dryTime ? `<span class="ams-loadout-dry-time">${esc(dryTime)}</span>` : ''}
         <div class="ams-loadout-actions">
@@ -3048,11 +3156,11 @@ function _detailLiveAmsLoadoutRows(p) {
 }
 
 function _detailLiveMmuRows(p) {
-  if (!_list(p.mmu).length) return '';
+  if (!p.mmu?.length) return '';
   const loaded = _latestSpoolsByPrinter[p.id] || [];
-  return _list(p.mmu).map(unit => {
+  return p.mmu.map(unit => {
     const routeState = _mmuRouteState(unit);
-    const gates = _list(unit.gates).map(gate => {
+    const gates = (unit.gates || []).map(gate => {
       const loadedSpool = loaded.find(s => Number(s.location_slot) === Number(gate.idx));
       const mismatch = _slotMismatch(loadedSpool, gate);
       const gateLabel = `T${Number(gate.idx)}`;
@@ -3094,20 +3202,22 @@ function _detailLiveMmuRows(p) {
 function _detailLiveToolheadRows(p) {
   if (!_isSnapmakerU1(p)) return '';
   const loaded = _latestSpoolsByPrinter[p.id] || [];
-  const tools = (_list(p.toolheads).length ? _list(p.toolheads) : [0, 1, 2, 3].map(idx => ({ idx, label: `T${idx}` }))).slice(0, 4);
+  const reported = _asList(p.toolheads);
+  const tools = (reported.length ? reported : [0, 1, 2, 3].map(idx => ({ idx, label: `T${idx}` }))).slice(0, 4);
   const cards = tools.map(tool => {
     const idx = Number(tool.idx ?? 0);
+    const label = tool.label || `T${idx}`;
     const loadedSpool = loaded.find(s => Number(s.location_slot) === idx);
-    const colour = loadedSpool?.color_hex || '#2563eb';
-    const temp = tool.actual != null ? `${_toDisplayTemp(tool.actual)}${_tempUnitLabel()}` : '—';
-    const target = Number(tool.target || 0) > 0 ? `/${_toDisplayTemp(tool.target)}${_tempUnitLabel()}` : '';
-    const grams = loadedSpool ? Math.round(Number(loadedSpool.remaining_g || 0)) : null;
-    const label = `T${idx}`;
-    const state = tool.active ? 'Active' : Number(tool.target || 0) > 0 ? 'Heating' : loadedSpool ? 'Ready' : 'Unassigned';
+    const colour = loadedSpool?.color_hex || '#64748b';
+    const actual = Math.round(Number(tool.actual || 0));
+    const target = Math.round(Number(tool.target || 0));
+    const temp = actual || target ? `${actual}°` : '—';
+    const targetText = target ? ` / ${target}°` : '';
+    const grams = loadedSpool?.remaining_g != null ? Math.round(Number(loadedSpool.remaining_g)) : null;
+    const state = tool.active ? 'Selected' : (target ? 'Heating' : 'Ready');
     const title = [
       label,
-      loadedSpool ? [loadedSpool.color_name, loadedSpool.material, loadedSpool.brand, `${grams}g`].filter(Boolean).join(' · ') : '',
-      `${temp}${target}`,
+      loadedSpool ? [loadedSpool.color_name, loadedSpool.material, loadedSpool.brand, `${grams}g`].filter(Boolean).join(' · ') : 'No Flightdeck spool assigned',
       state,
     ].filter(Boolean).join(' · ');
     return `<button class="snapmaker-tool-card${tool.active ? ' is-active' : ''}${loadedSpool ? ' has-spool' : ''}"
@@ -3123,7 +3233,7 @@ function _detailLiveToolheadRows(p) {
         <em>${esc(loadedSpool ? [loadedSpool.material, loadedSpool.brand].filter(Boolean).join(' · ') : 'Click to assign')}</em>
       </span>
       <span class="snapmaker-tool-foot">
-        <small>${esc(`${temp}${target}`)}</small>
+        <small>${esc(`${temp}${targetText}`)}</small>
         ${grams != null ? `<small>${grams}g</small>` : '<small>—</small>'}
       </span>
     </button>`;
@@ -3245,29 +3355,27 @@ function _routeDestinationLabel(p, unit) {
 }
 
 function _detailFilamentRoute(p) {
-  const amsUnits = _list(p.ams);
-  const mmuUnits = _list(p.mmu);
-  if (!amsUnits.length && !mmuUnits.length && !_isSnapmakerU1(p)) return '';
+  if (!p.ams?.length && !p.mmu?.length && !_isSnapmakerU1(p)) return '';
   const loaded = _latestSpoolsByPrinter[p.id] || [];
   const routes = [];
 
   if (_isSnapmakerU1(p)) {
-    const tools = (_list(p.toolheads).length ? _list(p.toolheads) : []).slice(0, 4);
+    const tools = _asList(p.toolheads).slice(0, 4);
     for (const tool of tools) {
       if (!tool.active) continue;
       const idx = Number(tool.idx ?? 0);
+      const toolLabel = tool.label || `T${idx}`;
       const spool = loaded.find(s => Number(s.location_slot) === idx);
-      const colour = spool?.color_hex || '#2563eb';
+      const colour = spool?.color_hex || '#60a5fa';
       const textColour = _spoolTextColor(colour);
-      const toolLabel = `T${idx}`;
       const spoolLabel = spool
         ? `#${spool.id} ${[spool.color_name, spool.material].filter(Boolean).join(' · ')}`
         : 'No Flightdeck spool assigned';
-      routes.push(`<div class="live-filament-route live-filament-route-snapmaker" style="--route-colour:${colour};--route-text:${textColour}" title="${esc(`${toolLabel} active · ${spoolLabel}`)}">
+      routes.push(`<div class="live-filament-route live-filament-route-snapmaker" style="--route-colour:${colour};--route-text:${textColour}" title="${esc(`${toolLabel} selected · ${spoolLabel}`)}">
         <button class="live-route-node live-route-source" data-slot-edit data-printer-id="${p.id}" data-slot-index="${idx}" data-slot-label="${esc(toolLabel)}">
           <span class="live-route-swatch"></span>
           <span><strong>${esc(toolLabel)}</strong><em>${esc(spoolLabel)}</em></span>
-          <b class="live-route-fed">Active</b>
+          <b class="live-route-fed">Selected</b>
         </button>
         <span class="live-route-line" aria-hidden="true"></span>
         <span class="live-route-node live-route-destination">
@@ -3278,11 +3386,12 @@ function _detailFilamentRoute(p) {
     }
   }
 
-  for (const unit of amsUnits) {
-    for (const slot of _list(unit.slots)) {
+  for (const unit of p.ams) {
+    for (const slot of (unit.slots || [])) {
       if (!_slotRouteActive(p, unit, slot)) continue;
       const flatSlot = _amsFlatSlot(unit, slot);
       const spool = loaded.find(s => Number(s.location_slot) === flatSlot);
+      const mismatch = _slotMismatch(spool, slot);
       const colour = spool?.color_hex || slot.color || '#22c55e';
       const textColour = _spoolTextColor(colour);
       const slotLabel = _amsSlotLabel(p, flatSlot);
@@ -3291,9 +3400,10 @@ function _detailFilamentRoute(p) {
         : _slotProfileLabel(slot) || slot.type || 'Loaded filament';
       const dest = _routeDestinationLabel(p, unit);
       const fedNow = _slotRouteFed(p, unit, slot);
-      const routeClass = fedNow ? '' : ' live-filament-route-idle';
-      const routeBadge = fedNow ? 'Fed now' : 'Ready';
-      const title = `${slotLabel} ${fedNow ? 'feeding' : 'ready for'} ${dest}${spoolLabel ? ' · ' + spoolLabel : ''}`;
+      const routeClass = `${fedNow ? '' : ' live-filament-route-idle'}${mismatch ? ' live-filament-route-warning' : ''}`;
+      const routeBadge = mismatch ? 'Review' : fedNow ? 'Fed now' : 'Ready';
+      const routeStatus = mismatch ? 'needs review for' : fedNow ? 'feeding' : 'ready for';
+      const title = `${slotLabel} ${routeStatus} ${dest}${spoolLabel ? ' · ' + spoolLabel : ''}${mismatch ? ' · ' + mismatch : ''}`;
       if (FLIGHTDECK_DEMO) {
         routes.push(`<div class="demo-filament-route${routeClass}${_isAmsHtUnit(unit) ? ' demo-filament-route-ht' : ''}" style="--route-colour:${colour};--route-text:${textColour};--route-slot:${Number(slot.idx || 0)}" title="${esc(title)}">
           <span class="demo-route-port" aria-hidden="true"></span>
@@ -3321,9 +3431,9 @@ function _detailFilamentRoute(p) {
     }
   }
 
-  for (const unit of mmuUnits) {
+  for (const unit of (p.mmu || [])) {
     const routeState = _mmuRouteState(unit);
-    for (const gate of _list(unit.gates)) {
+    for (const gate of (unit.gates || [])) {
       if (!gate.active || gate.empty) continue;
       const spool = loaded.find(s => Number(s.location_slot) === Number(gate.idx));
       const colour = spool?.color_hex || gate.color || '#ef4444';
@@ -3357,11 +3467,7 @@ function _detailFilamentRoute(p) {
 
 function _detailCameraContent(id, p, camSrc) {
   if (camSrc && p.state !== 'offline') {
-    const meta = _cameraMetaCache[id] || {};
-    if (meta.type === 'webrtc') {
-      return `<iframe id="detail-cam-img" class="webrtc-camera-frame detail-cam-media" src="${esc(camSrc)}" title="Live camera" data-camera-id="${esc(id)}" loading="eager" allow="autoplay; fullscreen" referrerpolicy="no-referrer"></iframe>`;
-    }
-    return `<img id="detail-cam-img" class="detail-cam-media" src="${camSrc}" alt="Live camera" data-camera-id="${id}">`;
+    return `<img id="detail-cam-img" src="${camSrc}" alt="Live camera" data-camera-id="${id}">`;
   }
   return _cameraOfflineContent(p, '');
 }
@@ -3596,11 +3702,10 @@ async function sendHomeAxes(id, axes) {
 // ── AMS panel ─────────────────────────────────────────────────────────────
 
 function _detailAmsPanel(p) {
-  const amsUnits = _list(p.ams);
-  if (!amsUnits.length) return '';
+  if (!p.ams?.length) return '';
 
   const title = `<div class="detail-panel-title">AMS</div>`;
-  const units = amsUnits.map(unit => {
+  const units = p.ams.map(unit => {
     const drying = !!unit.drying;
     const dryTime = unit.dry_time ? formatEta(unit.dry_time * 60) : '';
     const preset = unit.dry_setting || {};
@@ -3615,7 +3720,7 @@ function _detailAmsPanel(p) {
           data-ams-dry data-printer-id="${p.id}" data-ams-id="${unit.unit}" data-enabled="${drying ? 'false' : 'true'}"
           title="${drying ? 'Stop AMS drying' : 'Start AMS drying'}">${drying ? 'Stop' : 'Dry'}</button>`
       : '';
-    const slots = _list(unit.slots).map(slot => {
+    const slots = unit.slots.map(slot => {
       const flatSlot = _amsFlatSlot(unit, slot);
       const loaded = (_latestSpoolsByPrinter[p.id] || []).find(s => Number(s.location_slot) === flatSlot);
       const mismatch = _slotMismatch(loaded, slot);
@@ -5945,7 +6050,10 @@ async function renderPrinterDetail(id, subtab = 'live') {
         `<div class="detail-body">
           <div class="detail-left">
             <div id="detail-live-head">${_detailLiveHeader(p, printerColor, bannerTextColor)}</div>
-            <div class="camera-hero">${camHtml}<div class="camera-hud" id="detail-camera-hud">${_detailCameraHud(p)}</div></div>
+            <div class="live-main-deck">
+              <aside class="live-control-rail" id="detail-live-ops">${_detailLiveOps(p)}</aside>
+              <div class="camera-hero">${camHtml}<div class="camera-hud" id="detail-camera-hud">${_detailCameraHud(p)}</div></div>
+            </div>
             <div class="live-strip" id="detail-live-strip">${_detailLiveStrip(p)}</div>
           </div>
           <div class="detail-right">
@@ -6008,22 +6116,24 @@ async function renderPrinterDetail(id, subtab = 'live') {
   } else {
     // Restore camera stream if it was stopped when navigating away and back.
     const heroEl = el.querySelector('.camera-hero');
-    const camMedia = el.querySelector('#detail-cam-img, iframe[data-camera-id]');
+    const camImg = el.querySelector('#detail-cam-img');
     const camSrc = _cameraStreamSrc(id);
-    const shouldShowCamera = !!camSrc && p.state !== 'offline';
-    const hasCamera = !!camMedia;
-    if (heroEl && shouldShowCamera !== hasCamera) {
+    const shouldShowImg = !!camSrc && p.state !== 'offline';
+    const hasImg = !!camImg;
+    if (heroEl && shouldShowImg !== hasImg) {
       heroEl.innerHTML = `${_detailCameraContent(id, p, camSrc)}<div class="camera-hud" id="detail-camera-hud">${_detailCameraHud(p)}</div>`;
       _attachCameraRetries(el);
-    } else if (camMedia?.dataset.stopped && camSrc && p.state !== 'offline') {
-      delete camMedia.dataset.stopped;
-      camMedia.src = camSrc;
+    } else if (camImg?.dataset.stopped && camSrc && p.state !== 'offline') {
+      delete camImg.dataset.stopped;
+      camImg.src = camSrc;
     }
 
     const printerColor = _printerColor(id);
     const bannerTextColor = p.icon === 'bambu' ? '#22c55e' : p.icon === 'voron' ? '#ef4444' : 'var(--text)';
     const headEl = el.querySelector('#detail-live-head');
     if (headEl) headEl.innerHTML = _detailLiveHeader(p, printerColor, bannerTextColor);
+    const opsEl = el.querySelector('#detail-live-ops');
+    if (opsEl) opsEl.innerHTML = _detailLiveOps(p);
     const hudEl = el.querySelector('#detail-camera-hud');
     if (hudEl) hudEl.innerHTML = _detailCameraHud(p);
     const stripEl = el.querySelector('#detail-live-strip');
@@ -6365,9 +6475,15 @@ function _pollPrintBayIfVisible() {
 }
 
 setInterval(_pollPrintBayIfVisible, 5000);
-setInterval(_refreshVisibleCameraStreams, 30000);
+setInterval(() => {
+  _refreshVisibleCameraStreams();
+  _refreshCameraSignals();
+}, 30000);
 document.addEventListener('visibilitychange', () => {
-  if (!document.hidden) _refreshVisibleCameraStreams(true);
+  if (!document.hidden) {
+    _refreshVisibleCameraStreams(true);
+    _refreshCameraSignals();
+  }
 });
 
 async function renderFileDeskView() {
@@ -7608,7 +7724,7 @@ async function renderMissionControl() {
     ).join('');
     const simToggle = `<div class="mission-sim-actions">
       <a class="mission-sim-toggle ${prefs.sim ? 'active' : ''}" href="${_missionHref(prefs.filter, !prefs.sim)}">${prefs.sim ? '30-printer sim on' : 'Sim 30 printers'}</a>
-      ${prefs.sim ? '<a class="mission-sim-toggle" href="#/fleet">Open Fleet Wall</a>' : ''}
+      ${prefs.sim ? '<a class="mission-sim-toggle" href="#/fleet">View Fleet Wall</a>' : ''}
     </div>`;
 
     const lanes = filteredContexts.map(({ p, laneJobs, signals, bucket }) => {
@@ -7670,6 +7786,9 @@ async function renderMissionControl() {
           <small>${esc(p ? _dashboardPrinterName(p) : j.printer_id)} · ${ready.label}</small>
         </a>`;
       }).join('') || '<div class="mission-empty-list">No blocked queue items.</div>';
+    const actionInbox = _missionActionInbox(jobs, printers, spools, maint);
+    const fixIt = _missionFixItPanel(jobs, printers, spools);
+    const dispatchIntel = _missionDispatchIntel(jobs, printers, spools, maint);
 
     const html = `
       <section class="mission-hero">
@@ -7689,24 +7808,30 @@ async function renderMissionControl() {
         <div class="mission-filters">${filterBar}</div>
         ${simToggle}
       </section>
-      <section class="mission-grid">
-        <div class="mission-lanes">${lanes}</div>
-        <aside class="mission-sidebar-panel">
-          <div class="mission-panel-title">Action Inbox</div>
-          <div class="mission-action-list">${_missionActionInbox(jobs, printers, spools, maint)}</div>
-          <div class="mission-panel-title">Legend</div>
-          <div class="mission-note">Action Inbox is for current operator work. Reliability history stays on dashboard cards and Failure Review.</div>
-          <div class="mission-panel-title">Dispatch Ready</div>
+      <section class="mission-dispatch-board" aria-label="Dispatch board">
+        <div class="mission-dispatch-panel mission-dispatch-primary">
+          <div class="mission-panel-title">Run Now</div>
           <div class="mission-job-list">${dispatchReady}</div>
+        </div>
+        <div class="mission-dispatch-panel">
+          <div class="mission-panel-title">Needs Action</div>
+          <div class="mission-action-list">${actionInbox}</div>
+        </div>
+        <div class="mission-dispatch-panel">
           <div class="mission-panel-title">Blocked</div>
           <div class="mission-job-list">${blockedJobs}</div>
-          <div class="mission-panel-title">Fix It</div>
-          <div class="mission-fix-list">${_missionFixItPanel(jobs, printers, spools)}</div>
+        </div>
+        <div class="mission-dispatch-panel mission-dispatch-wide">
           <div class="mission-panel-title">Dispatch Intel</div>
-          <div class="mission-intel-list">${_missionDispatchIntel(jobs, printers, spools, maint)}</div>
-          <div class="mission-panel-title">Operator Notes</div>
-          <div class="mission-note">Dispatch intel is advisory only. It scores printers by availability, loaded matching filament, stock, health, maintenance, and current queue target.</div>
-        </aside>
+          <div class="mission-intel-list">${dispatchIntel}</div>
+        </div>
+        <div class="mission-dispatch-panel mission-dispatch-wide">
+          <div class="mission-panel-title">Fix It</div>
+          <div class="mission-fix-list">${fixIt}</div>
+        </div>
+      </section>
+      <section class="mission-grid">
+        <div class="mission-lanes">${lanes}</div>
       </section>`;
     if (html !== _missionLastHtml) {
       _missionLastHtml = html;
@@ -7940,23 +8065,26 @@ async function _queueHandleAction(e) {
 }
 
 
-// ── Fleet Wall cameras ────────────────────────────────────────────────────
+// ── Print Watch ───────────────────────────────────────────────────────────
 
 let _fleetWallSignature = '';
 let _fleetWallMode = localStorage.getItem('fleetWallMode') || 'medium';
-let _fleetWallRenderTimer = null;
-const _FLEET_WALL_LIVE_LIMITS = { small: 16, medium: 16, large: 16 };
 
 function _safeFleetWallMode(mode) {
-  return ['small', 'medium', 'large'].includes(mode) ? mode : 'medium';
+  return ['xsmall', 'small', 'medium', 'large'].includes(mode) ? mode : 'medium';
 }
 
 function _fleetWallModeControls() {
   _fleetWallMode = _safeFleetWallMode(_fleetWallMode);
   return `<div class="fleet-wall-mode" role="group" aria-label="Fleet Wall size">
-    ${['small', 'medium', 'large'].map(mode => `<button type="button"
+    ${[
+      ['xsmall', 'XS'],
+      ['small', 'Small'],
+      ['medium', 'Medium'],
+      ['large', 'Large'],
+    ].map(([mode, label]) => `<button type="button"
       class="${_fleetWallMode === mode ? 'active' : ''}"
-      data-fleet-wall-mode="${mode}">${mode[0].toUpperCase()}${mode.slice(1)}</button>`).join('')}
+      data-fleet-wall-mode="${mode}">${label}</button>`).join('')}
   </div>`;
 }
 
@@ -7978,36 +8106,19 @@ function _cameraStreamSrc(printerId) {
   const url = _cameraUrlCache[printerId];
   if (!url) return null;
   if (FLIGHTDECK_DEMO && url.startsWith('data:')) return url;
-  if (_cameraMetaCache[printerId]?.type === 'webrtc') return url;
   return `${url}${url.includes('?') ? '&' : '?'}t=${Date.now()}`;
-}
-
-function _cameraFeedHtml(cameraId, label, extraClass = '') {
-  const camSrc = _cameraStreamSrc(cameraId);
-  const meta = _cameraMetaCache[cameraId] || {};
-  if (!camSrc) return '';
-  if (meta.type === 'webrtc') {
-    return `<iframe class="webrtc-camera-frame ${extraClass}" src="${esc(camSrc)}" title="${esc(label || 'WebRTC camera')}" data-camera-id="${esc(cameraId)}" loading="eager" allow="autoplay; fullscreen" referrerpolicy="no-referrer"></iframe>`;
-  }
-  return `<img class="${extraClass}" src="${camSrc}" alt="${esc(label || 'Live camera')}" data-camera-id="${esc(cameraId)}" loading="eager" fetchpriority="high">`;
 }
 
 function _fleetWallCameraSrc(cameraId) {
   const meta = _cameraMetaCache[cameraId] || {};
-  const url = meta.fleet_url || (meta.type === 'adaptive' ? _cameraUrlCache[cameraId] : '');
+  const url = meta.fleet_url || '';
   if (!url) return _cameraStreamSrc(cameraId);
   return `${url}${url.includes('?') ? '&' : '?'}fw=${Date.now()}`;
 }
 
 function _fleetWallPlaceholderSrc(cameraId, label) {
-  const safeId = esc(label || cameraId || 'Camera').replace(/&apos;/g, "'").replace(/&quot;/g, '"');
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360">
     <rect width="640" height="360" fill="#050914"/>
-    <rect x="24" y="24" width="592" height="312" rx="18" fill="#0b1120" stroke="#1f3657" stroke-width="2"/>
-    <path d="M244 152 h132 l40 86 H218 z" fill="#1e293b" stroke="#475569" stroke-width="7" stroke-linejoin="round"/>
-    <circle cx="320" cy="196" r="34" fill="#020617" stroke="#64748b" stroke-width="8"/>
-    <text x="320" y="292" fill="#dbeafe" font-family="Segoe UI, Arial, sans-serif" font-size="28" font-weight="800" text-anchor="middle">${safeId}</text>
-    <text x="320" y="320" fill="#93a4bd" font-family="Segoe UI, Arial, sans-serif" font-size="16" text-anchor="middle">Waiting for next frame</text>
   </svg>`;
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
@@ -8016,38 +8127,71 @@ function _fleetWallCameraFeedHtml(cameraId, label) {
   const meta = _cameraMetaCache[cameraId] || {};
   const stillSrc = _fleetWallCameraSrc(cameraId);
   if (!stillSrc) return '';
-  if (!meta.fleet_url && meta.type === 'webrtc') {
-    return `<iframe class="webrtc-camera-frame fleet-wall-camera-live" src="${esc(stillSrc)}" title="${esc(label || 'WebRTC camera')}" data-camera-id="${esc(cameraId)}" loading="eager" allow="autoplay; fullscreen" referrerpolicy="no-referrer"></iframe>`;
-  }
-  const refreshMs = Math.max(1000, Math.min(20000, Number(meta.fleet_refresh_ms || meta.refresh_ms || 3500)));
+  const refreshMs = Math.max(1000, Math.min(20000, Number(meta.fleet_refresh_ms || 3500)));
   return `<img class="fleet-wall-camera-still" src="${_fleetWallPlaceholderSrc(cameraId, label)}" alt="${esc(label || 'Live camera')}" data-camera-id="${esc(cameraId)}" data-fleet-still="1" data-fleet-src="${esc(meta.fleet_url || _cameraUrlCache[cameraId] || '')}" data-fleet-refresh-ms="${refreshMs}" loading="eager" fetchpriority="low">`;
-}
-
-function _fleetWallLiveLimit() {
-  const raw = Number(_serverSettings.fleet_wall_live_limit ?? _FLEET_WALL_LIVE_LIMITS[_fleetWallMode]);
-  return Math.max(1, Math.min(32, Number.isFinite(raw) ? raw : 16));
-}
-
-function _fleetWallLiveCameraIds(printers) {
-  const priority = p => {
-    if (p.state === 'printing') return 0;
-    if (p.state === 'paused' || p.state === 'error' || p.state === 'estop') return 1;
-    if (_healthIsActionable(p.health) || _printerPrintLocked(p)) return 2;
-    return 3;
-  };
-  return new Set(
-    [...(printers || [])]
-      .filter(p => p.state !== 'offline' && _cameraUrlCache[p.id])
-      .sort((a, b) => priority(a) - priority(b) || _dashboardPrinterName(a).localeCompare(_dashboardPrinterName(b)))
-      .slice(0, _fleetWallLiveLimit())
-      .map(p => String(p.id))
-  );
 }
 
 function _setCameraImageSrc(img, baseUrl, key = 't') {
   if (!img || !baseUrl) return;
+  _setCameraSignal(img, 'refreshing');
   img.src = `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}${key}=${Date.now()}`;
   img.dataset.streamLoadedAt = String(Date.now());
+}
+
+function _cameraSignalText(img, state) {
+  const fleetStill = img?.dataset?.fleetStill === '1';
+  const loadedAt = Number(img?.dataset?.streamLoadedAt || 0);
+  if (state === 'waiting') return fleetStill ? 'Waiting for frame' : 'Opening stream';
+  if (state === 'refreshing') return fleetStill ? 'Refreshing frame' : 'Refreshing stream';
+  if (state === 'reconnecting') return 'Reconnecting';
+  if (state === 'stale') return fleetStill ? 'Frame stale' : 'Stream quiet';
+  if (state === 'live') {
+    if (!fleetStill) return 'Stream live';
+    if (!loadedAt) return 'Frame live';
+    const ageSec = Math.max(0, Math.round((Date.now() - loadedAt) / 1000));
+    return ageSec <= 2 ? 'Frame now' : `Frame ${ageSec}s`;
+  }
+  return 'Camera';
+}
+
+function _ensureCameraSignal(img) {
+  if (!img?.parentElement) return null;
+  let signal = img.parentElement.querySelector(':scope > .camera-signal');
+  if (!signal) {
+    signal = document.createElement('span');
+    signal.className = 'camera-signal';
+    signal.setAttribute('aria-live', 'polite');
+    img.parentElement.appendChild(signal);
+  }
+  return signal;
+}
+
+function _setCameraSignal(img, state) {
+  const signal = _ensureCameraSignal(img);
+  if (!signal) return;
+  const nextState = state || 'waiting';
+  img.dataset.cameraSignalState = nextState;
+  signal.dataset.cameraSignalState = nextState;
+  signal.textContent = _cameraSignalText(img, nextState);
+  const loadedAt = Number(img.dataset.streamLoadedAt || 0);
+  signal.title = loadedAt
+    ? `Camera ${signal.textContent} · last load ${new Date(loadedAt).toLocaleTimeString([], _clockOpts({ second: '2-digit' }))}`
+    : `Camera ${signal.textContent}`;
+}
+
+function _refreshCameraSignals(root = document) {
+  if (document.hidden) return;
+  const now = Date.now();
+  root.querySelectorAll('img[data-camera-id]').forEach(img => {
+    const current = img.dataset.cameraSignalState || 'waiting';
+    if (current === 'reconnecting' || current === 'refreshing') return;
+    const loadedAt = Number(img.dataset.streamLoadedAt || 0);
+    if (img.dataset.fleetStill === '1' && loadedAt && (now - loadedAt) > _CAMERA_SIGNAL_STALE_MS) {
+      _setCameraSignal(img, 'stale');
+      return;
+    }
+    _setCameraSignal(img, loadedAt ? 'live' : 'waiting');
+  });
 }
 
 function _loadCameraUrl(printerId, onResolved) {
@@ -8074,7 +8218,10 @@ function _loadCameraUrl(printerId, onResolved) {
 
 function _attachCameraRetries(root) {
   root.querySelectorAll('img[data-camera-id]').forEach(img => {
-    img.dataset.streamLoadedAt = img.dataset.streamLoadedAt || String(Date.now());
+    const isFleetStill = img.dataset.fleetStill === '1';
+    const hasLoadedImage = img.complete && img.naturalWidth > 0 && !(isFleetStill && String(img.src || '').startsWith('data:'));
+    img.dataset.streamLoadedAt = hasLoadedImage ? (img.dataset.streamLoadedAt || String(Date.now())) : (img.dataset.streamLoadedAt || '');
+    _setCameraSignal(img, hasLoadedImage ? 'live' : 'waiting');
     let tries = 0;
     const cameraId = img.dataset.cameraId;
     const meta = _cameraMetaCache[cameraId] || {};
@@ -8103,7 +8250,13 @@ function _attachCameraRetries(root) {
             if (!img.isConnected || img.dataset.fleetToken !== token || img.dataset.fleetActive !== '1') return;
             img.src = nextSrc;
             img.dataset.streamLoadedAt = String(Date.now());
+            _setCameraSignal(img, 'live');
           };
+          preloader.onerror = () => {
+            if (!img.isConnected || img.dataset.fleetToken !== token || img.dataset.fleetActive !== '1') return;
+            _setCameraSignal(img, 'reconnecting');
+          };
+          _setCameraSignal(img, img.dataset.streamLoadedAt ? 'refreshing' : 'waiting');
           preloader.src = nextSrc;
           window.setTimeout(refreshFleetStill, refreshMs);
         };
@@ -8112,20 +8265,8 @@ function _attachCameraRetries(root) {
     }
     if (img.dataset.retryAttached === '1') return;
     img.dataset.retryAttached = '1';
-    if (img.dataset.fleetStill !== '1' && meta.type === 'adaptive') {
-      const refreshMs = Math.max(250, Math.min(20000, Number(meta.refresh_ms || 1000)));
-      img.dataset.adaptiveCamera = '1';
-      img.dataset.adaptiveRefreshMs = String(refreshMs);
-      const refreshAdaptive = () => {
-        if (!img.isConnected) return;
-        const url = _cameraUrlCache[cameraId];
-        if (!url) return;
-        img.src = `${url}${url.includes('?') ? '&' : '?'}t=${Date.now()}`;
-        window.setTimeout(refreshAdaptive, refreshMs);
-      };
-      window.setTimeout(refreshAdaptive, refreshMs);
-    }
     img.addEventListener('error', () => {
+      _setCameraSignal(img, 'reconnecting');
       if (tries >= 3) return;
       tries += 1;
       const url = img.dataset.fleetSrc || _cameraUrlCache[cameraId];
@@ -8137,14 +8278,17 @@ function _attachCameraRetries(root) {
     img.addEventListener('load', () => {
       tries = 0;
       img.dataset.streamLoadedAt = String(Date.now());
+      _setCameraSignal(img, 'live');
     });
   });
+  _refreshCameraSignals(root);
 }
 
 function _refreshVisibleCameraStreams(force = false) {
   if (FLIGHTDECK_DEMO || document.hidden) return;
   const now = Date.now();
   document.querySelectorAll('img[data-camera-id]').forEach(img => {
+    if (img.dataset.fleetStill === '1') return;
     const cameraId = img.dataset.cameraId;
     const url = _cameraUrlCache[cameraId];
     if (!url || url.startsWith('data:')) return;
@@ -8154,10 +8298,6 @@ function _refreshVisibleCameraStreams(force = false) {
     if (!force && loadedAt && (now - loadedAt) < _CAMERA_STREAM_REFRESH_MS) return;
     _setCameraImageSrc(img, url, 'refresh');
   });
-}
-
-function _hasCameraMedia(root) {
-  return !!root?.querySelector('img[data-camera-id], iframe[data-camera-id]');
 }
 
 function _camTileHtml(p) {
@@ -8170,8 +8310,9 @@ function _camTileHtml(p) {
 
 function _camTileFeedHtml(p) {
   const cameraId = p._camera_id || p.id;
-  return (_cameraStreamSrc(cameraId) && p.state !== 'offline')
-    ? _cameraFeedHtml(cameraId, p.custom_name || _printerPrimaryLabel(p))
+  const camSrc = _cameraStreamSrc(cameraId);
+  return (camSrc && p.state !== 'offline')
+    ? `<img src="${camSrc}" alt="${p.custom_name}" data-camera-id="${cameraId}">`
     : _cameraOfflineContent(p, 'cam-tile-offline');
 }
 
@@ -8237,7 +8378,7 @@ function _printWatchFocusHtml(printers, sim = false, focusPrinter = null) {
   const mode = pinned ? 'Pinned' : 'Cycling';
   const pinTitle = pinned ? 'Unpin and continue cycling' : 'Pin this camera';
   const feed = (camSrc && p.state !== 'offline')
-    ? _cameraFeedHtml(cameraId, `${_printerPrimaryLabel(p)} print watch camera`)
+    ? `<img src="${camSrc}" alt="${esc(_printerPrimaryLabel(p))} print watch camera" data-camera-id="${esc(cameraId)}" loading="eager" fetchpriority="high">`
     : _cameraOfflineContent(p, 'print-watch-offline');
   return `<section class="print-watch-focus ${pinned ? 'print-watch-focus-pinned' : ''}" data-print-watch-focus="${esc(p.id)}" data-print-watch-camera="${esc(cameraId)}">
     <div class="print-watch-focus-head">
@@ -8318,9 +8459,9 @@ function _renderPrintWatchFocus(printers, sim = false) {
   if (currentFeed && nextFeed) {
     currentFeed.href = nextFeed.getAttribute('href') || currentFeed.href;
     currentFeed.dataset.printerId = nextFeed.dataset.printerId || '';
-    const currentHasCamera = _hasCameraMedia(currentFeed);
-    const nextHasCamera = _hasCameraMedia(nextFeed);
-    if (currentHasCamera !== nextHasCamera) currentFeed.innerHTML = nextFeed.innerHTML;
+    const currentIsImg = !!currentFeed.querySelector('img[data-camera-id]');
+    const nextIsImg = !!nextFeed.querySelector('img[data-camera-id]');
+    if (currentIsImg !== nextIsImg) currentFeed.innerHTML = nextFeed.innerHTML;
   }
   _attachCameraRetries(host);
 }
@@ -8511,18 +8652,53 @@ function _fleetWallAmsVisual(p) {
   return `<div class="fleet-wall-ams-visual">${_detailLiveAmsLoadoutRows(p)}</div>`;
 }
 
-function _fleetWallParkedCameraHtml(p) {
-  return `<div class="fleet-wall-camera-fallback fleet-wall-camera-parked">
-    <div class="fleet-wall-printer-glyph">${getIcon(p.icon)}</div>
-    <strong>${esc(_printerPrimaryLabel(p))}</strong>
-    <span>Camera parked to keep live feeds stable</span>
+function _fleetWallAmsRouteStrip(p) {
+  const loaded = (_latestSpoolsByPrinter[p.id] || []).filter(s => !s.archived_at);
+  const routes = [];
+  for (const unit of (p.ams || [])) {
+    for (const slot of (unit.slots || [])) {
+      if (!_slotRouteActive(p, unit, slot)) continue;
+      const flatSlot = _amsFlatSlot(unit, slot);
+      const spool = loaded.find(s => Number(s.location_slot) === flatSlot);
+      const colour = spool?.color_hex || slot.color || '#22c55e';
+      const slotLabel = _amsSlotLabel(p, flatSlot);
+      const spoolLabel = spool
+        ? `#${spool.id} ${[spool.color_name, spool.material].filter(Boolean).join(' · ')}`
+        : _slotProfileLabel(slot) || slot.type || 'Filament';
+      const dest = _routeDestinationLabel(p, unit);
+      const fedNow = _slotRouteFed(p, unit, slot);
+      routes.push(`<button class="fleet-wall-route${fedNow ? ' is-fed' : ' is-ready'}" data-slot-edit data-printer-id="${esc(p.id)}" data-slot-index="${flatSlot}" data-slot-label="${esc(slotLabel)}" style="--route-colour:${esc(colour)}" title="${esc(`${slotLabel} ${fedNow ? 'feeding' : 'ready for'} ${dest} · ${spoolLabel}`)}">
+        <span class="fleet-wall-route-source">
+          <span class="fleet-wall-route-swatch"></span>
+          <strong>${esc(slotLabel)}</strong>
+          <em>${esc(spoolLabel)}</em>
+        </span>
+        <span class="fleet-wall-route-line" aria-hidden="true"></span>
+        <span class="fleet-wall-route-dest">${esc(dest)}</span>
+      </button>`);
+    }
+  }
+  if (routes.length) {
+    return `<div class="fleet-wall-route-strip" aria-label="AMS filament routes">
+      <span class="fleet-wall-route-title">Feed route</span>
+      ${routes.slice(0, 2).join('')}
+    </div>`;
+  }
+  if (!loaded.length) return `<div class="fleet-wall-route-empty">No loaded spools tracked</div>`;
+  return `<div class="fleet-wall-route-strip fleet-wall-route-strip-idle" aria-label="Loaded AMS spools">
+    <span class="fleet-wall-route-title">Loaded</span>
+    <div class="fleet-wall-route-chips">${loaded.slice(0, 4).map(s => {
+      const loc = s.location_slot != null ? _amsSlotLabel(p, Number(s.location_slot)) : 'Loaded';
+      const label = `#${s.id} ${s.color_name || s.material || loc}`;
+      return `<a class="fleet-wall-route-chip" href="#/spool/${s.id}" style="${_spoolColorStyle(s)};color:${_spoolTextColor(s.color_hex || '#808080')}" title="${esc(`${loc} · ${s.material || ''} ${s.color_name || ''}`)}">${esc(label)}</a>`;
+    }).join('')}</div>
   </div>`;
 }
 
-function _fleetWallFeedHtml(p, live = true) {
+function _fleetWallFeedHtml(p) {
   const cameraId = p._camera_id || p.id;
-  if (!live && _fleetWallCameraSrc(cameraId) && p.state !== 'offline') return _fleetWallParkedCameraHtml(p);
-  return _fleetWallCameraSrc(cameraId) && p.state !== 'offline'
+  const camSrc = _fleetWallCameraSrc(cameraId);
+  return camSrc && p.state !== 'offline'
     ? _fleetWallCameraFeedHtml(cameraId, `${_printerPrimaryLabel(p)} fleet camera`)
     : `<div class="fleet-wall-camera-fallback">
         <div class="fleet-wall-printer-glyph">${getIcon(p.icon)}</div>
@@ -8552,7 +8728,7 @@ function _fleetWallCardBody(p) {
         ${_fleetWallMetric('Mode', activeJob ? 'In flight' : (_printerPrintLocked(p) ? 'On hold' : 'Available'))}
       </div>
       ${_fleetWallWarnings(p)}
-      ${_fleetWallAmsVisual(p)}
+      ${_fleetWallMode === 'medium' ? _fleetWallAmsRouteStrip(p) : _fleetWallAmsVisual(p)}
       ${_fleetWallMode === 'large' ? `<div class="fleet-wall-extra">
         <span><b>Signal</b>${esc(fmtLastSeen(p.last_seen))}</span>
         <span><b>ID</b>${esc(p.id)}</span>
@@ -8577,24 +8753,16 @@ function _fleetWallHeadHtml(p) {
   </div>`;
 }
 
-function _fleetWallCardHtml(p, live = true) {
+function _fleetWallCardHtml(p) {
   return `<article class="fleet-wall-card fleet-wall-card-${_fleetWallTone(p)}" data-printer-id="${esc(p.id)}">
     <div class="fleet-wall-card-head">
       ${_fleetWallHeadHtml(p)}
     </div>
     <a class="fleet-wall-feed" href="#/printer/${esc(p.id)}" data-fleet-feed="${esc(p.id)}" data-fleet-live="${esc(p.id)}">
-      ${_fleetWallFeedHtml(p, live)}
+      ${_fleetWallFeedHtml(p)}
     </a>
     <div class="fleet-wall-card-body">${_fleetWallCardBody(p)}</div>
   </article>`;
-}
-
-function _scheduleFleetWallRender() {
-  if (_fleetWallRenderTimer) clearTimeout(_fleetWallRenderTimer);
-  _fleetWallRenderTimer = setTimeout(() => {
-    _fleetWallRenderTimer = null;
-    if (parseRoute().view === 'fleet') renderFleetWall();
-  }, 250);
 }
 
 async function _ensureFleetWallCameraUrls(printers) {
@@ -8607,11 +8775,9 @@ async function _ensureFleetWallCameraUrls(printers) {
       const printer = (_latestPrinters || []).find(x => x.id === printerId);
       const feed = card?.querySelector('[data-fleet-feed]');
       if (!printer || !feed || printer.state === 'offline') return;
-      const nextLiveIds = _fleetWallLiveCameraIds(_latestPrinters || []);
-      feed.innerHTML = _fleetWallFeedHtml(printer, nextLiveIds.has(String(printerId)));
+      feed.innerHTML = _fleetWallFeedHtml(printer);
       _attachCameraRetries(feed);
       _fleetWallSignature = '';
-      _scheduleFleetWallRender();
     });
   });
 }
@@ -8632,10 +8798,9 @@ async function renderFleetWall() {
     return;
   }
 
-  const liveIds = _fleetWallLiveCameraIds(printers);
   _ensureFleetWallCameraUrls(printers);
 
-  const signature = `${_fleetWallMode}|live:${[...liveIds].join(',')}|${printers.map(p => `${p.id}:${_cameraUrlCache[p.id] ? 'cam' : 'nocam'}`).join('|')}`;
+  const signature = `${_fleetWallMode}|${printers.map(p => `${p.id}:${_cameraUrlCache[p.id] ? 'cam' : 'nocam'}`).join('|')}`;
   if (_fleetWallSignature !== signature || !el.querySelector('.fleet-wall-grid')) {
     const active = printers.filter(p => ['printing', 'paused'].includes(p.state)).length;
     const attention = printers.filter(p => _printerWarningTarget(p) || _printerPrintLocked(p)).length;
@@ -8650,11 +8815,10 @@ async function renderFleetWall() {
         ${_fleetWallMetric('Printers', String(printers.length))}
         ${_fleetWallMetric('Active', String(active), active ? 'warm' : '')}
         ${_fleetWallMetric('Attention', String(attention), attention ? 'hot' : '')}
-        ${_fleetWallMetric('Live cams', `${liveIds.size}/${printers.filter(p => _cameraUrlCache[p.id] && p.state !== 'offline').length}`)}
       </div>
     </div>
     <div class="fleet-wall-grid">
-      ${printers.map(p => _fleetWallCardHtml(p, liveIds.has(String(p.id)))).join('')}
+      ${printers.map(_fleetWallCardHtml).join('')}
     </div>`;
     _fleetWallSignature = signature;
     _attachCameraRetries(el);
@@ -8677,9 +8841,9 @@ async function renderFleetWall() {
       const body = card.querySelector('.fleet-wall-card-body');
       if (body) body.innerHTML = _fleetWallCardBody(p);
       const feed = card.querySelector('[data-fleet-feed]');
-      const hasImg = _hasCameraMedia(feed);
-      const shouldImg = liveIds.has(String(p.id)) && !!_fleetWallCameraSrc(p.id) && p.state !== 'offline';
-      if (feed && hasImg !== shouldImg) feed.innerHTML = _fleetWallFeedHtml(p, shouldImg);
+      const hasImg = !!feed?.querySelector('img[data-camera-id]');
+      const shouldImg = !!_fleetWallCameraSrc(p.id) && p.state !== 'offline';
+      if (feed && hasImg !== shouldImg) feed.innerHTML = _fleetWallFeedHtml(p);
     });
   }
 
@@ -8690,8 +8854,7 @@ async function renderFleetWall() {
     summary.innerHTML = `
       ${_fleetWallMetric('Printers', String(printers.length))}
       ${_fleetWallMetric('Active', String(active), active ? 'warm' : '')}
-      ${_fleetWallMetric('Attention', String(attention), attention ? 'hot' : '')}
-      ${_fleetWallMetric('Live cams', `${liveIds.size}/${printers.filter(p => _cameraUrlCache[p.id] && p.state !== 'offline').length}`)}`;
+      ${_fleetWallMetric('Attention', String(attention), attention ? 'hot' : '')}`;
   }
   _attachCameraRetries(el);
 }
@@ -8713,7 +8876,6 @@ async function renderCamerasView() {
     : sourcePrinters;
 
   if (_camerasFull && _camerasMode === mode) {
-    _renderPrintWatchFocus(cameraPrinters, sim);
     const summary = el.querySelector('.print-watch-summary');
     if (summary) summary.innerHTML = _printWatchSummaryHtml(cameraPrinters);
     cameraPrinters.forEach(p => {
@@ -8723,9 +8885,9 @@ async function renderCamerasView() {
       const feed = tile?.querySelector('.cam-tile-feed');
       if (feed) {
         const next = _camTileFeedHtml(p);
-        const currentHasCamera = _hasCameraMedia(feed);
-        const nextHasCamera = next.includes('data-camera-id=');
-        if (currentHasCamera !== nextHasCamera || !nextHasCamera) {
+        const currentIsImg = !!feed.querySelector('img[data-camera-id]');
+        const nextIsImg = next.includes('<img ');
+        if (currentIsImg !== nextIsImg || !nextIsImg) {
           feed.innerHTML = next;
         }
       }
@@ -8742,17 +8904,16 @@ async function renderCamerasView() {
   _ensurePrintWatchCameraUrls(cameraPrinters);
 
   el.classList.toggle('cameras-grid-sim', sim);
-  el.innerHTML = `<div class="print-watch-page">
+  el.innerHTML = `<div class="print-watch-page print-watch-page-parked">
     <div class="print-watch-hero">
       <div>
-        <span>Fleet Wall</span>
-        <h1>${sim ? 'Simulated camera watch' : 'Rotating print watch'}</h1>
+        <span>Camera Wall</span>
+        <h1>${sim ? 'Simulated camera grid' : 'Camera grid'}</h1>
       </div>
       <div class="print-watch-summary">
         ${_printWatchSummaryHtml(cameraPrinters)}
       </div>
     </div>
-    <div id="print-watch-focus-host">${_printWatchFocusHtml(cameraPrinters, sim)}</div>
     <div class="print-watch-grid">${cameraPrinters.map(_camTileHtml).join('')}</div>
   </div>`;
   _attachCameraRetries(el);
@@ -8769,7 +8930,6 @@ async function renderCamerasView() {
 
   _camerasFull = true;
   _camerasMode = mode;
-  _startPrintWatchCycle(cameraPrinters, sim);
 }
 
 // ── Tab title ─────────────────────────────────────────────────────────────
@@ -8995,7 +9155,7 @@ function updateDashboard(printers) {
 
   const grid = document.getElementById('printer-grid');
   const printerCards = sortedPrinters.length
-    ? `${sortedPrinters.map(renderCard).join('')}${_renderAddPrinterCard()}`
+    ? sortedPrinters.map(renderCard).join('')
     : _renderAddPrinterCard(true);
   grid.innerHTML = `${_renderDashboardBriefing(sortedPrinters)}${printerCards}`;
 
@@ -9096,7 +9256,7 @@ function _statsPrinterRows(printers, filamentSummary, failureSummary, allSpools 
 function _statsRhReadings(printers) {
   const rows = [];
   printers.forEach(p => {
-    _list(p.ams).forEach(unit => {
+    (p.ams || []).forEach(unit => {
       if (unit.humidity == null) return;
       const rh = Number(unit.humidity);
       rows.push({
@@ -9491,6 +9651,123 @@ const _DEFAULT_PRESETS = [
   { label: 'ASA',  hotend: 255, bed: 110 },
 ];
 
+const _PRINTER_SETUP_FAMILIES = {
+  bambu: {
+    label: 'Bambu',
+    connType: 'bambu',
+    icon: 'bambu',
+    idPlaceholder: 'h2d',
+    customPlaceholder: 'BigBoy',
+    models: ['H2D', 'H2C', 'H2S', 'X2D', 'X1C', 'X1E', 'P2S', 'P1S', 'P1P', 'A1', 'A1 mini', 'Custom Bambu'],
+  },
+  voron: {
+    label: 'Voron / Klipper',
+    connType: 'moonraker',
+    icon: 'voron',
+    idPlaceholder: 'voron24',
+    customPlaceholder: 'Greyhound Elite V2',
+    models: ['Voron 2.4 250', 'Voron 2.4 300', 'Voron 2.4 350', 'Voron Trident 250', 'Voron Trident 300', 'Voron Trident 350', 'Voron 0.1', 'Voron 0.2', 'Voron Switchwire', 'Custom Voron / Klipper'],
+  },
+  snapmaker_u1: {
+    label: 'Snapmaker',
+    connType: 'snapmaker_u1',
+    icon: 'generic',
+    idPlaceholder: 'u1',
+    customPlaceholder: 'Printer Beast',
+    models: ['Snapmaker U1'],
+  },
+  moonraker: {
+    label: 'Other Moonraker',
+    connType: 'moonraker',
+    icon: 'generic',
+    idPlaceholder: 'my_printer',
+    customPlaceholder: 'Workshop Beast',
+    models: ['Sovol SV08', 'Qidi', 'FLSUN', 'IdeaFormer IR3 V2', 'Custom Moonraker'],
+  },
+  simulated: {
+    label: 'Simulated',
+    connType: 'simulated',
+    icon: 'generic',
+    idPlaceholder: 'demo_printer',
+    customPlaceholder: 'Demo Printer',
+    models: ['Simulated Printer'],
+  },
+};
+
+const _PRINTER_FAMILY_ORDER = ['bambu', 'voron', 'snapmaker_u1', 'moonraker'];
+
+const _CUSTOM_MODEL_RE = /custom|other/i;
+const _PRINTER_MODEL_BUILD_VOLUME = {
+  'H2D': { x: 350, y: 320, z: 325 },
+  'H2C': { x: 350, y: 320, z: 325 },
+  'H2S': { x: 340, y: 320, z: 340 },
+  'X2D': { x: 256, y: 256, z: 256 },
+  'X1C': { x: 256, y: 256, z: 256 },
+  'X1E': { x: 256, y: 256, z: 256 },
+  'P2S': { x: 256, y: 256, z: 256 },
+  'P1S': { x: 256, y: 256, z: 256 },
+  'P1P': { x: 256, y: 256, z: 256 },
+  'A1': { x: 256, y: 256, z: 256 },
+  'A1 mini': { x: 180, y: 180, z: 180 },
+  'Voron 2.4 250': { x: 250, y: 250, z: 250 },
+  'Voron 2.4 300': { x: 300, y: 300, z: 300 },
+  'Voron 2.4 350': { x: 350, y: 350, z: 350 },
+  'Voron Trident 250': { x: 250, y: 250, z: 250 },
+  'Voron Trident 300': { x: 300, y: 300, z: 250 },
+  'Voron Trident 350': { x: 350, y: 350, z: 250 },
+  'Voron 0.1': { x: 120, y: 120, z: 120 },
+  'Voron 0.2': { x: 120, y: 120, z: 120 },
+  'Voron Switchwire': { x: 250, y: 210, z: 220 },
+  'Snapmaker U1': { x: 270, y: 270, z: 270 },
+  'Sovol SV08': { x: 350, y: 350, z: 345 },
+};
+
+function _setupFamilyForPrinter(printer) {
+  const connType = printer?.connection?.type || 'moonraker';
+  const model = String(printer?.model_name || '').toLowerCase();
+  if (connType === 'bambu') return 'bambu';
+  if (connType === 'snapmaker_u1') return 'snapmaker_u1';
+  if (connType === 'simulated') return 'simulated';
+  if (model.includes('voron') || printer?.icon === 'voron') return 'voron';
+  return 'moonraker';
+}
+
+function _setupFamilyForConnType(connType, modelName = '') {
+  if (connType === 'bambu') return 'bambu';
+  if (connType === 'snapmaker_u1') return 'snapmaker_u1';
+  if (connType === 'simulated') return 'simulated';
+  return String(modelName || '').toLowerCase().includes('voron') ? 'voron' : 'moonraker';
+}
+
+function _modelOptionsHtml(familyId, selectedModel = '') {
+  const family = _PRINTER_SETUP_FAMILIES[familyId] || _PRINTER_SETUP_FAMILIES.moonraker;
+  const selected = String(selectedModel || '');
+  const hasExact = family.models.some(m => m === selected);
+  return family.models.map(model => `<option value="${esc(model)}"${model === selected || (!selected && model === family.models[0]) ? ' selected' : ''}>${esc(model)}</option>`).join('')
+    + (selected && !hasExact ? `<option value="__custom__" selected>Custom</option>` : '');
+}
+
+function _setBuildVolumeFields(el, volume = {}) {
+  const set = (id, value) => {
+    const field = el.querySelector(`#${id}`);
+    if (field) field.value = value ?? '';
+  };
+  set('p-bed-x', volume.x);
+  set('p-bed-y', volume.y);
+  set('p-bed-z', volume.z);
+}
+
+function _readBuildVolumeFields(el) {
+  const n = id => {
+    const value = Number(el.querySelector(`#${id}`)?.value || 0);
+    return Number.isFinite(value) && value > 0 ? value : null;
+  };
+  const x = n('p-bed-x');
+  const y = n('p-bed-y');
+  const z = n('p-bed-z');
+  return x && y ? { x, y, ...(z ? { z } : {}) } : null;
+}
+
 function _printersCategoryHtml(printers) {
   const list = printers.length
     ? printers.map(p => {
@@ -9544,37 +9821,75 @@ function _printersCategoryHtml(printers) {
       <div class="settings-printer-list">${list}</div>
     </div>
 
+    <div class="settings-section printer-scan-panel">
+      <div class="settings-section-title">LAN Scan</div>
+      <div class="settings-hint">Find likely printers on the local subnet, then use a result to prefill the Add Printer form.</div>
+      <div class="printer-scan-controls">
+        <input class="settings-input" id="printer-scan-cidr" type="text"
+          placeholder="Auto /24 subnet or 192.168.1.0/24" autocomplete="off">
+        <button type="button" class="ctrl-btn" id="printer-scan-run">Scan LAN</button>
+        <button type="button" class="settings-save-btn" id="printer-scan-add-selected" disabled>Add selected</button>
+      </div>
+      <div class="printer-scan-results" id="printer-scan-results">
+        <div class="settings-empty">No scan run yet.</div>
+      </div>
+    </div>
+
     <div class="settings-section">
       <div class="settings-section-title" id="settings-printer-form-title">Add Printer</div>
       <form id="settings-add-form" class="settings-form" novalidate>
         <input type="hidden" id="p-editing-id" value="">
 
-        <div class="settings-form-row">
-          <label class="settings-label">Connection Type</label>
-          <div class="settings-type-toggle">
-            <button type="button" class="type-btn type-btn-active" data-conn-type="moonraker">Moonraker</button>
-            <button type="button" class="type-btn" data-conn-type="snapmaker_u1">Snapmaker U1</button>
-            <button type="button" class="type-btn" data-conn-type="bambu">Bambu</button>
-            <button type="button" class="type-btn" data-conn-type="simulated">Simulated</button>
+        <div class="settings-form-row printer-family-row">
+          <label class="settings-label" for="p-printer-family">Printer</label>
+          <select class="settings-input printer-family-select" id="p-printer-family" aria-label="Printer family">
+            <option value="bambu">Bambu</option>
+            <option value="voron">Voron / Klipper</option>
+            <option value="snapmaker_u1">Snapmaker</option>
+            <option value="moonraker">Other Moonraker</option>
+          </select>
+          <div class="printer-family-picker" role="radiogroup" aria-label="Printer family">
+            ${_PRINTER_FAMILY_ORDER.map(id => {
+              const family = _PRINTER_SETUP_FAMILIES[id];
+              return `<button type="button" class="printer-family-option" data-printer-family-option="${esc(id)}" aria-pressed="${id === 'bambu' ? 'true' : 'false'}">
+                <span class="printer-family-icon">${getIcon(family.icon)}</span>
+                <span>${esc(family.label)}</span>
+              </button>`;
+            }).join('')}
           </div>
         </div>
 
         <div class="settings-form-row">
           <label class="settings-label" for="p-id">
-            ID <span class="settings-hint">(e.g. sovol_sv08)</span>
+            Internal ID <span class="settings-hint">(no spaces)</span>
           </label>
           <input class="settings-input" id="p-id" type="text"
             placeholder="my_printer" autocomplete="off" required>
         </div>
 
         <div class="settings-form-row">
-          <label class="settings-label" for="p-model">Model Name</label>
-          <input class="settings-input" id="p-model" type="text"
-            placeholder="Sovol SV08" required>
+          <label class="settings-label" for="p-model-select">Model Name</label>
+          <select class="settings-input" id="p-model-select" style="max-width:18rem">
+            ${_modelOptionsHtml('bambu', 'H2D')}
+          </select>
+          <input id="p-model" type="hidden" value="H2D">
+          <input class="settings-input" id="p-model-custom" type="text"
+            placeholder="Custom model" hidden>
         </div>
 
         <div class="settings-form-row">
-          <label class="settings-label" for="p-custom">Custom Name</label>
+          <label class="settings-label">Build Plate <span class="settings-hint">(mm)</span></label>
+          <div class="settings-inline-fields">
+            <input class="settings-input" id="p-bed-x" type="number" min="1" max="1000" value="350" placeholder="X" style="max-width:6rem">
+            <input class="settings-input" id="p-bed-y" type="number" min="1" max="1000" value="320" placeholder="Y" style="max-width:6rem">
+            <input class="settings-input" id="p-bed-z" type="number" min="1" max="1000" value="325" placeholder="Z" style="max-width:6rem">
+          </div>
+        </div>
+
+        <div class="settings-form-row">
+          <label class="settings-label" for="p-custom">
+            Printer Name <span class="settings-hint">(spaces ok)</span>
+          </label>
           <input class="settings-input" id="p-custom" type="text"
             placeholder="Workshop Beast" required>
         </div>
@@ -9610,53 +9925,20 @@ function _printersCategoryHtml(printers) {
             <select class="settings-input" id="p-cam-type" style="max-width:14rem">
               <option value="none">None</option>
               <option value="mjpeg_direct">MJPEG stream</option>
-              <option value="adaptive">Adaptive snapshots</option>
-              <option value="webrtc">WebRTC stream</option>
             </select>
           </div>
           <div class="settings-form-group" id="mjpeg-fields" hidden>
             <div class="settings-form-row">
               <label class="settings-label" for="p-stream-url">Stream URL</label>
               <input class="settings-input" id="p-stream-url" type="text"
-                placeholder="http://192.168.1.100/webcam/?action=stream">
+                placeholder="http://192.168.1.100/webcam/stream.mjpg">
             </div>
             <div class="settings-form-row">
               <label class="settings-label" for="p-snap-url">
                 Snapshot URL <span class="settings-hint">(optional)</span>
               </label>
               <input class="settings-input" id="p-snap-url" type="text"
-                placeholder="http://192.168.1.100/webcam/?action=snapshot">
-            </div>
-          </div>
-          <div class="settings-form-group" id="webrtc-fields" hidden>
-            <div class="settings-form-row">
-              <label class="settings-label" for="p-webrtc-url">WebRTC URL</label>
-              <input class="settings-input" id="p-webrtc-url" type="text"
-                placeholder="http://192.168.1.100/webcam/webrtc">
-            </div>
-            <div class="settings-form-row">
-              <label class="settings-label" for="p-webrtc-snap-url">
-                Snapshot URL <span class="settings-hint">(optional)</span>
-              </label>
-              <input class="settings-input" id="p-webrtc-snap-url" type="text"
                 placeholder="http://192.168.1.100/webcam/snapshot.jpg">
-            </div>
-          </div>
-          <div class="settings-form-group" id="adaptive-fields" hidden>
-            <div class="settings-form-row">
-              <label class="settings-label" for="p-adaptive-snap-url">Snapshot URL</label>
-              <input class="settings-input" id="p-adaptive-snap-url" type="text"
-                placeholder="http://192.168.1.100/webcam/snapshot.jpg">
-            </div>
-            <div class="settings-form-row">
-              <label class="settings-label" for="p-active-fps">Active FPS</label>
-              <input class="settings-input" id="p-active-fps" type="number"
-                value="2" min="0.05" max="10" step="0.05" style="max-width:7rem">
-            </div>
-            <div class="settings-form-row">
-              <label class="settings-label" for="p-idle-fps">Idle FPS</label>
-              <input class="settings-input" id="p-idle-fps" type="number"
-                value="0.25" min="0.05" max="10" step="0.05" style="max-width:7rem">
             </div>
           </div>
         </div>
@@ -9708,7 +9990,7 @@ function _printersCategoryHtml(printers) {
           </div>
         </div>
 
-        <div class="settings-form-row">
+        <div class="settings-form-row printer-temp-presets-row">
           <label class="settings-label">Temp Presets</label>
           <table class="preset-table">
             <thead>
@@ -9733,56 +10015,293 @@ function _printersCategoryHtml(printers) {
 }
 
 function _attachPrintersEvents(el) {
-  let connType = 'moonraker';
+  let connType = 'bambu';
+  let scanCandidates = [];
 
-  const setConnType = type => {
-    connType = type;
-    el.querySelectorAll('[data-conn-type]').forEach(b =>
-      b.classList.toggle('type-btn-active', b.dataset.connType === connType)
-    );
+  const syncModelValue = (applyBuildVolume = true) => {
+    const modelSelect = el.querySelector('#p-model-select');
+    const modelInput = el.querySelector('#p-model');
+    const customModel = el.querySelector('#p-model-custom');
+    const selected = modelSelect?.value || '';
+    const isCustom = selected === '__custom__' || _CUSTOM_MODEL_RE.test(selected);
+    if (customModel) customModel.hidden = !isCustom;
+    const modelName = isCustom ? (customModel?.value.trim() || '') : selected;
+    if (modelInput) modelInput.value = modelName;
+    if (applyBuildVolume && !isCustom && _PRINTER_MODEL_BUILD_VOLUME[modelName]) {
+      _setBuildVolumeFields(el, _PRINTER_MODEL_BUILD_VOLUME[modelName]);
+    }
+  };
+
+  const setPrinterFamily = (familyId, opts = {}) => {
+    const family = _PRINTER_SETUP_FAMILIES[familyId] || _PRINTER_SETUP_FAMILIES.bambu;
+    const previousType = connType;
+    const previousFamily = el.querySelector('#p-printer-family')?.value || _setupFamilyForConnType(connType);
+    connType = family.connType;
+    const idInput = el.querySelector('#p-id');
+    const modelInput = el.querySelector('#p-model');
+    const modelSelect = el.querySelector('#p-model-select');
+    const customModel = el.querySelector('#p-model-custom');
+    const customInput = el.querySelector('#p-custom');
+    const familySelect = el.querySelector('#p-printer-family');
+    if (familySelect) familySelect.value = familyId;
+    el.querySelectorAll('[data-printer-family-option]').forEach(btn => {
+      const active = btn.dataset.printerFamilyOption === familyId;
+      btn.classList.toggle('active', active);
+      btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+    });
+    if (previousType === 'snapmaker_u1' && connType !== 'snapmaker_u1') {
+      if (modelInput?.dataset.autoSnapmaker === '1' || modelInput?.value === 'Snapmaker U1') {
+        modelInput.value = '';
+        delete modelInput.dataset.autoSnapmaker;
+      }
+      if (customInput?.value === 'Snapmaker U1') customInput.value = '';
+    }
+    if (idInput) idInput.placeholder = family.idPlaceholder;
+    if (customInput) customInput.placeholder = family.customPlaceholder;
+    const selectedModel = opts.modelName || (opts.preserveModel ? modelInput?.value : '');
+    if (modelSelect) modelSelect.innerHTML = _modelOptionsHtml(familyId, selectedModel);
+    const selected = modelSelect?.value || family.models[0] || '';
+    if (customModel) {
+      const isCustom = selected === '__custom__' || _CUSTOM_MODEL_RE.test(selected);
+      customModel.hidden = !isCustom;
+      customModel.placeholder = `Custom ${family.label} model`;
+      customModel.value = opts.modelName && !family.models.includes(opts.modelName) ? opts.modelName : '';
+    }
+    syncModelValue(!opts.keepBuildVolume);
     el.querySelector('#moonraker-fields').hidden = !['moonraker', 'snapmaker_u1'].includes(connType);
     el.querySelector('#bambu-fields').hidden     = connType !== 'bambu';
     el.querySelector('#simulated-fields').hidden = connType !== 'simulated';
-    if (connType === 'snapmaker_u1') {
-      el.querySelector('input[name="icon"][value="generic"]').checked = true;
-      if (!el.querySelector('#p-model')?.value) el.querySelector('#p-model').value = 'Snapmaker U1';
-      if (!el.querySelector('#p-custom')?.value) el.querySelector('#p-custom').value = 'Snapmaker U1';
-      if (el.querySelector('#p-cam-type')?.value === 'none') {
-        el.querySelector('#p-cam-type').value = 'mjpeg_direct';
-        el.querySelector('#mjpeg-fields').hidden = false;
-        el.querySelector('#adaptive-fields').hidden = false;
-        el.querySelector('#webrtc-fields').hidden = true;
+    const icon = el.querySelector(`input[name="icon"][value="${family.icon}"]`);
+    if (icon) icon.checked = true;
+    if (connType === 'bambu') {
+      const bambuCam = el.querySelector('#p-bambu-cam');
+      if (bambuCam) bambuCam.checked = true;
+    } else if (connType === 'snapmaker_u1') {
+      if (!modelInput?.value || modelInput?.dataset.autoSnapmaker === '1') {
+        modelInput.value = 'Snapmaker U1';
+        modelInput.dataset.autoSnapmaker = '1';
       }
-      if (el.querySelector('#p-cam-type')?.value === 'mjpeg_direct') {
-        el.querySelector('#mjpeg-fields').hidden = false;
-        el.querySelector('#adaptive-fields').hidden = true;
-        el.querySelector('#webrtc-fields').hidden = true;
-      }
-      if (!el.querySelector('#p-stream-url')?.value) {
-        el.querySelector('#p-stream-url').value = _snapmakerMjpegUrl(el.querySelector('#p-host')?.value);
-      }
-      if (!el.querySelector('#p-snap-url')?.value) {
-        el.querySelector('#p-snap-url').value = _snapmakerMonitorUrl(el.querySelector('#p-host')?.value);
-      }
-      if (el.querySelector('#p-cam-type')?.value === 'webrtc') {
-        el.querySelector('#adaptive-fields').hidden = true;
-        el.querySelector('#webrtc-fields').hidden = false;
-      }
-      if (!el.querySelector('#p-webrtc-url')?.value) {
-        el.querySelector('#p-webrtc-url').value = _snapmakerWebrtcUrl(el.querySelector('#p-host')?.value);
-      }
-      if (!el.querySelector('#p-adaptive-snap-url')?.value) {
-        el.querySelector('#p-adaptive-snap-url').value = _snapmakerMonitorUrl(el.querySelector('#p-host')?.value);
-      }
-      if (!el.querySelector('#p-webrtc-snap-url')?.value) {
-        el.querySelector('#p-webrtc-snap-url').value = _snapmakerMonitorUrl(el.querySelector('#p-host')?.value);
-      }
-    } else if (connType === 'bambu') {
-      el.querySelector('input[name="icon"][value="bambu"]').checked = true;
-    } else if (connType === 'simulated') {
-      el.querySelector('input[name="icon"][value="generic"]').checked = true;
+      if (modelInput?.value === 'Snapmaker U1') modelInput.dataset.autoSnapmaker = '1';
+      if (customInput?.value === 'Snapmaker U1') customInput.value = '';
+      if (el.querySelector('#p-cam-type')?.value === 'none') el.querySelector('#p-cam-type').value = 'mjpeg_direct';
+      el.querySelector('#mjpeg-fields').hidden = el.querySelector('#p-cam-type')?.value !== 'mjpeg_direct';
+      const stream = el.querySelector('#p-stream-url');
+      const snapshot = el.querySelector('#p-snap-url');
+      const host = el.querySelector('#p-host')?.value;
+      if (stream && _isGenericMjpegUrl(stream.value, 'stream')) stream.value = _snapmakerMjpegUrl(host);
+      if (snapshot && _isGenericMjpegUrl(snapshot.value, 'snapshot')) snapshot.value = _snapmakerSnapshotUrl(host);
+    } else if (previousFamily !== familyId && ['moonraker'].includes(connType)) {
+      if (el.querySelector('#p-cam-type')?.value == null) el.querySelector('#p-cam-type').value = 'none';
     }
   };
+
+  const setConnType = (type, modelName = '') => setPrinterFamily(_setupFamilyForConnType(type, modelName), { modelName });
+
+  const renderScanResults = (payload, message = '') => {
+    const box = el.querySelector('#printer-scan-results');
+    const addSelected = el.querySelector('#printer-scan-add-selected');
+    if (!box) return;
+    scanCandidates = Array.isArray(payload?.found) ? payload.found : [];
+    const autoAddable = scanCandidates.filter(row => _scanCandidateCanAutoAdd(row)).length;
+    if (addSelected) addSelected.disabled = true;
+    if (message) {
+      box.innerHTML = `<div class="settings-empty">${esc(message)}</div>`;
+      return;
+    }
+    if (!scanCandidates.length) {
+      box.innerHTML = `<div class="settings-empty">No likely printers found on ${esc(payload?.cidr || 'this subnet')}.</div>`;
+      return;
+    }
+    box.innerHTML = scanCandidates.map((row, idx) => `
+      <div class="printer-scan-result${row.already_configured ? ' already-configured' : ''}${_scanCandidateCanAutoAdd(row) ? '' : ' not-auto-addable'}">
+        <label class="printer-scan-check" title="${esc(_scanCandidateCanAutoAdd(row) ? 'Select for bulk add' : _scanCandidateDisabledReason(row))}">
+          <input type="checkbox" data-scan-check="${idx}" ${_scanCandidateCanAutoAdd(row) ? '' : 'disabled'}>
+        </label>
+        <div class="printer-scan-main">
+          <strong>${esc(row.custom_name || row.host)}</strong>
+          <span>${esc(row.model_name || row.family || 'Printer')} · ${esc(row.host)}${row.port ? `:${esc(row.port)}` : ''}${row.serial ? ` · SN ${esc(row.serial)}` : ''}</span>
+          <small>${esc(row.reason || '')}</small>
+        </div>
+        <div class="printer-scan-tags">
+          <span class="printer-scan-tag">${esc(row.family || row.connection_type || 'printer')}</span>
+          <span class="printer-scan-tag ${row.confidence === 'high' ? 'scan-high' : 'scan-medium'}">${esc(row.confidence || 'found')}</span>
+          ${row.already_configured ? '<span class="printer-scan-tag scan-muted">Configured</span>' : ''}
+        </div>
+        <button type="button" class="settings-save-btn printer-scan-use" data-scan-index="${idx}" ${row.already_configured ? 'disabled' : ''}>Use</button>
+      </div>`).join('');
+    if (!autoAddable) {
+      box.insertAdjacentHTML('afterbegin', '<div class="settings-empty">Only unconfigured Moonraker/Snapmaker results can be bulk added. Bambu results need access code and serial first.</div>');
+    }
+  };
+
+  const _scanCandidateCanAutoAdd = candidate => {
+    if (!candidate || candidate.already_configured) return false;
+    return ['moonraker', 'snapmaker_u1'].includes(candidate.connection_type);
+  };
+
+  const _scanCandidateDisabledReason = candidate => {
+    if (candidate?.already_configured) return 'Already configured';
+    if (candidate?.connection_type === 'bambu') return 'Bambu needs access code and serial before adding';
+    return 'Not enough information to add automatically';
+  };
+
+  const _scanCandidateEntry = candidate => {
+    const model = candidate.model_name || (candidate.connection_type === 'snapmaker_u1' ? 'Snapmaker U1' : 'Custom Moonraker');
+    const volume = _PRINTER_MODEL_BUILD_VOLUME[model] || null;
+    const hotend = _DEFAULT_PRESETS.map(p => ({ label: p.label, value: p.hotend }));
+    const bed = _DEFAULT_PRESETS.map(p => ({ label: p.label, value: p.bed }));
+    const entry = {
+      id: candidate.suggested_id || '',
+      model_name: model,
+      custom_name: candidate.custom_name || candidate.host || model,
+      icon: candidate.family === 'voron' ? 'voron' : 'generic',
+      connection: {
+        type: candidate.connection_type || 'moonraker',
+        host: candidate.host || '',
+        port: Number(candidate.port) || 7125,
+      },
+      temperature_presets: { hotend, bed },
+    };
+    if (volume) entry.build_volume = volume;
+    if (candidate.camera_type === 'mjpeg_direct' && candidate.stream_url) {
+      entry.camera = {
+        type: 'mjpeg_direct',
+        stream_url: candidate.stream_url,
+        ...(candidate.snapshot_url ? { snapshot_url: candidate.snapshot_url } : {}),
+      };
+    }
+    return entry;
+  };
+
+  const updateBulkAddState = () => {
+    const addSelected = el.querySelector('#printer-scan-add-selected');
+    if (!addSelected) return;
+    const checked = el.querySelectorAll('[data-scan-check]:checked').length;
+    addSelected.disabled = checked === 0;
+    addSelected.textContent = checked ? `Add selected (${checked})` : 'Add selected';
+  };
+
+  const addSelectedScanCandidates = async () => {
+    const addSelected = el.querySelector('#printer-scan-add-selected');
+    const selected = Array.from(el.querySelectorAll('[data-scan-check]:checked'))
+      .map(input => scanCandidates[Number(input.dataset.scanCheck)])
+      .filter(_scanCandidateCanAutoAdd);
+    if (!selected.length) return;
+    const original = addSelected?.textContent || 'Add selected';
+    if (addSelected) {
+      addSelected.disabled = true;
+      addSelected.textContent = 'Adding...';
+    }
+    let added = 0;
+    const errors = [];
+    for (const candidate of selected) {
+      const entry = _scanCandidateEntry(candidate);
+      try {
+        const r = await fetch('/api/config/printers', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(entry),
+        });
+        const body = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(body.detail || `Failed to add ${entry.custom_name}`);
+        added += 1;
+        candidate.already_configured = true;
+      } catch (err) {
+        errors.push(`${candidate.custom_name || candidate.host}: ${err.message || 'failed'}`);
+      }
+    }
+    renderScanResults({ found: scanCandidates });
+    if (added) {
+      showToast('Printers added', `${added} printer${added === 1 ? '' : 's'} added from LAN scan`, 'success');
+      await refreshPrinters();
+      _renderSettingsContent('printers');
+    }
+    if (errors.length) showToast('Some printers were not added', errors.slice(0, 2).join(' · '), 'error');
+    if (addSelected) addSelected.textContent = original;
+  };
+
+  const applyScanCandidate = candidate => {
+    if (!candidate || candidate.already_configured) return;
+    const form = el.querySelector('#settings-add-form');
+    if (!form) return;
+    form.reset();
+    delete el.querySelector('#p-model')?.dataset.autoSnapmaker;
+    el.querySelector('#p-editing-id').value = '';
+    el.querySelector('#p-id').disabled = false;
+    el.querySelector('#settings-printer-form-title').textContent = 'Add Printer';
+    el.querySelector('#settings-cancel-edit')?.setAttribute('hidden', '');
+    form.querySelector('button[type="submit"]').textContent = 'Add Printer';
+    const familyId = candidate.family || _setupFamilyForConnType(candidate.connection_type, candidate.model_name);
+    setPrinterFamily(familyId, { modelName: candidate.model_name || '', keepBuildVolume: false });
+    const set = (id, value = '') => {
+      const field = el.querySelector(`#${id}`);
+      if (field) field.value = value ?? '';
+    };
+    set('p-id', candidate.suggested_id || '');
+    set('p-custom', candidate.custom_name || '');
+    if (candidate.connection_type === 'bambu') {
+      set('p-bambu-host', candidate.host || '');
+      set('p-serial', candidate.serial || '');
+    } else {
+      set('p-host', candidate.host || '');
+      set('p-port', candidate.port || 7125);
+      if (candidate.camera_type === 'mjpeg_direct') {
+        set('p-cam-type', 'mjpeg_direct');
+        el.querySelector('#mjpeg-fields').hidden = false;
+        set('p-stream-url', candidate.stream_url || '');
+        set('p-snap-url', candidate.snapshot_url || '');
+      }
+    }
+    el.querySelector('#settings-form-error')?.setAttribute('hidden', '');
+    form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    showToast('Printer details filled', candidate.custom_name || candidate.host || 'LAN scan result', 'success');
+  };
+
+  el.querySelector('#printer-scan-run')?.addEventListener('click', async () => {
+    const btn = el.querySelector('#printer-scan-run');
+    const cidr = el.querySelector('#printer-scan-cidr')?.value.trim() || '';
+    const original = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Scanning...';
+    renderScanResults(null, 'Scanning local subnet...');
+    try {
+      const r = await fetch('/api/config/printers/scan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cidr: cidr || null }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.detail || 'LAN scan failed');
+      renderScanResults(data);
+      showToast('LAN scan complete', `${data.found?.length || 0} likely printer${(data.found?.length || 0) === 1 ? '' : 's'} found`, 'success');
+    } catch (err) {
+      renderScanResults(null, err.message || 'LAN scan failed');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = original;
+    }
+  });
+
+  el.querySelector('#printer-scan-results')?.addEventListener('click', e => {
+    const btn = e.target.closest('[data-scan-index]');
+    if (btn) {
+      applyScanCandidate(scanCandidates[Number(btn.dataset.scanIndex)]);
+      return;
+    }
+    if (e.target.matches('[data-scan-check]')) updateBulkAddState();
+  });
+
+  el.querySelector('#printer-scan-add-selected')?.addEventListener('click', addSelectedScanCandidates);
+
+  el.querySelector('#p-printer-family')?.addEventListener('change', e => {
+    setPrinterFamily(e.target.value);
+  });
+  el.querySelectorAll('[data-printer-family-option]').forEach(btn => {
+    btn.addEventListener('click', () => setPrinterFamily(btn.dataset.printerFamilyOption));
+  });
+  el.querySelector('#p-model-select')?.addEventListener('change', () => syncModelValue(true));
+  el.querySelector('#p-model-custom')?.addEventListener('input', () => syncModelValue(false));
+  setPrinterFamily('bambu', { modelName: 'H2D' });
 
   el.querySelectorAll('[data-conn-type]').forEach(btn => {
     btn.addEventListener('click', () => setConnType(btn.dataset.connType));
@@ -9790,30 +10309,16 @@ function _attachPrintersEvents(el) {
 
   el.querySelector('#p-cam-type')?.addEventListener('change', e => {
     el.querySelector('#mjpeg-fields').hidden = e.target.value !== 'mjpeg_direct';
-    el.querySelector('#adaptive-fields').hidden = e.target.value !== 'adaptive';
-    el.querySelector('#webrtc-fields').hidden = e.target.value !== 'webrtc';
   });
   el.querySelector('#p-host')?.addEventListener('input', () => {
     if (connType !== 'snapmaker_u1') return;
-    const adaptiveUrl = el.querySelector('#p-adaptive-snap-url');
-    if (adaptiveUrl && (!adaptiveUrl.value || /\/(?:server\/files\/camera\/monitor|webcam\/snapshot)\.jpg$/i.test(adaptiveUrl.value))) {
-      adaptiveUrl.value = _snapmakerMonitorUrl(el.querySelector('#p-host')?.value);
+    const stream = el.querySelector('#p-stream-url');
+    const snapshot = el.querySelector('#p-snap-url');
+    if (stream && (_isGenericMjpegUrl(stream.value, 'stream') || /\/webcam\/stream\.mjpg$/i.test(stream.value))) {
+      stream.value = _snapmakerMjpegUrl(el.querySelector('#p-host')?.value);
     }
-    const streamUrl = el.querySelector('#p-stream-url');
-    if (streamUrl && (!streamUrl.value || /\/webcam\/stream\.mjpg$/i.test(streamUrl.value))) {
-      streamUrl.value = _snapmakerMjpegUrl(el.querySelector('#p-host')?.value);
-    }
-    const snapUrl = el.querySelector('#p-snap-url');
-    if (snapUrl && (!snapUrl.value || /\/(?:server\/files\/camera\/monitor|webcam\/snapshot)\.jpg$/i.test(snapUrl.value))) {
-      snapUrl.value = _snapmakerMonitorUrl(el.querySelector('#p-host')?.value);
-    }
-    const webrtcUrl = el.querySelector('#p-webrtc-url');
-    if (webrtcUrl && (!webrtcUrl.value || /\/webcam\/webrtc$/i.test(webrtcUrl.value))) {
-      webrtcUrl.value = _snapmakerWebrtcUrl(el.querySelector('#p-host')?.value);
-    }
-    const webrtcSnapUrl = el.querySelector('#p-webrtc-snap-url');
-    if (webrtcSnapUrl && (!webrtcSnapUrl.value || /\/(?:server\/files\/camera\/monitor|webcam\/snapshot)\.jpg$/i.test(webrtcSnapUrl.value))) {
-      webrtcSnapUrl.value = _snapmakerMonitorUrl(el.querySelector('#p-host')?.value);
+    if (snapshot && (_isGenericMjpegUrl(snapshot.value, 'snapshot') || /\/webcam\/snapshot\.jpg$/i.test(snapshot.value))) {
+      snapshot.value = _snapmakerSnapshotUrl(el.querySelector('#p-host')?.value);
     }
   });
 
@@ -9870,6 +10375,8 @@ function _collectFormData(el, connType) {
     icon,
     temperature_presets: { hotend, bed },
   };
+  const buildVolume = _readBuildVolumeFields(el);
+  if (buildVolume) base.build_volume = buildVolume;
 
   if (connType === 'moonraker' || connType === 'snapmaker_u1') {
     const host    = v('p-host');
@@ -9881,16 +10388,6 @@ function _collectFormData(el, connType) {
       const streamUrl = v('p-stream-url');
       const snapUrl   = v('p-snap-url');
       camera = { type: 'mjpeg_direct', stream_url: streamUrl };
-      if (snapUrl) camera.snapshot_url = snapUrl;
-    } else if (camType === 'adaptive') {
-      const snapshotUrl = v('p-adaptive-snap-url');
-      const activeFps = parseFloat(el.querySelector('#p-active-fps')?.value || '2') || 2;
-      const idleFps = parseFloat(el.querySelector('#p-idle-fps')?.value || '0.25') || 0.25;
-      camera = { type: 'adaptive', snapshot_url: snapshotUrl, active_fps: activeFps, idle_fps: idleFps };
-    } else if (camType === 'webrtc') {
-      const streamUrl = v('p-webrtc-url');
-      const snapUrl = v('p-webrtc-snap-url');
-      camera = { type: 'webrtc', stream_url: streamUrl };
       if (snapUrl) camera.snapshot_url = snapUrl;
     }
     return { ...base, connection: conn, ...(camera ? { camera } : {}) };
@@ -9917,11 +10414,23 @@ function _populatePrinterForm(el, printer, setConnType) {
     if (field) field.value = value ?? '';
   };
   const conn = printer.connection || { type: 'moonraker' };
-  setConnType(conn.type || 'moonraker');
+  setConnType(conn.type || 'moonraker', printer.model_name || '');
   set('p-editing-id', printer.id);
   set('p-id', printer.id);
   set('p-model', printer.model_name || '');
+  const familyId = _setupFamilyForPrinter(printer);
+  const family = _PRINTER_SETUP_FAMILIES[familyId] || _PRINTER_SETUP_FAMILIES.moonraker;
+  const modelSelect = el.querySelector('#p-model-select');
+  const customModel = el.querySelector('#p-model-custom');
+  if (modelSelect && printer.model_name && !family.models.includes(printer.model_name)) {
+    modelSelect.value = '__custom__';
+    if (customModel) {
+      customModel.hidden = false;
+      customModel.value = printer.model_name;
+    }
+  }
   set('p-custom', printer.custom_name || '');
+  delete el.querySelector('#p-model')?.dataset.autoSnapmaker;
   const icon = el.querySelector(`input[name="icon"][value="${printer.icon || 'generic'}"]`);
   if (icon) icon.checked = true;
   el.querySelector('#p-id').disabled = true;
@@ -9938,18 +10447,12 @@ function _populatePrinterForm(el, printer, setConnType) {
   set('p-sim-scenario', conn.type === 'simulated' ? conn.scenario : 'mixed');
 
   const camera = printer.camera || null;
-  const camType = camera?.type === 'mjpeg_direct' ? 'mjpeg_direct' : camera?.type === 'adaptive' ? 'adaptive' : camera?.type === 'webrtc' ? 'webrtc' : 'none';
+  const camType = camera?.type === 'mjpeg_direct' ? 'mjpeg_direct' : 'none';
   set('p-cam-type', camType);
   el.querySelector('#mjpeg-fields').hidden = camType !== 'mjpeg_direct';
-  el.querySelector('#adaptive-fields').hidden = camType !== 'adaptive';
-  el.querySelector('#webrtc-fields').hidden = camType !== 'webrtc';
   set('p-stream-url', camera?.stream_url || '');
   set('p-snap-url', camera?.snapshot_url || '');
-  set('p-adaptive-snap-url', camera?.snapshot_url || '');
-  set('p-webrtc-url', camera?.stream_url || '');
-  set('p-webrtc-snap-url', camera?.snapshot_url || '');
-  set('p-active-fps', camera?.active_fps ?? 2);
-  set('p-idle-fps', camera?.idle_fps ?? 0.25);
+  _setBuildVolumeFields(el, printer.build_volume || _PRINTER_MODEL_BUILD_VOLUME[printer.model_name] || {});
   const bambuCam = el.querySelector('#p-bambu-cam');
   if (bambuCam) bambuCam.checked = camera?.type === 'bambu_rtsp' || conn.type === 'bambu';
 
@@ -9969,16 +10472,15 @@ function _resetPrinterForm(el, setConnType) {
   const form = el.querySelector('#settings-add-form');
   if (!form) return;
   form.reset();
+  delete el.querySelector('#p-model')?.dataset.autoSnapmaker;
   el.querySelector('#p-editing-id').value = '';
   el.querySelector('#p-id').disabled = false;
   el.querySelector('#settings-printer-form-title').textContent = 'Add Printer';
   el.querySelector('#settings-cancel-edit')?.setAttribute('hidden', '');
   form.querySelector('button[type="submit"]').textContent = 'Add Printer';
   el.querySelector('#settings-form-error')?.setAttribute('hidden', '');
-  setConnType('moonraker');
+  setConnType('bambu', 'H2D');
   el.querySelector('#mjpeg-fields').hidden = true;
-  el.querySelector('#adaptive-fields').hidden = true;
-  el.querySelector('#webrtc-fields').hidden = true;
 }
 
 function _validateFormData(data, connType, errorEl) {
@@ -9989,16 +10491,12 @@ function _validateFormData(data, connType, errorEl) {
   if (!/^[a-z][a-z0-9_-]*$/.test(data.id))
                          return fail('ID must be lowercase letters, digits, underscores or hyphens — starting with a letter');
   if (!data.model_name)  return fail('Model name is required');
-  if (!data.custom_name) return fail('Custom name is required');
+  if (!data.custom_name) return fail('Printer name is required');
 
   if (connType === 'moonraker' || connType === 'snapmaker_u1') {
     if (!data.connection.host) return fail('Host / IP is required');
     if (data.camera?.type === 'mjpeg_direct' && !data.camera.stream_url)
       return fail('Stream URL is required for MJPEG camera');
-    if (data.camera?.type === 'adaptive' && !data.camera.snapshot_url)
-      return fail('Snapshot URL is required for adaptive camera');
-    if (data.camera?.type === 'webrtc' && !data.camera.stream_url)
-      return fail('WebRTC URL is required for WebRTC camera');
   } else if (connType === 'bambu') {
     if (!data.connection.host)        return fail('Host / IP is required');
     if (!data.connection.access_code) return fail('Access code is required');
@@ -10254,6 +10752,25 @@ function _slicerFilterRowsForPrinter(rows, printerProfile, fallback = '') {
   return scored.length ? scored.map(item => item.row) : rows;
 }
 
+function _profileSearchNormalise(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/\bsydd/g, 'sidd')
+    .replace(/\bsyd/g, 'sid')
+    .replace(/syddament|sydament|sidament/g, 'siddament')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function _profileSearchMatches(search, query) {
+  const q = _profileSearchNormalise(query);
+  if (!q) return true;
+  const haystack = _profileSearchNormalise(search);
+  if (haystack.includes(q)) return true;
+  return q.split(' ').filter(Boolean).every(token => haystack.includes(token));
+}
+
 function _slicerProfilesHtml(profileData, printers) {
   _slicerProfileData = profileData;
   const vendors = profileData?.vendors || [];
@@ -10262,7 +10779,11 @@ function _slicerProfilesHtml(profileData, printers) {
   const processProfiles = _slicerProfileOptions(profileData, 'process');
   const filamentProfiles = _slicerProfileOptions(profileData, 'filament');
   const vendorStats = vendors.length
-    ? vendors.map(v => `<span class="slicer-profile-pill">${esc(v.vendor || v.name)} · ${(v.machines || []).length} printers · ${(v.processes || []).length} processes · ${(v.filaments || []).length} filaments</span>`).join('')
+    ? vendors.map(v => {
+      const name = v.vendor || v.name;
+      const isLocal = name === 'Orca Local';
+      return `<span class="slicer-profile-pill${isLocal ? ' slicer-profile-pill-local' : ''}">${esc(name)} · ${(v.machines || []).length} printers · ${(v.processes || []).length} processes · ${(v.filaments || []).length} filaments</span>`;
+    }).join('')
     : '<span class="settings-empty">No standard profiles synced yet.</span>';
   const rows = (printers || []).map(p => {
     const d = defaults[p.id] || {};
@@ -10280,9 +10801,9 @@ function _slicerProfilesHtml(profileData, printers) {
         <strong>${esc(p.custom_name || p.model_name || p.id)}</strong>
         <span>${esc([p.model_name, p.kind].filter(Boolean).join(' · '))}</span>
       </div>
-      <input class="settings-input slicer-profile-input" data-profile-slot="printer" list="slicer-printer-profiles-${esc(rowKey)}" value="${esc(d.printer_profile || '')}" placeholder="${esc(printerPlaceholder)}">
-      <input class="settings-input slicer-profile-input" data-profile-slot="process" list="slicer-process-profiles-${esc(rowKey)}" value="${esc(d.process_profile || '')}" placeholder="${esc(processPlaceholder)}">
-      <input class="settings-input slicer-profile-input" data-profile-slot="filament" list="slicer-filament-profiles-${esc(rowKey)}" value="${esc(d.filament_profile || '')}" placeholder="${esc(filamentPlaceholder)}">
+      <input class="settings-input slicer-profile-input" data-profile-slot="printer" data-profile-list-id="slicer-printer-profiles-${esc(rowKey)}" value="${esc(d.printer_profile || '')}" placeholder="${esc(printerPlaceholder)}">
+      <input class="settings-input slicer-profile-input" data-profile-slot="process" data-profile-list-id="slicer-process-profiles-${esc(rowKey)}" value="${esc(d.process_profile || '')}" placeholder="${esc(processPlaceholder)}">
+      <input class="settings-input slicer-profile-input" data-profile-slot="filament" data-profile-list-id="slicer-filament-profiles-${esc(rowKey)}" value="${esc(d.filament_profile || '')}" placeholder="${esc(filamentPlaceholder)}">
       ${_slicerDatalist(`slicer-printer-profiles-${rowKey}`, rowPrinters)}
       ${_slicerDatalist(`slicer-process-profiles-${rowKey}`, rowProcesses)}
       ${_slicerDatalist(`slicer-filament-profiles-${rowKey}`, rowFilaments)}
@@ -10294,7 +10815,7 @@ function _slicerProfilesHtml(profileData, printers) {
       <div class="setup-version-main">
         <div>
           <div class="settings-section-title">Standard Profiles</div>
-          <div class="settings-hint">Synced from OrcaSlicer standard profiles, plus any custom profiles you upload.</div>
+          <div class="settings-hint">Synced from OrcaSlicer standard profiles, local Orca AppData profiles, plus any custom profiles you upload.</div>
         </div>
         <div class="setup-version-actions">
           <button type="button" class="settings-save-btn" id="slicer-upload-profiles">Upload profiles</button>
@@ -10310,6 +10831,13 @@ function _slicerProfilesHtml(profileData, printers) {
       <div class="settings-hint">Choose the default profile triplet Flightdeck should use when slicing for each printer. Nozzle size lives in the printer profile; Bambu 0.4 process profiles are usually named by layer height, like 0.20mm Standard @BBL H2D.</div>
       ${_slicerDatalist('slicer-process-profiles', processProfiles)}
       ${_slicerDatalist('slicer-filament-profiles', filamentProfiles)}
+      <div class="slicer-profile-headings">
+        <span>Printer</span>
+        <span>Printer/nozzle</span>
+        <span>Process/layer</span>
+        <span>Filament/profile</span>
+        <span></span>
+      </div>
       <div class="slicer-profile-table">${rows}</div>
     </div>`;
 }
@@ -10329,10 +10857,103 @@ function _slicerRefreshRowProfileLists(row) {
   const fallback = row.querySelector('.slicer-profile-printer')?.textContent || '';
   const processRows = _slicerFilterRowsForPrinter(_slicerProfileOptions(_slicerProfileData, 'process'), printerText, fallback);
   const filamentRows = _slicerFilterRowsForPrinter(_slicerProfileOptions(_slicerProfileData, 'filament'), printerText, fallback);
-  if (processInput?.list?.id) _slicerReplaceDatalist(processInput.list.id, processRows);
-  if (filamentInput?.list?.id) _slicerReplaceDatalist(filamentInput.list.id, filamentRows);
+  if (processInput?.dataset.profileListId) _slicerReplaceDatalist(processInput.dataset.profileListId, processRows);
+  if (filamentInput?.dataset.profileListId) _slicerReplaceDatalist(filamentInput.dataset.profileListId, filamentRows);
   if (processInput && !processInput.value) processInput.placeholder = processRows[0]?.name || 'Process/layer profile';
   if (filamentInput && !filamentInput.value) filamentInput.placeholder = filamentRows[0]?.name || 'Filament profile';
+}
+
+function _slicerProfileRowsForInput(input) {
+  const listId = input?.dataset.profileListId || '';
+  const list = listId ? document.getElementById(listId) : null;
+  return [...(list?.querySelectorAll('option') || [])]
+    .map(option => ({ name: option.value || '', vendor: option.textContent || '' }))
+    .filter(row => row.name);
+}
+
+function _slicerProfileDropdownHtml(rows, selectedName) {
+  const options = rows.map(row => {
+    const selected = row.name === selectedName;
+    return `<button type="button" class="slicer-profile-choice${selected ? ' selected' : ''}" data-slicer-profile-choice="${esc(row.name)}" data-search="${esc(`${row.name} ${row.vendor}`.toLowerCase())}">
+      <span>${esc(row.name)}</span>
+      <em>${esc(row.vendor || 'Custom')}</em>
+    </button>`;
+  }).join('');
+  return options
+    ? `${options}<div class="slicer-profile-no-match hidden">No matching profiles in this field. Check the correct profile column, then Sync profiles.</div>`
+    : '<div class="settings-empty">No profiles found. Run Sync profiles first.</div>';
+}
+
+function _attachSlicerProfileDropdowns(root) {
+  let activeMenu = null;
+  const closeMenu = () => {
+    activeMenu?.remove();
+    activeMenu = null;
+  };
+  const openMenu = input => {
+    closeMenu();
+    const rows = _slicerProfileRowsForInput(input);
+    const rect = input.getBoundingClientRect();
+    activeMenu = document.createElement('div');
+    activeMenu.className = 'slicer-profile-dropdown';
+    const viewportPad = 12;
+    const menuWidth = Math.min(Math.max(rect.width, 380), window.innerWidth - viewportPad * 2);
+    const left = Math.min(Math.max(rect.left, viewportPad), window.innerWidth - menuWidth - viewportPad);
+    const below = window.innerHeight - rect.bottom - viewportPad;
+    const above = rect.top - viewportPad;
+    const openUp = below < 220 && above > below;
+    const maxHeight = Math.max(180, Math.min(420, (openUp ? above : below) - 8));
+    activeMenu.style.left = `${left}px`;
+    activeMenu.style.width = `${menuWidth}px`;
+    activeMenu.style.maxHeight = `${maxHeight}px`;
+    activeMenu.style.top = openUp ? `${Math.max(viewportPad, rect.top - maxHeight - 6)}px` : `${rect.bottom + 6}px`;
+    activeMenu.innerHTML = _slicerProfileDropdownHtml(rows, input.value);
+    document.body.appendChild(activeMenu);
+    const filter = () => {
+      if (!activeMenu) return;
+      const q = input.value.trim();
+      let visible = 0;
+      activeMenu.querySelectorAll('[data-slicer-profile-choice]').forEach(row => {
+        const match = _profileSearchMatches(row.dataset.search || '', q);
+        row.hidden = !match;
+        if (match) visible += 1;
+        row.classList.toggle('selected', row.dataset.slicerProfileChoice === input.value);
+      });
+      const empty = activeMenu.querySelector('.slicer-profile-no-match');
+      if (empty) empty.classList.toggle('hidden', visible > 0);
+    };
+    activeMenu.querySelectorAll('[data-slicer-profile-choice]').forEach(btn => {
+      btn.addEventListener('mousedown', e => {
+        e.preventDefault();
+        input.value = btn.dataset.slicerProfileChoice || '';
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+        closeMenu();
+      });
+    });
+    input.addEventListener('input', filter, { once: true });
+    requestAnimationFrame(filter);
+  };
+  root.querySelectorAll('.slicer-profile-input').forEach(input => {
+    input.addEventListener('focus', () => openMenu(input));
+    input.addEventListener('input', () => {
+      if (!activeMenu) openMenu(input);
+      else {
+        const q = input.value.trim();
+        let visible = 0;
+        activeMenu.querySelectorAll('[data-slicer-profile-choice]').forEach(row => {
+          const match = _profileSearchMatches(row.dataset.search || '', q);
+          row.hidden = !match;
+          if (match) visible += 1;
+          row.classList.toggle('selected', row.dataset.slicerProfileChoice === input.value);
+        });
+        const empty = activeMenu.querySelector('.slicer-profile-no-match');
+        if (empty) empty.classList.toggle('hidden', visible > 0);
+      }
+    });
+  });
+  document.addEventListener('mousedown', e => {
+    if (activeMenu && !activeMenu.contains(e.target) && !e.target.closest('.slicer-profile-input')) closeMenu();
+  });
 }
 
 function _slicerCategoryHtml(profileData = null, printers = []) {
@@ -10398,13 +11019,24 @@ function _slicerCategoryHtml(profileData = null, printers = []) {
         <button type="button" class="settings-save-btn" data-slicer-test="worker">Test Worker</button>
         <span class="slicer-connection-status" id="slicer-connection-status"></span>
       </div>
+      <div class="slicer-managed-panel">
+        <div class="slicer-managed-copy">
+          <strong>Managed Docker Orca</strong>
+          <span>Use this for Orca updates instead of the update prompt inside the remote Orca desktop.</span>
+        </div>
+        <div class="slicer-managed-actions">
+          <button type="button" class="settings-save-btn" data-orca-docker-action="check">Check Orca</button>
+          <button type="button" class="settings-save-btn" data-orca-docker-action="restart">Restart Orca</button>
+          <button type="button" class="settings-save-btn slicer-update-btn" data-orca-docker-action="update">Update Orca</button>
+        </div>
+        <div class="slicer-managed-status" id="slicer-docker-status">Docker Orca status has not been checked yet.</div>
+      </div>
     </div>
     ${_slicerProfilesHtml(profileData, printers)}`;
 }
 
 function _slicerDockerDefaultUrl() {
-  const proto = location.protocol === 'https:' ? 'https:' : location.protocol;
-  return `${proto}//${location.hostname}:3011`;
+  return `https://${location.hostname}:3011`;
 }
 
 function _slicerApiDefaultUrl() {
@@ -10412,7 +11044,17 @@ function _slicerApiDefaultUrl() {
 }
 
 function _slicerDockerLaunchUrl(value = '') {
-  return (value || '').trim().replace(/\/+$/, '');
+  const raw = (value || '').trim().replace(/\/+$/, '');
+  if (!raw) return '';
+  try {
+    const url = new URL(raw);
+    if (url.protocol === 'http:' && url.port === '3011') {
+      url.protocol = 'https:';
+    }
+    return url.toString().replace(/\/+$/, '');
+  } catch {
+    return raw;
+  }
 }
 
 function _updateSlicerDockerLaunch(el) {
@@ -10440,6 +11082,98 @@ function _updateSlicerDockerLaunch(el) {
   btn.href = url;
 }
 
+function _slicerUrlHost(value = '') {
+  try {
+    return new URL(value).hostname.toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
+function _slicerHostLooksRemote(host = '') {
+  const clean = String(host || '').trim().toLowerCase();
+  if (!clean) return false;
+  const here = String(location.hostname || '').trim().toLowerCase();
+  return !['localhost', '127.0.0.1', '::1', here].includes(clean);
+}
+
+function _setSlicerDockerActionAvailability(el, disabled, reason = '') {
+  el.querySelectorAll('[data-orca-docker-action="restart"], [data-orca-docker-action="update"]').forEach(btn => {
+    btn.disabled = !!disabled;
+    btn.title = disabled ? reason : '';
+  });
+}
+
+function _renderSlicerDockerStatus(el, data = {}) {
+  const box = el.querySelector('#slicer-docker-status');
+  if (!box) return;
+  const browserHost = _slicerUrlHost(el.querySelector('[data-pref-key="orcaslicer_docker_url"]')?.value || _serverSettings.orcaslicer_docker_url || '');
+  const workerHost = _slicerUrlHost(el.querySelector('[data-pref-key="orcaslicer_worker_url"]')?.value || _serverSettings.orcaslicer_worker_url || '');
+  const remoteHost = _slicerHostLooksRemote(browserHost) ? browserHost : (_slicerHostLooksRemote(workerHost) ? workerHost : '');
+  if (!data.available) {
+    _setSlicerDockerActionAvailability(el, true, data.message || 'Docker is unavailable on this Flightdeck host');
+    box.dataset.tone = 'warn';
+    box.innerHTML = `<strong>Docker unavailable</strong><span>${esc(data.message || 'Docker is not responding on this Flightdeck host.')}</span>`;
+    return;
+  }
+  const containers = Array.isArray(data.containers) ? data.containers : [];
+  const anyLocalOrca = containers.some(c => c && c.exists);
+  if (remoteHost && !anyLocalOrca) {
+    _setSlicerDockerActionAvailability(el, true, `Orca is configured on ${remoteHost}, not this Flightdeck host`);
+    box.dataset.tone = 'info';
+    box.innerHTML = `
+      <strong>Remote Orca configured</strong>
+      <span>This Flightdeck host can see Docker ${esc(data.version || '')}, but the Orca containers are not local here. Orca is configured on ${esc(remoteHost)}, so run managed Restart/Update from that Windows Flightdeck host.</span>
+      <div class="slicer-managed-list">
+        ${containers.map(c => `
+          <div class="slicer-managed-row" data-tone="warn">
+            <span>${esc(c.name || 'container')}</span>
+            <strong>not on this host</strong>
+            <em>${esc(c.image || '')}</em>
+          </div>`).join('')}
+      </div>`;
+    return;
+  }
+  _setSlicerDockerActionAvailability(el, false);
+  const rows = containers.map(c => {
+    const exists = !!c.exists;
+    const running = !!c.running || c.status === 'running';
+    const tone = !exists ? 'warn' : running ? 'ok' : 'warn';
+    const health = c.health ? ` · ${esc(c.health)}` : '';
+    const ports = Array.isArray(c.ports) && c.ports.length ? ` · ${esc(c.ports.join(', '))}` : '';
+    const update = c.can_update ? ' · managed update' : '';
+    return `
+      <div class="slicer-managed-row" data-tone="${tone}">
+        <span>${esc(c.name || 'container')}</span>
+        <strong>${exists ? esc(c.status || 'found') : 'missing'}${health}</strong>
+        <em>${esc(c.image || '')}${ports}${update}</em>
+      </div>`;
+  }).join('');
+  const prompt = data.orca_prompt && typeof data.orca_prompt === 'object' ? data.orca_prompt : null;
+  const promptLine = prompt
+    ? `<span>Internal Orca updater: ${prompt.stable_only ? 'stable releases only' : esc(prompt.message || 'not configured')}${Array.isArray(prompt.removed_downloads) && prompt.removed_downloads.length ? ` · removed ${esc(prompt.removed_downloads.join(', '))}` : ''}</span>`
+    : '';
+  box.dataset.tone = 'ok';
+  box.innerHTML = `
+    <strong>Docker ${esc(data.version || '')}</strong>
+    <span>${esc(data.message || 'Docker is available')}</span>
+    ${promptLine}
+    <div class="slicer-managed-list">${rows || '<div class="slicer-managed-row" data-tone="warn"><span>No Orca containers found</span></div>'}</div>`;
+}
+
+async function _checkSlicerDockerStatus(el) {
+  const box = el.querySelector('#slicer-docker-status');
+  if (box) {
+    box.dataset.tone = 'busy';
+    box.textContent = 'Checking Docker Orca...';
+  }
+  const r = await fetch('/api/slicer/orca-docker/status');
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Docker Orca check failed');
+  _renderSlicerDockerStatus(el, data);
+  return data;
+}
+
 function _attachSlicerEvents(el) {
   el.querySelectorAll('.slicer-card').forEach(card => {
     card.addEventListener('click', () => {
@@ -10459,7 +11193,7 @@ function _attachSlicerEvents(el) {
   el.querySelectorAll('.slicer-docker-input').forEach(input => {
     input.addEventListener('change', async () => {
       const key = input.dataset.prefKey;
-      let value = input.value.trim().replace(/\/+$/, '');
+      let value = _slicerDockerLaunchUrl(input.value);
       try {
         const saved = await _saveSetting(key, value);
         input.value = saved;
@@ -10498,7 +11232,8 @@ function _attachSlicerEvents(el) {
           : '[data-pref-key="orcaslicer_docker_url"]';
       const input = el.querySelector(selector);
       const fallback = kind === 'api' ? _slicerApiDefaultUrl() : (kind === 'browser' ? _slicerDockerDefaultUrl() : '');
-      const url = (input?.value || fallback || '').trim().replace(/\/+$/, '');
+      const rawUrl = (input?.value || fallback || '').trim().replace(/\/+$/, '');
+      const url = kind === 'browser' ? _slicerDockerLaunchUrl(rawUrl) : rawUrl;
       if (!url) {
         showToast('Slicer test needs a URL', 'Set the URL first.', 'warning');
         return;
@@ -10533,6 +11268,59 @@ function _attachSlicerEvents(el) {
           status.dataset.tone = 'warn';
         }
         showToast('Slicer check failed', err.message || '', 'error');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = old;
+      }
+    });
+  });
+
+  el.querySelectorAll('[data-orca-docker-action]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const action = btn.dataset.orcaDockerAction;
+      if (action === 'update' && !confirm('Update the browser Orca Docker image and recreate the Orca container? The current container will be kept as a stopped rollback copy.')) {
+        return;
+      }
+      const old = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = action === 'update' ? 'Updating...' : (action === 'restart' ? 'Restarting...' : 'Checking...');
+      const box = el.querySelector('#slicer-docker-status');
+      if (box) {
+        box.dataset.tone = 'busy';
+        box.textContent = action === 'update'
+          ? 'Pulling the Orca image and recreating the browser Orca container...'
+          : action === 'restart'
+            ? 'Restarting Orca containers...'
+            : 'Checking Docker Orca...';
+      }
+      try {
+        let data;
+        if (action === 'check') {
+          data = await _checkSlicerDockerStatus(el);
+        } else {
+          const url = action === 'restart' ? '/api/slicer/orca-docker/restart' : '/api/slicer/orca-docker/update';
+          const r = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: action === 'restart' ? JSON.stringify({ target: 'all' }) : '{}',
+          });
+          data = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Docker Orca action failed');
+          _renderSlicerDockerStatus(el, data);
+        }
+        if (action === 'update') {
+          showToast('Orca updated', data.backup ? `Rollback copy: ${data.backup}` : 'Container recreated', 'success');
+        } else if (action === 'restart') {
+          showToast('Orca restarted', (data.restarted || []).join(', ') || 'No containers restarted', 'success');
+        } else {
+          showToast('Docker Orca checked', data.message || '', data.available ? 'success' : 'warning');
+        }
+      } catch (err) {
+        if (box) {
+          box.dataset.tone = 'warn';
+          box.textContent = err.message || 'Docker Orca action failed';
+        }
+        showToast('Docker Orca action failed', err.message || '', 'error');
       } finally {
         btn.disabled = false;
         btn.textContent = old;
@@ -10631,6 +11419,7 @@ function _attachSlicerEvents(el) {
     input.addEventListener('change', () => _slicerRefreshRowProfileLists(input.closest('[data-printer-id]')));
     input.addEventListener('input', () => _slicerRefreshRowProfileLists(input.closest('[data-printer-id]')));
   });
+  _attachSlicerProfileDropdowns(el);
 }
 
 // ── Filament category ─────────────────────────────────────────────────────
@@ -11025,11 +11814,29 @@ async function _uploadSourceModel(file) {
   }
 }
 
-function _openSliceModelDialog({ sourceId, path, file, printers }) {
+async function _openSliceModelDialog({ sourceId, path, file, printers }) {
   document.querySelector('.filedesk-slice-dialog')?.remove();
+  const profileData = _slicerProfileData || await fetch('/api/slicer/profiles').then(r => r.ok ? r.json() : null).catch(() => null);
+  if (profileData) _slicerProfileData = profileData;
+  const printerProfiles = _slicerProfileOptions(profileData, 'printer');
+  const processProfiles = _slicerProfileOptions(profileData, 'process');
+  const filamentProfiles = _slicerProfileOptions(profileData, 'filament');
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay filedesk-slice-dialog';
+  let selectedPrinterId = printers[0]?.id || '';
   const bedTypes = ['Textured PEI Plate', 'Smooth PEI Plate', 'High Temp Plate', 'Cool Plate', 'Engineering Plate'];
+  const supportModes = [
+    ['profile', 'Profile default'],
+    ['off', 'Supports off'],
+    ['normal_auto', 'Normal auto'],
+    ['tree_auto', 'Tree auto'],
+    ['tree_strong', 'Tree strong'],
+  ];
+  const brimModes = [
+    ['profile', 'Profile default'],
+    ['off', 'No brim'],
+    ['outer', 'Outer brim'],
+  ];
   overlay.innerHTML = `
     <div class="modal-box filedesk-queue-box filedesk-slice-box" role="dialog" aria-modal="true" aria-label="Slice model">
       <div class="filedesk-queue-head">
@@ -11041,10 +11848,27 @@ function _openSliceModelDialog({ sourceId, path, file, printers }) {
         <button class="filedesk-dialog-close" data-dialog-close aria-label="Close">x</button>
       </div>
       <div class="filedesk-queue-options">
-        ${printers.map(p => `<button class="filedesk-printer-choice" data-printer-id="${esc(p.id)}">
+        ${printers.map((p, index) => `<button class="filedesk-printer-choice${index === 0 ? ' selected' : ''}" type="button" data-printer-id="${esc(p.id)}">
           <strong>${esc(p.custom_name || p.model_name || p.id)}</strong>
           <span>${esc([p.model_name, p.kind].filter(Boolean).join(' · '))}</span>
         </button>`).join('')}
+      </div>
+      <div class="filedesk-slice-profile-fields">
+        <label class="filedesk-slice-field">
+          <span>Printer/nozzle</span>
+          <input id="slice-printer-profile" class="settings-input slicer-profile-input" data-profile-slot="printer" data-profile-list-id="slice-printer-profiles" placeholder="Printer/nozzle profile">
+        </label>
+        <label class="filedesk-slice-field">
+          <span>Process/layer</span>
+          <input id="slice-process-profile" class="settings-input slicer-profile-input" data-profile-slot="process" data-profile-list-id="slice-process-profiles" placeholder="Process/layer profile">
+        </label>
+        <label class="filedesk-slice-field">
+          <span>Filament/profile</span>
+          <input id="slice-filament-profile" class="settings-input slicer-profile-input" data-profile-slot="filament" data-profile-list-id="slice-filament-profiles" placeholder="Filament profile">
+        </label>
+        ${_slicerDatalist('slice-printer-profiles', printerProfiles)}
+        ${_slicerDatalist('slice-process-profiles', processProfiles)}
+        ${_slicerDatalist('slice-filament-profiles', filamentProfiles)}
       </div>
       <label class="filedesk-slice-toggle">
         <input type="checkbox" id="slice-all-plates">
@@ -11056,27 +11880,81 @@ function _openSliceModelDialog({ sourceId, path, file, printers }) {
           ${bedTypes.map(name => `<option value="${esc(name)}">${esc(name)}</option>`).join('')}
         </select>
       </label>
+      <label class="filedesk-slice-field">
+        <span>Supports</span>
+        <select id="slice-support-mode">
+          ${supportModes.map(([value, label]) => `<option value="${esc(value)}">${esc(label)}</option>`).join('')}
+        </select>
+      </label>
+      <label class="filedesk-slice-field">
+        <span>Brim</span>
+        <select id="slice-brim-mode">
+          ${brimModes.map(([value, label]) => `<option value="${esc(value)}">${esc(label)}</option>`).join('')}
+        </select>
+      </label>
       <div class="filedesk-dialog-error" id="slice-plan-result" hidden></div>
       <div class="filedesk-slice-actions" id="slice-handoff-actions" hidden></div>
       <div class="settings-hint">Source models are portable. Flightdeck will create a printer-specific sliced job before queueing or sending it.</div>
       <div class="modal-actions">
+        <button class="modal-btn modal-btn-primary" id="slice-prepare-plan" type="button">Prepare slice</button>
         <button class="modal-btn" data-dialog-close>Close</button>
       </div>
     </div>`;
   document.body.appendChild(overlay);
   const close = () => overlay.remove();
-  overlay.addEventListener('click', async e => {
-    if (e.target === overlay || e.target.closest('[data-dialog-close]')) {
-      close();
-      return;
+  const profilePayload = () => ({
+    printer_profile: overlay.querySelector('#slice-printer-profile')?.value.trim() || '',
+    process_profile: overlay.querySelector('#slice-process-profile')?.value.trim() || '',
+    filament_profile: overlay.querySelector('#slice-filament-profile')?.value.trim() || '',
+  });
+  const setProfilesForPrinter = printerId => {
+    selectedPrinterId = printerId || selectedPrinterId;
+    const printer = printers.find(p => p.id === selectedPrinterId) || printers[0] || {};
+    const defaults = profileData?.defaults?.[selectedPrinterId] || {};
+    const fallback = [printer.model_name, printer.custom_name, printer.id].filter(Boolean).join(' ');
+    const filteredPrinters = _slicerFilterRowsForPrinter(printerProfiles, fallback, fallback);
+    const printerValue = defaults.printer_profile || filteredPrinters[0]?.name || '';
+    const filteredProcesses = _slicerFilterRowsForPrinter(processProfiles, printerValue, fallback);
+    const filteredFilaments = _slicerFilterRowsForPrinter(filamentProfiles, printerValue, fallback);
+    const printerInput = overlay.querySelector('#slice-printer-profile');
+    const processInput = overlay.querySelector('#slice-process-profile');
+    const filamentInput = overlay.querySelector('#slice-filament-profile');
+    if (printerInput) {
+      printerInput.value = printerValue;
+      printerInput.placeholder = filteredPrinters[0]?.name || 'Printer/nozzle profile';
     }
-    const choice = e.target.closest('[data-printer-id]');
-    if (!choice) return;
+    if (processInput) {
+      processInput.value = defaults.process_profile || filteredProcesses[0]?.name || '';
+      processInput.placeholder = filteredProcesses[0]?.name || 'Process/layer profile';
+    }
+    if (filamentInput) {
+      filamentInput.value = defaults.filament_profile || filteredFilaments[0]?.name || '';
+      filamentInput.placeholder = filteredFilaments[0]?.name || 'Filament profile';
+    }
+    _slicerReplaceDatalist('slice-printer-profiles', filteredPrinters);
+    _slicerReplaceDatalist('slice-process-profiles', filteredProcesses);
+    _slicerReplaceDatalist('slice-filament-profiles', filteredFilaments);
+    overlay.querySelectorAll('[data-printer-id]').forEach(btn => {
+      btn.classList.toggle('selected', btn.dataset.printerId === selectedPrinterId);
+    });
+    const actionsEl = overlay.querySelector('#slice-handoff-actions');
+    const errEl = overlay.querySelector('#slice-plan-result');
+    if (actionsEl) {
+      actionsEl.hidden = true;
+      actionsEl.innerHTML = '';
+    }
+    if (errEl) errEl.hidden = true;
+  };
+  const preparePlan = async () => {
+    if (!selectedPrinterId) return;
     const errEl = overlay.querySelector('#slice-plan-result');
     const actionsEl = overlay.querySelector('#slice-handoff-actions');
+    const prepareBtn = overlay.querySelector('#slice-prepare-plan');
     overlay.querySelectorAll('.filedesk-printer-choice').forEach(b => { b.disabled = true; });
-    choice.classList.add('is-working');
-    choice.querySelector('span').textContent = 'Preparing slice plan...';
+    if (prepareBtn) {
+      prepareBtn.disabled = true;
+      prepareBtn.textContent = 'Preparing...';
+    }
     if (actionsEl) {
       actionsEl.hidden = true;
       actionsEl.innerHTML = '';
@@ -11088,9 +11966,12 @@ function _openSliceModelDialog({ sourceId, path, file, printers }) {
         body: JSON.stringify({
           source_id: sourceId,
           path,
-          printer_id: choice.dataset.printerId,
+          printer_id: selectedPrinterId,
+          ...profilePayload(),
           plate: 'auto',
           bed_type: overlay.querySelector('#slice-bed-type')?.value || 'Textured PEI Plate',
+          support_mode: overlay.querySelector('#slice-support-mode')?.value || 'profile',
+          brim_mode: overlay.querySelector('#slice-brim-mode')?.value || 'profile',
           all_plates: !!overlay.querySelector('#slice-all-plates')?.checked,
         }),
       });
@@ -11100,12 +11981,12 @@ function _openSliceModelDialog({ sourceId, path, file, printers }) {
       errEl.textContent = data.ready
         ? (data.manual_handoff && data.message
           ? data.message
-          : `Prepare ${data.output?.filename || 'a printer-specific sliced job'} for ${data.target?.custom_name || data.target?.model_name || choice.dataset.printerId}.`)
+          : `Prepare ${data.output?.filename || 'a printer-specific sliced job'} for ${data.target?.custom_name || data.target?.model_name || selectedPrinterId}.`)
         : data.message || 'Set the slicer settings in Settings -> Slicer first.';
       errEl.classList.toggle('filedesk-dialog-ok', !!data.ready);
       if (data.ready && actionsEl) {
         const sourceUrl = data.source?.download_url || `/api/files/source/download?${new URLSearchParams({ source_id: sourceId, path }).toString()}`;
-        const browserUrl = data.browser_url || data.sidecar_url || '';
+        const browserUrl = _slicerDockerLaunchUrl(data.browser_url || data.sidecar_url || '');
         const outputName = data.output?.filename || 'sliced-output';
         const profiles = data.profiles || {};
         const canBackgroundSlice = data.can_background_slice !== false;
@@ -11114,17 +11995,24 @@ function _openSliceModelDialog({ sourceId, path, file, printers }) {
           ['Process', profiles.process],
           ['Filament', profiles.filament],
         ].map(([label, value]) => `<div><span>${esc(label)}</span><strong>${esc(value || 'Not set')}</strong></div>`).join('');
+        const sliceOptions = data.slice_options || {};
+        const optionRows = [
+          ['Plate', sliceOptions.bed_type],
+          ['Supports', sliceOptions.support],
+          ['Brim', sliceOptions.brim],
+        ].map(([label, value]) => `<div><span>${esc(label)}</span><strong>${esc(value || 'Profile default')}</strong></div>`).join('');
         actionsEl.hidden = false;
+        actionsEl.dataset.browserUrl = browserUrl || '';
         actionsEl.innerHTML = `
           <div class="filedesk-slice-steps">
             <strong>Slice handoff</strong>
-            <span>Download the model, open Orca, import it, use the profiles below, then export as ${esc(outputName)} back into the Print Vault.</span>
+            <span>Slice with the selected profile set, then queue the generated printer-ready file.</span>
           </div>
-          <div class="filedesk-slice-profiles">${profileRows}</div>
+          <div class="filedesk-slice-profiles">${profileRows}${optionRows}</div>
           <div class="filedesk-slice-buttons">
-            ${canBackgroundSlice ? `<button class="filedesk-slice-link filedesk-slice-run" type="button" data-run-slice="${esc(outputName)}" data-printer-id="${esc(data.target?.id || choice.dataset.printerId)}">Slice in Flightdeck</button>` : ''}
+            ${canBackgroundSlice ? `<button class="filedesk-slice-link filedesk-slice-run" type="button" data-run-slice="${esc(outputName)}" data-printer-id="${esc(data.target?.id || selectedPrinterId)}">Slice in Flightdeck</button>` : ''}
             ${sourceUrl ? `<a class="filedesk-slice-link" href="${esc(sourceUrl)}" download>Download model</a>` : ''}
-            ${browserUrl ? `<a class="filedesk-slice-link" href="${esc(browserUrl)}" target="_blank" rel="noreferrer">Open Orca</a>` : ''}
+            ${browserUrl ? `<button class="filedesk-slice-link" type="button" data-open-orca data-open-orca-source-id="${esc(sourceId)}" data-open-orca-path="${esc(path)}" data-open-orca-url="${esc(browserUrl)}">Open model in Orca</button>` : ''}
             <button class="filedesk-slice-link" type="button" data-copy-slice-name="${esc(outputName)}">Copy output name</button>
             <button class="filedesk-slice-link" type="button" data-check-slice-output="${esc(outputName)}">Check vault</button>
           </div>`;
@@ -11134,9 +12022,35 @@ function _openSliceModelDialog({ sourceId, path, file, printers }) {
       errEl.textContent = err.message || 'Unable to prepare slice';
       errEl.hidden = false;
     } finally {
-      choice.classList.remove('is-working');
       overlay.querySelectorAll('.filedesk-printer-choice').forEach(b => { b.disabled = false; });
+      if (prepareBtn) {
+        prepareBtn.disabled = false;
+        prepareBtn.textContent = 'Prepare slice';
+      }
     }
+  };
+  setProfilesForPrinter(selectedPrinterId);
+  _attachSlicerProfileDropdowns(overlay);
+  overlay.querySelector('#slice-printer-profile')?.addEventListener('change', () => {
+    const row = overlay.querySelector('.filedesk-slice-profile-fields');
+    if (!row) return;
+    const printerText = overlay.querySelector('#slice-printer-profile')?.value || '';
+    const printer = printers.find(p => p.id === selectedPrinterId) || {};
+    const fallback = [printer.model_name, printer.custom_name, printer.id].filter(Boolean).join(' ');
+    const processRows = _slicerFilterRowsForPrinter(processProfiles, printerText, fallback);
+    const filamentRows = _slicerFilterRowsForPrinter(filamentProfiles, printerText, fallback);
+    _slicerReplaceDatalist('slice-process-profiles', processRows);
+    _slicerReplaceDatalist('slice-filament-profiles', filamentRows);
+  });
+  overlay.querySelector('#slice-prepare-plan')?.addEventListener('click', preparePlan);
+  overlay.addEventListener('click', e => {
+    if (e.target === overlay || e.target.closest('[data-dialog-close]')) {
+      close();
+      return;
+    }
+    const choice = e.target.closest('[data-printer-id]');
+    if (!choice) return;
+    setProfilesForPrinter(choice.dataset.printerId);
   });
   overlay.addEventListener('click', e => {
     const copyBtn = e.target.closest('[data-copy-slice-name]');
@@ -11147,6 +12061,34 @@ function _openSliceModelDialog({ sourceId, path, file, printers }) {
     }).catch(() => {
       showToast('Copy failed', name, 'warning');
     });
+  });
+  overlay.addEventListener('click', async e => {
+    const openBtn = e.target.closest('[data-open-orca]');
+    if (!openBtn) return;
+    const old = openBtn.textContent;
+    const browserUrl = openBtn.dataset.openOrcaUrl || '';
+    openBtn.disabled = true;
+    openBtn.textContent = 'Opening...';
+    try {
+      const r = await fetch('/api/slicer/open', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          source_id: openBtn.dataset.openOrcaSourceId || 'library',
+          path: openBtn.dataset.openOrcaPath || '',
+          filename: openBtn.dataset.openOrcaFilename || '',
+        }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Unable to open Orca');
+      showToast('Opening in Orca', data.forwarded ? 'Sent to Windows Orca worker' : (data.filename || 'Model handed to Orca'), 'success');
+      if (browserUrl) window.open(browserUrl, '_blank', 'noreferrer');
+    } catch (err) {
+      showToast('Open Orca failed', err.message || '', 'error');
+    } finally {
+      openBtn.disabled = false;
+      openBtn.textContent = old;
+    }
   });
   overlay.addEventListener('click', async e => {
     const checkBtn = e.target.closest('[data-check-slice-output]');
@@ -11182,8 +12124,64 @@ function _openSliceModelDialog({ sourceId, path, file, printers }) {
     const runBtn = e.target.closest('[data-run-slice]');
     if (!runBtn) return;
     const old = runBtn.textContent;
+    const actionsEl = overlay.querySelector('#slice-handoff-actions');
+    const errEl = overlay.querySelector('#slice-plan-result');
+    const browserUrl = actionsEl?.dataset.browserUrl || '';
+    const started = Date.now();
+    const stages = [
+      [0, 'Preparing profiles', 'Checking printer, process, filament, support, brim, and plate settings.'],
+      [12, 'Sending model to slicer', 'Uploading the source model and selected profiles to the slicer service.'],
+      [28, 'Slicer is working', 'Orca is generating toolpaths. Large STL/3MF files can sit here for a while.'],
+      [62, 'Packaging output', 'Waiting for the printer-ready G-code/3MF and embedded preview.'],
+      [84, 'Saving to Print Vault', 'Flightdeck will show Queue sliced job as soon as the output lands.'],
+    ];
+    let stageIndex = 0;
+    const setProgress = (pct, title, detail) => {
+      const progress = actionsEl?.querySelector('[data-slice-progress-fill]');
+      const label = actionsEl?.querySelector('[data-slice-progress-label]');
+      const detailEl = actionsEl?.querySelector('[data-slice-progress-detail]');
+      const elapsed = actionsEl?.querySelector('[data-slice-progress-elapsed]');
+      if (progress) progress.style.width = `${Math.max(6, Math.min(96, pct))}%`;
+      if (label) label.textContent = title;
+      if (detailEl) detailEl.textContent = detail;
+      if (elapsed) elapsed.textContent = `${Math.max(1, Math.round((Date.now() - started) / 1000))}s`;
+    };
+    const progressTimer = setInterval(() => {
+      const seconds = (Date.now() - started) / 1000;
+      const nextIndex = seconds > 45 ? 4 : seconds > 24 ? 3 : seconds > 10 ? 2 : seconds > 3 ? 1 : 0;
+      stageIndex = Math.max(stageIndex, nextIndex);
+      const [base, title, detail] = stages[stageIndex];
+      const pct = Math.min(96, base + ((seconds % 9) / 9) * 12);
+      setProgress(pct, title, detail);
+    }, 500);
     runBtn.disabled = true;
     runBtn.textContent = 'Slicing...';
+    overlay.querySelectorAll('.filedesk-printer-choice, #slice-prepare-plan, #slice-bed-type, #slice-support-mode, #slice-brim-mode, #slice-all-plates, .slicer-profile-input').forEach(el => {
+      el.disabled = true;
+    });
+    if (errEl) {
+      errEl.hidden = false;
+      errEl.classList.add('filedesk-dialog-ok');
+      errEl.textContent = 'Slicing in progress. Keep this window open; Flightdeck will unlock Queue sliced job when the output is ready.';
+    }
+    if (actionsEl) {
+      actionsEl.hidden = false;
+      actionsEl.innerHTML = `
+        <div class="filedesk-slice-progress">
+          <div class="filedesk-slice-progress-head">
+            <div>
+              <strong data-slice-progress-label>Preparing profiles</strong>
+              <span data-slice-progress-detail>Checking printer, process, filament, support, brim, and plate settings.</span>
+            </div>
+            <em data-slice-progress-elapsed>1s</em>
+          </div>
+          <div class="filedesk-slice-progress-bar"><span data-slice-progress-fill style="width:8%"></span></div>
+          <div class="filedesk-slice-progress-foot">
+            <span>Background slice running</span>
+            ${browserUrl ? `<a class="filedesk-slice-link" href="${esc(browserUrl)}" target="_blank" rel="noreferrer">Open Orca</a>` : ''}
+          </div>
+        </div>`;
+    }
     try {
       const r = await fetch('/api/slicer/run', {
         method: 'POST',
@@ -11192,27 +12190,87 @@ function _openSliceModelDialog({ sourceId, path, file, printers }) {
           source_id: sourceId,
           path,
           printer_id: runBtn.dataset.printerId,
+          ...profilePayload(),
           output_filename: runBtn.dataset.runSlice || '',
           plate: '1',
           bed_type: overlay.querySelector('#slice-bed-type')?.value || 'Textured PEI Plate',
+          support_mode: overlay.querySelector('#slice-support-mode')?.value || 'profile',
+          brim_mode: overlay.querySelector('#slice-brim-mode')?.value || 'profile',
           all_plates: !!overlay.querySelector('#slice-all-plates')?.checked,
         }),
       });
+      setProgress(98, 'Finishing slice', 'Saving the generated output into the Print Vault.');
       const data = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(typeof data.detail === 'string' ? data.detail : data.detail?.message || 'Slice failed');
       showToast('Sliced job ready', `${data.filename} · ${_fmtBytes(data.size)}`, 'success');
-      close();
+      if (errEl) {
+        errEl.hidden = false;
+        errEl.classList.add('filedesk-dialog-ok');
+        errEl.textContent = `${data.filename} is sliced and ready in the Print Vault.`;
+      }
+      if (actionsEl) {
+        const previewUrl = data.preview_url || (data.path
+          ? `/api/files/source/preview?${new URLSearchParams({ source_id: 'library', path: data.path, view: 'top' }).toString()}`
+          : '');
+        const previewLabel = data.filename ? `${data.filename} preview` : 'Sliced job preview';
+        actionsEl.hidden = false;
+        actionsEl.innerHTML = `
+          <div class="filedesk-slice-steps">
+            <strong>Sliced job ready</strong>
+            <span>${esc(data.filename)} is now printer-ready. Preview uses the thumbnail embedded in the sliced output when available.</span>
+          </div>
+          ${previewUrl ? `<div class="filedesk-slice-preview">
+            <img src="${esc(_mediaUrl(previewUrl, previewLabel))}" alt="${esc(previewLabel)}" loading="eager" data-slice-preview-img>
+            <span>Preview unavailable</span>
+          </div>` : `<div class="filedesk-slice-preview is-missing"><span>Preview unavailable</span></div>`}
+          <div class="filedesk-slice-buttons">
+            <button class="filedesk-slice-link filedesk-slice-queue" type="button" data-queue-sliced="${esc(data.path || data.filename)}" data-printer-id="${esc(data.printer_id || runBtn.dataset.printerId)}">Queue sliced job</button>
+            ${browserUrl && data.path ? `<button class="filedesk-slice-link" type="button" data-open-orca data-open-orca-source-id="library" data-open-orca-path="${esc(data.path)}" data-open-orca-url="${esc(browserUrl)}">Open sliced in Orca</button>` : ''}
+            <button class="filedesk-slice-link" type="button" data-check-slice-output="${esc(data.filename)}">Check vault</button>
+          </div>`;
+        actionsEl.querySelector('[data-slice-preview-img]')?.addEventListener('error', event => {
+          event.currentTarget.closest('.filedesk-slice-preview')?.classList.add('is-missing');
+        });
+      }
       _fileDeskLastHtml = '';
       _printerBayLastHtml = '';
-      const route = parseRoute();
-      if (route.view === 'printer' && route.subtab === 'bay') _renderPrinterBayBody(route.id);
-      else renderFileDeskView();
     } catch (err) {
       showToast('Slice failed', err.message || '', 'error');
+      if (errEl) {
+        errEl.classList.remove('filedesk-dialog-ok');
+        errEl.hidden = false;
+        errEl.textContent = err.message || 'Slice failed';
+      }
+      if (actionsEl) {
+        actionsEl.hidden = false;
+        actionsEl.innerHTML = `
+          <div class="filedesk-slice-steps">
+            <strong>Slice failed</strong>
+            <span>${esc(err.message || 'The slicer did not return a printer-ready file.')}</span>
+          </div>
+          <div class="filedesk-slice-buttons">
+            <button class="filedesk-slice-link filedesk-slice-run" type="button" data-run-slice="${esc(runBtn.dataset.runSlice || '')}" data-printer-id="${esc(runBtn.dataset.printerId || selectedPrinterId)}">Try again</button>
+            ${browserUrl ? `<button class="filedesk-slice-link" type="button" data-open-orca data-open-orca-source-id="${esc(sourceId)}" data-open-orca-path="${esc(path)}" data-open-orca-url="${esc(browserUrl)}">Open model in Orca</button>` : ''}
+          </div>`;
+      }
     } finally {
+      clearInterval(progressTimer);
       runBtn.disabled = false;
       runBtn.textContent = old;
+      overlay.querySelectorAll('.filedesk-printer-choice, #slice-prepare-plan, #slice-bed-type, #slice-support-mode, #slice-brim-mode, #slice-all-plates, .slicer-profile-input').forEach(el => {
+        el.disabled = false;
+      });
     }
+  });
+  overlay.addEventListener('click', async e => {
+    const queueBtn = e.target.closest('[data-queue-sliced]');
+    if (!queueBtn) return;
+    await _queueFileToPrinter({
+      sourceId: 'library',
+      path: queueBtn.dataset.queueSliced || '',
+      printerId: queueBtn.dataset.printerId || selectedPrinterId,
+      button: queueBtn,
+    });
   });
 
 }
@@ -11220,6 +12278,9 @@ function _openSliceModelDialog({ sourceId, path, file, printers }) {
 function _setupVersionHtml(version) {
   const notes = (version?.release_notes || []).map(note => `<li>${esc(note)}</li>`).join('');
   const current = [version?.version ? `v${version.version}` : 'version unknown', version?.commit || ''].filter(Boolean).join(' · ');
+  const updateHint = version?.dirty
+    ? esc(_setupUpdateDirtyMessage(version))
+    : 'Updates use <code>git pull --ff-only</code>. Restart Flightdeck after a successful update. Download logs creates a redacted diagnostic zip for support.';
   let updateText = 'Check GitHub';
   let updateClass = 'info';
   if (version?.behind) {
@@ -11242,7 +12303,8 @@ function _setupVersionHtml(version) {
       <div class="setup-version-actions">
         <span class="setup-health-badge setup-ready-${updateClass}" id="setup-update-state">${esc(updateText)}</span>
         <button type="button" class="settings-save-btn" id="setup-check-update">Check</button>
-        <button type="button" class="settings-save-btn" id="setup-run-update" ${version?.dirty ? 'disabled' : ''}>Update</button>
+        <button type="button" class="settings-save-btn setup-update-btn" id="setup-run-update" data-update-state="${version?.dirty ? 'blocked' : version?.behind ? 'available' : 'idle'}">${version?.dirty ? 'Blocked' : 'Update'}</button>
+        <button type="button" class="settings-save-btn setup-log-download-btn" id="setup-support-bundle">Download logs</button>
       </div>
     </div>
     <div class="setup-version-meta">
@@ -11251,8 +12313,126 @@ function _setupVersionHtml(version) {
       ${dirty}
     </div>
     ${notes ? `<ul class="setup-version-notes">${notes}</ul>` : ''}
-    <div class="settings-hint" id="setup-update-message">Updates use <code>git pull --ff-only</code>. Restart Flightdeck after a successful update.</div>
+    <div class="settings-hint" id="setup-update-message" data-tone="${version?.dirty ? 'warn' : 'info'}">${updateHint}</div>
   </div>`;
+}
+
+function _setupUpdateDirtyMessage(data) {
+  const entries = Array.isArray(data?.dirty_entries) ? data.dirty_entries.filter(Boolean) : [];
+  if (!entries.length) {
+    return 'Local changes are present. Update is blocked until they are committed, stashed, or removed.';
+  }
+  const shown = entries.slice(0, 5).join(', ');
+  const extra = entries.length > 5 ? `, plus ${entries.length - 5} more` : '';
+  return `Local changes are blocking updates: ${shown}${extra}. Commit, stash, or remove those files first.`;
+}
+
+function _downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename || 'flightdeck-support.zip';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function _filenameFromDisposition(value, fallback) {
+  const header = String(value || '');
+  const utf8 = header.match(/filename\*=UTF-8''([^;]+)/i);
+  if (utf8) {
+    try { return decodeURIComponent(utf8[1].trim()); } catch {}
+  }
+  const plain = header.match(/filename="?([^";]+)"?/i);
+  return plain ? plain[1].trim() : fallback;
+}
+
+function _openSupportBundleModal() {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay setup-support-overlay';
+  overlay.innerHTML = `
+    <div class="modal-box setup-support-modal" role="dialog" aria-modal="true" aria-label="Download support logs">
+      <div class="setup-support-head">
+        <div>
+          <div class="settings-section-title">Support bundle</div>
+          <div class="settings-hint">Please fill in as much information as possible. Once completed, click Download zip, attach it to an email, and send it to flightdeck3dprinters@gmail.com.</div>
+        </div>
+        <button type="button" class="modal-close-btn" data-support-close>&times;</button>
+      </div>
+      <form class="setup-support-form">
+        <div class="setup-support-grid">
+          <label class="setup-support-field">
+            <span>Name *</span>
+            <input name="name" type="text" autocomplete="name" maxlength="200" placeholder="Your name" required>
+          </label>
+          <label class="setup-support-field">
+            <span>Email *</span>
+            <input name="email" type="email" autocomplete="email" maxlength="320" placeholder="you@example.com" required>
+          </label>
+        </div>
+        <label class="setup-support-field">
+          <span>Problem / what happened *</span>
+          <textarea name="problem" rows="4" maxlength="4000" placeholder="What broke, froze, failed, or looked wrong?" required></textarea>
+        </label>
+        <label class="setup-support-field">
+          <span>Expected / what you were trying to do</span>
+          <textarea name="expected" rows="3" maxlength="4000" placeholder="What should Flightdeck have done instead?"></textarea>
+        </label>
+        <label class="setup-support-field">
+          <span>Extra notes</span>
+          <textarea name="notes" rows="3" maxlength="4000" placeholder="Printer name, page, recent actions, screenshots sent separately..."></textarea>
+        </label>
+        <div class="settings-hint setup-support-email">After it downloads, email the zip to <strong>flightdeck3dprinters@gmail.com</strong>.</div>
+        <div class="modal-actions">
+          <button type="button" class="modal-btn" data-support-close>Cancel</button>
+          <button type="submit" class="modal-btn setup-support-primary" data-support-submit>Download zip</button>
+        </div>
+      </form>
+    </div>`;
+  document.body.appendChild(overlay);
+  const form = overlay.querySelector('.setup-support-form');
+  const first = form.querySelector('input, textarea');
+  const close = () => overlay.remove();
+  overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+  overlay.querySelectorAll('[data-support-close]').forEach(btn => btn.addEventListener('click', close));
+  overlay.addEventListener('keydown', e => { if (e.key === 'Escape') close(); });
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const submit = form.querySelector('[data-support-submit]');
+    const old = submit.textContent;
+    submit.disabled = true;
+    submit.textContent = 'Preparing...';
+    const fd = new FormData(form);
+    const payload = Object.fromEntries(['name', 'email', 'problem', 'expected', 'notes'].map(key => [key, String(fd.get(key) || '').trim()]));
+    if (!payload.name || !payload.email || !payload.problem) {
+      showToast('Support details needed', 'Please add your name, email, and what happened.', 'warn');
+      submit.disabled = false;
+      submit.textContent = old;
+      return;
+    }
+    try {
+      const r = await fetch('/api/setup/logs/support', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!r.ok) {
+        const data = await r.json().catch(() => ({}));
+        throw new Error(data.detail || 'Support bundle failed');
+      }
+      const blob = await r.blob();
+      const filename = _filenameFromDisposition(r.headers.get('Content-Disposition'), 'flightdeck-support.zip');
+      _downloadBlob(blob, filename);
+      close();
+      showToast('Support bundle ready', 'Email the zip to flightdeck3dprinters@gmail.com.', 'success');
+    } catch (err) {
+      showToast('Download logs failed', err.message || '', 'error');
+      submit.disabled = false;
+      submit.textContent = old;
+    }
+  });
+  setTimeout(() => first?.focus(), 30);
 }
 
 function _setupHealthHtml(health, context = {}) {
@@ -11265,8 +12445,6 @@ function _setupHealthHtml(health, context = {}) {
   const printers = context.printers || _latestPrinters || [];
   const scaleOk = !!context.scale?.available;
   const labelOk = !!context.labelPrinter?.available;
-  const labelModel = context.labelPrinter?.model || context.labelPrinter?.label || 'Label printer';
-  const labelSize = context.labelPrinter?.label_size || 'labels';
   const dataCheck = _setupCheckByLabel(checks, /data|database|folder|path/i);
   const cameraCheck = _setupCheckByLabel(checks, /camera|worker/i);
   const backupCheck = _setupCheckByLabel(checks, /backup|vault|archive/i);
@@ -11284,7 +12462,7 @@ function _setupHealthHtml(health, context = {}) {
     _setupReadinessTile('Data', dataOk ? 'Healthy' : 'Check', dataCheck?.detail || 'Database and data folder status', dataOk ? 'ok' : 'warn'),
     _setupReadinessTile('Cameras', cameraOk ? 'Ready' : 'Check', cameraCheck?.detail || 'Camera workers available when printers are online', cameraOk ? 'ok' : 'warn'),
     _setupReadinessTile('Scale', scaleOk ? 'Detected' : 'Optional', scaleOk ? 'Dymo scale ready for weigh-ins' : (context.scale?.last_error || 'Only needed for live spool weighing'), scaleOk ? 'ok' : 'optional'),
-    _setupReadinessTile('Labels', labelOk ? 'Detected' : 'Optional', labelOk ? `${labelModel} ready for ${labelSize}` : (context.labelPrinter?.last_error || 'Only needed for QR spool labels'), labelOk ? 'ok' : 'optional'),
+    _setupReadinessTile('Labels', labelOk ? 'Detected' : 'Optional', labelOk ? `QL-700 ready for ${context.labelPrinter?.label_size || 'DK-22212'}` : (context.labelPrinter?.last_error || 'Only needed for QR spool labels'), labelOk ? 'ok' : 'optional'),
     _setupReadinessTile('Access', baseUrl, 'Use this URL for labels, phones, and remote access', 'info'),
     _setupReadinessTile('Backup', backupCheck?.ok ? 'Ready' : 'Configure', backupCheck?.detail || 'GitHub/private backup path can be configured after install', backupCheck?.ok ? 'ok' : 'optional'),
   ].join('');
@@ -11337,14 +12515,22 @@ function _setupHealthHtml(health, context = {}) {
 function _attachSetupEvents(el) {
   const message = el.querySelector('#setup-update-message');
   const state = el.querySelector('#setup-update-state');
+  const updateBtn = el.querySelector('#setup-run-update');
   const setMessage = (text, tone = 'info') => {
     if (message) {
       message.textContent = text;
       message.dataset.tone = tone;
     }
   };
+  const setUpdateButton = (status, label = 'Update') => {
+    if (updateBtn) {
+      updateBtn.dataset.updateState = status;
+      updateBtn.textContent = label;
+    }
+  };
   el.querySelector('#setup-check-update')?.addEventListener('click', async () => {
-    setMessage('Checking GitHub...');
+    setMessage('Checking GitHub...', 'busy');
+    setUpdateButton('checking', 'Checking');
     try {
       const r = await fetch('/api/update/status?check_remote=true');
       const data = await r.json().catch(() => ({}));
@@ -11354,27 +12540,38 @@ function _attachSetupEvents(el) {
           ? `Update available ${data.remote_commit ? `· ${data.remote_commit}` : ''}`
           : data.fetch_ok === false ? 'GitHub check failed' : 'Up to date';
       }
-      setMessage(data.behind ? 'A newer GitHub build is available.' : (data.fetch_detail || 'Flightdeck is up to date.'), data.behind ? 'warn' : 'ok');
+      if (data.dirty) setUpdateButton('blocked', 'Blocked');
+      else if (data.behind) setUpdateButton('available', 'Update now');
+      else setUpdateButton('done', 'Current');
+      setMessage(data.dirty
+        ? _setupUpdateDirtyMessage(data)
+        : data.behind ? 'A newer GitHub build is available.' : (data.fetch_detail || 'Flightdeck is up to date.'),
+        (data.dirty || data.behind) ? 'warn' : 'ok');
     } catch (err) {
+      setUpdateButton('blocked', 'Check failed');
       setMessage(err.message || 'Update check failed', 'warn');
     }
   });
   el.querySelector('#setup-run-update')?.addEventListener('click', async e => {
     const btn = e.currentTarget;
     btn.disabled = true;
-    setMessage('Updating from GitHub...');
+    setUpdateButton('running', 'Updating...');
+    setMessage('Updating from GitHub...', 'busy');
     try {
       const r = await fetch('/api/update', { method: 'POST' });
       const data = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(data.detail || 'Update failed');
       if (state) state.textContent = 'Updated';
+      setUpdateButton('done', 'Updated');
       setMessage(`${data.message || 'Update complete.'} Restart Flightdeck to load the new code.`, 'ok');
       showToast('Flightdeck updated', 'Restart Flightdeck to load the new build.', 'success');
     } catch (err) {
       btn.disabled = false;
+      setUpdateButton('blocked', 'Blocked');
       setMessage(err.message || 'Update failed', 'warn');
     }
   });
+  el.querySelector('#setup-support-bundle')?.addEventListener('click', _openSupportBundleModal);
 }
 
 async function _saveSetting(key, value) {
@@ -11780,9 +12977,6 @@ function _hardwareCategoryHtml(scale, labelPrinter) {
   const scaleOk = !!scale?.available;
   const labelOk = !!labelPrinter?.available;
   const autoPrint = (_serverSettings.label_auto_print ?? 'false') === 'true';
-  const labelModel = labelPrinter?.model || labelPrinter?.label || 'Label printer';
-  const labelSize = labelPrinter?.label_size || 'labels';
-  const labelQueue = labelPrinter?.printer_name ? ` via ${labelPrinter.printer_name}` : '';
   return `
     <div class="settings-section">
       <div class="settings-section-title">Scale</div>
@@ -11805,8 +12999,8 @@ function _hardwareCategoryHtml(scale, labelPrinter) {
       <div class="hardware-card">
         <div class="hardware-card-main">
           <div>
-            <div class="hardware-title">${esc(labelModel)}</div>
-            <div class="hardware-sub">${labelOk ? `Ready for ${esc(labelSize)}${esc(labelQueue)}` : esc(labelPrinter?.last_error || 'Not detected')}</div>
+            <div class="hardware-title">Brother QL-700</div>
+            <div class="hardware-sub">${labelOk ? `Ready for ${labelPrinter.label_size || 'DK-22212'} labels` : (labelPrinter?.last_error || 'Not detected')}</div>
           </div>
           ${_hardwareStatusPill(labelOk, labelOk ? 'Ready' : 'Unavailable')}
         </div>
@@ -12116,6 +13310,12 @@ function _slotDoctorState(spool, report) {
 
 function _slotCandidateScore(spool, report) {
   if (!report || report.empty) return 9999;
+  if (_slotReportIsLowConfidence(report)) {
+    const mat = _normMat(`${spool.material || ''}${spool.subtype ? ' ' + spool.subtype : ''}`);
+    const reported = _normMat(_slotReportedMaterial(report));
+    const matPenalty = reported && mat && (mat.includes(reported) || reported.includes(mat)) ? 0 : 250;
+    return matPenalty + (_genericProfileRejectsSpool(report, spool) ? 500 : 0);
+  }
   const mat = _normMat(`${spool.material || ''}${spool.subtype ? ' ' + spool.subtype : ''}`);
   const reported = _normMat(_slotReportedMaterial(report));
   const matPenalty = reported && mat && (mat.includes(reported) || reported.includes(mat)) ? 0 : 250;
@@ -12123,26 +13323,187 @@ function _slotCandidateScore(spool, report) {
   return matPenalty + profilePenalty + _hexDistance(report.color, spool.color_hex);
 }
 
+function _slotReportIsGeneric(report) {
+  if (!report || report.empty) return false;
+  const text = [report.brand, report.profile_name, report.profile_id].filter(Boolean).join(' ');
+  return _isGenericProfile(report.brand) || _isGenericProfile(report.profile_name) || /\bGFL99\b/i.test(text);
+}
+
+function _slotReportIsUnknownLoaded(report) {
+  if (!report || report.empty) return false;
+  return !String(_slotReportedMaterial(report) || '').trim()
+    && !String(report.color || '').trim()
+    && !String(report.brand || report.profile_name || report.profile_id || '').trim();
+}
+
+function _slotReportIsLowConfidence(report) {
+  return _slotReportIsGeneric(report) || _slotReportIsUnknownLoaded(report);
+}
+
 function _slotReport(printer, slotIndex) {
   if (!printer) return null;
-  for (const unit of _list(printer.ams)) {
-    for (const slot of _list(unit.slots)) {
+  for (const unit of printer.ams || []) {
+    for (const slot of unit.slots || []) {
       if (_amsFlatSlot(unit, slot) === Number(slotIndex)) return slot;
     }
   }
-  for (const unit of _list(printer.mmu)) {
-    for (const gate of _list(unit.gates)) {
+  for (const unit of printer.mmu || []) {
+    for (const gate of unit.gates || []) {
       if (Number(gate.idx) === Number(slotIndex)) return gate;
     }
   }
   return null;
 }
 
+function _spoolAssignedSlotSource(spool) {
+  if (!spool?.location_printer_id || spool.location_slot === null || spool.location_slot === undefined) return null;
+  const printer = _latestPrinters.find(p => p.id === spool.location_printer_id);
+  const slotIndex = Number(spool.location_slot);
+  if (!printer || !Number.isFinite(slotIndex)) return null;
+  const report = _slotReport(printer, slotIndex);
+  return {
+    printer,
+    report,
+    slotIndex,
+    slotLabel: _amsSlotLabel(printer, slotIndex),
+  };
+}
+
+function _spoolIsAssignableToSlot(spool) {
+  if (!spool || spool.archived_at) return false;
+  if (!spool.location_printer_id) return true;
+  const source = _spoolAssignedSlotSource(spool);
+  return !!source?.report?.empty;
+}
+
+function _spoolAssignableLocationLabel(spool) {
+  if (!spool?.location_printer_id) return _spoolStorageLocationName(spool?.storage_location_id);
+  const source = _spoolAssignedSlotSource(spool);
+  const printerName = source?.printer?.custom_name || source?.printer?.model_name || spool.location_printer_id;
+  const slotLabel = source?.slotLabel || `S${Number(spool.location_slot) + 1}`;
+  return `${printerName} · ${slotLabel} empty`;
+}
+
+const _AMS_PROFILE_MATERIALS = ['PLA', 'PETG', 'PCTG', 'ABS', 'ASA', 'TPU', 'PC', 'PA', 'NYLON', 'PVA', 'HIPS', 'PP', 'PET'];
+
+function _amsProfileParts(name, fallbackSpool = null) {
+  const clean = String(name || '').replace(/\s*@.+$/, '').trim();
+  const upper = clean.toUpperCase();
+  for (const mat of _AMS_PROFILE_MATERIALS) {
+    if (new RegExp(`\\b${mat}\\b`, 'i').test(upper)) return { material: mat, profileName: clean || mat };
+  }
+  return {
+    material: String(fallbackSpool?.material || 'PLA').trim().toUpperCase(),
+    profileName: clean || [fallbackSpool?.brand, fallbackSpool?.material, fallbackSpool?.subtype].filter(Boolean).join(' ').trim(),
+  };
+}
+
+function _amsGenericFilamentId(material) {
+  const mat = String(material || '').toUpperCase().replace(/[^A-Z0-9 +.-]+/g, ' ').replace(/\s+/g, ' ').trim();
+  const ids = {
+    PLA: 'GFL99', 'PLA-CF': 'GFL98', 'PLA SILK': 'GFL96', 'PLA HIGH SPEED': 'GFL95',
+    PETG: 'GFG99', 'PETG HF': 'GFG96', 'PETG-CF': 'GFG98', PCTG: 'GFG97',
+    ABS: 'GFB99', ASA: 'GFB98', PC: 'GFC99',
+    PA: 'GFN99', 'PA-CF': 'GFN98', NYLON: 'GFN99',
+    TPU: 'GFU99', PVA: 'GFS99', HIPS: 'GFS98', PE: 'GFP99', PP: 'GFP97',
+  };
+  return ids[mat] || ids[mat.replace(/\+$/, '')] || ids[mat.split(/[-\s]/)[0]] || 'GFL99';
+}
+
+function _amsProfileTempRange(material) {
+  const mat = String(material || '').toUpperCase();
+  if (mat.includes('ABS') || mat.includes('ASA')) return { min: 240, max: 280 };
+  if (mat.includes('PETG') || mat.includes('PCTG')) return { min: 220, max: 260 };
+  if (mat.includes('TPU')) return { min: 200, max: 240 };
+  if (mat.includes('PC')) return { min: 260, max: 300 };
+  if (mat.includes('PA') || mat.includes('NYLON')) return { min: 250, max: 290 };
+  return { min: 190, max: 230 };
+}
+
+function _amsSlotProfileRows(profileData, spool, printer) {
+  const rows = _slicerProfileOptions(profileData, 'filament');
+  const material = String(spool?.material || '').toUpperCase();
+  const printerText = [printer?.model_name, printer?.custom_name, printer?.id].filter(Boolean).join(' ');
+  const keywords = _slicerProfileKeywords(printerText);
+  const filtered = rows.filter(row => {
+    const name = String(row.name || '');
+    if (material && !name.toUpperCase().includes(material)) return false;
+    return _slicerProfileScore(row, keywords) > 0 || !/@BBL|@Bambu/i.test(name);
+  });
+  return (filtered.length ? filtered : rows).slice().sort((a, b) => a.name.localeCompare(b.name)).slice(0, 320);
+}
+
+function _amsProfileOptionHtml(row, selectedName) {
+  const parsed = _amsProfileParts(row.name);
+  const selected = String(row.name || '') === String(selectedName || '');
+  return `<button type="button" class="slot-ams-profile-option${selected ? ' selected' : ''}" data-ams-profile-option="${esc(row.name)}" data-search="${esc(`${row.name || ''} ${row.vendor || ''}`.toLowerCase())}">
+    <span class="slot-ams-profile-option-main">
+      <strong>${esc(row.name)}</strong>
+      <small>${esc(row.vendor || 'Custom')}</small>
+    </span>
+    <em>${esc(parsed.material || 'PLA')}</em>
+  </button>`;
+}
+
+function _amsProfilePanelHtml(current, report, profileData, printer) {
+  if (!current) return '';
+  const fallbackName = [current.brand, current.material, current.subtype].filter(Boolean).join(' ').trim();
+  const reportedName = report && !report.empty ? (report.profile_name || report.brand || '') : '';
+  const initialName = fallbackName || reportedName || current.material || 'PLA';
+  const parsed = _amsProfileParts(initialName, current);
+  const temp = _amsProfileTempRange(parsed.material);
+  const rows = _amsSlotProfileRows(profileData, current, printer);
+  return `
+    <div class="slot-ams-profile">
+      <div class="slot-assign-head">
+        <label class="spool-form-label" for="slot-ams-profile-name">Bambu slot profile</label>
+        <span>Sent by Trust Flightdeck</span>
+      </div>
+      <label class="slot-ams-profile-toggle">
+        <input type="checkbox" id="slot-ams-profile-enabled">
+        <span>Override spool default profile</span>
+      </label>
+      <input id="slot-ams-profile-name" class="spool-form-input" value="${esc(initialName)}" placeholder="Search filament profiles...">
+      <div class="slot-ams-profile-list" role="listbox" aria-label="Filament profiles">
+        ${rows.length ? rows.map(row => _amsProfileOptionHtml(row, initialName)).join('') : '<div class="slot-empty-state">No synced filament profiles available.</div>'}
+        <div class="slot-ams-profile-no-match hidden">No matching filament profiles. Run Slicer Sync profiles, then search again.</div>
+      </div>
+      <div class="slot-ams-profile-grid">
+        <label><span>Material</span><input class="spool-form-input" id="slot-ams-profile-material" value="${esc(parsed.material)}"></label>
+        <label><span>Colour</span><input class="spool-form-input" id="slot-ams-profile-color" type="color" value="${esc(_normHex(current.color_hex || report?.color || '#808080') || '#808080')}"></label>
+        <label><span>Min</span><input class="spool-form-input" id="slot-ams-profile-temp-min" type="number" value="${temp.min}" min="0" max="350"></label>
+        <label><span>Max</span><input class="spool-form-input" id="slot-ams-profile-temp-max" type="number" value="${temp.max}" min="0" max="350"></label>
+      </div>
+      <div class="slot-return-memory">Flightdeck still treats spool #${esc(current.id)} as the identity. These fields only control the profile and colour written to the Bambu AMS slot.</div>
+    </div>`;
+}
+
+function _slotAmsProfilePayload(container, current) {
+  if (!current) return null;
+  if (!container.querySelector('#slot-ams-profile-enabled')?.checked) return null;
+  const name = container.querySelector('#slot-ams-profile-name')?.value.trim() || '';
+  const parsed = _amsProfileParts(name, current);
+  const material = container.querySelector('#slot-ams-profile-material')?.value.trim().toUpperCase() || parsed.material;
+  const color = container.querySelector('#slot-ams-profile-color')?.value.trim() || current.color_hex || '#808080';
+  const min = parseInt(container.querySelector('#slot-ams-profile-temp-min')?.value || '', 10);
+  const max = parseInt(container.querySelector('#slot-ams-profile-temp-max')?.value || '', 10);
+  const fallback = _amsProfileTempRange(material);
+  return {
+    profile_name: name || parsed.profileName || material,
+    tray_type: material,
+    tray_info_idx: _amsGenericFilamentId(material),
+    brand: current.brand || '',
+    color,
+    nozzle_temp_min: Number.isFinite(min) ? min : fallback.min,
+    nozzle_temp_max: Number.isFinite(max) ? max : fallback.max,
+  };
+}
+
 async function _openSlotEditor(printerId, slotIndex, slotLabel) {
   const printer = _latestPrinters.find(p => p.id === printerId);
   const title = `${printer?.custom_name || printerId} · ${slotLabel}`;
   const overlay = document.createElement('div');
-  overlay.className = 'modal-overlay';
+  overlay.className = 'modal-overlay slot-modal-overlay';
   overlay.innerHTML = `
     <div class="modal-box slot-modal">
       <div class="modal-header">
@@ -12165,27 +13526,30 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
   overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
 
   async function load() {
-    const [spools, locations] = await Promise.all([
+    const [spools, locations, profileData] = await Promise.all([
       fetch('/api/spools').then(r => r.json()).catch(() => []),
       fetch('/api/spool-locations').then(r => r.json()).catch(() => []),
+      fetch('/api/slicer/profiles').then(r => r.json()).catch(() => null),
     ]);
+    if (profileData) _slicerProfileData = profileData;
     _allSpools = spools;
     _spoolLocations = locations;
     const current = spools.find(s =>
       s.location_printer_id === printerId && Number(s.location_slot) === Number(slotIndex) && !s.archived_at
     );
     const report = _slotReport(printer, slotIndex);
+    const lowConfidenceReport = !current && _slotReportIsLowConfidence(report);
     const mismatch = _slotMismatch(current, report);
     const doctor = _slotDoctorState(current, report);
     const candidates = spools
-      .filter(s => !s.archived_at && !s.location_printer_id)
+      .filter(s => _spoolIsAssignableToSlot(s) && (!current || String(s.id) !== String(current.id)))
       .sort((a, b) =>
         _slotCandidateScore(a, report) - _slotCandidateScore(b, report) ||
-        _spoolStorageLocationName(a.storage_location_id).localeCompare(_spoolStorageLocationName(b.storage_location_id)) ||
+        _spoolAssignableLocationLabel(a).localeCompare(_spoolAssignableLocationLabel(b)) ||
         (a.material || '').localeCompare(b.material || '') ||
         (a.color_name || '').localeCompare(b.color_name || '')
       );
-    const bestCandidate = report && !report.empty ? candidates.find(s => _slotCandidateScore(s, report) < 320) : null;
+    const bestCandidate = report && !report.empty && !lowConfidenceReport ? candidates.find(s => _slotCandidateScore(s, report) < 320) : null;
     const reportProfile = report ? (_slotProfileLabel(report) || 'Loaded filament') : 'No report';
     const reportColour = report?.empty ? 'Empty' : (report?.color || 'Unknown');
     const reportMaterial = report?.empty ? 'Empty' : (_slotReportedMaterial(report) || 'Unknown');
@@ -12218,17 +13582,50 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
         <button type="button" class="spool-action-btn spool-action-label" data-slot-spool-id="${bestCandidate.id}">Assign suggested spool</button>
       </div>`
       : '';
+    const genericWarningHtml = lowConfidenceReport ? `
+      <div class="slot-warning">
+        Printer is reporting a generic or incomplete Bambu profile, so the stored colour may be stale or missing. Choose the physical shelf spool; assigning it will overwrite the AMS slot profile.
+      </div>` : '';
+    const matchCount = lowConfidenceReport ? 0 : candidates.filter(s => _slotCandidateScore(s, report) < 320).length;
+    const locationCounts = new Map();
+    for (const s of candidates) {
+      const source = _spoolAssignedSlotSource(s);
+      const key = source?.report?.empty ? `empty:${s.location_printer_id}:${s.location_slot}` : `loc:${s.storage_location_id || ''}`;
+      const currentCount = locationCounts.get(key) || { id: key, name: _spoolAssignableLocationLabel(s), count: 0 };
+      currentCount.count += 1;
+      locationCounts.set(key, currentCount);
+    }
+    const locationFilters = [...locationCounts.values()]
+      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
+      .slice(0, 6);
+    const pickerFilters = candidates.length ? `
+      <div class="slot-filter-chips" role="group" aria-label="Filter stored spools">
+        <button type="button" class="slot-filter-chip active" data-slot-filter="all">All <span>${candidates.length}</span></button>
+        ${report && !report.empty && !lowConfidenceReport ? `<button type="button" class="slot-filter-chip" data-slot-filter="match">Matches <span>${matchCount}</span></button>` : ''}
+        ${locationFilters.map(loc => `<button type="button" class="slot-filter-chip" data-slot-filter="${esc(loc.id)}">${esc(loc.name)} <span>${loc.count}</span></button>`).join('')}
+      </div>` : '';
     const pickerRows = candidates.length ? candidates.map(s => {
       const pct = s.label_weight_g > 0 ? Math.round(s.remaining_g * 100 / s.label_weight_g) : 0;
-      const loc = _spoolStorageLocationName(s.storage_location_id);
+      const loc = _spoolAssignableLocationLabel(s);
+      const staleEmptySource = !!_spoolAssignedSlotSource(s)?.report?.empty;
       const score = _slotCandidateScore(s, report);
-      const suggested = score < 96;
+      const suggested = !lowConfidenceReport && score < 96;
+      const nearMatch = !lowConfidenceReport && !suggested && score < 320;
+      const homeShelf = s.home_storage_location_id && String(s.home_storage_location_id) === String(s.storage_location_id);
+      const badges = [
+        suggested ? 'Suggested' : '',
+        nearMatch ? 'Near match' : '',
+        homeShelf ? 'Home shelf' : '',
+        staleEmptySource ? 'Empty source slot' : '',
+      ].filter(Boolean);
       const searchable = `${loc} ${s.material || ''} ${s.subtype || ''} ${s.brand || ''} ${s.color_name || ''} ${s.color_hex || ''} #${s.id}`.toLowerCase();
-      return `<button type="button" class="slot-spool-option" data-slot-spool-id="${s.id}" data-search="${esc(searchable)}">
+      const filterKey = staleEmptySource ? `empty:${s.location_printer_id}:${s.location_slot}` : `loc:${s.storage_location_id || ''}`;
+      return `<button type="button" class="slot-spool-option" data-slot-spool-id="${s.id}" data-search="${esc(searchable)}" data-score="${score}" data-location-id="${esc(filterKey)}">
         <span class="location-spool-swatch" style="${_spoolColorStyle(s)}"></span>
         <span class="slot-spool-option-main">
-          <strong>${esc(s.color_name || s.color_hex || 'Colour')} · ${esc(s.material)}${s.subtype ? ` ${esc(s.subtype)}` : ''}${suggested ? ' <em>Suggested</em>' : ''}</strong>
+          <strong>${esc(s.color_name || s.color_hex || 'Colour')} · ${esc(s.material)}${s.subtype ? ` ${esc(s.subtype)}` : ''}</strong>
           <small>${esc(s.brand || 'Unknown brand')} · #${s.id} · ${Math.round(s.remaining_g || 0)}g (${pct}%)</small>
+          ${badges.length ? `<span class="slot-spool-badges">${badges.map(b => `<em>${esc(b)}</em>`).join('')}</span>` : ''}
         </span>
         <span class="slot-spool-location">${esc(loc)}</span>
       </button>`;
@@ -12267,6 +13664,7 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
           </div>
         </div>
         ${mismatch ? `<div class="slot-warning">${esc(mismatch)}</div>` : ''}
+        ${genericWarningHtml}
         ${suggestionHtml}
         ${current ? `
           <div class="slot-actions slot-actions-primary">
@@ -12282,33 +13680,77 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
             <select class="slot-clear-location" data-slot-clear-location>${locationOptions}</select>
             <button class="spool-action-btn spool-action-danger" data-slot-clear="${current.id}">Return spool</button>
           </div>
-          ${returnHelp ? `<div class="slot-return-memory">${esc(returnHelp)}</div>` : ''}` : ''}
+          ${returnHelp ? `<div class="slot-return-memory">${esc(returnHelp)}</div>` : ''}
+          ${_amsProfilePanelHtml(current, report, profileData, printer)}` : ''}
       </div>
       <div class="slot-assign">
-        <label class="spool-form-label" for="slot-spool-filter">Assign stored spool</label>
+        <div class="slot-assign-head">
+          <label class="spool-form-label" for="slot-spool-filter">Assign stored spool</label>
+          <span>${candidates.length ? `${candidates.length} shelf spools` : 'No shelf stock'}</span>
+        </div>
+        ${pickerFilters}
         <input id="slot-spool-filter" class="spool-form-input" type="search" placeholder="Filter by location, material, brand, colour..."${candidates.length ? '' : ' disabled'}>
         <div class="slot-spool-picker">${pickerRows}</div>
       </div>`;
 
+    const profileNameInput = body.querySelector('#slot-ams-profile-name');
+    const profileEnableInput = body.querySelector('#slot-ams-profile-enabled');
+    body.querySelectorAll('#slot-ams-profile-name, #slot-ams-profile-material, #slot-ams-profile-color, #slot-ams-profile-temp-min, #slot-ams-profile-temp-max').forEach(input => {
+      input.addEventListener('input', () => { if (profileEnableInput) profileEnableInput.checked = true; });
+    });
+    const applyProfileName = () => {
+      const parsed = _amsProfileParts(profileNameInput.value, current);
+      const materialInput = body.querySelector('#slot-ams-profile-material');
+      const minInput = body.querySelector('#slot-ams-profile-temp-min');
+      const maxInput = body.querySelector('#slot-ams-profile-temp-max');
+      const temp = _amsProfileTempRange(parsed.material);
+      if (materialInput) materialInput.value = parsed.material;
+      if (minInput) minInput.value = temp.min;
+      if (maxInput) maxInput.value = temp.max;
+      body.querySelectorAll('[data-ams-profile-option]').forEach(row => row.classList.toggle('selected', row.dataset.amsProfileOption === profileNameInput.value));
+    };
+    profileNameInput?.addEventListener('change', applyProfileName);
+    profileNameInput?.addEventListener('input', () => {
+      const q = profileNameInput.value.trim();
+      let visible = 0;
+      body.querySelectorAll('[data-ams-profile-option]').forEach(row => {
+        const match = _profileSearchMatches(row.dataset.search || '', q);
+        row.hidden = !match;
+        if (match) visible += 1;
+      });
+      body.querySelector('.slot-ams-profile-no-match')?.classList.toggle('hidden', visible > 0);
+    });
+    body.querySelectorAll('[data-ams-profile-option]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        profileNameInput.value = btn.dataset.amsProfileOption || '';
+        if (profileEnableInput) profileEnableInput.checked = true;
+        applyProfileName();
+      });
+    });
+
     body.querySelectorAll('[data-slot-spool-id]').forEach(btn => {
       btn.addEventListener('click', async () => {
         const id = btn.dataset.slotSpoolId;
-      btn.disabled = true;
-      btn.classList.add('assigning');
-      const r = await fetch(`/api/spools/${id}/move`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ printer_id: printerId, slot: Number(slotIndex) }),
-      });
-      if (!r.ok) {
-        btn.classList.remove('assigning');
-        btn.classList.add('slot-spool-error');
-        setTimeout(load, 1200);
-        return;
-      }
-      _spoolMoveSyncToast(await r.json().catch(() => ({})), printer?.custom_name || printerId, slotLabel);
-      await _refreshSpoolsByPrinter();
-      load();
+        btn.disabled = true;
+        btn.classList.add('assigning');
+        const r = await fetch(`/api/spools/${id}/move`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ printer_id: printerId, slot: Number(slotIndex), replace_existing: true }),
+        });
+        if (!r.ok) {
+          btn.classList.remove('assigning');
+          btn.classList.add('slot-spool-error');
+          setTimeout(load, 1200);
+          return;
+        }
+        const data = await r.json().catch(() => ({}));
+        _spoolMoveSyncToast(data, printer?.custom_name || printerId, slotLabel);
+        if (data.replaced_spool_id) {
+          showToast('AMS slot swapped', `Returned spool #${data.replaced_spool_id} home and assigned spool #${id}.`, 'success');
+        }
+        await _refreshSpoolsByPrinter();
+        load();
       });
     });
 
@@ -12318,10 +13760,11 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
       const old = btn.textContent;
       btn.disabled = true;
       btn.textContent = 'Syncing';
+      const amsProfile = _slotAmsProfilePayload(body, current);
       const r = await fetch(`/api/spools/${id}/move`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ printer_id: printerId, slot: Number(slotIndex) }),
+        body: JSON.stringify({ printer_id: printerId, slot: Number(slotIndex), ams_profile: amsProfile, sync_ams: true }),
       });
       if (!r.ok) showToast('AMS sync failed', 'Flightdeck could not push this spool to the printer slot.', 'error');
       else _spoolMoveSyncToast(await r.json().catch(() => ({})), printer?.custom_name || printerId, slotLabel);
@@ -12360,13 +13803,27 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
       load();
     });
 
-    body.querySelector('#slot-spool-filter')?.addEventListener('input', e => {
-      const q = e.target.value.trim().toLowerCase();
+    const applySlotPickerFilters = () => {
+      const q = body.querySelector('#slot-spool-filter')?.value.trim().toLowerCase() || '';
+      const activeFilter = body.querySelector('.slot-filter-chip.active')?.dataset.slotFilter || 'all';
       const terms = q.split(/\s+/).filter(Boolean);
       body.querySelectorAll('[data-slot-spool-id]').forEach(row => {
         const search = row.dataset.search || '';
         if (!search) return;
-        row.hidden = !!(terms.length && !terms.every(term => search.includes(term)));
+        const matchesSearch = !terms.length || terms.every(term => search.includes(term));
+        const matchesFilter =
+          activeFilter === 'all'
+          || (activeFilter === 'match' && Number(row.dataset.score || 9999) < 320)
+          || ((activeFilter.startsWith('loc:') || activeFilter.startsWith('empty:')) && String(row.dataset.locationId || '') === activeFilter);
+        row.hidden = !(matchesSearch && matchesFilter);
+      });
+    };
+
+    body.querySelector('#slot-spool-filter')?.addEventListener('input', applySlotPickerFilters);
+    body.querySelectorAll('[data-slot-filter]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        body.querySelectorAll('[data-slot-filter]').forEach(item => item.classList.toggle('active', item === btn));
+        applySlotPickerFilters();
       });
     });
 
@@ -12472,11 +13929,8 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
 // Given a printer object and a flat slot index (unit_id*4 + tray_id), return
 // a human-readable label like "AMS 1 · S2" or "AMS HT".
 function _amsSlotLabel(printer, slotIndex) {
-  if (_isSnapmakerU1(printer)) return `T${Number(slotIndex || 0)}`;
-  if (!Array.isArray(printer?.ams)) return `S${slotIndex + 1}`;
   if (!printer?.ams?.length) return `S${slotIndex + 1}`;
   for (const unit of printer.ams) {
-    if (!Array.isArray(unit?.slots)) continue;
     for (const slot of unit.slots) {
       if (_amsFlatSlot(unit, slot) === slotIndex) {
         return unit.slots.length === 1
@@ -13704,7 +15158,7 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
               <button type="button" class="spool-inline-btn" id="sm-catalogue-sync">Sync</button>
             </div>
             <div id="sm-catalogue-chips" class="spool-catalogue-chips">
-              ${['PLA','PLA+','PETG','ASA','ABS','TPU','Bambu','Polymaker'].map(v => `<button type="button" data-chip="${v}">${v}</button>`).join('')}
+              ${['PLA','PLA+','PETG','ASA','ABS','TPU','Siddament','Bambu','Polymaker'].map(v => `<button type="button" data-chip="${v}">${v}</button>`).join('')}
             </div>
             <input id="sm-catalogue-search" class="spool-form-input" type="search" placeholder="Search brand, material, colour...">
             <div id="sm-catalogue-picked" class="spool-catalogue-picked hidden"></div>
@@ -14035,6 +15489,12 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
     return null;
   }
 
+  function catalogueSourceLabel(source) {
+    if (source === 'siddament') return 'Siddament';
+    if (source === 'open_filament_database') return 'Open Filament Database';
+    return source ? String(source).replaceAll('_', ' ') : 'Filament catalogue';
+  }
+
   function applyCatalogueEntry(item) {
     const material = String(item.material || '').toUpperCase();
     const brand = item.brand || '';
@@ -14055,7 +15515,7 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
     catalogueResults.classList.add('hidden');
     cataloguePicked.innerHTML = `
       <span class="spool-catalogue-swatch" style="background:${item.color_hex || '#808080'}"></span>
-      <span><b>${esc(item.color_name || 'Colour')}</b><small>${esc(brand)} · ${esc(material)}${item.subtype ? ` · ${esc(item.subtype)}` : ''}${item.filament_weight_g ? ` · ${Math.round(item.filament_weight_g)}g` : ''}</small><em>Catalogue match applied · editable before saving</em></span>
+      <span><b>${esc(item.color_name || 'Colour')}</b><small>${esc(brand)} · ${esc(material)}${item.subtype ? ` · ${esc(item.subtype)}` : ''}${item.filament_weight_g ? ` · ${Math.round(item.filament_weight_g)}g` : ''}</small><em>${esc(catalogueSourceLabel(item.source))} · editable before saving</em></span>
     `;
     cataloguePicked.classList.remove('hidden');
     catalogueSearch.value = `${brand} ${material} ${item.color_name || ''}`.trim();
@@ -14078,7 +15538,7 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
     catalogueResults.innerHTML = `<div class="spool-catalogue-hint">Showing ${rows.length} matches. Add material or colour to narrow.</div><div class="spool-catalogue-grid">` + rows.map((item, idx) => `
       <button type="button" class="spool-catalogue-result" data-idx="${idx}">
         <span class="spool-catalogue-swatch" style="background:${item.color_hex || '#808080'}"></span>
-        <span><b>${esc(item.color_name || 'Colour')}</b><small>${esc(item.brand || '')} · ${esc(item.material || '')}${item.subtype ? ` · ${esc(item.subtype)}` : ''}${item.filament_weight_g ? ` · ${Math.round(item.filament_weight_g)}g` : ''}</small></span>
+        <span><b>${esc(item.color_name || 'Colour')}</b><small>${esc(item.brand || '')} · ${esc(item.material || '')}${item.subtype ? ` · ${esc(item.subtype)}` : ''}${item.filament_weight_g ? ` · ${Math.round(item.filament_weight_g)}g` : ''} · ${esc(catalogueSourceLabel(item.source))}</small></span>
       </button>
     `).join('') + '</div>';
     catalogueResults.classList.remove('hidden');
@@ -14734,7 +16194,6 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
     if (units?.length) {
       const opts = [];
       for (const unit of units) {
-        if (!Array.isArray(unit?.slots)) continue;
         for (const slot of unit.slots) {
           const flatIdx = _amsFlatSlot(unit, slot);
           const label = unit.slots.length === 1

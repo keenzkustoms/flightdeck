@@ -1757,7 +1757,7 @@ def replace_filament_catalog(rows: list[dict], source: str = "open_filament_data
                (source, source_variant_id, source_filament_id, brand, material, product,
                 subtype, color_name, color_hex, filament_weight_g, empty_spool_weight_g,
                 diameter, traits, discontinued, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             [
                 (
                     source,
@@ -2567,7 +2567,8 @@ def move_spool(
     if old:
         old_loc = f"{old['location_printer_id']}:{old['location_slot']}" if old["location_printer_id"] else "storage"
         new_loc = f"{printer_id}:{slot}" if printer_id else f"storage:{target_storage_id or 'none'}"
-        log_decision("system", "spool_moved", f"Spool #{spool_id} {old_loc} → {new_loc}")
+        if old_loc != new_loc or old_storage_id != target_storage_id:
+            log_decision("system", "spool_moved", f"Spool #{spool_id} {old_loc} → {new_loc}")
     return {
         "ok": True,
         "conflict_spool_id": None,

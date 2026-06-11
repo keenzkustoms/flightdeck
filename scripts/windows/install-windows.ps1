@@ -3,6 +3,8 @@ param(
     [int]$Port = 8000,
     [string]$PythonCommand = "python",
     [string]$DataArchive = "",
+    [string]$SlicerSidecarCommand = "",
+    [string]$SlicerSidecarUrl = "http://127.0.0.1:3003",
     [switch]$NoStartup,
     [switch]$NoDesktopShortcut
 )
@@ -48,6 +50,10 @@ $envLines = @(
     "FLIGHTDECK_PORT=$Port",
     "FLIGHTDECK_URL=http://127.0.0.1:$Port"
 )
+if ($SlicerSidecarCommand) {
+    $envLines += "FLIGHTDECK_SLICER_SIDECAR_CMD=$SlicerSidecarCommand"
+    $envLines += "FLIGHTDECK_SLICER_SIDECAR_URL=$($SlicerSidecarUrl.TrimEnd('/'))"
+}
 Set-Content -Path $EnvPath -Value $envLines -Encoding UTF8
 
 function Restore-FlightdeckDataArchive {

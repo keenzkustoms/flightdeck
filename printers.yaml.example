@@ -7,6 +7,7 @@ printers:
     model_name: Voron
     custom_name: Voron
     icon: voron
+    build_volume: { x: 350, y: 350, z: 350 }
     connection:
       type: moonraker
       host: 192.168.1.10
@@ -31,6 +32,7 @@ printers:
     model_name: X1C
     custom_name: Bambu
     icon: bambu
+    build_volume: { x: 256, y: 256, z: 256 }
     connection:
       type: bambu
       host: 192.168.1.20
@@ -55,6 +57,7 @@ printers:
   #   model_name: Snapmaker U1
   #   custom_name: Snapmaker U1
   #   icon: generic
+  #   build_volume: { x: 270, y: 270, z: 270 }
   #   connection:
   #     type: snapmaker_u1
   #     host: 192.168.1.30

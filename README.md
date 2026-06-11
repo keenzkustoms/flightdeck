@@ -243,6 +243,14 @@ INCLUDE_PRINT_LIBRARY=1 ./scripts/backup-flightdeck-data.sh
 .\scripts\windows\bootstrap-install.ps1 -DataArchive "C:\path\to\flightdeck-backup-YYYYmmdd-HHMMSS.tar.gz"
 ```
 
+Uninstall the Windows tray app and shortcuts while keeping data:
+
+```powershell
+.\Uninstall-Flightdeck-Windows.cmd
+```
+
+Use `-RemoveData` only when you also want to delete `%LOCALAPPDATA%\Flightdeck`.
+
 By default the installer stores live data in `~/flightdeck-data`:
 
 - `flightdeck.db`
@@ -398,6 +406,14 @@ If the slicer model has no geometry assigned to a colour, the send dialog may le
 
 ---
 
+## Support Flightdeck
+
+Flightdeck is open-source and built from a real mixed-printer workshop. If it helps your fleet, you can support testing hardware, filament, parts, hosting, and the development time behind new features:
+
+[Support Flightdeck on Ko-fi](https://ko-fi.com/flightdeck3dprinters)
+
+---
+
 ## Roadmap
 
 - [x] Pi 5 host commissioned, SSH-hardened, NVMe-backed
@@ -415,6 +431,7 @@ If the slicer model has no geometry assigned to a colour, the send dialog may le
 
 - The Voron, Klipper, and Moonraker communities for keeping the open ecosystem alive.
 - [`bambulabs-api`](https://github.com/mchrisgm/bambulabs_api) for making the Bambu side hackable at all.
+- [`Bambuddy`](https://github.com/maziggy/bambuddy) for documenting and validating Bambu AMS/AMS-HT protocol behaviour in the open.
 - Julian Schill's [`klipper_led_effect`](https://github.com/julianschill/klipper_led_effect) — not part of Flightdeck, but it's the reason my Voron's LEDs aren't a perpetual source of suffering.
 - igiannakas, for Cartographer/Happy Hare wisdom passed along at exactly the right moments.
 

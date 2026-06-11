@@ -3,8 +3,12 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Flightdeck | Mixed-fleet 3D printer control</title>
-  <meta name="description" content="Flightdeck is a self-hosted control tower for mixed Bambu, Voron, and Klipper 3D printer fleets.">
+  <title>Flightdeck | 3D print farm control tower</title>
+  <meta name="description" content="Flightdeck is a local-first control tower for mixed 3D printer fleets: Bambu, Voron, Klipper, Snapmaker, AMS, cameras, queue, spools, and Orca handoff.">
+  <meta property="og:title" content="Flightdeck | 3D print farm control tower">
+  <meta property="og:description" content="Run mixed Bambu, Voron, Klipper, and Snapmaker fleets from one local-first dashboard.">
+  <meta property="og:image" content="assets/flightdeck-live.png">
+  <meta property="og:type" content="website">
   <meta name="theme-color" content="#09090d">
   <link rel="shortcut icon" href="assets/flightdeck-icon.svg">
   <link rel="icon" type="image/svg+xml" href="assets/flightdeck-icon.svg">
@@ -20,10 +24,15 @@
       <a href="#features">Features</a>
       <a href="#screens">Screens</a>
       <a href="#install">Install</a>
+      <a href="#share">Share</a>
       <a href="#testers">Testers</a>
       <a href="#roadmap">Roadmap</a>
+      <a href="#support">Support</a>
     </nav>
-    <a class="header-cta" href="https://github.com/Kidabah/flightdeck">GitHub</a>
+    <div class="header-actions">
+      <a class="header-cta" href="https://ko-fi.com/flightdeck3dprinters">Ko-fi</a>
+      <a class="header-cta" href="https://github.com/Kidabah/flightdeck">GitHub</a>
+    </div>
   </header>
 
   <main id="top">
@@ -34,66 +43,80 @@
         <img class="hero-mark" src="assets/flightdeck-logo.svg" alt="Flightdeck">
         <p class="eyebrow">Self-hosted printer ops</p>
         <h1>Flightdeck</h1>
-        <p class="hero-lede">A LAN-first control tower for mixed Bambu, Voron, and Klipper 3D printer fleets.</p>
+        <p class="hero-lede">Your local-first control tower for mixed 3D printer fleets.</p>
+        <p class="hero-sublede">Bambu, Voron/Klipper, Snapmaker, AMS, cameras, queue, spools, slicing, and diagnostics in one shop-floor dashboard.</p>
         <div class="hero-actions">
-          <a class="button primary" href="https://github.com/Kidabah/flightdeck/blob/main/INSTALL.md">Read the install guide</a>
+          <a class="button primary" href="https://github.com/Kidabah/flightdeck">Get Flightdeck</a>
+          <a class="button ghost" href="https://github.com/Kidabah/flightdeck/blob/main/INSTALL.md">Install guide</a>
           <a class="button ghost" href="https://github.com/Kidabah/flightdeck">View on GitHub</a>
-          <a class="button ghost" href="mailto:flightdeck3dprinters@gmail.com">Contact</a>
+          <a class="button ghost" href="https://ko-fi.com/flightdeck3dprinters">Support on Ko-fi</a>
         </div>
       </div>
     </section>
 
     <section class="intro-band" aria-label="Project status">
       <div>
-        <span class="stat-value">Bambu + Voron</span>
-        <span class="stat-label">Tested and proven</span>
+        <span class="stat-value">Mixed fleet</span>
+        <span class="stat-label">Bambu, Voron/Klipper, and Snapmaker</span>
       </div>
       <div>
-        <span class="stat-value">Spool-aware</span>
-        <span class="stat-label">Labels, scales, and usage history</span>
+        <span class="stat-value">Local-first</span>
+        <span class="stat-label">Runs on your bench, not someone else&apos;s cloud</span>
       </div>
       <div>
-        <span class="stat-value">Mobile-ready</span>
-        <span class="stat-label">Built for the bench and the phone</span>
+        <span class="stat-value">Open source</span>
+        <span class="stat-label">Built in public from a real print room</span>
       </div>
     </section>
 
     <section class="section" id="features">
       <div class="section-kicker">What it does</div>
-      <h2>Made for real mixed-fleet printer rooms.</h2>
+      <h2>Stop checking five screens to know what the room is doing.</h2>
       <div class="feature-grid">
         <article>
-          <h3>Live control</h3>
-          <p>Watch cameras, see print state, pause/resume/cancel, and keep risky actions behind clear confirmation.</p>
+          <h3>Fleet Wall</h3>
+          <p>See live cameras and printer state across the whole room without opening Bambu Studio, Mainsail, and browser tabs.</p>
         </article>
         <article>
-          <h3>Fleet queue</h3>
-          <p>Track queued work across printers and surface dispatch advice based on printer state, loaded filament, and stock.</p>
+          <h3>Printer cockpit</h3>
+          <p>Keep the camera, live controls, temperatures, print state, filament route, and AMS loadout together on one page.</p>
         </article>
         <article>
-          <h3>Spool intelligence</h3>
-          <p>Manage filament by roll, location, AMS slot, label, remaining weight, brand, colour, and confidence.</p>
+          <h3>AMS Doctor</h3>
+          <p>Compare what the printer reports against what Flightdeck knows, then deliberately trust the printer or Flightdeck.</p>
         </article>
         <article>
-          <h3>Print Bay</h3>
-          <p>Browse printer SD cards and a local print vault without bouncing between slicer, printer UI, and file shares.</p>
+          <h3>Spool tracking</h3>
+          <p>Track real rolls by shelf, AMS slot, weight, colour, brand, profile, label, humidity, and low-stock warnings.</p>
         </article>
         <article>
-          <h3>Telemetry</h3>
-          <p>See fleet health, print hours, failures, AMS humidity, low stock, host load, memory, and camera worker pressure.</p>
+          <h3>Queue and Print Bay</h3>
+          <p>Browse the Print Vault, queue jobs, move files, and prepare work without losing the printer context.</p>
         </article>
         <article>
-          <h3>Maintenance</h3>
-          <p>Bring printer-specific care items into the same workflow as history, failures, filament, and live controls.</p>
+          <h3>Orca handoff</h3>
+          <p>Open source models in managed Orca, apply printer profiles, slice to the vault, then queue or send the result.</p>
         </article>
         <article>
-          <h3>Proven platforms</h3>
-          <p>Tested on Bambu and Voron hardware, with testers wanted for Prusa, Qidi, Creality, RatRig, and other ecosystems.</p>
+          <h3>Diagnostics</h3>
+          <p>Download support logs, check setup health, spot camera pressure, and make tester feedback easier to understand.</p>
         </article>
         <article>
-          <h3>Mobile-ready</h3>
-          <p>Use Flightdeck from a phone or tablet for camera checks, alerts, queue triage, and spool work away from the desk.</p>
+          <h3>Phone and bench ready</h3>
+          <p>Check alerts, cameras, jobs, and spool state from the machine, the desk, or your phone over your own network.</p>
         </article>
+      </div>
+    </section>
+
+    <section class="section split proof-strip" aria-label="Flightdeck positioning">
+      <div>
+        <div class="section-kicker">The difference</div>
+        <h2>Inventory apps track stock. Flightdeck runs the room.</h2>
+        <p>Spools matter, but they are only one part of print-farm life. Flightdeck brings printers, cameras, AMS, queue, slicer handoff, failures, moisture watch, maintenance, and support diagnostics into the same operating surface.</p>
+      </div>
+      <div class="callout">
+        <h3>Built from a real bench</h3>
+        <p>Flightdeck is being shaped by daily testing on Bambu H2D, Bambu X1C, Voron 2.4, and expanding tester fleets.</p>
       </div>
     </section>
 
@@ -101,7 +124,7 @@
       <div class="screen-copy">
         <div class="section-kicker">Live view</div>
         <h2>The printer page is the cockpit.</h2>
-        <p>Flightdeck keeps the camera as the hero, then wraps it with the details that matter during a print: current job, action buttons, print objects, temperatures, loaded filament, AMS humidity, and live filament routing.</p>
+        <p>Flightdeck keeps the camera as the hero, then wraps it with the details that matter during a print: current job, action buttons, temperatures, loaded filament, AMS humidity, and live filament routing.</p>
       </div>
       <figure class="screen-card wide">
         <img src="assets/flightdeck-live.png" alt="Flightdeck live printer page">
@@ -121,6 +144,43 @@
       </div>
     </section>
 
+    <section class="section ops-section">
+      <div class="section-kicker">Shop-floor systems</div>
+      <h2>Everything you need to keep prints moving.</h2>
+      <div class="ops-grid">
+        <article>
+          <span>01</span>
+          <h3>Dispatch briefing</h3>
+          <p>Group printer attention, locked jobs, low spools, moisture warnings, and active prints by machine so handover is fast.</p>
+        </article>
+        <article>
+          <span>02</span>
+          <h3>Live filament route</h3>
+          <p>See which AMS bay, slot, spool, and nozzle are actually in play, including H2D dual-nozzle and AMS HT workflows.</p>
+        </article>
+        <article>
+          <span>03</span>
+          <h3>Failure review</h3>
+          <p>Classify failed, cancelled, and test prints so reliability stats stay useful instead of punishing workshop testing.</p>
+        </article>
+        <article>
+          <span>04</span>
+          <h3>Camera-aware fleet wall</h3>
+          <p>Choose compact views for Windows, larger views for Pi, and keep cameras from running when you leave the page.</p>
+        </article>
+        <article>
+          <span>05</span>
+          <h3>Support bundle</h3>
+          <p>Download a diagnostic zip with operator notes so early testers can send useful reports instead of vague screenshots.</p>
+        </article>
+        <article>
+          <span>06</span>
+          <h3>LAN discovery</h3>
+          <p>Scan for likely Bambu, Moonraker, and Snapmaker printers, then prefill the Add Printer form with the safe details.</p>
+        </article>
+      </div>
+    </section>
+
     <section class="section split">
       <div>
         <div class="section-kicker">Why it exists</div>
@@ -135,9 +195,13 @@
 
     <section class="section" id="install">
       <div class="section-kicker">Install</div>
-      <h2>Run it on a Pi, keep your data local.</h2>
+      <h2>Run it on a Pi or Windows machine. Keep your data local.</h2>
       <div class="install-panel">
-        <pre><code>curl -fsSL https://raw.githubusercontent.com/Kidabah/flightdeck/main/scripts/install-pi.sh | bash</code></pre>
+        <pre><code># Pi install
+curl -fsSL https://raw.githubusercontent.com/Kidabah/flightdeck/main/scripts/install-pi.sh | bash
+
+# Windows install
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\install-windows.ps1</code></pre>
         <div>
           <h3>Easy as 1-2-3</h3>
           <ol class="install-steps">
@@ -149,8 +213,25 @@
           <p class="muted">Optional hardware: Dymo USB scale and Brother QL-700 label printer.</p>
           <div class="install-actions">
             <a class="button primary" href="https://github.com/Kidabah/flightdeck/blob/main/INSTALL.md">Open install guide</a>
-            <a class="button ghost" href="https://github.com/Kidabah/flightdeck#demo-mode">See demo notes</a>
+            <a class="button ghost" href="https://github.com/Kidabah/flightdeck">Download from GitHub</a>
           </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section share-section" id="share">
+      <div class="section-kicker">Share pack</div>
+      <h2>Ready-to-post copy.</h2>
+      <div class="share-panel">
+        <div class="share-copy">
+          <p>I'm building Flightdeck, an open-source control tower for mixed 3D printer fleets. It brings Bambu, Voron/Klipper, Snapmaker, cameras, AMS/AMS HT, spool tracking, queue, Orca handoff, diagnostics, and shop-floor dashboards into one local-first interface.</p>
+          <p>It's early, real-world tested, and still moving fast. If you run multiple printers or want to help test it, jump in here:</p>
+          <p>https://github.com/Kidabah/flightdeck</p>
+        </div>
+        <div class="share-links">
+          <a class="button primary" href="https://github.com/Kidabah/flightdeck">GitHub repo</a>
+          <a class="button ghost" href="https://ko-fi.com/flightdeck3dprinters">Ko-fi</a>
+          <a class="button ghost" href="mailto:flightdeck3dprinters@gmail.com">Email feedback</a>
         </div>
       </div>
     </section>
@@ -159,11 +240,11 @@
       <div>
         <div class="section-kicker">Tester path</div>
         <h2>First run should feel safe, not technical.</h2>
-        <p>Flightdeck ships with Demo Mode, a standalone `/demo` page, and a Flight Manual so a new tester can explore the dashboard, cameras, printer pages, Print Bay, spools, failures, telemetry, and maintenance before touching real printer controls.</p>
+        <p>Flightdeck ships with Demo Mode, a standalone `/demo` page after install, and a Flight Manual so a new tester can explore the dashboard, cameras, printer pages, Print Bay, spools, failures, telemetry, and maintenance before touching real printer controls.</p>
       </div>
       <div class="callout tester-callout">
         <h3>Best first pass</h3>
-        <p>Install on a Pi, open `/demo` or Demo Mode, confirm Setup Health, add one printer, then browse read-only screens before testing queue, file, AMS, or hardware actions.</p>
+        <p>Install on a Pi or Windows machine, open `/demo` or Demo Mode, confirm Setup Health, add one printer, then browse read-only screens before testing queue, file, AMS, or hardware actions.</p>
       </div>
     </section>
 
@@ -189,11 +270,25 @@
       </div>
     </section>
 
+    <section class="section split" id="support">
+      <div>
+        <div class="section-kicker">Support</div>
+        <h2>Help keep Flightdeck moving.</h2>
+        <p>Flightdeck is open-source and built from a real mixed-printer workshop. Support helps cover testing hardware, filament, parts, hosting, and the late-night development time that turns shop-floor problems into proper features.</p>
+      </div>
+      <div class="callout support-callout">
+        <h3>Buy a coffee</h3>
+        <p>Every contribution helps Flightdeck get sharper across more printers, more AMS setups, and more real-world fleet workflows.</p>
+        <a class="button primary" href="https://ko-fi.com/flightdeck3dprinters">Support on Ko-fi</a>
+      </div>
+    </section>
+
     <section class="final-cta">
       <h2>Want to help shape Flightdeck?</h2>
       <p>Try the repo, open an issue, or send feedback. Real printer farms are messy; that is exactly where Flightdeck should get sharper.</p>
       <div class="hero-actions">
         <a class="button primary" href="https://github.com/Kidabah/flightdeck/issues">Give feedback</a>
+        <a class="button ghost" href="https://ko-fi.com/flightdeck3dprinters">Support on Ko-fi</a>
         <a class="button ghost" href="mailto:flightdeck3dprinters@gmail.com">flightdeck3dprinters@gmail.com</a>
       </div>
     </section>

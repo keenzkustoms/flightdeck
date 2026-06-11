@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -27,9 +28,16 @@ def _load_dotenv() -> None:
             continue
         key, value = line.split("=", 1)
         key = key.strip()
-        value = value.strip().strip('"').strip("'")
+        value = _clean_env_value(value)
         if key and key not in os.environ:
             os.environ[key] = value
+
+
+def _clean_env_value(value: str) -> str:
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+        return value[1:-1]
+    return value
 
 
 _load_dotenv()
@@ -40,13 +48,40 @@ LOG_DIR = DATA_DIR / "logs"
 URL = os.environ.get("FLIGHTDECK_URL", "http://127.0.0.1:8000")
 HOST = os.environ.get("FLIGHTDECK_HOST", "127.0.0.1")
 PORT = os.environ.get("FLIGHTDECK_PORT", "8000")
+SIDECAR_CMD = os.environ.get("FLIGHTDECK_SLICER_SIDECAR_CMD", "").strip()
+SIDECAR_URL = os.environ.get("FLIGHTDECK_SLICER_SIDECAR_URL", "http://127.0.0.1:3003").strip().rstrip("/")
+
+
+SAFE_UPDATE_DIRTY_PREFIXES = ("logs/", "tmp/", "temp/")
+SAFE_UPDATE_DIRTY_FILENAMES = {"00000.log"}
+
+
+def _blocking_dirty_entries(status_output: str) -> list[str]:
+    blocked: list[str] = []
+    for raw in (status_output or "").splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        path = line[3:].strip() if len(line) > 3 else line
+        if " -> " in path:
+            path = path.split(" -> ", 1)[1].strip()
+        clean = path.strip().lstrip("./").replace("\\", "/")
+        if clean in SAFE_UPDATE_DIRTY_FILENAMES or re.fullmatch(r"\d{5}\.log", clean):
+            continue
+        if any(clean.startswith(prefix) for prefix in SAFE_UPDATE_DIRTY_PREFIXES):
+            continue
+        blocked.append(clean)
+    return blocked
 
 
 class FlightdeckTray:
     def __init__(self) -> None:
         self.process: subprocess.Popen | None = None
+        self.sidecar_process: subprocess.Popen | None = None
         self.icon: pystray.Icon | None = None
         self.status = "Starting"
+        self.sidecar_status = "Off" if not SIDECAR_CMD else "Starting"
+        self._sidecar_manual_stop = False
         self._monitor_stop = threading.Event()
 
     def start_server(self) -> None:
@@ -84,6 +119,7 @@ class FlightdeckTray:
         )
         self.status = "Starting"
         self._refresh_icon()
+        self.start_sidecar()
 
     def stop_server(self) -> None:
         proc = self.process
@@ -105,6 +141,57 @@ class FlightdeckTray:
         self.stop_server()
         self.start_server()
 
+    def start_sidecar(self, _icon=None, _item=None) -> None:
+        self._sidecar_manual_stop = False
+        if not SIDECAR_CMD:
+            self.sidecar_status = "Not configured"
+            self._refresh_icon()
+            return
+        proc = self.sidecar_process
+        if proc and proc.poll() is None:
+            self.sidecar_status = "Running" if self._is_sidecar_ready() else "Starting"
+            self._refresh_icon()
+            return
+
+        LOG_DIR.mkdir(parents=True, exist_ok=True)
+        log_path = LOG_DIR / "slicer-sidecar.log"
+        log = log_path.open("a", encoding="utf-8")
+        log.write(f"\n[{datetime.now().isoformat(timespec='seconds')}] Starting slicer sidecar\n{SIDECAR_CMD}\n")
+        log.flush()
+        try:
+            self.sidecar_process = subprocess.Popen(
+                SIDECAR_CMD,
+                cwd=str(APP_DIR),
+                env=os.environ.copy(),
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                shell=True,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            )
+            self.sidecar_status = "Starting"
+        except Exception as exc:
+            log.write(f"[{datetime.now().isoformat(timespec='seconds')}] Sidecar start failed: {exc}\n")
+            self.sidecar_process = None
+            self.sidecar_status = "Start failed"
+        self._refresh_icon()
+
+    def stop_sidecar(self, _icon=None, _item=None) -> None:
+        self._sidecar_manual_stop = True
+        proc = self.sidecar_process
+        if not proc or proc.poll() is not None:
+            self.sidecar_process = None
+            self.sidecar_status = "Stopped" if SIDECAR_CMD else "Not configured"
+            self._refresh_icon()
+            return
+        proc.terminate()
+        try:
+            proc.wait(timeout=8)
+        except Exception:
+            proc.kill()
+        self.sidecar_process = None
+        self.sidecar_status = "Stopped"
+        self._refresh_icon()
+
     def update_from_github(self, _icon=None, _item=None) -> None:
         threading.Thread(target=self._update_from_github_worker, daemon=True).start()
 
@@ -124,8 +211,9 @@ class FlightdeckTray:
             )
             if dirty.returncode != 0:
                 raise RuntimeError((dirty.stderr or dirty.stdout or "git status failed").strip())
-            if dirty.stdout.strip():
-                raise RuntimeError("Local changes are present. Update skipped.")
+            blocked = _blocking_dirty_entries(dirty.stdout)
+            if blocked:
+                raise RuntimeError(f"Local changes are present. Update skipped: {', '.join(blocked[:5])}")
 
             branch = subprocess.run(
                 ["git", "rev-parse", "--abbrev-ref", "HEAD"],
@@ -172,6 +260,7 @@ class FlightdeckTray:
 
     def quit(self, icon=None, _item=None) -> None:
         self._monitor_stop.set()
+        self.stop_sidecar()
         self.stop_server()
         (icon or self.icon).stop()
 
@@ -179,6 +268,15 @@ class FlightdeckTray:
         try:
             with urllib.request.urlopen(f"{URL}/api/settings", timeout=1.5) as response:
                 return response.status == 200
+        except Exception:
+            return False
+
+    def _is_sidecar_ready(self) -> bool:
+        if not SIDECAR_CMD or not SIDECAR_URL:
+            return False
+        try:
+            with urllib.request.urlopen(f"{SIDECAR_URL}/health", timeout=1.5) as response:
+                return 200 <= response.status < 400
         except Exception:
             return False
 
@@ -194,17 +292,37 @@ class FlightdeckTray:
                 self.status = "Running"
             else:
                 self.status = "Starting"
+
+            if SIDECAR_CMD:
+                sidecar = self.sidecar_process
+                if sidecar is None or sidecar.poll() is not None:
+                    self.sidecar_status = "Stopped"
+                    if not self._sidecar_manual_stop:
+                        self.start_sidecar()
+                elif self._is_sidecar_ready():
+                    self.sidecar_status = "Running"
+                else:
+                    self.sidecar_status = "Starting"
             self._refresh_icon()
             self._monitor_stop.wait(5)
 
     def _refresh_icon(self) -> None:
         if self.icon:
-            self.icon.title = f"Flightdeck - {self.status}"
+            sidecar = f" / Slicer {self.sidecar_status}" if SIDECAR_CMD else ""
+            self.icon.title = f"Flightdeck - {self.status}{sidecar}"
             self.icon.update_menu()
 
     def menu(self):
+        sidecar_items = []
+        if SIDECAR_CMD:
+            sidecar_items = [
+                pystray.MenuItem(lambda _item: f"Slicer sidecar - {self.sidecar_status}", None, enabled=False),
+                pystray.MenuItem("Restart Slicer Sidecar", lambda icon, item: (self.stop_sidecar(), self.start_sidecar())),
+                pystray.MenuItem("Stop Slicer Sidecar", self.stop_sidecar),
+            ]
         return pystray.Menu(
             pystray.MenuItem(lambda _item: f"Flightdeck - {self.status}", None, enabled=False),
+            *sidecar_items,
             pystray.MenuItem("Open Dashboard", self.open_dashboard, default=True),
             pystray.MenuItem("Update from GitHub", self.update_from_github),
             pystray.MenuItem("Restart", self.restart_server),
