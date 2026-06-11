@@ -887,6 +887,12 @@ class SliceRunRequest(SlicePlanRequest):
     output_filename: Optional[str] = None
 
 
+class SlicerOpenRequest(BaseModel):
+    source_id: str
+    path: str
+    filename: str = ""
+
+
 class SlicerConnectionCheckRequest(BaseModel):
     kind: str
     url: str
@@ -1685,6 +1691,8 @@ async def slicer_worker_status():
 _ORCA_DOCKER_BROWSER_CONTAINER = "flightdeck-orcaslicer"
 _ORCA_DOCKER_API_CONTAINER = "orca-slicer-api"
 _ORCA_DOCKER_BROWSER_IMAGE = "lscr.io/linuxserver/orcaslicer:latest"
+_ORCA_DOCKER_CONFIG_TARGET = "/config"
+_ORCA_DOCKER_PRINTS_TARGET = "/prints"
 
 
 def _docker_binary() -> str | None:
@@ -1778,6 +1786,173 @@ def _docker_container_summary(name: str) -> dict:
     }
 
 
+def _docker_bind_source(bind: str, target: str) -> str:
+    raw = str(bind or "")
+    for suffix in (f":{target}:rw", f":{target}:ro", f":{target}"):
+        if raw.endswith(suffix):
+            return raw[: -len(suffix)]
+    marker = f":{target}:"
+    if marker in raw:
+        return raw.rsplit(marker, 1)[0]
+    return ""
+
+
+def _orca_docker_config_dir() -> Path | None:
+    info = _docker_inspect_container(_ORCA_DOCKER_BROWSER_CONTAINER)
+    if not info:
+        return None
+    host_config = info.get("HostConfig") if isinstance(info.get("HostConfig"), dict) else {}
+    for bind in host_config.get("Binds") or []:
+        source = _docker_bind_source(str(bind), _ORCA_DOCKER_CONFIG_TARGET)
+        if source:
+            return Path(source)
+    mounts = info.get("Mounts") if isinstance(info.get("Mounts"), list) else []
+    for mount in mounts:
+        if not isinstance(mount, dict):
+            continue
+        if str(mount.get("Destination") or "") == _ORCA_DOCKER_CONFIG_TARGET:
+            source = str(mount.get("Source") or "").strip()
+            if source:
+                return Path(source)
+    return None
+
+
+def _orca_docker_prints_dir() -> Path | None:
+    info = _docker_inspect_container(_ORCA_DOCKER_BROWSER_CONTAINER)
+    if not info:
+        return None
+    host_config = info.get("HostConfig") if isinstance(info.get("HostConfig"), dict) else {}
+    for bind in host_config.get("Binds") or []:
+        source = _docker_bind_source(str(bind), _ORCA_DOCKER_PRINTS_TARGET)
+        if source:
+            return Path(source)
+    mounts = info.get("Mounts") if isinstance(info.get("Mounts"), list) else []
+    for mount in mounts:
+        if not isinstance(mount, dict):
+            continue
+        if str(mount.get("Destination") or "") == _ORCA_DOCKER_PRINTS_TARGET:
+            source = str(mount.get("Source") or "").strip()
+            if source:
+                return Path(source)
+    return None
+
+
+def _orca_container_path_for_library_file(path: Path) -> str:
+    prints_dir = _orca_docker_prints_dir()
+    if not prints_dir:
+        raise HTTPException(status_code=404, detail="Orca /prints mount was not found")
+    try:
+        rel = path.resolve().relative_to(prints_dir.resolve()).as_posix()
+    except ValueError:
+        library_root = _print_library_path().resolve()
+        try:
+            rel = path.resolve().relative_to(library_root).as_posix()
+        except ValueError:
+            raise HTTPException(status_code=400, detail="File is not inside the shared Print Vault")
+    return f"{_ORCA_DOCKER_PRINTS_TARGET}/{rel}"
+
+
+def _open_orca_container_file(container_path: str) -> None:
+    if not _docker_inspect_container(_ORCA_DOCKER_BROWSER_CONTAINER):
+        raise HTTPException(status_code=404, detail="Browser Orca container is not running on this Flightdeck host")
+    _run_docker(
+        [
+            "exec",
+            "-d",
+            "-u",
+            "abc",
+            "-e",
+            "HOME=/config",
+            "-e",
+            "DISPLAY=:1",
+            "-e",
+            "XDG_RUNTIME_DIR=/config/.XDG",
+            "-e",
+            "WAYLAND_DISPLAY=wayland-0",
+            _ORCA_DOCKER_BROWSER_CONTAINER,
+            "/opt/orcaslicer/bin/orca-slicer",
+            container_path,
+        ],
+        timeout=10,
+    )
+
+
+def _import_model_for_orca(filename: str, data: bytes) -> tuple[Path, str]:
+    library_root = _print_library_path().resolve()
+    library_root.mkdir(parents=True, exist_ok=True)
+    safe_name = _safe_basename(filename, "flightdeck-model.3mf")
+    dest = _unique_library_destination(library_root, safe_name)
+    dest.write_bytes(data)
+    return dest, dest.relative_to(library_root).as_posix()
+
+
+def _open_orca_model_bytes(filename: str, data: bytes) -> dict:
+    _enforce_file_size(len(data), label="Orca model")
+    dest, rel = _import_model_for_orca(filename, data)
+    container_path = _orca_container_path_for_library_file(dest)
+    _open_orca_container_file(container_path)
+    return {
+        "ok": True,
+        "filename": dest.name,
+        "path": rel,
+        "container_path": container_path,
+        "mode": "local-docker",
+    }
+
+
+def _suppress_orca_internal_update_prompt() -> dict:
+    result = {
+        "configured": False,
+        "stable_only": False,
+        "removed_downloads": [],
+        "message": "",
+    }
+    config_dir = _orca_docker_config_dir()
+    if not config_dir:
+        result["message"] = "Orca /config mount was not found"
+        return result
+    pref_path = config_dir / ".config" / "OrcaSlicer" / "OrcaSlicer.conf"
+    if pref_path.exists():
+        try:
+            payload = json.loads(pref_path.read_text(encoding="utf-8"))
+            if not isinstance(payload, dict):
+                payload = {}
+            app_prefs = payload.get("app")
+            if not isinstance(app_prefs, dict):
+                app_prefs = {}
+                payload["app"] = app_prefs
+            if app_prefs.get("check_stable_update_only") is not True:
+                app_prefs["check_stable_update_only"] = True
+                pref_path.write_text(json.dumps(payload, indent=4, sort_keys=False) + "\n", encoding="utf-8")
+            result["configured"] = True
+            result["stable_only"] = app_prefs.get("check_stable_update_only") is True
+        except Exception as exc:
+            result["message"] = f"Could not update Orca preferences: {exc}"
+    else:
+        result["message"] = "Orca preferences file has not been created yet"
+
+    downloads_dir = config_dir / "Downloads"
+    removed: list[str] = []
+    if downloads_dir.exists():
+        patterns = [
+            "OrcaSlicer_Windows_Installer_*beta*.exe",
+            "OrcaSlicer_Windows_Installer_V2.4.0-beta.exe",
+        ]
+        for pattern in patterns:
+            for candidate in downloads_dir.glob(pattern):
+                if not candidate.is_file():
+                    continue
+                try:
+                    candidate.unlink()
+                    removed.append(candidate.name)
+                except Exception as exc:
+                    result["message"] = f"Could not remove {candidate.name}: {exc}"
+    result["removed_downloads"] = sorted(set(removed))
+    if not result["message"]:
+        result["message"] = "Orca beta update prompt is suppressed"
+    return result
+
+
 def _orca_docker_status() -> dict:
     docker = _docker_binary()
     if not docker:
@@ -1798,11 +1973,13 @@ def _orca_docker_status() -> dict:
         _docker_container_summary(_ORCA_DOCKER_BROWSER_CONTAINER),
         _docker_container_summary(_ORCA_DOCKER_API_CONTAINER),
     ]
+    prompt = _suppress_orca_internal_update_prompt() if containers[0].get("exists") else None
     return {
         "available": True,
         "version": (proc.stdout or "").strip(),
         "message": "Docker is available",
         "containers": containers,
+        "orca_prompt": prompt,
     }
 
 
@@ -1817,6 +1994,7 @@ def _docker_restart_orca_containers(target: str = "all") -> dict:
         raise HTTPException(status_code=422, detail="target must be browser, api, or all")
     restarted: list[str] = []
     skipped: list[str] = []
+    prompt = _suppress_orca_internal_update_prompt() if _ORCA_DOCKER_BROWSER_CONTAINER in names else None
     for name in names:
         if not _docker_inspect_container(name):
             skipped.append(name)
@@ -1824,7 +2002,7 @@ def _docker_restart_orca_containers(target: str = "all") -> dict:
         _run_docker(["restart", name], timeout=90)
         restarted.append(name)
     status = _orca_docker_status()
-    status.update({"ok": True, "restarted": restarted, "skipped": skipped})
+    status.update({"ok": True, "restarted": restarted, "skipped": skipped, "orca_prompt": prompt or status.get("orca_prompt")})
     return status
 
 
@@ -1881,8 +2059,10 @@ def _recreate_orca_browser_container() -> dict:
 
     # Keep one rollback container around briefly, but stop it so ports stay free.
     _run_docker(["stop", backup_name], timeout=30, check=False)
+    prompt = _suppress_orca_internal_update_prompt()
+    _run_docker(["restart", name], timeout=90, check=False)
     status = _orca_docker_status()
-    status.update({"ok": True, "updated": name, "backup": backup_name})
+    status.update({"ok": True, "updated": name, "backup": backup_name, "orca_prompt": prompt or status.get("orca_prompt")})
     return status
 
 
@@ -2054,6 +2234,59 @@ async def slicer_worker_slice(
             "X-Flightdeck-Sliced-Filename": name,
         },
     )
+
+
+@app.post("/api/slicer/worker/open")
+async def slicer_worker_open(file: UploadFile = File(...)):
+    source_name = _safe_basename(file.filename, "flightdeck-model.3mf")
+    source_data = await _read_upload_bytes(file, label="Orca model")
+    return await asyncio.to_thread(_open_orca_model_bytes, source_name, source_data)
+
+
+@app.post("/api/slicer/open")
+async def open_file_in_orca(body: SlicerOpenRequest):
+    source_id = body.source_id.strip()
+    source_path = body.path.strip().lstrip("/")
+    filename, data = await _read_file_desk_source(source_id, source_path)
+    if body.filename.strip():
+        filename = _safe_basename(body.filename, filename)
+
+    settings = db.get_all_settings()
+    worker_url = (settings.get("orcaslicer_worker_url") or "").strip().rstrip("/")
+    local_orca = _docker_inspect_container(_ORCA_DOCKER_BROWSER_CONTAINER)
+    if not local_orca and worker_url:
+        files = {"file": (filename, data, "application/octet-stream")}
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(connect=10.0, read=45.0, write=60.0, pool=10.0)) as client:
+                resp = await client.post(f"{worker_url}/api/slicer/worker/open", files=files)
+        except Exception as exc:
+            detail = str(exc).strip() or "connection timed out"
+            raise HTTPException(status_code=502, detail=f"Slicer worker unreachable: {detail}") from exc
+        payload = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
+        if resp.status_code >= 400:
+            detail = payload.get("detail") if isinstance(payload, dict) else resp.text
+            raise HTTPException(status_code=resp.status_code, detail=detail or "Slicer worker could not open Orca")
+        if isinstance(payload, dict):
+            payload["forwarded"] = True
+            payload["worker_url"] = worker_url
+            return payload
+        return {"ok": True, "forwarded": True, "worker_url": worker_url}
+
+    if source_id == "library" and local_orca:
+        source_file = _safe_library_path(source_path)
+        container_path = _orca_container_path_for_library_file(source_file)
+        await asyncio.to_thread(_open_orca_container_file, container_path)
+        return {
+            "ok": True,
+            "filename": source_file.name,
+            "path": source_file.relative_to(_print_library_path().resolve()).as_posix(),
+            "container_path": container_path,
+            "mode": "local-docker",
+            "forwarded": False,
+        }
+    result = await asyncio.to_thread(_open_orca_model_bytes, filename, data)
+    result["forwarded"] = False
+    return result
 
 
 @app.post("/api/slicer/run")

@@ -2,13 +2,17 @@
 
 Latest GitHub/Pi state:
 - Branch: main
-- Latest commit: current HEAD after this handoff (`Soften camera feed status badges`)
+- Latest commit: current HEAD after this handoff (`Open slicer models in managed Orca`)
 - Pi repo: /home/flightdeck/flightdeck
 - Data dir: /home/flightdeck/flightdeck-data
 - App URL: https://flightdeck.tail7de73e.ts.net/
-- Refresh cachebust currently: app.js?v=451 / style.css?v=364
+- Refresh cachebust currently: app.js?v=452 / style.css?v=364
 
 Recent work:
+- Slice Model `Open Orca` is now a real file handoff instead of only opening the remote desktop. New `/api/slicer/open` and `/api/slicer/worker/open` endpoints import/copy the selected source or sliced output into the shared Print Vault, then run `/opt/orcaslicer/bin/orca-slicer /prints/...` inside the `flightdeck-orcaslicer` container. If the Pi does not have the Orca container locally, it forwards the model bytes to the configured Windows worker URL so Windows opens the file in its managed Orca container. The slice modal now labels the actions as `Open model in Orca` before slicing and `Open sliced in Orca` after slicing. Static cache bumped to `app.js?v=452`; backend restart required.
+  - Verification: `python -m py_compile app/main.py`, `node --check app/static/app.js`, `git diff --check`, and a direct helper smoke test opening `/prints/bedscraper.stl` in the local Windows `flightdeck-orcaslicer` container passed.
+- Managed Docker Orca now suppresses Orca's own beta update prompt. Flightdeck locates the container `/config` mount, sets Orca's `check_stable_update_only` preference to true, removes downloaded beta Windows installers from the Orca Downloads folder, and runs that cleanup during Docker Orca status/restart/update. The Slicer panel now reports `Internal Orca updater: stable releases only`. The live Windows Orca container was restarted after the cleanup. Static cache remains `app.js?v=452`; backend restart required.
+  - Verification: `python -m py_compile app/main.py`, `node --check app/static/app.js`, `git diff --check`, direct `_suppress_orca_internal_update_prompt()` smoke test, and `docker ps` confirmed `flightdeck-orcaslicer` running on `3011->3001/tcp`.
 - Browser Orca launch URLs now force HTTPS on port `3011`. This fixes the `400 Bad Request: The plain HTTP request was sent to HTTPS port` page when clicking `Open Orca` from Settings or the Slice Model dialog. The Browser Orca default URL now uses `https://`, saving the Browser Orca URL normalises `http://...:3011` to `https://...:3011`, and Test Browser Orca uses the same launch-normalised URL. Static cache bumped to `app.js?v=451`; frontend refresh only.
   - Verification: `node --check app/static/app.js`, `git diff --check`, and a Node URL-normalisation smoke test passed.
 - Managed Docker Orca status now handles the real Pi + Windows split-brain setup. If the Browser Orca/Worker URL points at another host and the current Flightdeck host has Docker but no local `flightdeck-orcaslicer`/`orca-slicer-api` containers, the Slicer panel now says `Remote Orca configured` and disables local Restart/Update instead of showing both containers as missing. Static cache bumped to `app.js?v=450` and `style.css?v=364`; frontend refresh only.

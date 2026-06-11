@@ -11149,10 +11149,15 @@ function _renderSlicerDockerStatus(el, data = {}) {
         <em>${esc(c.image || '')}${ports}${update}</em>
       </div>`;
   }).join('');
+  const prompt = data.orca_prompt && typeof data.orca_prompt === 'object' ? data.orca_prompt : null;
+  const promptLine = prompt
+    ? `<span>Internal Orca updater: ${prompt.stable_only ? 'stable releases only' : esc(prompt.message || 'not configured')}${Array.isArray(prompt.removed_downloads) && prompt.removed_downloads.length ? ` · removed ${esc(prompt.removed_downloads.join(', '))}` : ''}</span>`
+    : '';
   box.dataset.tone = 'ok';
   box.innerHTML = `
     <strong>Docker ${esc(data.version || '')}</strong>
     <span>${esc(data.message || 'Docker is available')}</span>
+    ${promptLine}
     <div class="slicer-managed-list">${rows || '<div class="slicer-managed-row" data-tone="warn"><span>No Orca containers found</span></div>'}</div>`;
 }
 
@@ -12007,7 +12012,7 @@ async function _openSliceModelDialog({ sourceId, path, file, printers }) {
           <div class="filedesk-slice-buttons">
             ${canBackgroundSlice ? `<button class="filedesk-slice-link filedesk-slice-run" type="button" data-run-slice="${esc(outputName)}" data-printer-id="${esc(data.target?.id || selectedPrinterId)}">Slice in Flightdeck</button>` : ''}
             ${sourceUrl ? `<a class="filedesk-slice-link" href="${esc(sourceUrl)}" download>Download model</a>` : ''}
-            ${browserUrl ? `<a class="filedesk-slice-link" href="${esc(browserUrl)}" target="_blank" rel="noreferrer">Open Orca</a>` : ''}
+            ${browserUrl ? `<button class="filedesk-slice-link" type="button" data-open-orca data-open-orca-source-id="${esc(sourceId)}" data-open-orca-path="${esc(path)}" data-open-orca-url="${esc(browserUrl)}">Open model in Orca</button>` : ''}
             <button class="filedesk-slice-link" type="button" data-copy-slice-name="${esc(outputName)}">Copy output name</button>
             <button class="filedesk-slice-link" type="button" data-check-slice-output="${esc(outputName)}">Check vault</button>
           </div>`;
@@ -12056,6 +12061,34 @@ async function _openSliceModelDialog({ sourceId, path, file, printers }) {
     }).catch(() => {
       showToast('Copy failed', name, 'warning');
     });
+  });
+  overlay.addEventListener('click', async e => {
+    const openBtn = e.target.closest('[data-open-orca]');
+    if (!openBtn) return;
+    const old = openBtn.textContent;
+    const browserUrl = openBtn.dataset.openOrcaUrl || '';
+    openBtn.disabled = true;
+    openBtn.textContent = 'Opening...';
+    try {
+      const r = await fetch('/api/slicer/open', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          source_id: openBtn.dataset.openOrcaSourceId || 'library',
+          path: openBtn.dataset.openOrcaPath || '',
+          filename: openBtn.dataset.openOrcaFilename || '',
+        }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Unable to open Orca');
+      showToast('Opening in Orca', data.forwarded ? 'Sent to Windows Orca worker' : (data.filename || 'Model handed to Orca'), 'success');
+      if (browserUrl) window.open(browserUrl, '_blank', 'noreferrer');
+    } catch (err) {
+      showToast('Open Orca failed', err.message || '', 'error');
+    } finally {
+      openBtn.disabled = false;
+      openBtn.textContent = old;
+    }
   });
   overlay.addEventListener('click', async e => {
     const checkBtn = e.target.closest('[data-check-slice-output]');
@@ -12192,7 +12225,7 @@ async function _openSliceModelDialog({ sourceId, path, file, printers }) {
           </div>` : `<div class="filedesk-slice-preview is-missing"><span>Preview unavailable</span></div>`}
           <div class="filedesk-slice-buttons">
             <button class="filedesk-slice-link filedesk-slice-queue" type="button" data-queue-sliced="${esc(data.path || data.filename)}" data-printer-id="${esc(data.printer_id || runBtn.dataset.printerId)}">Queue sliced job</button>
-            ${browserUrl ? `<a class="filedesk-slice-link" href="${esc(browserUrl)}" target="_blank" rel="noreferrer">Open Orca</a>` : ''}
+            ${browserUrl && data.path ? `<button class="filedesk-slice-link" type="button" data-open-orca data-open-orca-source-id="library" data-open-orca-path="${esc(data.path)}" data-open-orca-url="${esc(browserUrl)}">Open sliced in Orca</button>` : ''}
             <button class="filedesk-slice-link" type="button" data-check-slice-output="${esc(data.filename)}">Check vault</button>
           </div>`;
         actionsEl.querySelector('[data-slice-preview-img]')?.addEventListener('error', event => {
@@ -12217,7 +12250,7 @@ async function _openSliceModelDialog({ sourceId, path, file, printers }) {
           </div>
           <div class="filedesk-slice-buttons">
             <button class="filedesk-slice-link filedesk-slice-run" type="button" data-run-slice="${esc(runBtn.dataset.runSlice || '')}" data-printer-id="${esc(runBtn.dataset.printerId || selectedPrinterId)}">Try again</button>
-            ${browserUrl ? `<a class="filedesk-slice-link" href="${esc(browserUrl)}" target="_blank" rel="noreferrer">Open Orca</a>` : ''}
+            ${browserUrl ? `<button class="filedesk-slice-link" type="button" data-open-orca data-open-orca-source-id="${esc(sourceId)}" data-open-orca-path="${esc(path)}" data-open-orca-url="${esc(browserUrl)}">Open model in Orca</button>` : ''}
           </div>`;
       }
     } finally {
