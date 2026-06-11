@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -49,6 +50,28 @@ HOST = os.environ.get("FLIGHTDECK_HOST", "127.0.0.1")
 PORT = os.environ.get("FLIGHTDECK_PORT", "8000")
 SIDECAR_CMD = os.environ.get("FLIGHTDECK_SLICER_SIDECAR_CMD", "").strip()
 SIDECAR_URL = os.environ.get("FLIGHTDECK_SLICER_SIDECAR_URL", "http://127.0.0.1:3003").strip().rstrip("/")
+
+
+SAFE_UPDATE_DIRTY_PREFIXES = ("logs/", "tmp/", "temp/")
+SAFE_UPDATE_DIRTY_FILENAMES = {"00000.log"}
+
+
+def _blocking_dirty_entries(status_output: str) -> list[str]:
+    blocked: list[str] = []
+    for raw in (status_output or "").splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        path = line[3:].strip() if len(line) > 3 else line
+        if " -> " in path:
+            path = path.split(" -> ", 1)[1].strip()
+        clean = path.strip().lstrip("./").replace("\\", "/")
+        if clean in SAFE_UPDATE_DIRTY_FILENAMES or re.fullmatch(r"\d{5}\.log", clean):
+            continue
+        if any(clean.startswith(prefix) for prefix in SAFE_UPDATE_DIRTY_PREFIXES):
+            continue
+        blocked.append(clean)
+    return blocked
 
 
 class FlightdeckTray:
@@ -188,8 +211,9 @@ class FlightdeckTray:
             )
             if dirty.returncode != 0:
                 raise RuntimeError((dirty.stderr or dirty.stdout or "git status failed").strip())
-            if dirty.stdout.strip():
-                raise RuntimeError("Local changes are present. Update skipped.")
+            blocked = _blocking_dirty_entries(dirty.stdout)
+            if blocked:
+                raise RuntimeError(f"Local changes are present. Update skipped: {', '.join(blocked[:5])}")
 
             branch = subprocess.run(
                 ["git", "rev-parse", "--abbrev-ref", "HEAD"],

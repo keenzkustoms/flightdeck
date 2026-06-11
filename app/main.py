@@ -4382,10 +4382,48 @@ def _git_text(args: list[str], fallback: str = "", timeout: int = 8) -> str:
     return fallback
 
 
+_SAFE_UPDATE_DIRTY_PREFIXES = (
+    "logs/",
+    "tmp/",
+    "temp/",
+)
+_SAFE_UPDATE_DIRTY_FILENAMES = {
+    "00000.log",
+}
+
+
+def _git_dirty_entries() -> list[str]:
+    raw = _git_text(["status", "--porcelain"], "")
+    entries: list[str] = []
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        path = line[3:].strip() if len(line) > 3 else line
+        if " -> " in path:
+            path = path.split(" -> ", 1)[1].strip()
+        entries.append(path.replace("\\", "/"))
+    return entries
+
+
+def _is_safe_update_dirty_entry(path: str) -> bool:
+    clean = path.strip().lstrip("./").replace("\\", "/")
+    if clean in _SAFE_UPDATE_DIRTY_FILENAMES:
+        return True
+    if re.fullmatch(r"\d{5}\.log", clean):
+        return True
+    return any(clean.startswith(prefix) for prefix in _SAFE_UPDATE_DIRTY_PREFIXES)
+
+
+def _blocking_git_dirty_entries() -> list[str]:
+    return [path for path in _git_dirty_entries() if not _is_safe_update_dirty_entry(path)]
+
+
 def _app_version_info(include_remote: bool = False) -> dict:
     branch = _git_text(["rev-parse", "--abbrev-ref", "HEAD"], "unknown")
     commit = _git_text(["rev-parse", "--short", "HEAD"], "unknown")
-    dirty = bool(_git_text(["status", "--porcelain"], ""))
+    dirty_entries = _blocking_git_dirty_entries()
+    dirty = bool(dirty_entries)
     info = {
         "version": APP_VERSION,
         "name": APP_VERSION_NAME,
@@ -4393,6 +4431,7 @@ def _app_version_info(include_remote: bool = False) -> dict:
         "branch": branch,
         "commit": commit,
         "dirty": dirty,
+        "dirty_entries": dirty_entries[:20],
         "runtime": os.environ.get("FLIGHTDECK_RUNTIME", "").strip() or ("docker" if Path("/.dockerenv").exists() else "systemd"),
         "remote": _git_text(["config", "--get", "remote.origin.url"], ""),
     }
@@ -4968,7 +5007,9 @@ async def update_status(check_remote: bool = False):
 async def run_update():
     info = _app_version_info(include_remote=False)
     if info.get("dirty"):
-        raise HTTPException(status_code=409, detail="Local changes are present. Commit or stash them before updating.")
+        entries = info.get("dirty_entries") or []
+        suffix = f": {', '.join(entries[:5])}" if entries else ""
+        raise HTTPException(status_code=409, detail=f"Local changes are present. Commit or stash them before updating{suffix}.")
     branch = str(info.get("branch") or "")
     if branch in {"", "unknown", "HEAD"}:
         raise HTTPException(status_code=409, detail="Flightdeck is not on a named Git branch.")

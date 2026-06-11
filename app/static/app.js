@@ -12005,6 +12005,9 @@ async function _openSliceModelDialog({ sourceId, path, file, printers }) {
 function _setupVersionHtml(version) {
   const notes = (version?.release_notes || []).map(note => `<li>${esc(note)}</li>`).join('');
   const current = [version?.version ? `v${version.version}` : 'version unknown', version?.commit || ''].filter(Boolean).join(' · ');
+  const updateHint = version?.dirty
+    ? esc(_setupUpdateDirtyMessage(version))
+    : 'Updates use <code>git pull --ff-only</code>. Restart Flightdeck after a successful update. Download logs creates a redacted diagnostic zip for support.';
   let updateText = 'Check GitHub';
   let updateClass = 'info';
   if (version?.behind) {
@@ -12037,8 +12040,18 @@ function _setupVersionHtml(version) {
       ${dirty}
     </div>
     ${notes ? `<ul class="setup-version-notes">${notes}</ul>` : ''}
-    <div class="settings-hint" id="setup-update-message">Updates use <code>git pull --ff-only</code>. Restart Flightdeck after a successful update. Download logs creates a redacted diagnostic zip for support.</div>
+    <div class="settings-hint" id="setup-update-message" data-tone="${version?.dirty ? 'warn' : 'info'}">${updateHint}</div>
   </div>`;
+}
+
+function _setupUpdateDirtyMessage(data) {
+  const entries = Array.isArray(data?.dirty_entries) ? data.dirty_entries.filter(Boolean) : [];
+  if (!entries.length) {
+    return 'Local changes are present. Update is blocked until they are committed, stashed, or removed.';
+  }
+  const shown = entries.slice(0, 5).join(', ');
+  const extra = entries.length > 5 ? `, plus ${entries.length - 5} more` : '';
+  return `Local changes are blocking updates: ${shown}${extra}. Commit, stash, or remove those files first.`;
 }
 
 function _downloadBlob(blob, filename) {
@@ -12258,7 +12271,7 @@ function _attachSetupEvents(el) {
       else if (data.behind) setUpdateButton('available', 'Update now');
       else setUpdateButton('done', 'Current');
       setMessage(data.dirty
-        ? 'Local changes are present. Update is blocked until they are committed, stashed, or removed.'
+        ? _setupUpdateDirtyMessage(data)
         : data.behind ? 'A newer GitHub build is available.' : (data.fetch_detail || 'Flightdeck is up to date.'),
         (data.dirty || data.behind) ? 'warn' : 'ok');
     } catch (err) {
