@@ -54,6 +54,7 @@ class MjpegDirectCamera(BaseModel):
     type: Literal["mjpeg_direct"]
     stream_url: str
     snapshot_url: Optional[str] = None
+    rotation: int = 0
 
 
 class AdaptiveCamera(BaseModel):
@@ -61,16 +62,19 @@ class AdaptiveCamera(BaseModel):
     snapshot_url: str
     active_fps: float = 2.0
     idle_fps: float = 0.25
+    rotation: int = 0
 
 
 class WebrtcCamera(BaseModel):
     type: Literal["webrtc"]
     stream_url: str
     snapshot_url: Optional[str] = None
+    rotation: int = 0
 
 
 class BambuRtspCamera(BaseModel):
     type: Literal["bambu_rtsp"]
+    rotation: int = 0
     # stream_url served via /api/camera/{printer_id}/stream proxy
 
 

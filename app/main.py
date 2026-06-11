@@ -3106,6 +3106,7 @@ async def get_printer_camera(printer_id: str):
             "type": "simulated",
             "fleet_url": f"/api/camera/{printer_id}/simulated.svg",
             "fleet_refresh_ms": 4000,
+            "rotation": 0,
         }
     camera = _cameras.get(printer_id)
     if camera is None:
@@ -3117,6 +3118,7 @@ async def get_printer_camera(printer_id: str):
             "snapshot_url": camera.snapshot_url,
             "fleet_url": f"/api/camera/{printer_id}/snapshot",
             "fleet_refresh_ms": 3500,
+            "rotation": camera.rotation,
         }
     if isinstance(camera, AdaptiveCamera):
         return {
@@ -3127,6 +3129,7 @@ async def get_printer_camera(printer_id: str):
             "refresh_ms": max(100, int(1000 / _adaptive_camera_fps(camera, printer_id))),
             "fleet_url": f"/api/camera/{printer_id}/snapshot",
             "fleet_refresh_ms": max(1000, int(1000 / _adaptive_camera_fps(camera, printer_id))),
+            "rotation": camera.rotation,
         }
     if isinstance(camera, WebrtcCamera):
         return {
@@ -3135,6 +3138,7 @@ async def get_printer_camera(printer_id: str):
             "snapshot_url": camera.snapshot_url,
             "fleet_url": f"/api/camera/{printer_id}/snapshot" if camera.snapshot_url else None,
             "fleet_refresh_ms": 3500,
+            "rotation": camera.rotation,
         }
     if isinstance(camera, BambuRtspCamera):
         return {
@@ -3142,6 +3146,7 @@ async def get_printer_camera(printer_id: str):
             "type": "mjpeg",
             "fleet_url": f"/api/camera/{printer_id}/snapshot",
             "fleet_refresh_ms": 3500,
+            "rotation": camera.rotation,
         }
     raise HTTPException(status_code=404, detail="unknown camera type")
 

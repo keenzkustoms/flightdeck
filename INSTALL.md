@@ -299,6 +299,15 @@ Common supported hardware:
 - Brother QL-700 using DK-22212 continuous labels
 - AusPrint Pro 300DPI direct thermal label printer on Windows
 
+For Brother QL-700 on Windows, install the Brother QL-700 driver, turn off Editor Lite mode on the printer, then set:
+
+```powershell
+FLIGHTDECK_LABEL_PRINTER_MODEL=brother_ql
+FLIGHTDECK_LABEL_PRINTER_NAME=QL-700
+```
+
+Use the exact Windows printer queue name, or a unique part of it, for `FLIGHTDECK_LABEL_PRINTER_NAME`.
+
 For AusPrint Pro, install the Windows printer driver first, then set these environment values before starting Flightdeck:
 
 ```powershell

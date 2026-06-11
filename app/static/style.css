@@ -4174,6 +4174,30 @@ button.briefing-row {
   display: block;
 }
 
+img[data-camera-rotation="90"],
+img[data-camera-rotation="270"] {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  transform: rotate(var(--camera-rotation, 90deg)) scale(0.72);
+  transform-origin: center;
+}
+
+img[data-camera-rotation="90"] { --camera-rotation: 90deg; }
+img[data-camera-rotation="180"] {
+  transform: rotate(180deg);
+  transform-origin: center;
+}
+img[data-camera-rotation="270"] { --camera-rotation: 270deg; }
+
+img[data-camera-id="flsuns1"] {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: contain !important;
+  transform: rotate(90deg) scale(0.72) !important;
+  transform-origin: center !important;
+}
+
 .camera-signal {
   position: absolute;
   right: 0.55rem;
@@ -7442,6 +7466,25 @@ button.live-route-node:hover {
   opacity: 0.34;
 }
 
+.obj-map-top-shape {
+  width: auto;
+  height: auto;
+  min-width: 1.5rem;
+  min-height: 1.5rem;
+  transform: none;
+}
+
+.obj-map-top-shape .obj-map-shape {
+  width: 100%;
+  height: 100%;
+  opacity: 0.92;
+}
+
+.obj-map-top-shape .obj-map-id-dot {
+  right: 0.15rem;
+  top: 0.15rem;
+}
+
 .obj-map-overlay-rotated .obj-map-stage,
 .object-map-modal-stage.obj-map-overlay-rotated {
   aspect-ratio: 1 / 1;
@@ -7512,6 +7555,8 @@ button.live-route-node:hover {
   border-radius: 0.5rem;
   background: rgba(15,23,42,0.34);
   padding: 0.55rem;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .obj-id-selector > span {
@@ -7526,25 +7571,32 @@ button.live-route-node:hover {
 
 .obj-id-selector > div {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(3.2rem, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(12rem, 100%), 1fr));
   gap: 0.35rem;
+  min-width: 0;
 }
 
 .obj-id-select {
-  display: inline-flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
-  justify-content: center;
+  justify-content: start;
+  gap: 0.42rem;
   border: 2px solid rgba(96,165,250,0.62);
   border-radius: 0.38rem;
   background: rgba(2,6,23,0.84);
   color: #fff;
+  min-width: 0;
+  width: 100%;
   min-height: 1.7rem;
   padding: 0.18rem 0.34rem;
+  text-align: left;
+  overflow: hidden;
 }
 
 .obj-id-select > span:not(.obj-chip-id) {
   max-width: 100%;
+  min-width: 0;
   color: #bfdbfe;
   font-size: 0.58rem;
   font-weight: 800;
@@ -10499,6 +10551,8 @@ button.live-route-node:hover {
   background: rgba(2,6,23,0.84);
   color: #fff;
   padding: 0.16rem 0.34rem;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .obj-map-region.obj-exclude-btn {
@@ -10559,7 +10613,7 @@ button.live-route-node:hover {
 }
 
 .object-map-modal-ids > div {
-  grid-template-columns: repeat(auto-fit, minmax(5.5rem, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(14rem, 100%), 1fr));
 }
 
 .object-map-modal-ids .obj-id-select {

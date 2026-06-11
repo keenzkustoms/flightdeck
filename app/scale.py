@@ -61,6 +61,8 @@ class Scale:
         if not self._usb_present():
             self.last_error = "Dymo M10 USB scale not detected"
             return False
+        if os.name == "nt":
+            return True
         if any(Path(p).exists() for p in self._candidate_paths()):
             return True
         self.last_error = "Scale device path not found"
@@ -71,6 +73,8 @@ class Scale:
         if not self._usb_present():
             self.last_error = "Dymo M10 USB scale not detected"
             return None
+        if os.name == "nt":
+            return self._read_windows_once()
         for path in self._candidate_paths():
             if not Path(path).exists():
                 continue
@@ -155,6 +159,14 @@ class Scale:
         if not self._usb_present():
             self.last_error = "Dymo M10 USB scale not detected"
             return False
+        if os.name == "nt":
+            reading = self._read_windows_once(timeout_ms=250)
+            if reading or self.last_error in {None, "No non-zero scale reading"}:
+                self.last_keep_awake_at = time.time()
+                self.last_keep_awake_method = "windows-hid"
+                self.last_error = None
+                return True
+            return False
         for path in self._candidate_paths():
             if not Path(path).exists():
                 continue
@@ -181,12 +193,55 @@ class Scale:
         return False
 
     def _usb_present(self) -> bool:
+        if os.name == "nt":
+            try:
+                import hid  # type: ignore
+
+                devices = hid.enumerate(int(self.VENDOR, 16), 0)
+                return any(f"{device.get('product_id', 0):04x}" in self.PRODUCTS for device in devices)
+            except Exception as exc:
+                self.last_error = str(exc)
+                return False
         try:
             out = subprocess.check_output(["lsusb"], text=True)
         except Exception as exc:
             self.last_error = str(exc)
             return False
         return any(f"{self.VENDOR}:{product}" in out for product in self.PRODUCTS)
+
+    def _read_windows_once(self, timeout_ms: int = 1000) -> Optional[ScaleReading]:
+        try:
+            import hid  # type: ignore
+        except Exception as exc:
+            self.last_error = f"Windows HID support unavailable: {exc}"
+            return None
+
+        devices = []
+        for product in sorted(self.PRODUCTS):
+            try:
+                devices.extend(hid.enumerate(int(self.VENDOR, 16), int(product, 16)))
+            except Exception as exc:
+                self.last_error = str(exc)
+        for info in devices:
+            device = None
+            try:
+                device = hid.device()
+                device.open_path(info["path"])
+                data = bytes(device.read(16, timeout_ms=timeout_ms))
+                reading = self._parse_report(data)
+                if reading and reading.grams > 0:
+                    self.last_error = None
+                    return reading
+            except Exception as exc:
+                self.last_error = str(exc)
+            finally:
+                try:
+                    if device is not None:
+                        device.close()
+                except Exception:
+                    pass
+        self.last_error = self.last_error or "No non-zero scale reading"
+        return None
 
     def read_stable(self, timeout_s: float = 5.0) -> Optional[ScaleReading]:
         deadline = time.time() + timeout_s

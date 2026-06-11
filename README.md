@@ -356,7 +356,7 @@ The OrcaSlicer image is currently x86-64 only, so run this sidecar on the NAS or
 
 The NAS compose also marks the instance as Docker / Portainer managed so the setup health page does not expect a host `systemd` service inside the container.
 
-For optional hardware support, the NAS Docker image includes `usbutils` and the compose file passes through `/dev/bus/usb` plus `/dev/hidraw0` so the Dymo scale and Brother QL-700 can be detected from inside the container. On Windows installs, Flightdeck can also print labels through an AusPrint Pro printer queue by setting `FLIGHTDECK_LABEL_PRINTER_MODEL=ausprint_pro` and `FLIGHTDECK_LABEL_PRINTER_NAME` to the queue name.
+For optional hardware support, the NAS Docker image includes `usbutils` and the compose file passes through `/dev/bus/usb` plus `/dev/hidraw0` so the Dymo scale and Brother QL-700 can be detected from inside the container. On Windows installs, Flightdeck can also print labels through Brother QL-700 or AusPrint Pro printer queues by setting `FLIGHTDECK_LABEL_PRINTER_MODEL` to `brother_ql` or `ausprint_pro` and `FLIGHTDECK_LABEL_PRINTER_NAME` to the queue name.
 
 This is intended for a staged NAS deployment first. Keep the Pi service as the live host until the NAS container has been tested with copied backup data and printer connectivity.
 

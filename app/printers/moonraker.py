@@ -677,7 +677,7 @@ def _pick_thumbnail(thumbnails: list) -> Optional[dict]:
 
 
 async def fetch_objects(base_url: str) -> dict:
-    """Return exclude_object state: {supported, objects: [{name, state}]}."""
+    """Return exclude_object state with optional polygon geometry from Klipper."""
     base_url = base_url.rstrip("/")
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
@@ -696,6 +696,8 @@ async def fetch_objects(base_url: str) -> dict:
     excluded_set = set(data.get("excluded_objects") or [])
 
     result = []
+    xs: list[float] = []
+    ys: list[float] = []
     for obj in raw_objects:
         name = obj if isinstance(obj, str) else obj.get("name", "")
         if not name:
@@ -706,9 +708,58 @@ async def fetch_objects(base_url: str) -> dict:
             state = "current"
         else:
             state = "printing"
-        result.append({"name": name, "state": state})
+        item = {"name": name, "state": state}
+        if isinstance(obj, dict):
+            polygon = _normalise_object_polygon(obj.get("polygon"))
+            if polygon:
+                px = [point[0] for point in polygon]
+                py = [point[1] for point in polygon]
+                xs.extend(px)
+                ys.extend(py)
+                item["bbox"] = {
+                    "x": min(px),
+                    "y": min(py),
+                    "w": max(px) - min(px),
+                    "h": max(py) - min(py),
+                }
+                item["shape"] = {"polygon": polygon}
+                center = obj.get("center")
+                if isinstance(center, list) and len(center) >= 2:
+                    try:
+                        item["x"] = float(center[0])
+                        item["y"] = float(center[1])
+                    except (TypeError, ValueError):
+                        pass
+        result.append(item)
 
-    return {"supported": True, "objects": result}
+    response = {"supported": True, "objects": result}
+    if xs and ys:
+        pad = 8.0
+        response.update({
+            "plate_bounds": {
+                "x": min(xs) - pad,
+                "y": min(ys) - pad,
+                "w": (max(xs) - min(xs)) + (pad * 2),
+                "h": (max(ys) - min(ys)) + (pad * 2),
+            },
+            "map_view": "top_down",
+            "map_image_mode": "top_down",
+        })
+    return response
+
+
+def _normalise_object_polygon(value) -> list[list[float]]:
+    if not isinstance(value, list):
+        return []
+    points: list[list[float]] = []
+    for point in value:
+        if not isinstance(point, list) or len(point) < 2:
+            continue
+        try:
+            points.append([float(point[0]), float(point[1])])
+        except (TypeError, ValueError):
+            continue
+    return points if len(points) >= 3 else []
 
 
 async def exclude_object(base_url: str, name: str) -> None:

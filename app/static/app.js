@@ -3467,7 +3467,8 @@ function _detailFilamentRoute(p) {
 
 function _detailCameraContent(id, p, camSrc) {
   if (camSrc && p.state !== 'offline') {
-    return `<img id="detail-cam-img" src="${camSrc}" alt="Live camera" data-camera-id="${id}">`;
+    const rotation = Number(_cameraMetaCache[id]?.rotation || 0);
+    return `<img id="detail-cam-img" src="${camSrc}" alt="Live camera" data-camera-id="${id}" data-camera-rotation="${rotation}">`;
   }
   return _cameraOfflineContent(p, '');
 }
@@ -4047,7 +4048,7 @@ function _objectMapHtml(id, data) {
     if (hasGeometry && topDown) return '';
     return `<button type="button" class="obj-id-select obj-exclude-btn${isExcluded ? ' is-excluded' : ''}${isCurrent ? ' is-current' : ''}"
       data-obj-name="${safeName}" data-obj-label="${esc(shortName)}" data-printer-id="${id}" data-obj-id="${safeId}" ${isExcluded ? 'disabled' : ''}
-      title="${esc(shortName)}"><span class="obj-chip-id">${displayId}</span></button>`;
+      title="${esc(shortName)}"><span class="obj-chip-id">${displayId}</span><span>${esc(shortName)}</span></button>`;
   }).join('');
   const imageVersion = objects.map(o => `${o.id ?? ''}:${o.state ?? ''}`).join('-') || 'current';
   const plateImageUrl = _objectMapPlateImageUrl(data, topDown);
@@ -4232,6 +4233,13 @@ function _objectMapTopDownObjects(data) {
     const rawName = obj.name || `Object ${obj.id ?? ''}`;
     const shortName = (obj.label || rawName).replace(/.*[/\\]/, '');
     const displayId = obj.id !== undefined && obj.id !== null ? `#${obj.id}` : '?';
+    if (obj.bbox && obj.shape?.polygon) {
+      const shape = _objectMapShapeSvg(obj, bounds, data);
+      const style = _objectMapBoxStyle(bounds, obj.bbox, data);
+      return `<div class="obj-map-top-object obj-map-top-shape${isExcluded ? ' is-excluded' : ''}${isCurrent ? ' is-current' : ''}"
+        style="${style}"
+        title="${esc(shortName)}" aria-hidden="true">${shape}<span class="obj-map-id-dot">${esc(displayId)}</span></div>`;
+    }
     const style = _objectMapHasPoint(obj)
       ? _objectMapPointMarkerStyle(bounds, obj)
       : _objectMapMarkerStyle(bounds, obj.bbox, data);
@@ -8128,7 +8136,8 @@ function _fleetWallCameraFeedHtml(cameraId, label) {
   const stillSrc = _fleetWallCameraSrc(cameraId);
   if (!stillSrc) return '';
   const refreshMs = Math.max(1000, Math.min(20000, Number(meta.fleet_refresh_ms || 3500)));
-  return `<img class="fleet-wall-camera-still" src="${_fleetWallPlaceholderSrc(cameraId, label)}" alt="${esc(label || 'Live camera')}" data-camera-id="${esc(cameraId)}" data-fleet-still="1" data-fleet-src="${esc(meta.fleet_url || _cameraUrlCache[cameraId] || '')}" data-fleet-refresh-ms="${refreshMs}" loading="eager" fetchpriority="low">`;
+  const rotation = Number(meta.rotation || 0);
+  return `<img class="fleet-wall-camera-still" src="${_fleetWallPlaceholderSrc(cameraId, label)}" alt="${esc(label || 'Live camera')}" data-camera-id="${esc(cameraId)}" data-camera-rotation="${rotation}" data-fleet-still="1" data-fleet-src="${esc(meta.fleet_url || _cameraUrlCache[cameraId] || '')}" data-fleet-refresh-ms="${refreshMs}" loading="eager" fetchpriority="low">`;
 }
 
 function _setCameraImageSrc(img, baseUrl, key = 't') {
@@ -8312,7 +8321,7 @@ function _camTileFeedHtml(p) {
   const cameraId = p._camera_id || p.id;
   const camSrc = _cameraStreamSrc(cameraId);
   return (camSrc && p.state !== 'offline')
-    ? `<img src="${camSrc}" alt="${p.custom_name}" data-camera-id="${cameraId}">`
+    ? `<img src="${camSrc}" alt="${p.custom_name}" data-camera-id="${cameraId}" data-camera-rotation="${Number(_cameraMetaCache[cameraId]?.rotation || 0)}">`
     : _cameraOfflineContent(p, 'cam-tile-offline');
 }
 
@@ -8378,7 +8387,7 @@ function _printWatchFocusHtml(printers, sim = false, focusPrinter = null) {
   const mode = pinned ? 'Pinned' : 'Cycling';
   const pinTitle = pinned ? 'Unpin and continue cycling' : 'Pin this camera';
   const feed = (camSrc && p.state !== 'offline')
-    ? `<img src="${camSrc}" alt="${esc(_printerPrimaryLabel(p))} print watch camera" data-camera-id="${esc(cameraId)}" loading="eager" fetchpriority="high">`
+    ? `<img src="${camSrc}" alt="${esc(_printerPrimaryLabel(p))} print watch camera" data-camera-id="${esc(cameraId)}" data-camera-rotation="${Number(_cameraMetaCache[cameraId]?.rotation || 0)}" loading="eager" fetchpriority="high">`
     : _cameraOfflineContent(p, 'print-watch-offline');
   return `<section class="print-watch-focus ${pinned ? 'print-watch-focus-pinned' : ''}" data-print-watch-focus="${esc(p.id)}" data-print-watch-camera="${esc(cameraId)}">
     <div class="print-watch-focus-head">
