@@ -170,6 +170,14 @@ h1 {
   font-weight: 700;
 }
 
+.hero-sublede {
+  width: min(760px, 100%);
+  margin-top: 0.8rem;
+  color: var(--muted);
+  font-size: clamp(1rem, 1.55vw, 1.22rem);
+  line-height: 1.55;
+}
+
 .hero-actions {
   display: flex;
   flex-wrap: wrap;
@@ -272,6 +280,7 @@ h1 {
 }
 
 .feature-grid article,
+.ops-grid article,
 .callout,
 .install-panel,
 .roadmap article,
@@ -286,7 +295,37 @@ h1 {
   padding: 1.2rem;
 }
 
+.ops-section {
+  padding-top: 4rem;
+}
+
+.ops-grid {
+  margin-top: 1.5rem;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.9rem;
+}
+
+.ops-grid article {
+  min-height: 184px;
+  padding: 1.2rem;
+  background: linear-gradient(180deg, rgba(23, 25, 37, 0.96), rgba(18, 19, 27, 0.96));
+}
+
+.ops-grid span {
+  display: inline-flex;
+  margin-bottom: 1rem;
+  color: var(--red);
+  font-weight: 900;
+}
+
+.ops-grid p {
+  color: var(--muted);
+  line-height: 1.55;
+}
+
 .feature-grid h3,
+.ops-grid h3,
 .callout h3,
 .install-panel h3,
 .roadmap h3 {
@@ -354,6 +393,10 @@ h1 {
   align-items: stretch;
 }
 
+.proof-strip {
+  padding-top: 4rem;
+}
+
 .split p {
   max-width: 720px;
   margin-top: 1rem;
@@ -371,6 +414,44 @@ h1 {
   grid-template-columns: 1fr 0.8fr;
   gap: 1rem;
   padding: 1rem;
+}
+
+.share-section {
+  padding-top: 4rem;
+}
+
+.share-panel {
+  margin-top: 1.5rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  gap: 1rem;
+  padding: 1rem;
+  border: 1px solid rgba(96, 165, 250, 0.28);
+  border-radius: 8px;
+  background: rgba(96, 165, 250, 0.055);
+}
+
+.share-copy {
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #05060a;
+}
+
+.share-copy p {
+  color: #dbeafe;
+  line-height: 1.58;
+}
+
+.share-copy p + p {
+  margin-top: 0.8rem;
+}
+
+.share-links {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  justify-content: center;
 }
 
 .install-actions {
@@ -489,10 +570,12 @@ code {
 
   .intro-band,
   .feature-grid,
+  .ops-grid,
   .screen-feature,
   .two-column,
   .split,
   .install-panel,
+  .share-panel,
   .roadmap {
     grid-template-columns: 1fr;
   }
@@ -504,6 +587,10 @@ code {
 
 @media (min-width: 921px) and (max-width: 1120px) {
   .feature-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ops-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
