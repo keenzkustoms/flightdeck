@@ -11019,6 +11019,18 @@ function _slicerCategoryHtml(profileData = null, printers = []) {
         <button type="button" class="settings-save-btn" data-slicer-test="worker">Test Worker</button>
         <span class="slicer-connection-status" id="slicer-connection-status"></span>
       </div>
+      <div class="slicer-managed-panel">
+        <div class="slicer-managed-copy">
+          <strong>Managed Docker Orca</strong>
+          <span>Use this for Orca updates instead of the update prompt inside the remote Orca desktop.</span>
+        </div>
+        <div class="slicer-managed-actions">
+          <button type="button" class="settings-save-btn" data-orca-docker-action="check">Check Orca</button>
+          <button type="button" class="settings-save-btn" data-orca-docker-action="restart">Restart Orca</button>
+          <button type="button" class="settings-save-btn slicer-update-btn" data-orca-docker-action="update">Update Orca</button>
+        </div>
+        <div class="slicer-managed-status" id="slicer-docker-status">Docker Orca status has not been checked yet.</div>
+      </div>
     </div>
     ${_slicerProfilesHtml(profileData, printers)}`;
 }
@@ -11059,6 +11071,49 @@ function _updateSlicerDockerLaunch(el) {
     return;
   }
   btn.href = url;
+}
+
+function _renderSlicerDockerStatus(el, data = {}) {
+  const box = el.querySelector('#slicer-docker-status');
+  if (!box) return;
+  if (!data.available) {
+    box.dataset.tone = 'warn';
+    box.innerHTML = `<strong>Docker unavailable</strong><span>${esc(data.message || 'Docker is not responding on this Flightdeck host.')}</span>`;
+    return;
+  }
+  const containers = Array.isArray(data.containers) ? data.containers : [];
+  const rows = containers.map(c => {
+    const exists = !!c.exists;
+    const running = !!c.running || c.status === 'running';
+    const tone = !exists ? 'warn' : running ? 'ok' : 'warn';
+    const health = c.health ? ` · ${esc(c.health)}` : '';
+    const ports = Array.isArray(c.ports) && c.ports.length ? ` · ${esc(c.ports.join(', '))}` : '';
+    const update = c.can_update ? ' · managed update' : '';
+    return `
+      <div class="slicer-managed-row" data-tone="${tone}">
+        <span>${esc(c.name || 'container')}</span>
+        <strong>${exists ? esc(c.status || 'found') : 'missing'}${health}</strong>
+        <em>${esc(c.image || '')}${ports}${update}</em>
+      </div>`;
+  }).join('');
+  box.dataset.tone = 'ok';
+  box.innerHTML = `
+    <strong>Docker ${esc(data.version || '')}</strong>
+    <span>${esc(data.message || 'Docker is available')}</span>
+    <div class="slicer-managed-list">${rows || '<div class="slicer-managed-row" data-tone="warn"><span>No Orca containers found</span></div>'}</div>`;
+}
+
+async function _checkSlicerDockerStatus(el) {
+  const box = el.querySelector('#slicer-docker-status');
+  if (box) {
+    box.dataset.tone = 'busy';
+    box.textContent = 'Checking Docker Orca...';
+  }
+  const r = await fetch('/api/slicer/orca-docker/status');
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Docker Orca check failed');
+  _renderSlicerDockerStatus(el, data);
+  return data;
 }
 
 function _attachSlicerEvents(el) {
@@ -11154,6 +11209,59 @@ function _attachSlicerEvents(el) {
           status.dataset.tone = 'warn';
         }
         showToast('Slicer check failed', err.message || '', 'error');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = old;
+      }
+    });
+  });
+
+  el.querySelectorAll('[data-orca-docker-action]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const action = btn.dataset.orcaDockerAction;
+      if (action === 'update' && !confirm('Update the browser Orca Docker image and recreate the Orca container? The current container will be kept as a stopped rollback copy.')) {
+        return;
+      }
+      const old = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = action === 'update' ? 'Updating...' : (action === 'restart' ? 'Restarting...' : 'Checking...');
+      const box = el.querySelector('#slicer-docker-status');
+      if (box) {
+        box.dataset.tone = 'busy';
+        box.textContent = action === 'update'
+          ? 'Pulling the Orca image and recreating the browser Orca container...'
+          : action === 'restart'
+            ? 'Restarting Orca containers...'
+            : 'Checking Docker Orca...';
+      }
+      try {
+        let data;
+        if (action === 'check') {
+          data = await _checkSlicerDockerStatus(el);
+        } else {
+          const url = action === 'restart' ? '/api/slicer/orca-docker/restart' : '/api/slicer/orca-docker/update';
+          const r = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: action === 'restart' ? JSON.stringify({ target: 'all' }) : '{}',
+          });
+          data = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Docker Orca action failed');
+          _renderSlicerDockerStatus(el, data);
+        }
+        if (action === 'update') {
+          showToast('Orca updated', data.backup ? `Rollback copy: ${data.backup}` : 'Container recreated', 'success');
+        } else if (action === 'restart') {
+          showToast('Orca restarted', (data.restarted || []).join(', ') || 'No containers restarted', 'success');
+        } else {
+          showToast('Docker Orca checked', data.message || '', data.available ? 'success' : 'warning');
+        }
+      } catch (err) {
+        if (box) {
+          box.dataset.tone = 'warn';
+          box.textContent = err.message || 'Docker Orca action failed';
+        }
+        showToast('Docker Orca action failed', err.message || '', 'error');
       } finally {
         btn.disabled = false;
         btn.textContent = old;

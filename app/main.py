@@ -892,6 +892,10 @@ class SlicerConnectionCheckRequest(BaseModel):
     url: str
 
 
+class OrcaDockerActionRequest(BaseModel):
+    target: str = "all"
+
+
 def _slice_request_profiles(body: SlicePlanRequest, settings: dict, printer_id: str) -> dict:
     return {
         "printer": (body.printer_profile or settings.get(_slicer_profile_key(printer_id, "printer"), "") or "").strip(),
@@ -1676,6 +1680,225 @@ async def slicer_worker_status():
         "profile_roots": [str(p) for p in _orca_profile_roots(exe)],
         "platform": os.name,
     }
+
+
+_ORCA_DOCKER_BROWSER_CONTAINER = "flightdeck-orcaslicer"
+_ORCA_DOCKER_API_CONTAINER = "orca-slicer-api"
+_ORCA_DOCKER_BROWSER_IMAGE = "lscr.io/linuxserver/orcaslicer:latest"
+
+
+def _docker_binary() -> str | None:
+    return shutil.which("docker") or shutil.which("docker.exe")
+
+
+def _run_docker(args: list[str], *, timeout: int = 30, check: bool = True) -> subprocess.CompletedProcess:
+    docker = _docker_binary()
+    if not docker:
+        raise HTTPException(status_code=404, detail="Docker command not found on this Flightdeck host")
+    try:
+        proc = subprocess.run(
+            [docker, *args],
+            text=True,
+            capture_output=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise HTTPException(status_code=504, detail=f"Docker command timed out: docker {' '.join(args)}") from exc
+    if check and proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or "Docker command failed").strip()
+        raise HTTPException(status_code=502, detail=detail)
+    return proc
+
+
+def _docker_inspect_container(name: str) -> dict | None:
+    proc = _run_docker(["inspect", name], timeout=15, check=False)
+    if proc.returncode != 0:
+        return None
+    try:
+        payload = json.loads(proc.stdout or "[]")
+    except Exception:
+        return None
+    if not isinstance(payload, list) or not payload:
+        return None
+    return payload[0] if isinstance(payload[0], dict) else None
+
+
+def _docker_port_summary(port_bindings: dict | None) -> list[str]:
+    out: list[str] = []
+    if not isinstance(port_bindings, dict):
+        return out
+    for container_port, bindings in sorted(port_bindings.items()):
+        if not isinstance(bindings, list):
+            continue
+        for binding in bindings:
+            if not isinstance(binding, dict):
+                continue
+            host_ip = str(binding.get("HostIp") or "").strip()
+            host_port = str(binding.get("HostPort") or "").strip()
+            prefix = f"{host_ip}:" if host_ip else ""
+            if host_port:
+                out.append(f"{prefix}{host_port}->{container_port}")
+    return out
+
+
+def _docker_container_summary(name: str) -> dict:
+    info = _docker_inspect_container(name)
+    if not info:
+        return {
+            "name": name,
+            "exists": False,
+            "status": "missing",
+            "health": "",
+            "image": "",
+            "ports": [],
+            "restart": "",
+            "can_update": False,
+        }
+    state = info.get("State") if isinstance(info.get("State"), dict) else {}
+    config = info.get("Config") if isinstance(info.get("Config"), dict) else {}
+    host_config = info.get("HostConfig") if isinstance(info.get("HostConfig"), dict) else {}
+    health = ""
+    if isinstance(state.get("Health"), dict):
+        health = str(state["Health"].get("Status") or "")
+    image = str(config.get("Image") or info.get("Image") or "")
+    restart = ""
+    if isinstance(host_config.get("RestartPolicy"), dict):
+        restart = str(host_config["RestartPolicy"].get("Name") or "")
+    return {
+        "name": name,
+        "exists": True,
+        "status": str(state.get("Status") or ""),
+        "running": bool(state.get("Running")),
+        "health": health,
+        "image": image,
+        "image_id": str(info.get("Image") or ""),
+        "ports": _docker_port_summary(host_config.get("PortBindings")),
+        "restart": restart,
+        "can_update": name == _ORCA_DOCKER_BROWSER_CONTAINER and image == _ORCA_DOCKER_BROWSER_IMAGE,
+    }
+
+
+def _orca_docker_status() -> dict:
+    docker = _docker_binary()
+    if not docker:
+        return {
+            "available": False,
+            "message": "Docker command not found on this Flightdeck host",
+            "containers": [],
+        }
+    proc = _run_docker(["version", "--format", "{{.Server.Version}}"], timeout=10, check=False)
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or "Docker is not responding").strip()
+        return {
+            "available": False,
+            "message": detail,
+            "containers": [],
+        }
+    containers = [
+        _docker_container_summary(_ORCA_DOCKER_BROWSER_CONTAINER),
+        _docker_container_summary(_ORCA_DOCKER_API_CONTAINER),
+    ]
+    return {
+        "available": True,
+        "version": (proc.stdout or "").strip(),
+        "message": "Docker is available",
+        "containers": containers,
+    }
+
+
+def _docker_restart_orca_containers(target: str = "all") -> dict:
+    target = (target or "all").strip().lower()
+    names = {
+        "browser": [_ORCA_DOCKER_BROWSER_CONTAINER],
+        "api": [_ORCA_DOCKER_API_CONTAINER],
+        "all": [_ORCA_DOCKER_BROWSER_CONTAINER, _ORCA_DOCKER_API_CONTAINER],
+    }.get(target)
+    if not names:
+        raise HTTPException(status_code=422, detail="target must be browser, api, or all")
+    restarted: list[str] = []
+    skipped: list[str] = []
+    for name in names:
+        if not _docker_inspect_container(name):
+            skipped.append(name)
+            continue
+        _run_docker(["restart", name], timeout=90)
+        restarted.append(name)
+    status = _orca_docker_status()
+    status.update({"ok": True, "restarted": restarted, "skipped": skipped})
+    return status
+
+
+def _recreate_orca_browser_container() -> dict:
+    name = _ORCA_DOCKER_BROWSER_CONTAINER
+    info = _docker_inspect_container(name)
+    if not info:
+        raise HTTPException(status_code=404, detail=f"{name} container was not found")
+    config = info.get("Config") if isinstance(info.get("Config"), dict) else {}
+    host_config = info.get("HostConfig") if isinstance(info.get("HostConfig"), dict) else {}
+    image = str(config.get("Image") or "")
+    if image != _ORCA_DOCKER_BROWSER_IMAGE:
+        raise HTTPException(status_code=422, detail=f"{name} uses {image or 'an unknown image'}; managed update only supports {_ORCA_DOCKER_BROWSER_IMAGE}")
+
+    _run_docker(["pull", _ORCA_DOCKER_BROWSER_IMAGE], timeout=900)
+
+    env = [str(item) for item in (config.get("Env") or []) if str(item)]
+    binds = [str(item) for item in (host_config.get("Binds") or []) if str(item)]
+    port_bindings = host_config.get("PortBindings") if isinstance(host_config.get("PortBindings"), dict) else {}
+    restart_policy = host_config.get("RestartPolicy") if isinstance(host_config.get("RestartPolicy"), dict) else {}
+    restart_name = str(restart_policy.get("Name") or "").strip()
+    backup_name = f"{name}-backup-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+
+    run_args = ["run", "-d", "--name", name]
+    if restart_name and restart_name != "no":
+        run_args.extend(["--restart", restart_name])
+    for bind in binds:
+        run_args.extend(["-v", bind])
+    for container_port, bindings in sorted(port_bindings.items()):
+        if not isinstance(bindings, list):
+            continue
+        for binding in bindings:
+            if not isinstance(binding, dict):
+                continue
+            host_ip = str(binding.get("HostIp") or "").strip()
+            host_port = str(binding.get("HostPort") or "").strip()
+            if not host_port:
+                continue
+            published = f"{host_ip}:{host_port}:{container_port}" if host_ip else f"{host_port}:{container_port}"
+            run_args.extend(["-p", published])
+    for item in env:
+        run_args.extend(["-e", item])
+    run_args.append(_ORCA_DOCKER_BROWSER_IMAGE)
+
+    _run_docker(["stop", name], timeout=90, check=False)
+    _run_docker(["rename", name, backup_name], timeout=30)
+    try:
+        _run_docker(run_args, timeout=120)
+    except HTTPException:
+        _run_docker(["rm", "-f", name], timeout=30, check=False)
+        _run_docker(["rename", backup_name, name], timeout=30, check=False)
+        _run_docker(["start", name], timeout=60, check=False)
+        raise
+
+    # Keep one rollback container around briefly, but stop it so ports stay free.
+    _run_docker(["stop", backup_name], timeout=30, check=False)
+    status = _orca_docker_status()
+    status.update({"ok": True, "updated": name, "backup": backup_name})
+    return status
+
+
+@app.get("/api/slicer/orca-docker/status")
+async def slicer_orca_docker_status():
+    return await asyncio.to_thread(_orca_docker_status)
+
+
+@app.post("/api/slicer/orca-docker/restart")
+async def slicer_orca_docker_restart(body: OrcaDockerActionRequest):
+    return await asyncio.to_thread(_docker_restart_orca_containers, body.target)
+
+
+@app.post("/api/slicer/orca-docker/update")
+async def slicer_orca_docker_update():
+    return await asyncio.to_thread(_recreate_orca_browser_container)
 
 
 async def _probe_slicer_api(api_url: str, *, timeout: float = 3.0) -> dict:

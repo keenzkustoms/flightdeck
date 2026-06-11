@@ -11448,6 +11448,135 @@ select optgroup {
 .slicer-connection-status[data-tone="ok"] { color: #86efac; }
 .slicer-connection-status[data-tone="warn"] { color: #fcd34d; }
 
+.slicer-managed-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.7rem 1rem;
+  margin-top: 0.85rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid rgba(34,197,94,0.28);
+  border-radius: 0.625rem;
+  background: rgba(10,36,42,0.48);
+}
+
+.slicer-managed-copy strong,
+.slicer-managed-copy span {
+  display: block;
+}
+
+.slicer-managed-copy strong {
+  color: var(--text);
+  font-size: 0.9rem;
+}
+
+.slicer-managed-copy span {
+  margin-top: 0.18rem;
+  color: #94a3b8;
+  font-size: 0.76rem;
+  line-height: 1.35;
+}
+
+.slicer-managed-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: flex-start;
+  gap: 0.45rem;
+}
+
+.slicer-update-btn {
+  border-color: #38bdf8;
+  background: rgba(14,165,233,0.14);
+  color: #bae6fd;
+}
+
+.slicer-managed-status {
+  grid-column: 1 / -1;
+  min-height: 2.2rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid rgba(148,163,184,0.22);
+  border-radius: 0.5rem;
+  background: rgba(15,23,42,0.52);
+  color: #94a3b8;
+  font-size: 0.76rem;
+}
+
+.slicer-managed-status[data-tone="ok"] {
+  border-color: rgba(34,197,94,0.32);
+  background: rgba(20,83,45,0.16);
+}
+
+.slicer-managed-status[data-tone="warn"] {
+  border-color: rgba(245,158,11,0.38);
+  background: rgba(120,53,15,0.18);
+  color: #fcd34d;
+}
+
+.slicer-managed-status[data-tone="busy"] {
+  border-color: rgba(96,165,250,0.35);
+  color: #bfdbfe;
+}
+
+.slicer-managed-status strong,
+.slicer-managed-status span {
+  display: block;
+}
+
+.slicer-managed-status strong {
+  color: var(--text);
+}
+
+.slicer-managed-status span {
+  margin-top: 0.18rem;
+}
+
+.slicer-managed-list {
+  display: grid;
+  gap: 0.35rem;
+  margin-top: 0.55rem;
+}
+
+.slicer-managed-row {
+  display: grid;
+  grid-template-columns: minmax(8rem, 0.8fr) minmax(7rem, 0.55fr) minmax(0, 1.4fr);
+  gap: 0.6rem;
+  align-items: center;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid rgba(148,163,184,0.18);
+  border-radius: 0.4rem;
+  background: rgba(15,23,42,0.55);
+}
+
+.slicer-managed-row[data-tone="ok"] {
+  border-color: rgba(34,197,94,0.22);
+}
+
+.slicer-managed-row[data-tone="warn"] {
+  border-color: rgba(245,158,11,0.28);
+}
+
+.slicer-managed-row span,
+.slicer-managed-row strong,
+.slicer-managed-row em {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.slicer-managed-row span {
+  color: #bfdbfe;
+  font-weight: 800;
+}
+
+.slicer-managed-row strong {
+  color: #e5e7eb;
+}
+
+.slicer-managed-row em {
+  color: #94a3b8;
+  font-style: normal;
+}
+
 .slicer-profiles-panel {
   gap: 0.85rem;
 }
@@ -11595,6 +11724,9 @@ select optgroup {
   .slicer-grid { grid-template-columns: 1fr; }
   .slicer-docker-panel { grid-template-columns: 1fr; }
   .slicer-launch-btn { width: 100%; }
+  .slicer-managed-panel { grid-template-columns: 1fr; }
+  .slicer-managed-actions { justify-content: flex-start; }
+  .slicer-managed-row { grid-template-columns: 1fr; }
   .slicer-profile-row { grid-template-columns: 1fr; }
 }
 
