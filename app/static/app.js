@@ -11835,6 +11835,7 @@ async function _openSliceModelDialog({ sourceId, path, file, printers }) {
           ['Brim', sliceOptions.brim],
         ].map(([label, value]) => `<div><span>${esc(label)}</span><strong>${esc(value || 'Profile default')}</strong></div>`).join('');
         actionsEl.hidden = false;
+        actionsEl.dataset.browserUrl = browserUrl || '';
         actionsEl.innerHTML = `
           <div class="filedesk-slice-steps">
             <strong>Slice handoff</strong>
@@ -11928,8 +11929,64 @@ async function _openSliceModelDialog({ sourceId, path, file, printers }) {
     const runBtn = e.target.closest('[data-run-slice]');
     if (!runBtn) return;
     const old = runBtn.textContent;
+    const actionsEl = overlay.querySelector('#slice-handoff-actions');
+    const errEl = overlay.querySelector('#slice-plan-result');
+    const browserUrl = actionsEl?.dataset.browserUrl || '';
+    const started = Date.now();
+    const stages = [
+      [0, 'Preparing profiles', 'Checking printer, process, filament, support, brim, and plate settings.'],
+      [12, 'Sending model to slicer', 'Uploading the source model and selected profiles to the slicer service.'],
+      [28, 'Slicer is working', 'Orca is generating toolpaths. Large STL/3MF files can sit here for a while.'],
+      [62, 'Packaging output', 'Waiting for the printer-ready G-code/3MF and embedded preview.'],
+      [84, 'Saving to Print Vault', 'Flightdeck will show Queue sliced job as soon as the output lands.'],
+    ];
+    let stageIndex = 0;
+    const setProgress = (pct, title, detail) => {
+      const progress = actionsEl?.querySelector('[data-slice-progress-fill]');
+      const label = actionsEl?.querySelector('[data-slice-progress-label]');
+      const detailEl = actionsEl?.querySelector('[data-slice-progress-detail]');
+      const elapsed = actionsEl?.querySelector('[data-slice-progress-elapsed]');
+      if (progress) progress.style.width = `${Math.max(6, Math.min(96, pct))}%`;
+      if (label) label.textContent = title;
+      if (detailEl) detailEl.textContent = detail;
+      if (elapsed) elapsed.textContent = `${Math.max(1, Math.round((Date.now() - started) / 1000))}s`;
+    };
+    const progressTimer = setInterval(() => {
+      const seconds = (Date.now() - started) / 1000;
+      const nextIndex = seconds > 45 ? 4 : seconds > 24 ? 3 : seconds > 10 ? 2 : seconds > 3 ? 1 : 0;
+      stageIndex = Math.max(stageIndex, nextIndex);
+      const [base, title, detail] = stages[stageIndex];
+      const pct = Math.min(96, base + ((seconds % 9) / 9) * 12);
+      setProgress(pct, title, detail);
+    }, 500);
     runBtn.disabled = true;
     runBtn.textContent = 'Slicing...';
+    overlay.querySelectorAll('.filedesk-printer-choice, #slice-prepare-plan, #slice-bed-type, #slice-support-mode, #slice-brim-mode, #slice-all-plates, .slicer-profile-input').forEach(el => {
+      el.disabled = true;
+    });
+    if (errEl) {
+      errEl.hidden = false;
+      errEl.classList.add('filedesk-dialog-ok');
+      errEl.textContent = 'Slicing in progress. Keep this window open; Flightdeck will unlock Queue sliced job when the output is ready.';
+    }
+    if (actionsEl) {
+      actionsEl.hidden = false;
+      actionsEl.innerHTML = `
+        <div class="filedesk-slice-progress">
+          <div class="filedesk-slice-progress-head">
+            <div>
+              <strong data-slice-progress-label>Preparing profiles</strong>
+              <span data-slice-progress-detail>Checking printer, process, filament, support, brim, and plate settings.</span>
+            </div>
+            <em data-slice-progress-elapsed>1s</em>
+          </div>
+          <div class="filedesk-slice-progress-bar"><span data-slice-progress-fill style="width:8%"></span></div>
+          <div class="filedesk-slice-progress-foot">
+            <span>Background slice running</span>
+            ${browserUrl ? `<a class="filedesk-slice-link" href="${esc(browserUrl)}" target="_blank" rel="noreferrer">Open Orca</a>` : ''}
+          </div>
+        </div>`;
+    }
     try {
       const r = await fetch('/api/slicer/run', {
         method: 'POST',
@@ -11947,11 +12004,10 @@ async function _openSliceModelDialog({ sourceId, path, file, printers }) {
           all_plates: !!overlay.querySelector('#slice-all-plates')?.checked,
         }),
       });
+      setProgress(98, 'Finishing slice', 'Saving the generated output into the Print Vault.');
       const data = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(typeof data.detail === 'string' ? data.detail : data.detail?.message || 'Slice failed');
       showToast('Sliced job ready', `${data.filename} · ${_fmtBytes(data.size)}`, 'success');
-      const actionsEl = overlay.querySelector('#slice-handoff-actions');
-      const errEl = overlay.querySelector('#slice-plan-result');
       if (errEl) {
         errEl.hidden = false;
         errEl.classList.add('filedesk-dialog-ok');
@@ -11974,6 +12030,7 @@ async function _openSliceModelDialog({ sourceId, path, file, printers }) {
           </div>` : `<div class="filedesk-slice-preview is-missing"><span>Preview unavailable</span></div>`}
           <div class="filedesk-slice-buttons">
             <button class="filedesk-slice-link filedesk-slice-queue" type="button" data-queue-sliced="${esc(data.path || data.filename)}" data-printer-id="${esc(data.printer_id || runBtn.dataset.printerId)}">Queue sliced job</button>
+            ${browserUrl ? `<a class="filedesk-slice-link" href="${esc(browserUrl)}" target="_blank" rel="noreferrer">Open Orca</a>` : ''}
             <button class="filedesk-slice-link" type="button" data-check-slice-output="${esc(data.filename)}">Check vault</button>
           </div>`;
         actionsEl.querySelector('[data-slice-preview-img]')?.addEventListener('error', event => {
@@ -11984,9 +12041,30 @@ async function _openSliceModelDialog({ sourceId, path, file, printers }) {
       _printerBayLastHtml = '';
     } catch (err) {
       showToast('Slice failed', err.message || '', 'error');
+      if (errEl) {
+        errEl.classList.remove('filedesk-dialog-ok');
+        errEl.hidden = false;
+        errEl.textContent = err.message || 'Slice failed';
+      }
+      if (actionsEl) {
+        actionsEl.hidden = false;
+        actionsEl.innerHTML = `
+          <div class="filedesk-slice-steps">
+            <strong>Slice failed</strong>
+            <span>${esc(err.message || 'The slicer did not return a printer-ready file.')}</span>
+          </div>
+          <div class="filedesk-slice-buttons">
+            <button class="filedesk-slice-link filedesk-slice-run" type="button" data-run-slice="${esc(runBtn.dataset.runSlice || '')}" data-printer-id="${esc(runBtn.dataset.printerId || selectedPrinterId)}">Try again</button>
+            ${browserUrl ? `<a class="filedesk-slice-link" href="${esc(browserUrl)}" target="_blank" rel="noreferrer">Open Orca</a>` : ''}
+          </div>`;
+      }
     } finally {
+      clearInterval(progressTimer);
       runBtn.disabled = false;
       runBtn.textContent = old;
+      overlay.querySelectorAll('.filedesk-printer-choice, #slice-prepare-plan, #slice-bed-type, #slice-support-mode, #slice-brim-mode, #slice-all-plates, .slicer-profile-input').forEach(el => {
+        el.disabled = false;
+      });
     }
   });
   overlay.addEventListener('click', async e => {

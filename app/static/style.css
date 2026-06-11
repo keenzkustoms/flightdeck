@@ -15356,6 +15356,79 @@ select optgroup {
   color: var(--text);
   font-size: 0.82rem;
 }
+.filedesk-slice-progress {
+  display: grid;
+  gap: 0.65rem;
+}
+.filedesk-slice-progress-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.8rem;
+}
+.filedesk-slice-progress-head div {
+  display: grid;
+  gap: 0.18rem;
+  min-width: 0;
+}
+.filedesk-slice-progress-head strong {
+  color: var(--text);
+  font-size: 0.88rem;
+}
+.filedesk-slice-progress-head span {
+  color: var(--muted);
+  font-size: 0.76rem;
+  line-height: 1.35;
+}
+.filedesk-slice-progress-head em {
+  flex: 0 0 auto;
+  min-width: 2.4rem;
+  border: 1px solid rgba(96,165,250,0.32);
+  border-radius: 999px;
+  background: rgba(59,130,246,0.12);
+  color: #bfdbfe;
+  padding: 0.15rem 0.42rem;
+  font-size: 0.68rem;
+  font-style: normal;
+  font-weight: 900;
+  text-align: center;
+}
+.filedesk-slice-progress-bar {
+  position: relative;
+  height: 0.6rem;
+  overflow: hidden;
+  border: 1px solid rgba(96,165,250,0.28);
+  border-radius: 999px;
+  background: rgba(2,6,23,0.72);
+}
+.filedesk-slice-progress-bar span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 8%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #2563eb, #22c55e, #93c5fd);
+  box-shadow: 0 0 16px rgba(59,130,246,0.32);
+  transition: width 0.45s ease;
+}
+.filedesk-slice-progress-bar span::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.42), transparent);
+  animation: filedesk-progress-sheen 1.4s linear infinite;
+}
+.filedesk-slice-progress-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+@keyframes filedesk-progress-sheen {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(100%); }
+}
 .filedesk-slice-preview {
   position: relative;
   display: grid;
