@@ -130,6 +130,28 @@ The PowerShell script can also be run directly:
 .\scripts\windows\uninstall-windows.ps1
 ```
 
+### Windows Slicer Sidecar At Login
+
+H2D loose STL/OBJ background slicing needs a running Orca/Bambu slicer API sidecar. The Windows tray can supervise that sidecar too, but it needs to know the command that starts your `/slice` API service.
+
+Configure it once:
+
+```powershell
+.\scripts\windows\configure-slicer-sidecar.ps1 `
+  -Command "<command that starts your /slice API sidecar>" `
+  -Url "http://127.0.0.1:3003"
+```
+
+Then restart Flightdeck from the tray, or log out/in. The tray will start the sidecar at login, probe `/health`, restart it if the process exits, and add slicer-sidecar controls to the tray menu. Logs go to `%LOCALAPPDATA%\Flightdeck\logs\slicer-sidecar.log`.
+
+For fresh installs, the same values can be supplied during install:
+
+```powershell
+.\scripts\windows\install-windows.ps1 `
+  -SlicerSidecarCommand "<command that starts your /slice API sidecar>" `
+  -SlicerSidecarUrl "http://127.0.0.1:3003"
+```
+
 ## Manual Install
 
 Use this only if you want to run each step yourself.
