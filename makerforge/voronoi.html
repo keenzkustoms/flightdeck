@@ -1,0 +1,1241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Paper3D · MakerDeck</title>
+<script type="importmap">
+{ "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.164.1/examples/jsm/"
+} }
+</script>
+<link rel="stylesheet" href="css/makerdeck.css">
+<style>
+/* -- Paper3D-specific layout --------------------------------------- */
+:root{ --sidebar-w:280px; --footer-h:32px; }
+.app{display:grid;height:100vh;
+  grid-template-rows:var(--nav-h) 1fr var(--footer-h);
+  grid-template-columns:var(--sidebar-w) 1fr;
+  grid-template-areas:
+    "nav      nav"
+    "sidebar  viewport"
+    "footer   footer";
+}
+.sidebar{grid-area:sidebar;background:var(--panel);border-right:1px solid var(--border);
+  overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:12px}
+.viewport{grid-area:viewport;position:relative;background:var(--bg);overflow:hidden}
+.viewport canvas{display:block;width:100%!important;height:100%!important}
+.drop-zone .icon{font-size:28px;margin-bottom:6px}
+.mode-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px}
+.mode-btn{padding:8px;border-radius:var(--radius-sm);border:1px solid var(--border);
+  text-align:center;font-size:12px;font-weight:600;transition:all .15s}
+.mode-btn:hover{border-color:var(--accent);color:var(--accent)}
+.mode-btn.active{border-color:var(--accent);background:var(--accent-dim);color:var(--accent)}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- Nav (injected by js/nav.js) -->
+  <nav class="md-nav"></nav>
+
+  <!-- Sidebar -->
+  <div class="sidebar">
+
+    <!-- Load -->
+    <div>
+      <div class="section-label">Load Model</div>
+      <div class="drop-zone" id="dropZone">
+        <div class="icon">&#x1F4E6;</div>
+        Drop STL here or click to browse
+        <input type="file" id="fileInput" accept=".stl" hidden>
+      </div>
+    </div>
+
+    <!-- Mode -->
+    <div>
+      <div class="section-label">Paper3D Mode</div>
+      <div class="mode-grid">
+        <button class="mode-btn active" id="modeHoles" data-mode="holes">&#x25CB; Holes</button>
+        <button class="mode-btn" id="modeLattice" data-mode="lattice">&#x25A1; Lattice</button>
+      </div>
+    </div>
+
+    <!-- Parameters -->
+    <div>
+      <div class="section-label">Parameters</div>
+
+      <div class="form-group">
+        <div class="form-label"><span>Cell Count</span><span class="val" id="cellCountVal">500</span></div>
+        <input type="range" id="cellCount" min="10" max="1200" value="500" step="10">
+      </div>
+
+      <div class="form-group">
+        <div class="form-label"><span>Wall Thickness</span><span class="val" id="wallThickVal">3.0mm</span></div>
+        <input type="range" id="wallThick" min="0.2" max="3.0" value="3.0" step="0.1">
+      </div>
+
+      <div class="form-group">
+        <div class="form-label"><span>Body Thickness</span><span class="val" id="bodyThickVal">1.2mm</span></div>
+        <input type="range" id="bodyThick" min="0.3" max="2.0" value="1.2" step="0.1">
+      </div>
+
+      <div class="form-group">
+        <div class="form-label"><span>Randomness</span><span class="val" id="randomVal">80%</span></div>
+        <input type="range" id="randomness" min="0" max="100" value="80" step="5">
+      </div>
+
+      <label class="cb-label">
+        <input type="checkbox" id="smoothEdges" checked>
+        <span>Smooth cell edges</span>
+      </label>
+
+      <label class="cb-label">
+        <input type="checkbox" id="bedPads">
+        <span>Add bed contact pads</span>
+      </label>
+
+      <label class="cb-label">
+        <input type="checkbox" id="selfSupports">
+        <span>Add self-support stilts</span>
+      </label>
+
+      <label class="cb-label">
+        <input type="checkbox" id="fastLowPoly">
+        <span>Fast low-poly dense STL</span>
+      </label>
+    </div>
+
+    <!-- Actions -->
+    <div>
+      <div class="section-label">Generate</div>
+      <div class="btn-row">
+        <button class="btn btn-primary" id="generateBtn" disabled style="flex:1">Generate Paper3D</button>
+      </div>
+      <div class="progress-bar" id="progressBar" style="margin-top:6px;display:none">
+        <div class="fill" id="progressFill"></div>
+      </div>
+    </div>
+
+    <!-- Stats -->
+    <div id="statsPanel" style="display:none">
+      <div class="section-label">Result Stats</div>
+      <div class="stat-grid">
+        <span class="label">Original faces</span><span class="val" id="statOrigFaces">—</span>
+        <span class="label">Result faces</span><span class="val" id="statResultFaces">—</span>
+        <span class="label">Cells</span><span class="val" id="statCells">—</span>
+        <span class="label">Removed</span><span class="val" id="statRemoved">—</span>
+        <span class="label">Source faces cut</span><span class="val" id="statWalls">—</span>
+        <span class="label">Output triangles</span><span class="val" id="statRims">—</span>
+      </div>
+    </div>
+
+    <!-- Export -->
+    <div>
+      <div class="section-label">Export</div>
+      <div class="btn-row">
+        <button class="btn" id="exportSTLBtn" disabled style="flex:1">Download STL</button>
+        <button class="btn btn-danger" id="resetBtn" disabled>Reset</button>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Viewport -->
+  <div class="viewport" id="viewport">
+    <div class="viewport-toolbar">
+      <button id="tbFrame">Frame</button>
+      <button id="tbWire">Wire</button>
+      <button id="tbSpin">Spin</button>
+      <button id="tbOriginal">Original</button>
+    </div>
+    <div class="statusbar"><span id="status">Drop an STL to begin</span></div>
+  </div>
+
+  <!-- Footer -->
+  <div class="md-footer">
+    <span id="fileName">No model loaded</span>
+    <span>Paper3D</span>
+  </div>
+
+</div>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import './js/nav.js?v=551';
+
+/* ================================================================== */
+/*  Helpers                                                           */
+/* ================================================================== */
+const $ = id => document.getElementById(id);
+
+function setStatus(msg) { $('status').textContent = msg; }
+function showProgress(pct) {
+  $('progressBar').style.display = 'block';
+  $('progressFill').style.width = pct + '%';
+}
+function hideProgress() { $('progressBar').style.display = 'none'; }
+
+/* ================================================================== */
+/*  Three.js Scene                                                    */
+/* ================================================================== */
+const viewport = $('viewport');
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setClearColor(0x060a10);
+viewport.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 5000);
+camera.position.set(0, 0, 200);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true; controls.dampingFactor = 0.12;
+
+scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+const dirLight = new THREE.DirectionalLight(0xffffff, 1.0);
+dirLight.position.set(1, 2, 3);
+scene.add(dirLight);
+const backLight = new THREE.DirectionalLight(0x3ecfff, 0.3);
+backLight.position.set(-1, -1, -2);
+scene.add(backLight);
+
+let meshOriginal = null, meshResult = null;
+let wireHelper = null;
+let autoRotate = false;
+let showingOriginal = false;
+
+function resize() {
+  const w = viewport.clientWidth, h = viewport.clientHeight;
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  renderer.setSize(w, h);
+}
+window.addEventListener('resize', resize);
+resize();
+
+function animate() {
+  requestAnimationFrame(animate);
+  if (autoRotate && (meshOriginal || meshResult)) {
+    const target = meshResult || meshOriginal;
+    if (target) target.rotation.y += 0.003;
+    if (meshOriginal && meshResult) meshOriginal.rotation.y = meshResult.rotation.y;
+  }
+  controls.update();
+  renderer.render(scene, camera);
+}
+animate();
+
+function frameModel(mesh) {
+  if (!mesh) return;
+  const box = new THREE.Box3().setFromObject(mesh);
+  const center = box.getCenter(new THREE.Vector3());
+  const size = box.getSize(new THREE.Vector3());
+  const maxDim = Math.max(size.x, size.y, size.z);
+  camera.position.set(center.x, center.y, center.z + maxDim * 1.8);
+  controls.target.copy(center);
+  controls.update();
+}
+
+/* ================================================================== */
+/*  STL Parsing                                                       */
+/* ================================================================== */
+function parseSTL(buffer) {
+  const dv = new DataView(buffer);
+  const nTri = dv.getUint32(80, true);
+  const positions = new Float32Array(nTri * 9);
+  const normals = new Float32Array(nTri * 3);
+  let off = 84;
+  for (let i = 0; i < nTri; i++) {
+    normals[i * 3]     = dv.getFloat32(off, true);
+    normals[i * 3 + 1] = dv.getFloat32(off + 4, true);
+    normals[i * 3 + 2] = dv.getFloat32(off + 8, true);
+    off += 12;
+    for (let v = 0; v < 9; v++) {
+      positions[i * 9 + v] = dv.getFloat32(off, true);
+      off += 4;
+    }
+    off += 2;
+  }
+  return { positions, normals, nTri };
+}
+
+function meshStats(positions, nTri) {
+  let area = 0;
+  let minX = Infinity, minY = Infinity, minZ = Infinity;
+  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+  for (let i = 0; i < nTri; i++) {
+    const o = i * 9;
+    for (let v = 0; v < 3; v++) {
+      const p = o + v * 3;
+      const x = positions[p], y = positions[p+1], z = positions[p+2];
+      if (x < minX) minX = x; if (x > maxX) maxX = x;
+      if (y < minY) minY = y; if (y > maxY) maxY = y;
+      if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+    }
+    const ux = positions[o+3]-positions[o], uy = positions[o+4]-positions[o+1], uz = positions[o+5]-positions[o+2];
+    const vx = positions[o+6]-positions[o], vy = positions[o+7]-positions[o+1], vz = positions[o+8]-positions[o+2];
+    const cx = uy*vz-uz*vy, cy = uz*vx-ux*vz, cz = ux*vy-uy*vx;
+    area += 0.5 * Math.sqrt(cx*cx + cy*cy + cz*cz);
+  }
+  return { area, minX, minY, minZ, maxX, maxY, maxZ };
+}
+
+function meshBounds(positions, nTri) {
+  let minX = Infinity, minY = Infinity, minZ = Infinity;
+  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+  for (let i = 0; i < nTri; i++) {
+    const o = i * 9;
+    for (let v = 0; v < 3; v++) {
+      const p = o + v * 3;
+      const x = positions[p], y = positions[p+1], z = positions[p+2];
+      if (x < minX) minX = x; if (x > maxX) maxX = x;
+      if (y < minY) minY = y; if (y > maxY) maxY = y;
+      if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+    }
+  }
+  const sizeX = maxX - minX;
+  const sizeY = maxY - minY;
+  const sizeZ = maxZ - minZ;
+  return {
+    minX, minY, minZ, maxX, maxY, maxZ,
+    sizeX, sizeY, sizeZ,
+    maxDim: Math.max(sizeX, sizeY, sizeZ)
+  };
+}
+
+function quantizeVertex(positions, offset, cell, origin) {
+  const qx = Math.round((positions[offset] - origin.x) / cell);
+  const qy = Math.round((positions[offset+1] - origin.y) / cell);
+  const qz = Math.round((positions[offset+2] - origin.z) / cell);
+  return { qx, qy, qz };
+}
+
+function addQuantizedPoint(out, q, cell, origin) {
+  out.push(
+    origin.x + q.qx * cell,
+    origin.y + q.qy * cell,
+    origin.z + q.qz * cell
+  );
+}
+
+function lowPolyPass(positions, nTri, cell, origin) {
+  const outPos = [];
+  const seen = new Set();
+  for (let i = 0; i < nTri; i++) {
+    const o = i * 9;
+    const a = quantizeVertex(positions, o, cell, origin);
+    const b = quantizeVertex(positions, o + 3, cell, origin);
+    const c = quantizeVertex(positions, o + 6, cell, origin);
+    const ka = `${a.qx},${a.qy},${a.qz}`;
+    const kb = `${b.qx},${b.qy},${b.qz}`;
+    const kc = `${c.qx},${c.qy},${c.qz}`;
+    if (ka === kb || kb === kc || ka === kc) continue;
+    const ordered = [ka, kb, kc].sort().join('|');
+    if (seen.has(ordered)) continue;
+    seen.add(ordered);
+    addQuantizedPoint(outPos, a, cell, origin);
+    addQuantizedPoint(outPos, b, cell, origin);
+    addQuantizedPoint(outPos, c, cell, origin);
+  }
+  return { positions: new Float32Array(outPos), nTri: outPos.length / 9 };
+}
+
+function autoLowPolyMesh(positions, normals, nTri, allowLowPoly) {
+  const threshold = 650000;
+  const target = 320000;
+  if (!allowLowPoly) return { positions, normals, nTri, sourceTri: nTri, lowPoly: false };
+  if (nTri <= threshold) return { positions, normals, nTri, sourceTri: nTri, lowPoly: false };
+
+  setStatus(`Dense STL detected — simplifying ${nTri.toLocaleString()} faces…`);
+  showProgress(6);
+  const stats = meshStats(positions, nTri);
+  const origin = { x: stats.minX, y: stats.minY, z: stats.minZ };
+  const baseCell = Math.max(0.002, Math.sqrt(Math.max(stats.area, 1) / target) * 0.06);
+  const minKeep = target * 0.35;
+  const maxKeep = target * 1.35;
+  let best = null;
+  let bestScore = Infinity;
+  for (let pass = 0; pass < 18; pass++) {
+    const cell = baseCell * Math.pow(1.25, pass);
+    const reduced = lowPolyPass(positions, nTri, cell, origin);
+    if (reduced.nTri < 1000) continue;
+    const score = Math.abs(reduced.nTri - target);
+    if (score < bestScore) {
+      best = reduced;
+      bestScore = score;
+    }
+    if (reduced.nTri >= minKeep && reduced.nTri <= maxKeep) {
+      best = reduced;
+      break;
+    }
+  }
+  if (!best || best.nTri < minKeep || best.nTri >= nTri * 0.95) {
+    return { positions, normals, nTri, sourceTri: nTri, lowPoly: false };
+  }
+  return {
+    positions: best.positions,
+    normals: new Float32Array(best.nTri * 3),
+    nTri: best.nTri,
+    sourceTri: nTri,
+    lowPoly: true,
+    lowPolyMethod: 'clustered'
+  };
+}
+
+/* ================================================================== */
+/*  Paper3D Core — nearest-seed carved shell field                    */
+/* ================================================================== */
+
+/** Poisson-disc-ish sampling on mesh surface */
+function sampleSeedPoints(positions, nTri, count, randomness) {
+  const areas = new Float32Array(nTri);
+  let totalArea = 0;
+  for (let i = 0; i < nTri; i++) {
+    const o = i * 9;
+    const ex = positions[o+3]-positions[o], ey = positions[o+4]-positions[o+1], ez = positions[o+5]-positions[o+2];
+    const fx = positions[o+6]-positions[o], fy = positions[o+7]-positions[o+1], fz = positions[o+8]-positions[o+2];
+    const cx = ey*fz-ez*fy, cy = ez*fx-ex*fz, cz = ex*fy-ey*fx;
+    areas[i] = 0.5 * Math.sqrt(cx*cx+cy*cy+cz*cz);
+    totalArea += areas[i];
+  }
+  const cdf = new Float64Array(nTri);
+  cdf[0] = areas[0] / totalArea;
+  for (let i = 1; i < nTri; i++) cdf[i] = cdf[i-1] + areas[i] / totalArea;
+
+  // Use dart-throwing with rejection for better spacing
+  const seeds = [];
+  const jitter = randomness / 100;
+  const minDist = Math.sqrt(totalArea / count) * 0.4 * (1 - jitter * 0.8);
+
+  for (let s = 0; s < count; s++) {
+    let bestPt = null, bestMinD = -1;
+    const attempts = s < 20 ? 1 : 15; // More attempts = better spacing
+    for (let a = 0; a < attempts; a++) {
+      const r = Math.random();
+      let lo = 0, hi = nTri - 1;
+      while (lo < hi) { const mid = (lo+hi)>>1; if (cdf[mid] < r) lo = mid+1; else hi = mid; }
+      const o = lo * 9;
+      let u = Math.random(), v = Math.random();
+      if (u+v > 1) { u = 1-u; v = 1-v; }
+      const px = positions[o]+u*(positions[o+3]-positions[o])+v*(positions[o+6]-positions[o]);
+      const py = positions[o+1]+u*(positions[o+4]-positions[o+1])+v*(positions[o+7]-positions[o+1]);
+      const pz = positions[o+2]+u*(positions[o+5]-positions[o+2])+v*(positions[o+8]-positions[o+2]);
+      // Check min distance to existing seeds
+      let md = Infinity;
+      for (let j = 0; j < seeds.length; j += 3) {
+        const dx = px-seeds[j], dy = py-seeds[j+1], dz = pz-seeds[j+2];
+        md = Math.min(md, dx*dx+dy*dy+dz*dz);
+      }
+      if (md > bestMinD) { bestMinD = md; bestPt = [px, py, pz]; }
+    }
+    if (bestPt) seeds.push(...bestPt);
+  }
+  return new Float32Array(seeds);
+}
+
+/** Distance to the nearest cell boundary at a point. */
+function boundaryDistanceAt(x, y, z, seeds, nSeeds) {
+  let d1 = Infinity, d2 = Infinity, s1 = 0, s2 = 0;
+  for (let s = 0; s < nSeeds; s++) {
+    const dx = x - seeds[s*3], dy = y - seeds[s*3+1], dz = z - seeds[s*3+2];
+    const dd = dx*dx + dy*dy + dz*dz;
+    if (dd < d1) { d2 = d1; s2 = s1; d1 = dd; s1 = s; }
+    else if (dd < d2) { d2 = dd; s2 = s; }
+  }
+  const nx = seeds[s2*3] - seeds[s1*3];
+  const ny = seeds[s2*3+1] - seeds[s1*3+1];
+  const nz = seeds[s2*3+2] - seeds[s1*3+2];
+  const nLen = Math.sqrt(nx*nx + ny*ny + nz*nz);
+  if (nLen <= 1e-10) return Infinity;
+  const mx = (seeds[s1*3] + seeds[s2*3]) / 2;
+  const my = (seeds[s1*3+1] + seeds[s2*3+1]) / 2;
+  const mz = (seeds[s1*3+2] + seeds[s2*3+2]) / 2;
+  return Math.abs((x - mx) * nx + (y - my) * ny + (z - mz) * nz) / nLen;
+}
+
+function interpPoint(a, b, t) {
+  return {
+    x: a.x + (b.x - a.x) * t,
+    y: a.y + (b.y - a.y) * t,
+    z: a.z + (b.z - a.z) * t,
+    d: a.d + (b.d - a.d) * t,
+    nx: a.nx + (b.nx - a.nx) * t,
+    ny: a.ny + (b.ny - a.ny) * t,
+    nz: a.nz + (b.nz - a.nz) * t
+  };
+}
+
+function clipPolygonToWallBand(poly, halfWall) {
+  const out = [];
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i];
+    const b = poly[(i + 1) % poly.length];
+    const aIn = a.d <= halfWall;
+    const bIn = b.d <= halfWall;
+    if (aIn && bIn) {
+      out.push(b);
+    } else if (aIn !== bIn) {
+      const denom = b.d - a.d;
+      const t = Math.abs(denom) > 1e-10 ? (halfWall - a.d) / denom : 0;
+      const p = interpPoint(a, b, Math.max(0, Math.min(1, t)));
+      out.push(p);
+      if (bIn) out.push(b);
+    }
+  }
+  return out;
+}
+
+function pushTri(outPos, outNorm, a, b, c) {
+  const ux = b.x - a.x, uy = b.y - a.y, uz = b.z - a.z;
+  const vx = c.x - a.x, vy = c.y - a.y, vz = c.z - a.z;
+  let nx = uy*vz - uz*vy, ny = uz*vx - ux*vz, nz = ux*vy - uy*vx;
+  const len = Math.sqrt(nx*nx + ny*ny + nz*nz);
+  if (len <= 1e-10) return false;
+  nx /= len; ny /= len; nz /= len;
+  outPos.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z);
+  outNorm.push(nx, ny, nz, nx, ny, nz, nx, ny, nz);
+  return true;
+}
+
+function vertexKey(p) {
+  const q = n => Math.round(n * 1000);
+  return `${q(p.x)},${q(p.y)},${q(p.z)}`;
+}
+
+function vertexKeyXYZ(x, y, z) {
+  const q = n => Math.round(n * 1000);
+  return `${q(x)},${q(y)},${q(z)}`;
+}
+
+function edgeKey(a, b) {
+  const ka = vertexKey(a), kb = vertexKey(b);
+  return ka < kb ? ka + '|' + kb : kb + '|' + ka;
+}
+
+function addBoundaryEdge(edgeMap, a, b, ia, ib) {
+  const key = edgeKey(a, b);
+  const existing = edgeMap.get(key);
+  if (existing) {
+    existing.count++;
+  } else {
+    edgeMap.set(key, { count: 1, a, b, ia, ib });
+  }
+}
+
+function buildSmoothNormalMap(positions, nTri) {
+  const sums = new Map();
+  for (let i = 0; i < nTri; i++) {
+    const o = i * 9;
+    const a = { x: positions[o], y: positions[o+1], z: positions[o+2] };
+    const b = { x: positions[o+3], y: positions[o+4], z: positions[o+5] };
+    const c = { x: positions[o+6], y: positions[o+7], z: positions[o+8] };
+    const ux = b.x - a.x, uy = b.y - a.y, uz = b.z - a.z;
+    const vx = c.x - a.x, vy = c.y - a.y, vz = c.z - a.z;
+    let nx = uy*vz - uz*vy, ny = uz*vx - ux*vz, nz = ux*vy - uy*vx;
+    const len = Math.sqrt(nx*nx + ny*ny + nz*nz);
+    if (len <= 1e-10) continue;
+    nx /= len; ny /= len; nz /= len;
+    for (let v = 0; v < 3; v++) {
+      const vo = o + v * 3;
+      const key = vertexKeyXYZ(positions[vo], positions[vo+1], positions[vo+2]);
+      const sum = sums.get(key) || { x: 0, y: 0, z: 0 };
+      sum.x += nx; sum.y += ny; sum.z += nz;
+      sums.set(key, sum);
+    }
+  }
+  for (const sum of sums.values()) {
+    const len = Math.sqrt(sum.x*sum.x + sum.y*sum.y + sum.z*sum.z);
+    if (len > 1e-10) {
+      sum.x /= len; sum.y /= len; sum.z /= len;
+    } else {
+      sum.x = 0; sum.y = 0; sum.z = 1;
+    }
+  }
+  return sums;
+}
+
+function smoothNormalAt(normalMap, x, y, z) {
+  const n = normalMap.get(vertexKeyXYZ(x, y, z));
+  return n || { x: 0, y: 0, z: 1 };
+}
+
+function normalizePolyNormals(poly) {
+  for (const p of poly) {
+    const len = Math.sqrt(p.nx*p.nx + p.ny*p.ny + p.nz*p.nz);
+    if (len > 1e-10) {
+      p.nx /= len; p.ny /= len; p.nz /= len;
+    } else {
+      p.nx = 0; p.ny = 0; p.nz = 1;
+    }
+  }
+}
+
+function inwardPoint(p, depth) {
+  let nx = p.nx, ny = p.ny, nz = p.nz;
+  const len = Math.sqrt(nx*nx + ny*ny + nz*nz);
+  if (len <= 1e-8) return { x: p.x, y: p.y, z: p.z - depth, d: p.d };
+  nx /= len; ny /= len; nz /= len;
+  return { x: p.x - nx * depth, y: p.y - ny * depth, z: p.z - nz * depth, d: p.d };
+}
+
+function addSolidPolygon(outPos, outNorm, edgeMap, poly, shellDepth) {
+  normalizePolyNormals(poly);
+  const inner = poly.map(p => inwardPoint(p, shellDepth));
+  let tris = 0;
+  for (let v = 1; v < poly.length - 1; v++) {
+    if (pushTri(outPos, outNorm, poly[0], poly[v], poly[v+1])) tris++;
+    if (pushTri(outPos, outNorm, inner[0], inner[v+1], inner[v])) tris++;
+  }
+  for (let i = 0; i < poly.length; i++) {
+    const j = (i + 1) % poly.length;
+    addBoundaryEdge(edgeMap, poly[i], poly[j], inner[i], inner[j]);
+  }
+  return tris;
+}
+
+function filterSmallTriangleIslands(result, minTriangles = 4) {
+  const nTri = result.nTri;
+  if (nTri < minTriangles * 2) return { ...result, removedIslands: 0 };
+
+  const parent = new Int32Array(nTri);
+  const counts = new Int32Array(nTri);
+  const firstTriByVertex = new Map();
+  for (let i = 0; i < nTri; i++) parent[i] = i;
+
+  const find = i => {
+    let r = i;
+    while (parent[r] !== r) r = parent[r];
+    while (parent[i] !== i) {
+      const p = parent[i];
+      parent[i] = r;
+      i = p;
+    }
+    return r;
+  };
+  const unite = (a, b) => {
+    const ra = find(a), rb = find(b);
+    if (ra !== rb) parent[rb] = ra;
+  };
+  const keyAt = offset => {
+    const q = n => Math.round(n * 1000);
+    return `${q(result.positions[offset])},${q(result.positions[offset+1])},${q(result.positions[offset+2])}`;
+  };
+
+  for (let tri = 0; tri < nTri; tri++) {
+    const o = tri * 9;
+    for (let v = 0; v < 3; v++) {
+      const key = keyAt(o + v * 3);
+      const first = firstTriByVertex.get(key);
+      if (first === undefined) firstTriByVertex.set(key, tri);
+      else unite(tri, first);
+    }
+  }
+
+  for (let tri = 0; tri < nTri; tri++) counts[find(tri)]++;
+
+  const keep = new Uint8Array(nTri);
+  let keepCount = 0;
+  let largestRoot = 0;
+  for (let tri = 0; tri < nTri; tri++) {
+    const root = find(tri);
+    if (counts[root] > counts[largestRoot]) largestRoot = root;
+    if (counts[root] >= minTriangles) {
+      keep[tri] = 1;
+      keepCount++;
+    }
+  }
+  if (keepCount === 0) {
+    for (let tri = 0; tri < nTri; tri++) {
+      if (find(tri) === largestRoot) {
+        keep[tri] = 1;
+        keepCount++;
+      }
+    }
+  }
+  if (keepCount === nTri) return { ...result, removedIslands: 0 };
+
+  const outPos = new Float32Array(keepCount * 9);
+  const outNorm = new Float32Array(keepCount * 9);
+  let w = 0;
+  for (let tri = 0; tri < nTri; tri++) {
+    if (!keep[tri]) continue;
+    const o = tri * 9;
+    outPos.set(result.positions.subarray(o, o + 9), w);
+    outNorm.set(result.normals.subarray(o, o + 9), w);
+    w += 9;
+  }
+  return {
+    positions: outPos,
+    normals: outNorm,
+    nTri: keepCount,
+    nKept: result.nKept,
+    removedIslands: nTri - keepCount
+  };
+}
+
+function pushCylinderPad(outPos, outNorm, cx, cy, z0, z1, radius) {
+  const steps = 18;
+  const top = [];
+  const bottom = [];
+  for (let i = 0; i < steps; i++) {
+    const a = (i / steps) * Math.PI * 2;
+    const x = cx + Math.cos(a) * radius;
+    const y = cy + Math.sin(a) * radius;
+    bottom.push({ x, y, z: z0 });
+    top.push({ x, y, z: z1 });
+  }
+  const cb = { x: cx, y: cy, z: z0 };
+  const ct = { x: cx, y: cy, z: z1 };
+  for (let i = 0; i < steps; i++) {
+    const j = (i + 1) % steps;
+    pushTri(outPos, outNorm, cb, bottom[j], bottom[i]);
+    pushTri(outPos, outNorm, ct, top[i], top[j]);
+    pushTri(outPos, outNorm, bottom[i], bottom[j], top[j]);
+    pushTri(outPos, outNorm, bottom[i], top[j], top[i]);
+  }
+}
+
+function addBedContactPads(result, bodyThick, modelDim) {
+  if (modelDim < 1 || bodyThick > modelDim * 0.05) return { ...result, bedPads: 0 };
+  const positions = result.positions;
+  let minZ = Infinity;
+  for (let i = 2; i < positions.length; i += 3) minZ = Math.min(minZ, positions[i]);
+  if (!Number.isFinite(minZ)) return { ...result, bedPads: 0 };
+
+  const candidates = [];
+  const windowZ = Math.max(Math.min(0.35, modelDim * 0.006), bodyThick * 0.45);
+  for (let i = 0; i < positions.length; i += 3) {
+    if (positions[i+2] <= minZ + windowZ) {
+      candidates.push({ x: positions[i], y: positions[i+1] });
+    }
+  }
+  if (!candidates.length) return { ...result, bedPads: 0 };
+
+  const clusters = [];
+  const mergeDist = Math.max(Math.min(4.0, modelDim * 0.04), bodyThick * 4.0);
+  for (const p of candidates) {
+    let best = null;
+    let bestD = mergeDist * mergeDist;
+    for (const c of clusters) {
+      const dx = p.x - c.x, dy = p.y - c.y;
+      const d = dx*dx + dy*dy;
+      if (d < bestD) { bestD = d; best = c; }
+    }
+    if (best) {
+      best.x = (best.x * best.count + p.x) / (best.count + 1);
+      best.y = (best.y * best.count + p.y) / (best.count + 1);
+      best.count++;
+    } else {
+      clusters.push({ x: p.x, y: p.y, count: 1 });
+    }
+  }
+
+  const pads = clusters
+    .filter(c => c.count >= 6)
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 8);
+  if (!pads.length) return { ...result, bedPads: 0 };
+
+  const outPos = Array.from(result.positions);
+  const outNorm = Array.from(result.normals);
+  const minRadius = Math.max(0.12, Math.min(1.8, modelDim * 0.012));
+  const maxRadius = Math.max(minRadius, Math.min(4.5, modelDim * 0.035));
+  const radius = Math.max(minRadius, Math.min(maxRadius, bodyThick * 2.0));
+  const z0 = minZ - 0.02;
+  const minPadHeight = Math.max(0.04, Math.min(0.28, modelDim * 0.004));
+  const maxPadHeight = Math.max(minPadHeight, Math.min(0.6, modelDim * 0.012));
+  const z1 = minZ + Math.max(minPadHeight, Math.min(maxPadHeight, bodyThick * 0.35));
+  for (const pad of pads) pushCylinderPad(outPos, outNorm, pad.x, pad.y, z0, z1, radius);
+
+  return {
+    positions: new Float32Array(outPos),
+    normals: new Float32Array(outNorm),
+    nTri: outPos.length / 9,
+    nKept: result.nKept,
+    removedIslands: result.removedIslands || 0,
+    bedPads: pads.length
+  };
+}
+
+function pushTaperedSupport(outPos, outNorm, cx, cy, z0, z1, rBase, rTop) {
+  const steps = 14;
+  const bottom = [];
+  const top = [];
+  for (let i = 0; i < steps; i++) {
+    const a = (i / steps) * Math.PI * 2;
+    const ca = Math.cos(a), sa = Math.sin(a);
+    bottom.push({ x: cx + ca * rBase, y: cy + sa * rBase, z: z0 });
+    top.push({ x: cx + ca * rTop, y: cy + sa * rTop, z: z1 });
+  }
+  const cb = { x: cx, y: cy, z: z0 };
+  const ct = { x: cx, y: cy, z: z1 };
+  for (let i = 0; i < steps; i++) {
+    const j = (i + 1) % steps;
+    pushTri(outPos, outNorm, cb, bottom[j], bottom[i]);
+    pushTri(outPos, outNorm, ct, top[i], top[j]);
+    pushTri(outPos, outNorm, bottom[i], bottom[j], top[j]);
+    pushTri(outPos, outNorm, bottom[i], top[j], top[i]);
+  }
+}
+
+function addSelfSupports(result, bodyThick, modelDim) {
+  if (modelDim < 1 || bodyThick > modelDim * 0.05) return { ...result, selfSupports: 0 };
+  const positions = result.positions;
+  const normals = result.normals;
+  let minZ = Infinity, maxZ = -Infinity;
+  for (let i = 2; i < positions.length; i += 3) {
+    const z = positions[i];
+    if (z < minZ) minZ = z;
+    if (z > maxZ) maxZ = z;
+  }
+  if (!Number.isFinite(minZ) || !Number.isFinite(maxZ)) return { ...result, selfSupports: 0 };
+
+  const height = maxZ - minZ;
+  const lowLimit = minZ + height * 0.62;
+  const floorClearance = Math.max(Math.min(2.0, modelDim * 0.025), bodyThick * 2.0);
+  const candidates = [];
+  for (let tri = 0; tri < result.nTri; tri++) {
+    const o = tri * 9;
+    const cx = (positions[o] + positions[o+3] + positions[o+6]) / 3;
+    const cy = (positions[o+1] + positions[o+4] + positions[o+7]) / 3;
+    const cz = (positions[o+2] + positions[o+5] + positions[o+8]) / 3;
+    if (cz < minZ + floorClearance || cz > lowLimit) continue;
+
+    const nz = (normals[o+2] + normals[o+5] + normals[o+8]) / 3;
+    if (nz < -0.22) candidates.push({ x: cx, y: cy, z: cz, count: 1 });
+  }
+  if (!candidates.length) return { ...result, selfSupports: 0 };
+
+  const clusters = [];
+  const mergeDist = Math.max(Math.min(6.0, modelDim * 0.055), bodyThick * 5.0);
+  for (const p of candidates) {
+    let best = null;
+    let bestD = mergeDist * mergeDist;
+    for (const c of clusters) {
+      const dx = p.x - c.x, dy = p.y - c.y;
+      const d = dx*dx + dy*dy;
+      if (d < bestD) { bestD = d; best = c; }
+    }
+    if (best) {
+      best.x = (best.x * best.count + p.x) / (best.count + 1);
+      best.y = (best.y * best.count + p.y) / (best.count + 1);
+      best.z = Math.min(best.z, p.z);
+      best.count++;
+    } else {
+      clusters.push({ ...p });
+    }
+  }
+
+  const supports = clusters
+    .filter(c => c.count >= 4)
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 18);
+  if (!supports.length) return { ...result, selfSupports: 0 };
+
+  const outPos = Array.from(result.positions);
+  const outNorm = Array.from(result.normals);
+  const z0 = minZ - 0.02;
+  const minBaseR = Math.max(0.08, Math.min(1.2, modelDim * 0.01));
+  const maxBaseR = Math.max(minBaseR, Math.min(3.2, modelDim * 0.028));
+  const baseR = Math.max(minBaseR, Math.min(maxBaseR, bodyThick * 1.25));
+  const topR = Math.max(0.7, baseR * 0.55);
+  for (const s of supports) {
+    pushTaperedSupport(outPos, outNorm, s.x, s.y, z0, s.z + Math.max(0.35, bodyThick * 0.25), baseR, topR);
+  }
+
+  return {
+    positions: new Float32Array(outPos),
+    normals: new Float32Array(outNorm),
+    nTri: outPos.length / 9,
+    nKept: result.nKept,
+    removedIslands: result.removedIslands || 0,
+    bedPads: result.bedPads || 0,
+    selfSupports: supports.length
+  };
+}
+
+/** Clip original STL triangles against the Paper3D band and give the result body. */
+function buildClippedPaper3DShell(positions, nTri, seeds, nSeeds, halfWall, shellDepth, normalMap) {
+  const outPos = [];
+  const outNorm = [];
+  const edgeMap = new Map();
+  let touched = 0;
+  for (let i = 0; i < nTri; i++) {
+    const o = i * 9;
+    const n0 = smoothNormalAt(normalMap, positions[o], positions[o+1], positions[o+2]);
+    const n1 = smoothNormalAt(normalMap, positions[o+3], positions[o+4], positions[o+5]);
+    const n2 = smoothNormalAt(normalMap, positions[o+6], positions[o+7], positions[o+8]);
+    const poly = [
+      { x: positions[o],   y: positions[o+1], z: positions[o+2], nx: n0.x, ny: n0.y, nz: n0.z },
+      { x: positions[o+3], y: positions[o+4], z: positions[o+5], nx: n1.x, ny: n1.y, nz: n1.z },
+      { x: positions[o+6], y: positions[o+7], z: positions[o+8], nx: n2.x, ny: n2.y, nz: n2.z }
+    ];
+    for (const p of poly) p.d = boundaryDistanceAt(p.x, p.y, p.z, seeds, nSeeds);
+    const clipped = clipPolygonToWallBand(poly, halfWall);
+    if (clipped.length < 3) continue;
+    touched++;
+    addSolidPolygon(outPos, outNorm, edgeMap, clipped, shellDepth);
+  }
+  for (const edge of edgeMap.values()) {
+    if (edge.count !== 1) continue;
+    pushTri(outPos, outNorm, edge.a, edge.b, edge.ib);
+    pushTri(outPos, outNorm, edge.a, edge.ib, edge.ia);
+  }
+  return {
+    positions: new Float32Array(outPos),
+    normals: new Float32Array(outNorm),
+    nTri: outPos.length / 9,
+    nKept: touched
+  };
+}
+
+function adaptiveWallThreshold(positions, nTri, seeds, nSeeds, requestedBand, cellCount, wallThick, mode) {
+  const maxSamples = 60000;
+  const stride = Math.max(1, Math.floor(nTri / maxSamples));
+  const distances = [];
+  for (let i = 0; i < nTri; i += stride) {
+    const o = i * 9;
+    const cx = (positions[o] + positions[o+3] + positions[o+6]) / 3;
+    const cy = (positions[o+1] + positions[o+4] + positions[o+7]) / 3;
+    const cz = (positions[o+2] + positions[o+5] + positions[o+8]) / 3;
+    const d = boundaryDistanceAt(cx, cy, cz, seeds, nSeeds);
+    if (Number.isFinite(d)) distances.push(d);
+  }
+  if (!distances.length) return requestedBand;
+  distances.sort((a, b) => a - b);
+  const wallT = Math.max(0, Math.min(1, (wallThick - 0.2) / 2.8));
+  const cellT = Math.max(0, Math.min(1, (cellCount - 10) / 1190));
+  const modeBias = mode === 'holes' ? 0.08 : 0;
+  const targetKeep = Math.max(0.48, Math.min(0.84, 0.58 + modeBias + wallT * 0.24 - cellT * 0.05));
+  const idx = Math.max(0, Math.min(distances.length - 1, Math.floor(distances.length * targetKeep)));
+  return Math.max(0.02, Math.min(requestedBand, distances[idx]));
+}
+
+/** Full Paper3D generation pipeline. */
+function generatePaper3D(positions, normals, nTri, opts) {
+  const { cellCount, wallThick, bodyThick, randomness, mode, bedPads, selfSupports } = opts;
+  const bounds = meshBounds(positions, nTri);
+  const modelDim = Math.max(bounds.maxDim, 1e-6);
+  const effectiveWallThick = Math.min(wallThick, Math.max(0.05, modelDim * 0.035));
+  const minBody = Math.max(0.03, Math.min(0.15, modelDim * 0.004));
+  const maxBody = Math.max(minBody, Math.min(2.0, modelDim * 0.018));
+  const effectiveBodyThick = Math.max(minBody, Math.min(bodyThick, maxBody));
+  const wasScaleClamped = effectiveWallThick < wallThick || effectiveBodyThick < bodyThick;
+
+  setStatus('Sampling seed points…'); showProgress(5);
+  const seeds = sampleSeedPoints(positions, nTri, cellCount, randomness);
+  const nSeeds = seeds.length / 3;
+  showProgress(15);
+
+  setStatus('Smoothing shell normals…'); showProgress(20);
+  const normalMap = buildSmoothNormalMap(positions, nTri);
+
+  setStatus('Sizing Paper3D wall band…'); showProgress(25);
+  const requestedBand = Math.max(Math.min(0.08, modelDim * 0.004), effectiveWallThick * 1.65);
+  const halfWall = adaptiveWallThreshold(positions, nTri, seeds, nSeeds, requestedBand, cellCount, effectiveWallThick, mode);
+
+  const shellDepth = effectiveBodyThick;
+
+  setStatus('Building Paper3D shell body…'); showProgress(40);
+  let result = buildClippedPaper3DShell(positions, nTri, seeds, nSeeds, halfWall, shellDepth, normalMap);
+  showProgress(85);
+
+  setStatus('Cleaning tiny loose islands…');
+  const cleanupMin = nTri > 1000000 ? 18 : (nTri > 500000 ? 10 : 4);
+  result = filterSmallTriangleIslands(result, cleanupMin);
+  if (bedPads) {
+    setStatus('Adding bed contact pads…');
+    result = addBedContactPads(result, shellDepth, modelDim);
+  }
+  if (selfSupports) {
+    setStatus('Adding self-support stilts…');
+    result = addSelfSupports(result, shellDepth, modelDim);
+  }
+  showProgress(95);
+
+  const removed = nTri - result.nKept;
+  const islandText = result.removedIslands ? `, cleaned ${result.removedIslands.toLocaleString()} loose faces` : '';
+  const padText = result.bedPads ? `, ${result.bedPads} bed pads` : '';
+  const supportText = result.selfSupports ? `, ${result.selfSupports} supports` : '';
+  const scaleText = wasScaleClamped ? ', scale-clamped' : '';
+  setStatus(`Done — ${result.nTri.toLocaleString()} shell faces, removed ${removed.toLocaleString()} interiors${islandText}${padText}${supportText}, band ${halfWall.toFixed(3)}mm, body ${shellDepth.toFixed(2)}mm${scaleText}`);
+  showProgress(100);
+
+  return { result, cellCount, removed, nKept: result.nKept, halfWall, shellDepth };
+}
+
+/* ================================================================== */
+/*  Export Binary STL                                                  */
+/* ================================================================== */
+function exportSTLBinary(positions, normals, nTri) {
+  const bufSize = 84 + nTri * 50;
+  const buf = new ArrayBuffer(bufSize);
+  const dv = new DataView(buf);
+  // Header
+  const header = 'MakerDeck Paper3D b551';
+  for (let i = 0; i < 80; i++) dv.setUint8(i, i < header.length ? header.charCodeAt(i) : 0);
+  dv.setUint32(80, nTri, true);
+  let off = 84;
+  for (let i = 0; i < nTri; i++) {
+    // Face normal (use first vertex normal, which equals face normal)
+    dv.setFloat32(off, normals[i*9], true);
+    dv.setFloat32(off+4, normals[i*9+1], true);
+    dv.setFloat32(off+8, normals[i*9+2], true);
+    off += 12;
+    for (let v = 0; v < 9; v++) {
+      dv.setFloat32(off, positions[i*9+v], true);
+      off += 4;
+    }
+    dv.setUint16(off, 0, true);
+    off += 2;
+  }
+  return buf;
+}
+
+/* ================================================================== */
+/*  State                                                             */
+/* ================================================================== */
+let S = {
+  loaded: false,
+  positions: null, normals: null, nTri: 0, sourceTri: 0, lowPoly: false, lowPolyMethod: '',
+  result: null,
+  mode: 'holes',
+  fileName: ''
+};
+
+/* ================================================================== */
+/*  File Loading                                                      */
+/* ================================================================== */
+function loadSTL(buffer, name) {
+  const parsed = parseSTL(buffer);
+  const prepared = autoLowPolyMesh(parsed.positions, parsed.normals, parsed.nTri, $('fastLowPoly').checked);
+  S.positions = prepared.positions;
+  S.normals = prepared.normals;
+  S.nTri = prepared.nTri;
+  S.sourceTri = prepared.sourceTri;
+  S.lowPoly = prepared.lowPoly;
+  S.lowPolyMethod = prepared.lowPolyMethod || '';
+  S.loaded = true;
+  S.result = null;
+  S.fileName = name;
+  showingOriginal = false;
+
+  const faceText = S.lowPoly
+    ? `${name} — ${S.sourceTri.toLocaleString()} faces, low-poly ${S.lowPolyMethod} source ${S.nTri.toLocaleString()}`
+    : `${name} — ${S.nTri.toLocaleString()} faces`;
+  $('fileName').textContent = faceText;
+  $('generateBtn').disabled = false;
+  $('resetBtn').disabled = false;
+  $('exportSTLBtn').disabled = true;
+  $('statsPanel').style.display = 'none';
+  $('tbOriginal').classList.remove('active');
+
+  // Show in viewport
+  if (meshResult) { scene.remove(meshResult); meshResult = null; }
+  if (wireHelper) { scene.remove(wireHelper); wireHelper = null; }
+  showOriginalMesh(parsed.positions, parsed.nTri);
+  frameModel(meshOriginal);
+  if (S.lowPoly) {
+    setStatus(`Loaded ${name} — fast low-poly ${S.lowPolyMethod} ${S.sourceTri.toLocaleString()} → ${S.nTri.toLocaleString()} faces`);
+  } else if (S.nTri > 650000) {
+    setStatus(`Loaded ${name} — full detail ${S.nTri.toLocaleString()} faces; generation may take longer`);
+  } else {
+    setStatus(`Loaded ${name} — ${S.nTri.toLocaleString()} faces`);
+  }
+}
+
+function showOriginalMesh(positions, nTri) {
+  if (meshOriginal) scene.remove(meshOriginal);
+  const geom = new THREE.BufferGeometry();
+  geom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+  geom.computeVertexNormals();
+  const mat = new THREE.MeshStandardMaterial({
+    color: 0xb0b0b0, metalness: 0.1, roughness: 0.6,
+    side: THREE.DoubleSide, flatShading: true
+  });
+  meshOriginal = new THREE.Mesh(geom, mat);
+  scene.add(meshOriginal);
+}
+
+function showResultMesh(positions, normals, nTri) {
+  if (meshResult) scene.remove(meshResult);
+  if (wireHelper) { scene.remove(wireHelper); wireHelper = null; }
+
+  const geom = new THREE.BufferGeometry();
+  geom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+  geom.computeVertexNormals();
+  const mat = new THREE.MeshStandardMaterial({
+    color: 0x3ecfff, metalness: 0.15, roughness: 0.5,
+    side: THREE.DoubleSide, flatShading: false
+  });
+  meshResult = new THREE.Mesh(geom, mat);
+
+  // Copy rotation from original
+  if (meshOriginal) meshResult.rotation.copy(meshOriginal.rotation);
+
+  scene.add(meshResult);
+  meshOriginal.visible = false;
+  showingOriginal = false;
+}
+
+/* ================================================================== */
+/*  UI Bindings                                                       */
+/* ================================================================== */
+
+// Drop zone
+const dropZone = $('dropZone');
+const fileInput = $('fileInput');
+dropZone.addEventListener('click', () => fileInput.click());
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault(); dropZone.classList.remove('dragover');
+  const file = e.dataTransfer.files[0];
+  if (file && file.name.toLowerCase().endsWith('.stl')) {
+    file.arrayBuffer().then(buf => loadSTL(buf, file.name));
+  }
+});
+fileInput.addEventListener('change', () => {
+  const file = fileInput.files[0];
+  if (file) file.arrayBuffer().then(buf => loadSTL(buf, file.name));
+});
+
+// Mode buttons
+$('modeHoles').addEventListener('click', () => { S.mode = 'holes'; updateModeUI(); });
+$('modeLattice').addEventListener('click', () => { S.mode = 'lattice'; updateModeUI(); });
+function updateModeUI() {
+  $('modeHoles').classList.toggle('active', S.mode === 'holes');
+  $('modeLattice').classList.toggle('active', S.mode === 'lattice');
+}
+
+// Sliders
+$('cellCount').addEventListener('input', e => { $('cellCountVal').textContent = e.target.value; });
+$('wallThick').addEventListener('input', e => { $('wallThickVal').textContent = e.target.value + 'mm'; });
+$('bodyThick').addEventListener('input', e => { $('bodyThickVal').textContent = e.target.value + 'mm'; });
+$('randomness').addEventListener('input', e => { $('randomVal').textContent = e.target.value + '%'; });
+
+// Generate
+$('generateBtn').addEventListener('click', () => {
+  if (!S.loaded) return;
+  $('generateBtn').disabled = true;
+
+  // Use requestAnimationFrame to let UI update
+  requestAnimationFrame(() => {
+    try {
+      const opts = {
+        cellCount: parseInt($('cellCount').value),
+        wallThick: parseFloat($('wallThick').value),
+        bodyThick: parseFloat($('bodyThick').value),
+        randomness: parseInt($('randomness').value),
+        mode: S.mode,
+        smooth: $('smoothEdges').checked,
+        bedPads: $('bedPads').checked,
+        selfSupports: $('selfSupports').checked
+      };
+
+      const { result, cellCount, removed, nKept } = generatePaper3D(
+        S.positions, S.normals, S.nTri, opts
+      );
+
+      S.result = result;
+
+      // Show result
+      showResultMesh(result.positions, result.normals, result.nTri);
+
+      // Stats
+      $('statsPanel').style.display = '';
+      $('statOrigFaces').textContent = S.lowPoly
+        ? `${S.sourceTri.toLocaleString()} → ${S.nTri.toLocaleString()}`
+        : S.nTri.toLocaleString();
+      $('statResultFaces').textContent = result.nTri.toLocaleString();
+      $('statCells').textContent = cellCount;
+      $('statRemoved').textContent = removed.toLocaleString() + ` (${Math.round(removed/S.nTri*100)}%)`;
+      $('statWalls').textContent = nKept.toLocaleString();
+      $('statRims').textContent = result.nTri.toLocaleString();
+
+      $('exportSTLBtn').disabled = false;
+      hideProgress();
+    } catch (e) {
+      setStatus('Error: ' + e.message);
+      hideProgress();
+    }
+    $('generateBtn').disabled = false;
+  });
+});
+
+// Export
+$('exportSTLBtn').addEventListener('click', () => {
+  if (!S.result) return;
+  const buf = exportSTLBinary(S.result.positions, S.result.normals, S.result.nTri);
+  const blob = new Blob([buf], { type: 'application/octet-stream' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const baseName = S.fileName.replace(/\.stl$/i, '');
+  a.href = url;
+  a.download = `${baseName}_paper3d.stl`;
+  a.click();
+  URL.revokeObjectURL(url);
+  setStatus(`Exported ${a.download}`);
+});
+
+// Reset
+$('resetBtn').addEventListener('click', () => {
+  if (meshResult) { scene.remove(meshResult); meshResult = null; }
+  if (wireHelper) { scene.remove(wireHelper); wireHelper = null; }
+  S.result = null;
+  if (meshOriginal) meshOriginal.visible = true;
+  showingOriginal = false;
+  $('tbOriginal').classList.remove('active');
+  $('exportSTLBtn').disabled = true;
+  $('statsPanel').style.display = 'none';
+  setStatus('Reset — original model restored');
+});
+
+// Toolbar
+$('tbFrame').addEventListener('click', () => frameModel(meshResult || meshOriginal));
+$('tbWire').addEventListener('click', () => {
+  const target = meshResult || meshOriginal;
+  if (!target) return;
+  if (wireHelper) {
+    scene.remove(wireHelper); wireHelper = null;
+    $('tbWire').classList.remove('active');
+  } else {
+    const wg = new THREE.WireframeGeometry(target.geometry);
+    wireHelper = new THREE.LineSegments(wg, new THREE.LineBasicMaterial({ color: 0x3ecfff, opacity: 0.3, transparent: true }));
+    wireHelper.rotation.copy(target.rotation);
+    scene.add(wireHelper);
+    $('tbWire').classList.add('active');
+  }
+});
+$('tbSpin').addEventListener('click', () => {
+  autoRotate = !autoRotate;
+  $('tbSpin').classList.toggle('active', autoRotate);
+});
+$('tbOriginal').addEventListener('click', () => {
+  if (!meshOriginal || !meshResult) return;
+  showingOriginal = !showingOriginal;
+  meshOriginal.visible = showingOriginal;
+  meshResult.visible = !showingOriginal;
+  $('tbOriginal').classList.toggle('active', showingOriginal);
+  if (wireHelper) { scene.remove(wireHelper); wireHelper = null; $('tbWire').classList.remove('active'); }
+});
+
+// Keyboard shortcuts
+window.addEventListener('keydown', e => {
+  if (e.target.closest?.('input,textarea,select')) return;
+  switch (e.key.toLowerCase()) {
+    case 'f': $('tbFrame').click(); break;
+    case 'w': $('tbWire').click(); break;
+    case 't': $('tbSpin').click(); break;
+    case 'g': $('generateBtn').click(); break;
+    case 'o': $('tbOriginal').click(); break;
+  }
+});
+
+setStatus('Drop an STL file to begin');
+</script>
+</body>
+</html>

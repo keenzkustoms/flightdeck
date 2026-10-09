@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Cindy Vinyl">
+  <rect width="512" height="512" fill="#0a090b"/>
+  <circle cx="256" cy="256" r="198" fill="#d4af37"/>
+  <circle cx="256" cy="256" r="188" fill="#1a1410"/>
+  <circle cx="256" cy="256" r="178" fill="none" stroke="#d4af37" stroke-opacity="0.35" stroke-width="2"/>
+  <circle cx="256" cy="256" r="158" fill="none" stroke="#d4af37" stroke-opacity="0.28" stroke-width="2"/>
+  <circle cx="256" cy="256" r="138" fill="none" stroke="#d4af37" stroke-opacity="0.22" stroke-width="2"/>
+  <circle cx="256" cy="256" r="118" fill="none" stroke="#d4af37" stroke-opacity="0.18" stroke-width="2"/>
+  <circle cx="256" cy="256" r="72" fill="#3a2a12" stroke="#d4af37" stroke-width="3"/>
+  <text x="256" y="272" text-anchor="middle" font-family="Georgia, serif" font-size="64" font-weight="700" fill="#f0d78c">C</text>
+  <circle cx="256" cy="256" r="10" fill="#0a090b"/>
+</svg>

@@ -1,3 +1,5 @@
+import { readPins, orderFleet, moveFleetPin } from './fleet-layout.mjs?v=1';
+
 // ── Settings cache & display helpers ──────────────────────────────────────
 
 let _serverSettings = {};
@@ -110,6 +112,45 @@ function _isSnapmakerU1(p) {
   return kind === 'snapmaker_u1';
 }
 
+function _isHSeriesPrinter(p) {
+  const model = String(p?.model_name || p?.model || p?.id || '').trim().toLowerCase();
+  return (p?.kind === 'bambu' || p?.connection?.type === 'bambu') && model.startsWith('h');
+}
+
+function _isH2CPrinter(p) {
+  const model = String(p?.model_name || p?.model || p?.id || '').trim().toLowerCase();
+  return (p?.kind === 'bambu' || p?.connection?.type === 'bambu') && model.startsWith('h2c');
+}
+
+function _hasHSeriesNozzleRack(p) {
+  return _isHSeriesPrinter(p) && _asList(p?.toolheads).some(tool => tool?.zone === 'toolhead' || tool?.zone === 'rack');
+}
+
+function _bambuFilamentIdLabel(value) {
+  const code = String(value || '').trim().toUpperCase();
+  const labels = {
+    GFL99: 'PLA',
+    GFL98: 'PLA-CF',
+    GFL96: 'PLA Silk',
+    GFL95: 'PLA HS',
+    GFG99: 'PETG',
+    GFG98: 'PETG-CF',
+    GFG97: 'PCTG',
+    GFG96: 'PETG HF',
+    GFB99: 'ABS',
+    GFB98: 'ASA',
+    GFC99: 'PC',
+    GFN99: 'PA',
+    GFN98: 'PA-CF',
+    GFU99: 'TPU',
+    GFS99: 'PVA',
+    GFS98: 'HIPS',
+    GFP99: 'PE',
+    GFP97: 'PP',
+  };
+  return labels[code] || '';
+}
+
 function _snapmakerMjpegUrl(host) {
   const clean = String(host || '').trim().replace(/^https?:\/\//i, '').replace(/\/+$/, '');
   return clean ? `http://${clean}/webcam/stream.mjpg` : '';
@@ -161,7 +202,10 @@ async function loadSettings() {
 
   try {
     const r = await fetch('/api/settings');
-    if (r.ok) _serverSettings = await r.json();
+    if (r.ok) {
+      _serverSettings = await r.json();
+      if (_serverSettings.spool_view_mode) _spoolsViewMode = _normaliseSpoolViewMode(_serverSettings.spool_view_mode);
+    }
   } catch {}
 
   _applyAppearanceSettings();
@@ -310,10 +354,15 @@ let _latestPrinters = [];
 let _tabsBuilt = false;
 let _missionRenderInFlight = false;
 let _missionLastHtml = '';
+let _hSeriesLiveTabByPrinter = {};
+let _hSeriesFleetTabByPrinter = {};
 const _cameraUrlCache = {};     // printer_id → url string or null
 const _cameraMetaCache = {};    // printer_id → camera metadata
-const _CAMERA_STREAM_REFRESH_MS = 120000;
-const _CAMERA_SIGNAL_STALE_MS = 45000;
+const _CAMERA_STREAM_REFRESH_MS = 25000;
+const _CAMERA_SIGNAL_STALE_MS = 12000;
+const _CAMERA_HEALTH_POLL_MS = 5000;
+const _CAMERA_HEALTH_STALE_MS = 12000;
+const _cameraHealthCache = {};   // printer_id → { changed_seq, checked_at }
 let _renderedDetailId = null;
 let _renderedDetailSubtab = null;
 let _renderedDetailOk = false;
@@ -321,6 +370,7 @@ const _pendingControls = {};    // printer_id → { action, fromState }
 const _lightOptimistic = {};    // printer_id → { state, expiresAt }
 const _tempOptimistic = {};     // `${id}:${heater}` → { sentTarget, expiresAt }
 const _objectsCache = {};       // printer_id → { supported, objects }
+const _detailThumbMissing = new Set(); // `${printer_id}::${job_name}` after thumbnail 404/error
 const _cameraUrlFetches = {};   // printer_id → in-flight camera URL fetch
 const _historyYear = {};        // printer_id → selected year (int)
 const _historyHeatmapMode = {}; // printer_id -> yearly | monthly | weekly
@@ -337,12 +387,30 @@ let _cameraReturnTarget = null; // { printerId, hash } when Fleet Wall opened Li
 let _onSettings = false;        // true while settings view is active
 let _onFailures = false;        // true while failure review is active
 let _onSpools = false;          // true while spool inventory is active
+let _onFilament = false;        // true while Fleet Filament board is active
+let _fleetFilamentSignature = '';
 let _onMemory = false;          // true while Print Memory is active
+let _onProjects = false;
+let _lastProjectsRouteKey = '';
+let _projectSlicePoll = 0;
 let _onManual = false;          // true while flight manual is active
-let _onDemo = false;            // true while demo mode is active
+let _onDemo = false;            // true while walkthrough mode is active
+let _onAbout = false;           // true while about page is active
+let _onMakerWorld = false;      // true while MakerWorld page is active
+let _onMakerDeck = false;       // true while MakerDeck embed is active
+let _onMeshPrep = false;        // true while Mesh Prep embed is active
+let _onPainter = false;         // true while STL Painter embed is active
+let _onChop = false;            // true while Chop embed is active
+let _makerWorldUrl = '';
+let _makerWorldResolved = null;
+let _makerWorldRecent = [];
+let _makerWorldBusy = false;
+let _makerWorldSlicerOverride = 'follow';
+let _bambuTokenEditorOpen = false;
 let _renderedSpoolDetailId = null;
 let _lastSpoolsRouteKey = '';
 let _lastMemoryRouteKey = '';
+let _queueLatestJobs = [];
 
 // ── Toast notifications ────────────────────────────────────────────────────
 
@@ -376,6 +444,8 @@ function showToast(message, sub, type = 'info', opts = {}) {
     remove();
   });
 }
+
+window.showToast = showToast;
 
 function _openNoteModal(printerId) {
   fetch(`/api/printers/${printerId}/prints/latest-finished`)
@@ -746,10 +816,35 @@ function _commandNavigate(hash, after = null) {
   if (after) setTimeout(after, 120);
 }
 
+function _spoolDisplayId(spool) {
+  return Number(spool?.display_id || spool?.id || 0);
+}
+
+function _spoolDisplayLabel(spool) {
+  const value = spool?.display_id || spool?.id;
+  return value != null ? `#${value}` : '#-';
+}
+
+function _spoolDisplayNumberById(spoolId) {
+  const spool = (_allSpools || []).find(s => String(s.id) === String(spoolId));
+  return spool?.display_id || spool?.id || spoolId;
+}
+
+function _spoolMovePayload(locMode, printerId, slot, storageLocationId) {
+  const loaded = locMode === 'loaded';
+  return {
+    printer_id: loaded ? printerId : null,
+    slot: loaded ? Number(slot) : null,
+    storage_location_id: !loaded && storageLocationId ? Number(storageLocationId) : null,
+    replace_existing: loaded,
+    sync_ams: loaded,
+  };
+}
+
 function _commandSpoolTitle(s) {
   const name = [s.color_name, s.material, s.subtype].filter(Boolean).join(' ');
   const brand = s.brand ? ` · ${s.brand}` : '';
-  return `Spool #${s.id} · ${name || 'Filament'}${brand}`;
+  return `Spool ${_spoolDisplayLabel(s)} · ${name || 'Filament'}${brand}`;
 }
 
 function _commandSpoolMeta(s) {
@@ -812,13 +907,21 @@ function _commandStaticItems() {
   const nav = [
     ['Dashboard', '#/', 'Overview and printer cards'],
     ['Fleet Wall', '#/fleet', 'Shop-floor camera and printer wall'],
+    ['Fleet Filament', '#/filament', 'Whole-room AMS loadout and feed routes'],
     ['Flight Tower', '#/mission', 'Dispatch and queue intelligence'],
     ['Telemetry', '#/stats', 'Stats, RH, utilisation'],
     ['Queue', '#/queue', 'Pending print jobs'],
     ['Global Print Bay', '#/files', 'Files, printer storage, and reprint staging'],
+    ['Projects', '#/projects', 'Project folders, slice totals, and local quotes'],
     ['Spools', '#/spools', 'Spool inventory'],
-    ['Demo Mode', '#/demo', 'Guided first-look tour for testers'],
-    ['Flight Manual', '#/manual', 'Setup, recovery, Bambu and demo notes'],
+    ['Walkthrough Mode', '#/walkthrough', 'Guided first-look tour for testers'],
+    ['MakerWorld', '#/makerworld', 'Paste MakerWorld links and import plates into Print Vault'],
+    ['MakerDeck', '#/makerdeck', 'Design boxes, pencil cases, lids — export STL and 3MF'],
+    ['Mesh Prep', '#/meshprep', 'Inspect STL health, repair safe defects, and resolve mesh intersections'],
+    ['STL Painter', '#/painter', 'Paint STL/3MF faces, stamp SVG art, export coloured 3MF'],
+    ['Chop', '#/chop', 'Slice STLs into printable pieces with Flexi Cut'],
+    ['Flight Manual', '#/manual', 'Setup, recovery, Bambu and walkthrough notes'],
+    ['About Flightdeck', '#/about', 'Origin story, credits, and release notes'],
     ['Settings', '#/settings', 'Configuration'],
   ].map(([label, hash, meta]) => _commandItem({
     label: `Go to ${label}`,
@@ -847,6 +950,13 @@ function _commandStaticItems() {
       run: () => _commandNavigate('#/spools?view=catalogue'),
     }),
     _commandItem({
+      label: 'Colour match',
+      meta: 'Mix or eyedrop a colour → nearest filaments',
+      group: 'Spools',
+      keywords: 'colour color match wheel mixer filament eyedropper hex siddament bambu',
+      run: () => _commandNavigate('#/spools?view=colour'),
+    }),
+    _commandItem({
       label: 'Show low stock spools',
       meta: 'Inventory below threshold',
       group: 'Spools',
@@ -873,7 +983,7 @@ function _commandStaticItems() {
     }),
   ];
 
-  const settings = ['Printers', 'Hardware', 'Appearance', 'Slicer', 'Locations'].map(label => {
+  const settings = ['Printers', 'Hardware', 'Appearance', 'Slicer', 'Locations', 'Costing', 'Tools'].map(label => {
     const id = label.toLowerCase();
     return _commandItem({
       label: `Settings: ${label}`,
@@ -883,6 +993,13 @@ function _commandStaticItems() {
       run: () => _commandNavigate(`#/settings/${id}`),
     });
   });
+  settings.push(_commandItem({
+    label: 'Quote a print',
+    meta: 'Floor + suggested sell',
+    group: 'Settings',
+    keywords: 'cost price quote shop goose hours grams',
+    run: () => _commandNavigate('#/settings/costing'),
+  }));
 
   return [...nav, ...spoolViews, ...settings];
 }
@@ -927,7 +1044,7 @@ function _commandSpoolItems() {
   return (_allSpools || [])
     .filter(s => !s.archived_at)
     .flatMap(s => {
-      const spoolWords = `${s.id} ${s.material || ''} ${s.subtype || ''} ${s.brand || ''} ${s.color_name || ''} ${s.color_hex || ''}`;
+      const spoolWords = `${s.display_id || s.id} ${s.id} ${s.material || ''} ${s.subtype || ''} ${s.brand || ''} ${s.color_name || ''} ${s.color_hex || ''}`;
       const cluster = `spool:${s.id}`;
       const clusterLabel = _commandSpoolTitle(s);
       const clusterMeta = _commandSpoolMeta(s);
@@ -944,7 +1061,7 @@ function _commandSpoolItems() {
           run: () => _commandNavigate(`#/spool/${s.id}`),
         }),
         _commandItem({
-          label: `Edit spool #${s.id}`,
+          label: `Edit spool ${_spoolDisplayLabel(s)}`,
           meta: [s.color_name, s.material, s.brand].filter(Boolean).join(' · '),
           group: 'Spool actions',
           keywords: `${spoolWords} edit change update tare weight colour color`,
@@ -955,7 +1072,7 @@ function _commandSpoolItems() {
           run: () => _commandOpenSpoolEditor(s.id),
         }),
         _commandItem({
-          label: `Actions for spool #${s.id}`,
+          label: `Actions for spool ${_spoolDisplayLabel(s)}`,
           meta: 'Label, weigh, copy, reset, archive',
           group: 'Spool actions',
           keywords: `${spoolWords} action actions label print weigh weight copy reset archive delete`,
@@ -1170,6 +1287,25 @@ function formatTime(seconds) {
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
 }
 
+function _timelapseRecorderCaption(print) {
+  const cov = print.timelapse_coverage;
+  if (!cov) {
+    return print.timelapse_source
+      ? `Recorded · ${print.timelapse_source}${print.timelapse_source === 'flightdeck-native' ? ' timelapse' : ''}`
+      : 'Recorded';
+  }
+  const vid = formatTime(Math.round(cov.video_seconds || 0));
+  const pr = formatTime(cov.print_seconds || 0);
+  const pct = Math.round((cov.coverage || 0) * 100);
+  if (cov.low_coverage) {
+    return `${vid} clip · ~${pct}% of ${pr} print — try Find better clip`;
+  }
+  if (print.timelapse_source === 'flightdeck-native') {
+    return `${vid} timelapse · ${pr} print`;
+  }
+  return `${vid} clip · ${pr} print`;
+}
+
 
 // ── Event wiring ───────────────────────────────────────────────────────────
 
@@ -1344,14 +1480,30 @@ function _dashboardPrinterName(p) {
   return _printerNavLabel(p);
 }
 
-function _printerNavLabel(p) {
-  return _printerPrimaryLabel(p);
+// Chris bench order (top → bottom): X1C → H2C Big Girl → H2D BigBoy → Voron.
+const _BENCH_PRINTER_ORDER = ['x1c', 'o1c2', 'h2d', 'greyhound'];
+
+function _printerBenchRank(p) {
+  const id = String(p?.id || '').toLowerCase();
+  let idx = _BENCH_PRINTER_ORDER.indexOf(id);
+  if (idx < 0 && _isH2CPrinter(p)) idx = _BENCH_PRINTER_ORDER.indexOf('o1c2');
+  return idx >= 0 ? idx : 1000;
 }
 
-function _printerProgressBadge(p) {
-  const state = String(p?.state || '').toLowerCase();
-  if (!['printing', 'paused'].includes(state)) return '';
-  return p?.job?.progress != null ? `${Math.round(p.job.progress * 100)}%` : '';
+function _comparePrintersByBench(a, b) {
+  const diff = _printerBenchRank(a) - _printerBenchRank(b);
+  if (diff) return diff;
+  return _dashboardPrinterName(a).localeCompare(_dashboardPrinterName(b));
+}
+
+function _comparePrintersForDashboard(a, b) {
+  const diff = _dashboardStateRank(a) - _dashboardStateRank(b);
+  if (diff) return diff;
+  return _comparePrintersByBench(a, b);
+}
+
+function _printerNavLabel(p) {
+  return _printerPrimaryLabel(p);
 }
 
 function _activePrinterJob(p) {
@@ -1412,7 +1564,7 @@ function _printerWarningTarget(p) {
 
 function _firstWarningTarget(printers) {
   return [...(printers || [])]
-    .sort((a, b) => _dashboardStateRank(a) - _dashboardStateRank(b) || _dashboardPrinterName(a).localeCompare(_dashboardPrinterName(b)))
+    .sort((a, b) => _comparePrintersForDashboard(a, b))
     .map(_printerWarningTarget)
     .find(Boolean) || null;
 }
@@ -1486,7 +1638,7 @@ function _dashboardLoadedLowRows(printers) {
     .map(({ printerId, spool, pct }) => {
       const p = printerById[printerId];
       const where = p && spool.location_slot != null ? _amsSlotLabel(p, Number(spool.location_slot)) : 'Loaded';
-      const title = `#${spool.id} ${spool.color_name || spool.material || 'spool'}`;
+      const title = `${_spoolDisplayLabel(spool)} ${spool.color_name || spool.material || 'spool'}`;
       const detail = `${where} · ${Math.round(Number(spool.remaining_g || 0))}g · ${pct}%`;
       return {
         printerId,
@@ -1516,11 +1668,69 @@ function _dashboardMoistureRowsByPrinter(printers) {
   return rows;
 }
 
+function _dashboardFleetSnapshot(printers) {
+  const printing = printers.filter(p => p.state === 'printing').length;
+  const paused = printers.filter(p => p.state === 'paused').length;
+  const active = printing + paused;
+  const idle = printers.filter(p => p.state === 'idle' || p.state === 'finished').length;
+  const offline = printers.filter(p => p.state === 'offline').length;
+  const faults = printers.filter(p => p.state === 'error' || p.state === 'estop').length;
+  const attention = printers.filter(p =>
+    _printerPrintLocked(p) ||
+    ['paused', 'offline'].includes(p.state) ||
+    _healthIsActionable(p.health) ||
+    (p.health?.status === 'attention' || p.health?.status === 'watch')
+  ).length;
+  return { printing, paused, active, idle, offline, faults, attention, total: printers.length };
+}
+
+function _renderDashboardHero(printers) {
+  if (!printers.length) return '';
+  const snap = _dashboardFleetSnapshot(printers);
+  const urgent = snap.faults > 0 || snap.attention > 0;
+  let statusLine = 'All printers idle — ready when you are';
+  if (urgent) {
+    statusLine = `${snap.attention} item${snap.attention === 1 ? '' : 's'} need a look — see briefing below`;
+  } else if (snap.active) {
+    statusLine = `${snap.active} print${snap.active === 1 ? '' : 's'} in flight — shop's humming along`;
+  } else if (snap.offline) {
+    statusLine = `${snap.offline} offline · everything else looks clear`;
+  }
+
+  return `<section class="dashboard-hero" aria-label="Fleet snapshot">
+    <div class="dashboard-hero-copy">
+      <span class="dashboard-hero-eyebrow">Print room</span>
+      <h1 class="dashboard-hero-title">Dashboard</h1>
+      <p class="dashboard-hero-status">${esc(statusLine)}</p>
+    </div>
+    <div class="dashboard-hero-metrics" aria-label="Fleet counts">
+      <div class="dash-hero-metric dash-hero-metric-active">
+        <strong>${snap.active}</strong>
+        <span>Active</span>
+      </div>
+      <div class="dash-hero-metric">
+        <strong>${snap.idle}</strong>
+        <span>Idle</span>
+      </div>
+      <div class="dash-hero-metric${snap.attention ? ' dash-hero-metric-warn' : ''}">
+        <strong>${snap.attention}</strong>
+        <span>Attention</span>
+      </div>
+      <div class="dash-hero-metric${snap.offline ? ' dash-hero-metric-muted' : ''}">
+        <strong>${snap.offline}</strong>
+        <span>Offline</span>
+      </div>
+    </div>
+    <div class="dashboard-hero-links">
+      <a href="#/fleet">Fleet Wall</a>
+      <a href="#/mission">Flight Tower</a>
+      <a href="#/queue">Queue</a>
+    </div>
+  </section>`;
+}
+
 function _renderDashboardBriefing(printers) {
-  const sorted = [...(printers || [])].sort((a, b) =>
-    _dashboardStateRank(a) - _dashboardStateRank(b) ||
-    _dashboardPrinterName(a).localeCompare(_dashboardPrinterName(b))
-  );
+  const sorted = [...(printers || [])].sort(_comparePrintersForDashboard);
   const rowsByPrinter = Object.fromEntries(sorted.map(p => [p.id, []]));
   const addRow = (printerId, row) => {
     if (!rowsByPrinter[printerId]) rowsByPrinter[printerId] = [];
@@ -1614,13 +1824,20 @@ function _renderDashboardBriefing(printers) {
 
   const calm = !cardModels.some(card => card.hasRows);
   const body = calm
-    ? `<div class="briefing-clear">
-        <strong>Clear skies</strong>
-        <span>No active printer faults, AMS profile warnings, or loaded spool risks.</span>
+    ? `<div class="briefing-clear briefing-clear-hero">
+        <div class="briefing-clear-icon" aria-hidden="true">✓</div>
+        <div class="briefing-clear-copy">
+          <strong>Clear skies</strong>
+          <span>No active faults, AMS profile warnings, or loaded spool risks.</span>
+        </div>
+        <div class="briefing-clear-links">
+          <a href="#/fleet">Watch cameras</a>
+          <a href="#/mission">Flight Tower</a>
+        </div>
       </div>`
     : cardModels.map(card => card.html).join('');
 
-  return `<section class="dashboard-briefing" aria-label="Flight briefing">
+  return `<section class="dashboard-briefing${calm ? ' dashboard-briefing-calm' : ''}" aria-label="Flight briefing">
     <div class="briefing-head">
       <div>
         <span>Flight Briefing</span>
@@ -1646,7 +1863,7 @@ function _renderDashboardOverview(printers) {
   const offline = counts.offline || 0;
   const attention = printers
     .filter(p => _printerPrintLocked(p) || ['estop', 'error', 'paused', 'offline'].includes(p.state) || _healthIsActionable(p.health))
-    .sort((a, b) => _dashboardStateRank(a) - _dashboardStateRank(b) || _dashboardPrinterName(a).localeCompare(_dashboardPrinterName(b)))
+    .sort((a, b) => _comparePrintersForDashboard(a, b))
     .slice(0, 5);
 
   const attentionHtml = attention.length ? attention.map(p => {
@@ -1818,7 +2035,7 @@ function renderCard(p) {
     </div>` : '';
 
   return `
-    <div class="card"${tabAttr}${dataAttr}>
+    <div class="card card-state-${badgeClass}"${tabAttr}${dataAttr}>
       <div class="card-header">
         <div class="printer-identity">
           <div class="printer-icon">${getIcon(p.icon)}</div>
@@ -1849,7 +2066,7 @@ function _renderAddPrinterCard(empty = false) {
       <div>
         <span>First run</span>
         <strong>Add your first printer</strong>
-        <p>Connect a Bambu, Moonraker/Klipper, or Snapmaker printer to start building live status, history, queue, and spool tracking.</p>
+        <p>Connect a Bambu, Klipper, or Snapmaker printer to start building live status, history, queue, and spool tracking.</p>
       </div>
       <a class="dashboard-add-printer-primary" href="#/settings/printers">Add Printer</a>
     </section>`;
@@ -2016,14 +2233,21 @@ function _preheatPresets(p) {
   const presets = p.temperature_presets || {};
   const hotend = Object.fromEntries((presets.hotend || []).map(row => [row.label, row.value]));
   const bed = Object.fromEntries((presets.bed || []).map(row => [row.label, row.value]));
+  const preferred = ['PLA', 'PETG', 'ASA', 'ABS', 'TPU', 'PA', 'PC', 'PVA'];
   return Object.keys(hotend)
     .filter(label => bed[label] != null)
-    .slice(0, 5)
+    .sort((a, b) => {
+      const ai = preferred.indexOf(String(a).toUpperCase());
+      const bi = preferred.indexOf(String(b).toUpperCase());
+      if (ai !== -1 || bi !== -1) return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+      return String(a).localeCompare(String(b));
+    })
+    .slice(0, 8)
     .map(label => ({ label, hotend: Number(hotend[label]), bed: Number(bed[label]) }))
     .filter(row => Number.isFinite(row.hotend) && Number.isFinite(row.bed));
 }
 
-function _detailLiveOps(p) {
+function _detailLiveOps(p, section = 'all') {
   const canPreheat = !['offline', 'printing', 'error', 'estop'].includes(p.state || '');
   const isMoonraker = _isMoonrakerFamily(p);
   const isBambu = p.kind === 'bambu';
@@ -2031,16 +2255,22 @@ function _detailLiveOps(p) {
   const canJog = (isMoonraker || isBambu) && !['offline', 'printing', 'finished', 'error', 'estop'].includes(p.state || '');
   const canHome = (isMoonraker || isBambu) && !['offline', 'printing', 'paused', 'finished', 'error', 'estop'].includes(p.state || '');
   const presets = _preheatPresets(p);
-  const preheatButtons = presets.map(row => `<button class="live-op-btn" type="button"
+  const preheatButtons = presets.map(row => `<button class="live-op-btn live-op-preheat-btn" type="button"
       data-preheat data-printer-id="${esc(p.id)}" data-material="${esc(row.label)}"
       data-hotend="${row.hotend}" data-bed="${row.bed}" ${canPreheat ? '' : 'disabled'}>
       <span>${esc(row.label)}</span><small>${row.hotend}/${row.bed}°</small>
     </button>`).join('');
-  const cooldown = `<button class="live-op-btn live-op-muted" type="button"
+  const cooldown = `<button class="live-op-btn live-op-muted live-op-preheat-btn" type="button"
       data-preheat data-printer-id="${esc(p.id)}" data-material="Cooldown"
       data-hotend="0" data-bed="0" ${canPreheat ? '' : 'disabled'}>
       <span>Cool</span><small>0/0°</small>
     </button>`;
+  const preheat = (preheatButtons || presets.length)
+    ? `<div class="live-op-group live-op-preheats" aria-label="Preheat presets">
+        <span class="live-op-group-label">Preheat</span>
+        ${preheatButtons}${cooldown}
+      </div>`
+    : '';
   const klipper = _isMoonrakerFamily(p) && p.klipper_ui_url
     ? `<a class="live-op-btn live-op-link" href="${esc(p.klipper_ui_url)}" target="_blank" rel="noreferrer">
         <span>Klipper</span><small>Mainsail / Fluidd</small>
@@ -2119,9 +2349,90 @@ function _detailLiveOps(p) {
         </button>`).join('')}
       </div>`
     : '';
-  const controls = [preheatButtons, presets.length ? cooldown : '', fan, jog, home, klipper].filter(Boolean).join('');
+  const calibration = isBambu ? _detailCalibrationOps(p) : '';
+  const groups = section === 'movement' ? [jog, home, calibration, klipper] : section === 'thermal' ? [preheat, fan] : [preheat, fan, jog, home, calibration, klipper];
+  const controls = groups.filter(Boolean).join('');
   if (!controls) return '';
   return `<div class="live-op-row" aria-label="Live printer shortcuts">${controls}</div>`;
+}
+
+function _detailCalibrationOps(p) {
+  const canCalibrate = ['idle', 'ready', 'standby', 'finished'].includes(p.state || '');
+  const running = !!p.calibration?.active || p.calibration?.pending_job_id;
+  const h2 = String(p.model_name || '').toUpperCase().startsWith('H2');
+  const opts = [
+    ['bed_leveling', 'Bed level', true],
+    ['vibration', 'Vibration', true],
+    ['motor_noise', 'Motor noise', true],
+    ['nozzle_offset', 'Nozzle offset', h2],
+    ['high_temp_heatbed', 'High-temp bed', false],
+  ];
+  const checks = opts.map(([key, label, checked]) => `
+    <label class="live-calibrate-opt">
+      <input type="checkbox" data-calibrate-opt="${key}" ${checked ? 'checked' : ''} ${canCalibrate && !running ? '' : 'disabled'}>
+      <span>${esc(label)}</span>
+    </label>`).join('');
+  const status = running
+    ? `<div class="live-calibrate-status">Calibrating${p.calibration?.pending_job_id ? ' before queued job' : ''}…</div>`
+    : '';
+  return `<div class="live-op-group live-op-calibrate" aria-label="Printer calibration">
+    <span class="live-op-group-label">Calibrate</span>
+    ${status}
+    <div class="live-calibrate-grid">${checks}</div>
+    <button class="live-op-btn live-op-calibrate-btn" type="button"
+      data-calibrate-run data-printer-id="${esc(p.id)}" ${canCalibrate && !running ? '' : 'disabled'}>
+      <span>${running ? 'Calibrating' : 'Run calibration'}</span>
+      <small>${running ? 'wait for idle' : 'remote bench check'}</small>
+    </button>
+  </div>`;
+}
+
+async function sendCalibration(id, options) {
+  const r = await fetch(`/api/printers/${encodeURIComponent(id)}/calibration`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(options),
+  });
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({}));
+    throw new Error(typeof err.detail === 'string' ? err.detail : err.detail?.message || r.statusText);
+  }
+  return r.json();
+}
+
+function _detailLiveOpsToggle() {
+  return `<div class="live-controls-bar">
+    <button class="live-controls-toggle" type="button" data-live-ops-toggle aria-expanded="false">
+      <span>Controls</span>
+    </button>
+    <button class="live-control-close" type="button" data-live-ops-close aria-label="Close controls">&times;</button>
+  </div>`;
+}
+
+function _detailLiveOpsDrawer(p) {
+  const ops = _detailLiveOps(p);
+  const hasTemps = Object.keys(p.temps || {}).length > 0;
+  const temps = hasTemps ? `<div class="live-op-temp-panel" id="detail-temps">${_detailTempsPanel(p)}</div>` : '';
+  if (!ops && !temps) return '';
+  return `<button class="live-control-backdrop" type="button" data-live-ops-close aria-label="Close controls"></button>
+    <aside class="live-control-rail" id="detail-live-ops" aria-label="Live printer controls">
+      <div class="live-control-scroll">
+        ${temps}
+        <div id="detail-live-ops-body">${ops}</div>
+      </div>
+    </aside>`;
+}
+
+function _detailLiveHasOps(p) {
+  return !!_detailLiveOps(p) || Object.keys(p.temps || {}).length > 0;
+}
+
+function _detailLiveDeckTop(p, printerColor, bannerTextColor) {
+  const toggle = ''; // Controls remain visible in the workspace below the camera.
+  return `<div class="live-deck-top">
+    ${toggle}
+    <div class="live-deck-status-bar" id="detail-live-head">${_detailLiveToolbarHeader(p, printerColor, bannerTextColor)}</div>
+  </div>`;
 }
 
 function _updateControlsWidget(id) {
@@ -2185,6 +2496,14 @@ function toggleBambuLight(id) {
 
 // Delegated handler — wired once at startup
 document.getElementById('view-printer').addEventListener('click', e => {
+  const reprintBtn = e.target.closest('[data-live-reprint-last]');
+  if (reprintBtn) {
+    e.preventDefault();
+    e.stopPropagation();
+    _handleLiveReprintLast(reprintBtn);
+    return;
+  }
+
   const lightToggle = e.target.closest('[data-light-toggle]');
   if (lightToggle) {
     e.preventDefault();
@@ -2211,6 +2530,27 @@ document.getElementById('view-printer').addEventListener('click', e => {
     sendControl(id, action);
   }
 });
+
+async function _handleLiveReprintLast(btn) {
+  const printerId = btn.dataset.printerId;
+  if (!printerId || btn.disabled) return;
+  btn.disabled = true;
+  const original = btn.textContent;
+  btn.textContent = 'Queuing...';
+  try {
+    const data = await _queueFetchJson(`/api/printers/${encodeURIComponent(printerId)}/queue/reprint-last`, {
+      method: 'POST',
+    });
+    showToast('Reprint queued', data.filename || 'Last completed file is pending again', 'success');
+    await _updateQueueBadge();
+    location.hash = '#/queue';
+  } catch (err) {
+    showToast('Reprint failed', err.message || 'No completed queue file found', 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = original || 'Reprint last';
+  }
+}
 
 document.getElementById('view-printer').addEventListener('change', async e => {
   const liveToggle = e.target.closest('[data-live-print-enabled]');
@@ -2244,6 +2584,18 @@ document.addEventListener('click', e => {
     return;
   }
 
+  const doctor = e.target.closest('[data-slot-doctor]');
+  if (doctor) {
+    e.preventDefault();
+    e.stopPropagation();
+    _openSlotEditor(
+      doctor.dataset.printerId,
+      Number(doctor.dataset.slotIndex),
+      doctor.dataset.slotLabel || `S${Number(doctor.dataset.slotIndex) + 1}`
+    );
+    return;
+  }
+
   const target = e.target.closest('[data-warning-target], [data-slot-edit]');
   if (!target) return;
   if (target.dataset.warningTarget === 'hash') {
@@ -2255,10 +2607,11 @@ document.addEventListener('click', e => {
   if (target.dataset.warningTarget === 'slot' || target.dataset.slotEdit !== undefined) {
     e.preventDefault();
     e.stopPropagation();
-    _openSlotEditor(
+    _openSlotQuickAssign(
       target.dataset.printerId,
       Number(target.dataset.slotIndex),
-      target.dataset.slotLabel || `S${Number(target.dataset.slotIndex) + 1}`
+      target.dataset.slotLabel || `S${Number(target.dataset.slotIndex) + 1}`,
+      target
     );
   }
 }, true);
@@ -2275,6 +2628,26 @@ document.addEventListener('keydown', e => {
 // Delegated handler for temp nudge + inline edit
 document.getElementById('view-printer').addEventListener('click', e => {
   // Nudge buttons
+  const liveOpsToggle = e.target.closest('[data-live-ops-toggle]');
+  if (liveOpsToggle) {
+    const deck = liveOpsToggle.closest('.live-main-deck');
+    if (deck) {
+      deck.classList.toggle('live-ops-open');
+      liveOpsToggle.setAttribute('aria-expanded', deck.classList.contains('live-ops-open') ? 'true' : 'false');
+    }
+    return;
+  }
+
+  const liveOpsClose = e.target.closest('[data-live-ops-close]');
+  if (liveOpsClose) {
+    const deck = liveOpsClose.closest('.live-main-deck');
+    if (deck) {
+      deck.classList.remove('live-ops-open');
+      deck.querySelector('[data-live-ops-toggle]')?.setAttribute('aria-expanded', 'false');
+    }
+    return;
+  }
+
   const tempBtn = e.target.closest('[data-temp-action]');
   if (tempBtn) {
     const { tempAction, heater, printerId: id, target } = tempBtn.dataset;
@@ -2343,6 +2716,31 @@ document.getElementById('view-printer').addEventListener('click', e => {
     return;
   }
 
+  const calibrateBtn = e.target.closest('[data-calibrate-run]');
+  if (calibrateBtn && !calibrateBtn.disabled) {
+    const id = calibrateBtn.dataset.printerId;
+    const panel = calibrateBtn.closest('.live-op-calibrate');
+    const options = {};
+    panel?.querySelectorAll('[data-calibrate-opt]').forEach(input => {
+      options[input.dataset.calibrateOpt] = input.checked;
+    });
+    if (!Object.values(options).some(Boolean)) {
+      showToast('Pick at least one calibration step', '', 'warning');
+      return;
+    }
+    const old = calibrateBtn.innerHTML;
+    calibrateBtn.disabled = true;
+    calibrateBtn.innerHTML = '<span>Starting</span><small>calibration</small>';
+    sendCalibration(id, options)
+      .then(() => showToast('Calibration started', 'Watch Live for progress', 'success'))
+      .catch(err => showToast('Calibration failed', err.message || '', 'error'))
+      .finally(() => {
+        calibrateBtn.disabled = false;
+        calibrateBtn.innerHTML = old;
+      });
+    return;
+  }
+
   const homeBtn = e.target.closest('[data-home-axes]');
   if (homeBtn && !homeBtn.disabled) {
     const id = homeBtn.dataset.printerId;
@@ -2378,7 +2776,7 @@ document.getElementById('view-printer').addEventListener('click', e => {
       label: _TEMP_LABELS[heater] ?? heater,
       current: r.actual,
       target: _getDisplayTarget(id, heater, r.target),
-      presets: p.temperature_presets?.[heater] ?? [],
+      presets: p.temperature_presets?.[heater] ?? (heater.startsWith('hotend') ? p.temperature_presets?.hotend : []) ?? [],
       max: 300,
     });
   }
@@ -2413,15 +2811,6 @@ document.getElementById('view-printer').addEventListener('click', e => {
     return;
   }
 
-  const slot = e.target.closest('[data-slot-edit]');
-  if (!slot) return;
-  e.preventDefault();
-  e.stopPropagation();
-  _openSlotEditor(
-    slot.dataset.printerId,
-    Number(slot.dataset.slotIndex),
-    slot.dataset.slotLabel || `S${Number(slot.dataset.slotIndex) + 1}`
-  );
 });
 
 // ── Flight Manual ─────────────────────────────────────────────────────────
@@ -2477,23 +2866,23 @@ async function renderManualView() {
       <div>
         <div class="mission-eyebrow">Flight Manual</div>
         <h1>Operator handbook</h1>
-        <p>Quick rules, recovery steps, and demo notes for running Flightdeck without needing the whole backstory.</p>
+        <p>Quick rules, recovery steps, and walkthrough notes for running Flightdeck without needing the whole backstory.</p>
       </div>
       <div class="manual-hero-actions">
-        <a href="#/demo">Demo Mode</a>
+        <a href="#/walkthrough">Walkthrough Mode</a>
         <a href="#/settings/setup">Setup Health</a>
         <a href="#/stats">Telemetry</a>
       </div>
     </section>
 
     <section class="manual-ready">
-      <div class="manual-card-head"><span>Demo Readiness</span></div>
+      <div class="manual-card-head"><span>Walkthrough Readiness</span></div>
       <div class="manual-check-grid">${readyChecks}</div>
     </section>
 
     <section class="manual-grid">
       ${_manualSection('First Tester Path', 'When Flightdeck is new to someone, start with the safe tour before touching real printer controls.', [
-        '<strong>Demo Mode</strong><span>Use the guided tour to show Dashboard, Flight Tower, Live printer pages, Spools, Print Bay, and Maintenance in the right order.</span>',
+        '<strong>Walkthrough Mode</strong><span>Use the guided tour to show Dashboard, Flight Tower, Live printer pages, Spools, Print Bay, and Maintenance in the right order.</span>',
         '<strong>Setup Health</strong><span>Confirm required checks first, then treat optional scale, label, backup, and vault items as upgrades rather than blockers.</span>',
         '<strong>One printer first</strong><span>Add or test one printer, browse read-only pages, then move on to queue, file, AMS, and hardware actions.</span>',
       ])}
@@ -2543,7 +2932,1000 @@ async function renderManualView() {
   </div>`;
 }
 
-// ── Demo Mode ─────────────────────────────────────────────────────────────
+// ── About Flightdeck ───────────────────────────────────────────────────────
+
+function _aboutTimelineItem(title, body) {
+  return `<div class="about-timeline-item">
+    <strong>${esc(title)}</strong>
+    <span>${esc(body)}</span>
+  </div>`;
+}
+
+async function renderAboutView() {
+  const el = document.getElementById('about-page');
+  if (!el) return;
+  const instance = await fetch('/api/instance')
+    .then(r => r.ok ? r.json() : (_instanceInfo || {}))
+    .catch(() => (_instanceInfo || {}));
+  if (instance?.app) _instanceInfo = instance;
+  const versionText = [
+    instance.app?.version || instance.version,
+    instance.git?.branch,
+    instance.git?.commit ? String(instance.git.commit).slice(0, 7) : '',
+  ].filter(Boolean).join(' · ') || 'Local build';
+
+  el.innerHTML = `<div class="manual-page about-page">
+    <section class="manual-hero about-hero">
+      <div>
+        <div class="mission-eyebrow">About Flightdeck</div>
+        <h1>Built from a real print room, not a pitch deck.</h1>
+        <p>Flightdeck started as Chris Little's workshop control layer for keeping printers, filament, queues, history, and recovery decisions in one honest place.</p>
+      </div>
+      <div class="about-build-card">
+        <span>Current build</span>
+        <strong>${esc(versionText)}</strong>
+        <small>Bambu-focused beta path</small>
+      </div>
+    </section>
+
+    <section class="manual-grid about-grid">
+      ${_manualSection('Where It Came From', 'Flightdeck grew out of day-to-day printing pain: spools that did not match printer reports, jobs that needed better queue recovery, cameras that froze, slicers that needed handoff help, and history that should remember more than a filename.', [
+        '<strong>Workshop first</strong><span>Every feature is shaped by running actual printers, not a clean-room demo.</span>',
+        '<strong>Mixed fleet thinking</strong><span>The core is built for Bambu, Voron/Klipper, and future printer types without pretending they all behave the same.</span>',
+        '<strong>Operator trust</strong><span>Flightdeck tries to explain why a print can run, why it is blocked, and what the next safe action is.</span>',
+      ])}
+      ${_manualSection('Credits', 'Flightdeck is led and built by Chris Little. Kidabah is the family handle behind the GitHub account and comes from his wife\'s pet name.', [
+        '<strong>Chris Little</strong><span>Project creator, daily operator, tester, and the person whose print room keeps finding the hard problems.</span>',
+        '<strong>Steve Keen</strong><span>Practical shop-floor input, staff workflow ideas, and feature pressure around spool assignment, recovery, and real-world usability.</span>',
+        '<strong>Early testers and makers</strong><span>Feedback from real users keeps Flightdeck pointed at useful workshop behaviour instead of shiny noise.</span>',
+      ])}
+      ${_manualSection('Beta Scope', 'The current beta should be treated as Bambu-tested first. Other printer paths are part of the direction, but the safest release promise is the one proven hardest in the room.', [
+        '<strong>Tested hardest</strong><span>Bambu X1C, H2D, AMS, and AMS HT workflows have driven most of the recent fixes.</span>',
+        '<strong>Supported carefully</strong><span>Voron/Klipper and other printer types are handled where available, but beta notes should call out what has actually been tested.</span>',
+        '<strong>Local data</strong><span>Printers, spools, print history, and settings live on the Flightdeck host, not in GitHub.</span>',
+      ])}
+      <section class="manual-card about-timeline">
+        <div class="manual-card-head"><span>How It Has Changed</span></div>
+        <div class="about-timeline-list">
+          ${_aboutTimelineItem('Spool truth', 'Inventory grew from simple stock tracking into QR labels, cabinet views, AMS slot assignment, tare profiles, weight confidence, and post-print repair.')}
+          ${_aboutTimelineItem('Bambu reliability', 'Queue preflight, AMS Profile Doctor, H2D AMS HT mapping, skip objects, and reprint flows were shaped by real failed starts and recovery testing.')}
+          ${_aboutTimelineItem('Slicer handoff', 'Browser and desktop slicer flows were tightened so source models can move through Orca/Bambu Studio without losing operator control.')}
+          ${_aboutTimelineItem('Live cockpit', 'Camera-first Live pages, slide-out controls, temperature editing, filament routes, and stream watchdogs made the printer page useful from a desk or phone.')}
+          ${_aboutTimelineItem('Flight Recorder', 'Print history now has the hooks for clips, notes, decisions, failures, costs, spool deductions, and manual recovery when metadata is missing.')}
+        </div>
+      </section>
+      ${_manualSection('What Flightdeck Is Trying To Be', 'A calm control surface for a busy print room: enough automation to remove repeated mistakes, enough caution to keep the operator in charge, and enough history to understand what really happened.', [
+        '<strong>Not just filament stock</strong><span>Filament matters, but the real value is connecting spool truth to printer state, queue decisions, failures, and print history.</span>',
+        '<strong>Not a cloud lock-in</strong><span>The goal is practical local control with clear data ownership.</span>',
+        '<strong>Still growing</strong><span>Beta is the point where real users can start pressure-testing the flow and helping decide what matters next.</span>',
+      ])}
+    </section>
+  </div>`;
+}
+
+// ── MakerWorld ─────────────────────────────────────────────────────────────
+
+function _makerWorldThumbUrl(url) {
+  const raw = String(url || '').trim();
+  if (!raw) return '';
+  return `/api/makerworld/thumbnail?url=${encodeURIComponent(raw)}`;
+}
+
+function _makerWorldTokenConfigured() {
+  return _serverSettings.bambu_cloud_token_configured === 'true'
+    || Boolean(String(_serverSettings.bambu_cloud_token || '').trim());
+}
+
+function _bambuTokenHint(token) {
+  const fromSettings = String(_serverSettings.bambu_cloud_token_hint || '').trim();
+  if (fromSettings) return fromSettings;
+  const t = String(token || '').trim();
+  if (!t) return '';
+  if (t.length <= 8) return '••••';
+  return `${t.slice(0, 4)}…${t.slice(-4)}`;
+}
+
+function _bambuTokenFieldHtml({
+  inputId = 'bambu-token-input',
+  saveBtnId = '',
+  rowClass = 'makerworld-token-row',
+  configured = _makerWorldTokenConfigured(),
+  hint = _bambuTokenHint(''),
+} = {}) {
+  const showInput = !configured || _bambuTokenEditorOpen;
+  if (!showInput) {
+    return `<div class="${rowClass} bambu-token-saved-row">
+      <span class="makerworld-plate-badge">Token saved${hint ? ` · ${esc(hint)}` : ''}</span>
+      <button type="button" class="settings-save-btn bambu-token-replace-btn" data-bambu-token-replace>Replace token</button>
+    </div>`;
+  }
+  const saveBtn = saveBtnId
+    ? `<button type="button" class="settings-save-btn" id="${esc(saveBtnId)}">Save token</button>`
+    : `<button type="button" class="settings-save-btn" data-bambu-cloud-token-save>Save token</button>`;
+  const cancelBtn = configured
+    ? `<button type="button" class="settings-save-btn bambu-token-cancel-btn" data-bambu-token-cancel>Cancel</button>`
+    : '';
+  const missing = !configured ? '<span class="makerworld-token-missing">Not saved yet</span>' : '';
+  return `<div class="${rowClass} bambu-token-edit-row">
+    ${cancelBtn}
+    <input type="text" id="${esc(inputId)}" class="settings-input bambu-token-input" autocomplete="one-time-code" autocapitalize="off" spellcheck="false" inputmode="verbatim" data-1p-ignore="true" data-lpignore="true" data-bito-ignore="true" data-form-type="other" readonly value="" placeholder="Paste makerworld.com token cookie value">
+    ${saveBtn}
+    ${missing}
+  </div>`;
+}
+
+function _attachBambuTokenFieldEvents(el, afterSave = null) {
+  const refresh = () => { if (typeof afterSave === 'function') afterSave(); };
+  el.querySelector('[data-bambu-token-replace]')?.addEventListener('click', () => {
+    _bambuTokenEditorOpen = true;
+    refresh();
+  });
+  el.querySelector('[data-bambu-token-cancel]')?.addEventListener('click', () => {
+    _bambuTokenEditorOpen = false;
+    refresh();
+  });
+  el.querySelectorAll('.bambu-token-input').forEach(input => {
+    input.addEventListener('focus', () => input.removeAttribute('readonly'));
+  });
+  const saveToken = async input => {
+    if (!input) return;
+    const value = (input.value || '').trim();
+    if (!value) {
+      showToast('Token required', 'Paste the makerworld.com token cookie first.', 'warn');
+      return;
+    }
+    input.value = '';
+    input.setAttribute('readonly', 'readonly');
+    try {
+      const r = await fetch('/api/settings/bambu_cloud_token', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value }),
+      });
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(body.detail || 'Setting save failed');
+      _serverSettings.bambu_cloud_token = '';
+      _serverSettings.bambu_cloud_token_configured = body.configured ? 'true' : 'false';
+      _serverSettings.bambu_cloud_token_hint = body.hint || _bambuTokenHint(value);
+      _bambuTokenEditorOpen = false;
+      showToast('Bambu Cloud token saved', 'MakerWorld downloads are ready.', 'success');
+      refresh();
+    } catch (err) {
+      showToast('Token save failed', err.message || '', 'error');
+      input.removeAttribute('readonly');
+    }
+  };
+  el.querySelector('#makerworld-token-save')?.addEventListener('click', () => {
+    saveToken(el.querySelector('#makerworld-token-input'));
+  });
+  el.querySelectorAll('[data-bambu-cloud-token-save]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const row = btn.closest('.bambu-cloud-token-row, .settings-section, .makerworld-token-setup, .bambu-token-edit-row');
+      saveToken(row?.querySelector('.bambu-token-input') || el.querySelector('.bambu-token-input'));
+    });
+  });
+}
+
+async function _fetchMakerWorldStatus() {
+  const r = await fetch('/api/makerworld/status');
+  if (!r.ok) throw new Error('Could not read MakerWorld status');
+  return r.json();
+}
+
+async function _fetchMakerWorldRecent() {
+  const r = await fetch('/api/makerworld/recent?limit=10');
+  if (!r.ok) return { imports: [] };
+  return r.json();
+}
+
+async function _clearMakerWorldRecent() {
+  const r = await fetch('/api/makerworld/recent/clear', { method: 'POST' });
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(_apiDetail(body, 'Could not clear recent imports'));
+  return body;
+}
+
+function _apiDetail(body, fallback) {
+  const detail = body?.detail;
+  if (typeof detail === 'string' && detail.trim()) return detail;
+  if (Array.isArray(detail) && detail.length) {
+    return detail.map(item => item?.msg || item?.message || JSON.stringify(item)).join('; ');
+  }
+  if (detail && typeof detail === 'object') return detail.message || JSON.stringify(detail);
+  return fallback;
+}
+
+async function _resolveMakerWorldUrl(url) {
+  const r = await fetch('/api/makerworld/resolve', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url: url.trim() }),
+  });
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(_apiDetail(body, 'Could not resolve MakerWorld URL'));
+  return body;
+}
+
+async function _importMakerWorldPlate(url, profileId) {
+  const r = await fetch('/api/makerworld/import', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url: url.trim(), profile_id: Number(profileId) }),
+  });
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(_apiDetail(body, 'MakerWorld import failed'));
+  return body;
+}
+
+async function _importAllMakerWorldPlatesLegacy(url, plates = [], onProgress = null, onlyMissing = false) {
+  const sourcePlates = plates || [];
+  const actionable = onlyMissing
+    ? sourcePlates.filter(_makerWorldPlateNeedsAction)
+    : sourcePlates;
+  const profileIds = actionable
+    .map(plate => Number(plate.profile_id))
+    .filter(id => Number.isFinite(id) && id > 0);
+  const total = profileIds.length;
+  const skipped = onlyMissing ? Math.max(0, sourcePlates.length - total) : 0;
+  const results = [];
+  let imported = 0;
+  let already_existed = 0;
+  let failed = 0;
+  for (let i = 0; i < profileIds.length; i += 1) {
+    const profileId = profileIds[i];
+    if (onProgress) onProgress(i + 1, total);
+    try {
+      const row = await _importMakerWorldPlate(url, profileId);
+      if (row.already_existed) already_existed += 1;
+      else imported += 1;
+      results.push({
+        ok: true,
+        profile_id: profileId,
+        already_existed: Boolean(row.already_existed),
+        relocated: Boolean(row.relocated),
+        name: row.name,
+        path: row.path,
+        plate_title: row.plate_title,
+      });
+    } catch (err) {
+      failed += 1;
+      results.push({
+        ok: false,
+        profile_id: profileId,
+        error: err.message || 'Import failed',
+      });
+    }
+  }
+  return {
+    ok: failed === 0,
+    total,
+    skipped,
+    imported,
+    already_existed,
+    relocated: results.filter(row => row.relocated).length,
+    failed,
+    results,
+    only_missing: onlyMissing,
+    legacy: true,
+  };
+}
+
+async function _importAllMakerWorldPlates(url, { plates = null, onProgress = null, onlyMissing = true } = {}) {
+  const r = await fetch('/api/makerworld/import-all', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url: url.trim(), only_missing: Boolean(onlyMissing) }),
+  });
+  const body = await r.json().catch(() => ({}));
+  if (r.status === 404) {
+    return _importAllMakerWorldPlatesLegacy(
+      url,
+      plates || _makerWorldResolved?.plates || [],
+      onProgress,
+      onlyMissing,
+    );
+  }
+  if (!r.ok) throw new Error(_apiDetail(body, 'MakerWorld bulk import failed'));
+  return body;
+}
+
+function _makerWorldPlateNeedsAction(plate) {
+  if (!plate?.already_imported) return true;
+  if (plate?.needs_vault_refresh) return true;
+  return false;
+}
+
+function _makerWorldImportAllSummary(result) {
+  const parts = [];
+  if (result.imported) parts.push(`${result.imported} saved`);
+  if (result.relocated) parts.push(`${result.relocated} moved to folder`);
+  if (result.skipped) parts.push(`${result.skipped} already in vault`);
+  if (result.already_existed) parts.push(`${result.already_existed} already in vault`);
+  if (result.failed) parts.push(`${result.failed} failed`);
+  if (!parts.length) return result.skipped ? 'All plates already in vault' : 'No plates to import';
+  return parts.join(', ');
+}
+
+function _makerWorldSlicerHandoff(override = _makerWorldSlicerOverride) {
+  const pick = String(override || 'follow').trim();
+  if (pick === 'bambu_studio') return { target: 'bambu_studio', label: 'Bambu Studio' };
+  if (pick === 'browser_orca') return { target: 'browser_orca', label: 'Browser Orca' };
+  if (pick === 'desktop_orca') return { target: 'desktop_orca', label: 'Desktop Orca' };
+  const openMode = (_serverSettings.slicer_open_mode || 'same').trim() || 'same';
+  if (openMode === 'bambu_studio') {
+    return { target: 'bambu_studio', label: 'Bambu Studio' };
+  }
+  if (openMode === 'orca' || openMode === 'browser_orca') {
+    return { target: 'browser_orca', label: 'Browser Orca' };
+  }
+  return { target: 'desktop_orca', label: 'Desktop Orca' };
+}
+
+async function _openVaultModelInSlicer(vaultPath, filename = '') {
+  const path = String(vaultPath || '').trim().replace(/^\/+/, '');
+  if (!path) throw new Error('Missing Print Vault path');
+  const handoff = _makerWorldSlicerHandoff();
+  const browserUrl = (_serverSettings.orcaslicer_docker_url || '').trim() || _slicerDockerDefaultUrl();
+  if (handoff.target === 'browser_orca') {
+    window.open(browserUrl, '_blank', 'noreferrer');
+  }
+  const r = await fetch('/api/slicer/open', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      source_id: 'library',
+      path,
+      filename: filename || path.split('/').pop() || '',
+      target: handoff.target,
+    }),
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(_apiDetail(data, `Unable to open ${handoff.label}`));
+  const detail = data.forwarded
+    ? (handoff.target === 'bambu_studio' ? 'Sent to Windows Bambu worker' : 'Sent to Windows Orca worker')
+    : (data.filename || path);
+  showToast(`Opening in ${handoff.label}`, detail, 'success');
+  return data;
+}
+
+async function _makerWorldSaveAndSlice(url, profileId) {
+  const result = await _importMakerWorldPlate(url, profileId);
+  await _openVaultModelInSlicer(result.path, result.name);
+  return result;
+}
+
+function _makerWorldPlateMeta(plate) {
+  const bits = [];
+  if (plate.weight_g) bits.push(`${plate.weight_g}g`);
+  if (plate.print_time_text) bits.push(plate.print_time_text);
+  if (plate.filament_colors) bits.push(`${plate.filament_colors} colours`);
+  if (plate.need_ams) bits.push('AMS');
+  return bits.join(' · ') || 'Print profile';
+}
+
+const _MAKERWORLD_PLATE_ACCENTS = [
+  '#60a5fa',
+  '#34d399',
+  '#a78bfa',
+  '#fbbf24',
+  '#f472b6',
+  '#22d3ee',
+  '#fb923c',
+  '#4ade80',
+];
+
+function _makerWorldPlateAccent(index) {
+  return _MAKERWORLD_PLATE_ACCENTS[Math.abs(Number(index) || 0) % _MAKERWORLD_PLATE_ACCENTS.length];
+}
+
+function _makerWorldPlateIndexLabel(index, total) {
+  if (total <= 1) return '';
+  return `Plate ${index} of ${total}`;
+}
+
+function _makerWorldPreviewHtml(data, url) {
+  if (!data) return '';
+  const cover = data.cover_url ? _makerWorldThumbUrl(data.cover_url) : '';
+  const highlight = Number(data.highlight_profile_id || 0);
+  const slicer = _makerWorldSlicerHandoff();
+  const plateRows = data.plates || [];
+  const plateCount = plateRows.length;
+  const plates = plateRows.map((plate, idx) => {
+    const plateNum = Number(plate.plate_index) || (idx + 1);
+    const plateTotal = Number(plate.plate_total) || plateCount;
+    const numbered = plateTotal > 1;
+    const accent = _makerWorldPlateAccent(idx);
+    const indexLabel = numbered ? _makerWorldPlateIndexLabel(plateNum, plateTotal) : '';
+    const active = highlight && Number(plate.profile_id) === highlight ? ' makerworld-plate-highlight' : '';
+    const imported = plate.already_imported;
+    const vaultPath = plate.vault_path || '';
+    const vaultName = plate.vault_name || '';
+    const actions = imported
+      ? `<div class="makerworld-plate-actions">
+          <span class="makerworld-plate-badge">In Print Vault</span>
+          <button type="button" class="settings-save-btn makerworld-save-slice-btn" data-makerworld-open-slice data-vault-path="${esc(vaultPath)}" data-vault-name="${esc(vaultName)}" ${vaultPath ? '' : 'disabled'}>
+            Open in ${esc(slicer.label)}
+          </button>
+          ${vaultPath ? `<a class="settings-save-btn" href="#/files">Print Vault</a>` : ''}
+        </div>`
+      : `<div class="makerworld-plate-actions">
+          <button type="button" class="settings-save-btn makerworld-save-slice-btn" data-makerworld-save-slice="${esc(String(plate.profile_id))}" ${data.can_download ? '' : 'disabled'}>
+            Save &amp; open in ${esc(slicer.label)}
+          </button>
+          <button type="button" class="settings-save-btn makerworld-save-vault-btn" data-makerworld-import="${esc(String(plate.profile_id))}" ${data.can_download ? '' : 'disabled'}>
+            Save to Vault
+          </button>
+        </div>`;
+    const thumb = plate.cover_url ? _makerWorldThumbUrl(plate.cover_url) : cover;
+    const thumbIndex = numbered
+      ? `<span class="makerworld-plate-thumb-index" aria-hidden="true">${plateNum}</span>`
+      : '';
+    return `<article class="makerworld-plate${numbered ? ' makerworld-plate--numbered' : ''}${active}"${numbered ? ` style="--plate-accent:${accent}"` : ''}>
+      <div class="makerworld-plate-thumb">${thumbIndex}${thumb ? `<img src="${esc(thumb)}" alt="" loading="lazy">` : ''}</div>
+      <div class="makerworld-plate-body">
+        ${indexLabel ? `<span class="makerworld-plate-index">${esc(indexLabel)}</span>` : ''}
+        <strong>${esc(plate.title)}</strong>
+        <span>${esc(_makerWorldPlateMeta(plate))}</span>
+        ${imported && plate.vault_path ? `<small>${esc(plate.vault_path)}</small>` : (imported && plate.vault_name ? `<small>${esc(plate.vault_name)}</small>` : '')}
+      </div>
+      ${actions}
+    </article>`;
+  }).join('');
+
+  const tokenBanner = data.can_download
+    ? `<div class="makerworld-token-banner makerworld-token-banner-ok">Bambu Cloud token ready${data.token_hint ? ` (${esc(data.token_hint)})` : ''}.</div>`
+    : `<div class="makerworld-token-banner makerworld-token-banner-warn">
+        Downloads need your Bambu Cloud token. Add the <code>token</code> cookie from makerworld.com under
+        <a href="#/settings/preferences">Settings → Preferences → Bambu Cloud</a>, then resolve again.
+      </div>`;
+
+  const pendingCount = plateRows.filter(_makerWorldPlateNeedsAction).length;
+  const refreshCount = plateRows.filter(plate => plate.needs_vault_refresh).length;
+  const missingCount = plateRows.filter(plate => !plate.already_imported).length;
+  const partialPending = pendingCount > 0 && pendingCount < plateCount;
+  const refreshOnly = refreshCount > 0 && missingCount === 0;
+  let importAllLabel = 'Import all to Vault';
+  if (!pendingCount) {
+    importAllLabel = 'All in vault';
+  } else if (refreshOnly && !partialPending) {
+    importAllLabel = 'Move all to folder';
+  } else if (partialPending) {
+    importAllLabel = refreshOnly ? `Move missing (${pendingCount})` : `Import missing (${pendingCount})`;
+  }
+  const importAllHint = pendingCount && !partialPending && refreshOnly
+    ? ` (${refreshCount} to move)`
+    : '';
+  const importAllBtn = plateCount > 1 && data.can_download
+    ? `<button type="button" class="settings-save-btn makerworld-import-all-btn" data-makerworld-import-all ${pendingCount ? '' : 'disabled'}>
+        ${esc(importAllLabel)}${importAllHint}
+      </button>`
+    : '';
+
+  return `<section class="manual-card makerworld-import-card">
+    ${tokenBanner}
+    <div class="makerworld-preview-head">
+      <div class="makerworld-preview-cover">${cover ? `<img src="${esc(cover)}" alt="" loading="lazy">` : ''}</div>
+      <div class="makerworld-preview-copy">
+        <div class="mission-eyebrow">Resolved model</div>
+        <h2>${esc(data.title)}</h2>
+        <p>${esc(data.summary_text || 'MakerWorld model ready to import plate by plate into the Print Vault.')}</p>
+        <div class="makerworld-preview-meta">
+          ${data.creator ? `<span>${esc(data.creator)}</span>` : ''}
+          ${data.license ? `<span>${esc(data.license)}</span>` : ''}
+          ${data.download_count != null ? `<span>${Number(data.download_count).toLocaleString()} downloads</span>` : ''}
+        </div>
+        <div class="makerworld-preview-links">
+          <a href="${esc(data.source_url || url)}" target="_blank" rel="noopener noreferrer">Open on MakerWorld</a>
+          <a href="#/files">Print Vault</a>
+        </div>
+      </div>
+    </div>
+    <div class="makerworld-plates">
+      <div class="makerworld-plates-head">
+        <div class="makerworld-plates-title">
+          <strong>Print profiles</strong>
+          <span>${plateCount} plate${plateCount === 1 ? '' : 's'}</span>
+        </div>
+        ${importAllBtn}
+      </div>
+      ${plateCount > 1 && data.vault_folder ? `<div class="makerworld-vault-folder">Imports save to <code>${esc(data.vault_folder)}/</code> with numbered filenames.</div>` : ''}
+      <div class="makerworld-plate-list">${plates || '<p class="makerworld-empty">No downloadable plates were returned for this model.</p>'}</div>
+    </div>
+  </section>`;
+}
+
+function _makerWorldRecentHtml(imports) {
+  const slicer = _makerWorldSlicerHandoff();
+  const rows = (imports || []).map(row => {
+    const when = row.imported_at ? new Date(row.imported_at).toLocaleString() : '';
+    const vaultPath = row.vault_path || '';
+    return `<div class="makerworld-recent-row">
+      <div class="makerworld-recent-copy">
+        <strong>${esc(row.title || 'MakerWorld import')}</strong>
+        <span>${esc(row.plate_title || row.filename || '')}</span>
+        <small>${esc(when)}${vaultPath ? ` · ${esc(vaultPath)}` : ''}</small>
+      </div>
+      <div class="makerworld-recent-actions">
+        ${vaultPath ? `<button type="button" class="settings-save-btn makerworld-save-slice-btn" data-makerworld-open-slice data-vault-path="${esc(vaultPath)}" data-vault-name="${esc(row.filename || '')}">${esc(slicer.label)}</button>` : ''}
+        <a class="settings-save-btn" href="#/files">Vault</a>
+      </div>
+    </div>`;
+  }).join('');
+  const clearBtn = (imports || []).length
+    ? '<button type="button" class="settings-save-btn makerworld-clear-recent-btn" data-makerworld-clear-recent>Clear all</button>'
+    : '';
+  return `<section class="manual-card makerworld-recent-card">
+    <div class="manual-card-head makerworld-recent-head">
+      <span>Recent imports</span>
+      ${clearBtn}
+    </div>
+    ${rows ? `<div class="makerworld-recent-list">${rows}</div>` : '<p class="makerworld-empty">Imported MakerWorld plates will appear here.</p>'}
+  </section>`;
+}
+
+function _attachMakerWorldRecentEvents(el) {
+  el.querySelector('[data-makerworld-clear-recent]')?.addEventListener('click', async () => {
+    if (_makerWorldBusy) return;
+    const ok = await _confirmModal('Clear recent MakerWorld import history? Print Vault files are not deleted.');
+    if (!ok) return;
+    _makerWorldBusy = true;
+    const btn = el.querySelector('[data-makerworld-clear-recent]');
+    const label = btn?.textContent || 'Clear all';
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = 'Clearing…';
+    }
+    try {
+      const result = await _clearMakerWorldRecent();
+      _makerWorldRecent = [];
+      if (_makerWorldUrl) {
+        try {
+          _makerWorldResolved = await _resolveMakerWorldUrl(_makerWorldUrl);
+        } catch (_) {
+          /* keep current preview if resolve fails */
+        }
+      }
+      await renderMakerWorldView();
+      const count = Number(result.cleared || 0);
+      showToast('Recent imports cleared', count ? `${count} record${count === 1 ? '' : 's'} removed` : 'History cleared', 'success');
+    } catch (err) {
+      showToast('Clear failed', err.message || '', 'error');
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = label;
+      }
+    } finally {
+      _makerWorldBusy = false;
+    }
+  });
+}
+
+function _attachMakerWorldImportEvents(el, url) {
+  const refreshAfterImport = async () => {
+    _makerWorldResolved = await _resolveMakerWorldUrl(url);
+    _makerWorldRecent = (await _fetchMakerWorldRecent()).imports || [];
+    renderMakerWorldView();
+  };
+
+  el.querySelector('[data-makerworld-import-all]')?.addEventListener('click', async () => {
+    if (_makerWorldBusy) return;
+    const btn = el.querySelector('[data-makerworld-import-all]');
+    if (!btn || btn.disabled) return;
+    _makerWorldBusy = true;
+    btn.disabled = true;
+    const label = btn.textContent;
+    btn.textContent = 'Importing…';
+    try {
+      const plates = _makerWorldResolved?.plates || [];
+      const result = await _importAllMakerWorldPlates(url, {
+        plates,
+        onlyMissing: true,
+        onProgress: (current, total) => {
+          btn.textContent = total ? `Importing ${current}/${total}…` : 'Importing…';
+        },
+      });
+      const tone = result.failed ? 'warn' : 'success';
+      const title = result.failed ? 'Import finished with errors' : 'All plates saved';
+      showToast(title, _makerWorldImportAllSummary(result), tone);
+      if (result.failed) {
+        const failed = (result.results || []).filter(row => !row.ok);
+        const detail = failed.map(row => `Plate ${row.profile_id}: ${row.error || 'failed'}`).join('; ');
+        if (detail) showToast('Failed plates', detail, 'error');
+      }
+      await refreshAfterImport();
+    } catch (err) {
+      showToast('Import all failed', err.message || '', 'error');
+      btn.disabled = false;
+      btn.textContent = label;
+    } finally {
+      _makerWorldBusy = false;
+    }
+  });
+
+  el.querySelectorAll('[data-makerworld-import]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (_makerWorldBusy) return;
+      const profileId = btn.getAttribute('data-makerworld-import');
+      _makerWorldBusy = true;
+      btn.disabled = true;
+      const label = btn.textContent;
+      btn.textContent = 'Importing…';
+      try {
+        const result = await _importMakerWorldPlate(url, profileId);
+        showToast(
+          result.already_existed ? 'Already in Print Vault' : 'Saved to Print Vault',
+          result.path || result.name || '',
+          'success',
+        );
+        await refreshAfterImport();
+      } catch (err) {
+        showToast('MakerWorld import failed', err.message || '', 'error');
+        btn.disabled = false;
+        btn.textContent = label;
+      } finally {
+        _makerWorldBusy = false;
+      }
+    });
+  });
+
+  el.querySelectorAll('[data-makerworld-save-slice]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (_makerWorldBusy) return;
+      const profileId = btn.getAttribute('data-makerworld-save-slice');
+      _makerWorldBusy = true;
+      btn.disabled = true;
+      const label = btn.textContent;
+      btn.textContent = 'Working…';
+      try {
+        const result = await _makerWorldSaveAndSlice(url, profileId);
+        showToast(
+          result.already_existed ? 'Opened vault copy in slicer' : 'Saved and opened in slicer',
+          result.path || result.name || '',
+          'success',
+        );
+        await refreshAfterImport();
+      } catch (err) {
+        showToast('Save & slice failed', err.message || '', 'error');
+        btn.disabled = false;
+        btn.textContent = label;
+      } finally {
+        _makerWorldBusy = false;
+      }
+    });
+  });
+
+  el.querySelectorAll('[data-makerworld-open-slice]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (_makerWorldBusy) return;
+      const vaultPath = btn.getAttribute('data-vault-path') || '';
+      const vaultName = btn.getAttribute('data-vault-name') || '';
+      _makerWorldBusy = true;
+      btn.disabled = true;
+      const label = btn.textContent;
+      btn.textContent = 'Opening…';
+      try {
+        await _openVaultModelInSlicer(vaultPath, vaultName);
+      } catch (err) {
+        showToast('Slicer handoff failed', err.message || '', 'error');
+        btn.disabled = false;
+        btn.textContent = label;
+      } finally {
+        _makerWorldBusy = false;
+      }
+    });
+  });
+}
+
+function _makerWorldTokenSetupHtml(status = {}) {
+  const hasToken = Boolean(status.has_token || _makerWorldTokenConfigured());
+  const hint = status.token_hint || _bambuTokenHint('');
+  return `<section class="manual-card makerworld-token-setup">
+    <div class="manual-card-head"><span>Bambu Cloud download token</span></div>
+    <p class="makerworld-token-copy">Paste the <code>token</code> cookie from makerworld.com after sign-in. Flightdeck stores it locally and uses it only for MakerWorld 3MF downloads.</p>
+    ${_bambuTokenFieldHtml({ inputId: 'makerworld-token-input', saveBtnId: 'makerworld-token-save', configured: hasToken, hint })}
+    <div class="settings-hint">Browser DevTools → Application → Cookies → <strong>makerworld.com</strong> → copy the value named <strong>token</strong>.</div>
+  </section>`;
+}
+
+function _attachMakerWorldTokenEvents(el, afterSave = null) {
+  _attachBambuTokenFieldEvents(el, afterSave);
+}
+
+function _makerWorldSnapshot(status = {}, resolved = null, recent = []) {
+  const plates = Array.isArray(resolved?.plates) ? resolved.plates : [];
+  const imported = plates.filter(plate => plate?.already_imported || plate?.needs_vault_refresh).length;
+  const pending = plates.filter(plate => !(plate?.already_imported || plate?.needs_vault_refresh)).length;
+  return {
+    hasToken: !!status?.has_token,
+    plateCount: plates.length,
+    importedCount: imported,
+    pendingCount: pending,
+    recentCount: Array.isArray(recent) ? recent.length : 0,
+    hasResolved: !!resolved,
+    title: resolved?.title || '',
+  };
+}
+
+function _makerWorldHeroStatusLine(snap) {
+  if (!snap.hasToken && !snap.hasResolved) {
+    return 'Add your MakerWorld token, then paste a model link to preview plates and save them into Print Vault.';
+  }
+  if (snap.hasResolved && snap.pendingCount) {
+    return `${snap.pendingCount} plate${snap.pendingCount === 1 ? '' : 's'} still ready to import from the resolved model.`;
+  }
+  if (snap.hasResolved && snap.importedCount) {
+    return `${snap.importedCount} plate${snap.importedCount === 1 ? '' : 's'} already landed in Print Vault for ${snap.title || 'this model'}.`;
+  }
+  if (snap.hasToken) {
+    return 'Token is ready. Paste a MakerWorld link to pull plates straight into the vault and hand them off to slicers.';
+  }
+  return 'Resolve a MakerWorld link to inspect plates before importing them into Print Vault.';
+}
+
+function _makerWorldHeroHtml(status = {}, resolved = null, recent = []) {
+  const snap = _makerWorldSnapshot(status, resolved, recent);
+  return `<section class="manual-hero makerworld-hero makerworld-hero-polished">
+    <div class="makerworld-hero-copy">
+      <div class="mission-eyebrow">MakerWorld</div>
+      <h1>Import MakerWorld models into Flightdeck.</h1>
+      <p class="makerworld-hero-status">${esc(_makerWorldHeroStatusLine(snap))}</p>
+    </div>
+    <div class="makerworld-hero-metrics" aria-label="MakerWorld counts">
+      <div class="makerworld-hero-metric${snap.hasToken ? ' makerworld-hero-metric-ok' : ' makerworld-hero-metric-warn'}">
+        <strong>${snap.hasToken ? 'Ready' : 'Needed'}</strong>
+        <span>Token</span>
+      </div>
+      <div class="makerworld-hero-metric">
+        <strong>${snap.plateCount}</strong>
+        <span>Plates</span>
+      </div>
+      <div class="makerworld-hero-metric${snap.pendingCount ? ' makerworld-hero-metric-info' : ''}">
+        <strong>${snap.pendingCount}</strong>
+        <span>To Import</span>
+      </div>
+      <div class="makerworld-hero-metric${snap.recentCount ? ' makerworld-hero-metric-muted' : ''}">
+        <strong>${snap.recentCount}</strong>
+        <span>Recent</span>
+      </div>
+    </div>
+    <div class="manual-hero-actions makerworld-hero-links">
+      <a href="https://makerworld.com/" target="_blank" rel="noopener noreferrer">Open MakerWorld</a>
+      <a href="#/files">Print Vault</a>
+      <a href="#/settings/preferences">Bambu Cloud token</a>
+    </div>
+  </section>`;
+}
+
+function _makerWorldBriefingHtml(status = {}, resolved = null, recent = []) {
+  const snap = _makerWorldSnapshot(status, resolved, recent);
+  const rows = [];
+  if (!snap.hasToken) {
+    rows.push({
+      tone: 'warn',
+      kicker: 'Token',
+      title: 'Bambu Cloud token still needed',
+      detail: 'Metadata resolves without it, but downloads and vault imports stay locked until the cookie is saved.',
+    });
+  }
+  if (snap.pendingCount) {
+    rows.push({
+      tone: 'ok',
+      kicker: 'Import',
+      title: `${snap.pendingCount} plate${snap.pendingCount === 1 ? '' : 's'} ready to save to Print Vault`,
+      detail: snap.importedCount
+        ? `${snap.importedCount} already imported from this model`
+        : 'Resolve is done; next step is Save to Vault or Save & open in slicer.',
+    });
+  }
+  if (snap.importedCount && !snap.pendingCount) {
+    rows.push({
+      tone: 'info',
+      kicker: 'Vault',
+      title: 'Resolved plates already exist in Print Vault',
+      detail: 'Open the vault or send them straight into your slicer handoff.',
+    });
+  }
+  if (snap.recentCount) {
+    rows.push({
+      tone: 'muted',
+      kicker: 'Recent',
+      title: `${snap.recentCount} recent import${snap.recentCount === 1 ? '' : 's'} on hand`,
+      detail: 'The recent list below doubles as a quick jump back into slicer or the vault.',
+    });
+  }
+
+  const calm = !rows.length;
+  const body = calm
+    ? `<div class="briefing-clear briefing-clear-hero makerworld-briefing-clear">
+        <div class="briefing-clear-icon" aria-hidden="true">✓</div>
+        <div class="briefing-clear-copy">
+          <strong>Ready to import</strong>
+          <span>Paste a MakerWorld link to preview the plates and start the import path into Print Vault.</span>
+        </div>
+        <div class="briefing-clear-links">
+          <a href="#/files">Open vault</a>
+          <a href="https://makerworld.com/" target="_blank" rel="noopener noreferrer">Browse models</a>
+        </div>
+      </div>`
+    : rows.map(row => `<article class="makerworld-briefing-row makerworld-briefing-${row.tone}">
+        <span class="makerworld-briefing-kicker">${esc(row.kicker)}</span>
+        <div class="makerworld-briefing-copy">
+          <strong>${esc(row.title)}</strong>
+          <span>${esc(row.detail)}</span>
+        </div>
+      </article>`).join('');
+
+  return `<section class="makerworld-briefing${calm ? ' makerworld-briefing-calm' : ''}" aria-label="MakerWorld briefing">
+    <div class="makerworld-briefing-head">
+      <div>
+        <span>Import briefing</span>
+        <strong>${calm ? 'Clear runway' : 'What to do next'}</strong>
+      </div>
+      <a href="#/files">Print Vault</a>
+    </div>
+    <div class="makerworld-briefing-list">${body}</div>
+  </section>`;
+}
+
+function _makerWorldHealthPanelHtml() {
+  const h = _bambuCloudHealth();
+  return `<section class="manual-card makerworld-token-card">
+    <div class="manual-card-head"><span>Bambu Cloud Token</span></div>
+    <div class="bambu-cloud-health bambu-cloud-health-${esc(h.tone)}">
+      <div>
+        <span class="bambu-cloud-status">${esc(h.label)}</span>
+        <strong>${esc(h.daysText)}</strong>
+      </div>
+      <p>${esc(h.detail)}</p>
+    </div>
+    <div class="makerworld-date-row">
+      <label class="settings-label">Last sign-in</label>
+      <input class="settings-input pref-input" data-pref-key="bambu_cloud_last_auth_at" type="date" value="${esc(h.lastValue)}">
+      <button type="button" class="settings-save-btn" data-bambu-cloud-mark-now>Mark today</button>
+    </div>
+    <div class="makerworld-expiry">
+      <span>Estimated expiry</span>
+      <strong>${esc(h.expiresText)}</strong>
+    </div>
+  </section>`;
+}
+
+function _attachBambuCloudMarkEvents(el, afterSave = null) {
+  el.querySelectorAll('[data-bambu-cloud-mark-now]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const today = new Date().toISOString().slice(0, 10);
+      try {
+        await _saveSetting('bambu_cloud_last_auth_at', today);
+        _serverSettings.bambu_cloud_last_auth_at = today;
+        showToast('Bambu Cloud sign-in tracked', today, 'success');
+        if (typeof afterSave === 'function') afterSave(today);
+      } catch (err) {
+        showToast('Bambu Cloud setting failed', err.message || '', 'error');
+      }
+    });
+  });
+  el.querySelectorAll('[data-pref-key="bambu_cloud_last_auth_at"]').forEach(input => {
+    input.addEventListener('change', async () => {
+      const value = (input.value || '').trim();
+      if (!value) return;
+      try {
+        await _saveSetting('bambu_cloud_last_auth_at', value);
+        _serverSettings.bambu_cloud_last_auth_at = value;
+        showToast('Bambu Cloud sign-in tracked', value, 'success');
+        if (typeof afterSave === 'function') afterSave(value);
+      } catch (err) {
+        showToast('Bambu Cloud setting failed', err.message || '', 'error');
+      }
+    });
+  });
+}
+
+async function renderMakerWorldView() {
+  const el = document.getElementById('makerworld-page');
+  if (!el) return;
+  const healthPanel = _makerWorldHealthPanelHtml();
+  let status = { has_token: _makerWorldTokenConfigured() };
+  try {
+    status = await _fetchMakerWorldStatus();
+  } catch (_) { /* keep fallback */ }
+  if (!_makerWorldRecent.length) {
+    try {
+      _makerWorldRecent = (await _fetchMakerWorldRecent()).imports || [];
+    } catch (_) {
+      _makerWorldRecent = [];
+    }
+  }
+  const previewHtml = _makerWorldResolved ? _makerWorldPreviewHtml(_makerWorldResolved, _makerWorldUrl) : '';
+  el.innerHTML = `<div class="manual-page makerworld-page">
+    ${_makerWorldHeroHtml(status, _makerWorldResolved, _makerWorldRecent)}
+    ${_makerWorldBriefingHtml(status, _makerWorldResolved, _makerWorldRecent)}
+
+    ${_makerWorldTokenSetupHtml(status)}
+
+    <section class="manual-card makerworld-import-bar">
+      <div class="manual-card-head"><span>Import from URL</span></div>
+      <div class="makerworld-url-row">
+        <input id="makerworld-url-input" class="settings-input" type="url" placeholder="https://makerworld.com/en/models/123456" value="${esc(_makerWorldUrl)}">
+        <button type="button" class="settings-save-btn" id="makerworld-resolve-btn">${_makerWorldResolved ? 'Refresh' : 'Resolve'}</button>
+      </div>
+      <div class="makerworld-slicer-row">
+        <label class="settings-label" for="makerworld-slicer-pick">Open in</label>
+        <select id="makerworld-slicer-pick" class="settings-input">
+          <option value="follow"${_makerWorldSlicerOverride === 'follow' ? ' selected' : ''}>Follow Settings</option>
+          <option value="bambu_studio"${_makerWorldSlicerOverride === 'bambu_studio' ? ' selected' : ''}>Bambu Studio</option>
+          <option value="browser_orca"${_makerWorldSlicerOverride === 'browser_orca' ? ' selected' : ''}>Browser Orca</option>
+          <option value="desktop_orca"${_makerWorldSlicerOverride === 'desktop_orca' ? ' selected' : ''}>Desktop Orca</option>
+        </select>
+      </div>
+      <div class="settings-hint">Accepts locale links, slugs, and <code>#profileId-…</code> fragments. Metadata works without a token; saving plates needs the Bambu Cloud token cookie.</div>
+    </section>
+
+    ${previewHtml}
+
+    <section class="manual-grid makerworld-grid">
+      ${healthPanel}
+      ${_makerWorldRecentHtml(_makerWorldRecent)}
+      ${_manualSection('Workflow', 'MakerWorld plates are source 3MF projects — slice them before queueing to a printer.', [
+        '<strong>1. Resolve</strong><span>Paste the shared MakerWorld URL and load the plate list.</span>',
+        '<strong>2. Save & open in slicer</strong><span>Import a plate and hand it off to your configured slicer (Settings → Slicer → Open in Slicer).</span>',
+        '<strong>3. Slice & queue</strong><span>Export the printer-ready job back to Print Vault, then queue it from Print Bay.</span>',
+      ])}
+    </section>
+  </div>`;
+  _attachBambuCloudMarkEvents(el, () => renderMakerWorldView());
+  _attachMakerWorldTokenEvents(el, () => renderMakerWorldView());
+  el.querySelector('#makerworld-slicer-pick')?.addEventListener('change', e => {
+    _makerWorldSlicerOverride = e.target.value || 'follow';
+    if (_makerWorldResolved) renderMakerWorldView();
+  });
+
+  el.querySelector('#makerworld-resolve-btn')?.addEventListener('click', async () => {
+    if (_makerWorldBusy) {
+      showToast('MakerWorld is busy', 'Wait for the current action to finish.', 'warn');
+      return;
+    }
+    const input = el.querySelector('#makerworld-url-input');
+    const url = (input?.value || '').trim();
+    if (!url) {
+      showToast('MakerWorld URL needed', 'Paste a makerworld.com model link first.', 'warn');
+      return;
+    }
+    _makerWorldBusy = true;
+    const btn = el.querySelector('#makerworld-resolve-btn');
+    const label = btn?.textContent || 'Resolve';
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = 'Resolving…';
+    }
+    try {
+      _makerWorldUrl = url;
+      _makerWorldResolved = await _resolveMakerWorldUrl(url);
+      _makerWorldRecent = (await _fetchMakerWorldRecent()).imports || [];
+      await renderMakerWorldView();
+      showToast('MakerWorld model loaded', _makerWorldResolved?.title || url, 'success');
+    } catch (err) {
+      showToast('MakerWorld resolve failed', err.message || '', 'error');
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = label;
+      }
+    } finally {
+      _makerWorldBusy = false;
+    }
+  });
+
+  el.querySelector('#makerworld-url-input')?.addEventListener('keydown', e => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      el.querySelector('#makerworld-resolve-btn')?.click();
+    }
+  });
+
+  _attachMakerWorldImportEvents(el, _makerWorldUrl);
+  _attachMakerWorldRecentEvents(el);
+}
+
+// ── Walkthrough Mode ───────────────────────────────────────────────────────
 
 function _demoMetric(label, value, detail = '', tone = '') {
   return `<div class="demo-metric ${tone}">
@@ -2561,6 +3943,17 @@ function _demoStep(n, title, route, body, bullets = []) {
       <p>${esc(body)}</p>
       ${bullets.length ? `<div class="demo-step-points">${bullets.map(b => `<span>${esc(b)}</span>`).join('')}</div>` : ''}
     </div>
+  </a>`;
+}
+
+function _walkthroughQuickStep(n, title, route, body, action) {
+  return `<a class="walkthrough-quick-step" href="${esc(route)}">
+    <span class="walkthrough-quick-num">${n}</span>
+    <span class="walkthrough-quick-copy">
+      <strong>${esc(title)}</strong>
+      <small>${esc(body)}</small>
+    </span>
+    <span class="walkthrough-quick-action">${esc(action)}</span>
   </a>`;
 }
 
@@ -2617,10 +4010,13 @@ async function renderDemoView() {
 
   el.innerHTML = `<div class="demo-page">
     <section class="demo-hero">
-      <div>
-        <div class="mission-eyebrow">Demo Mode</div>
-        <h1>Flightdeck first-look tour</h1>
-        <p>A guided, low-risk path through the screens that make Flightdeck feel different: fleet awareness, dispatch intelligence, live printer control, spool truth, and recovery.</p>
+      <div class="demo-hero-copy">
+        <img class="demo-hero-logo" src="/static/flightdeck-icon.svg" alt="" aria-hidden="true">
+        <div>
+          <div class="mission-eyebrow">Walkthrough Mode</div>
+          <h1>Welcome to Flightdeck</h1>
+          <p>A low-risk path through fleet awareness, dispatch intelligence, live printer control, spool truth, and recovery.</p>
+        </div>
       </div>
       <div class="demo-hero-status ${demoReady ? 'ready' : 'watch'}">
         <span>${demoReady ? 'Ready to show' : 'Check before demo'}</span>
@@ -2639,7 +4035,7 @@ async function renderDemoView() {
 
     <section class="demo-grid">
       <div class="demo-card demo-tour">
-        <div class="manual-card-head"><span>Tour Path</span></div>
+        <div class="manual-card-head"><span>Walkthrough Path</span></div>
         ${_demoStep(1, 'Dashboard', '#/', 'Open with the fleet view. Show online state, loaded spools, reliability flags, and camera shortcuts.', ['fleet health', 'loaded filament', 'low-risk overview'])}
         ${_demoStep(2, 'Flight Tower', '#/mission', 'Show the advisory dispatcher: ready jobs, blocked jobs, and why Flightdeck recommends a printer.', ['dispatch intel', 'stock checks', 'operator notes'])}
         ${_demoStep(3, 'Live Printer', bambuRoute, 'Use one printer page to show the camera hero, status strip, print details, objects, and AMS/Vivid filament route.', ['live feed', 'filament route', 'pause/cancel/E-stop are guarded'])}
@@ -2651,9 +4047,9 @@ async function renderDemoView() {
       <div class="demo-card">
         <div class="manual-card-head"><span>Talk Track</span></div>
         <div class="demo-script">
-          <p><strong>Opening:</strong> Flightdeck is built for a mixed printer workshop, not just one brand. It keeps printers, filament, queue decisions, history, maintenance, and recovery in one cockpit.</p>
-          <p><strong>Key difference:</strong> it does not just show status. It explains what is safe to run, which spool will be used, why a print is blocked, and what to check next.</p>
-          <p><strong>Trust point:</strong> risky actions are deliberate, state is visible, and the system health panel tells you when the host is under pressure.</p>
+          <p><strong>Opening:</strong> Flightdeck is for mixed-printer workshops, not just one brand.</p>
+          <p><strong>Key difference:</strong> it explains what is safe to run, which spool will be used, and why a print is blocked.</p>
+          <p><strong>Trust point:</strong> risky actions are deliberate and system health is visible.</p>
         </div>
       </div>
 
@@ -2665,12 +4061,12 @@ async function renderDemoView() {
       </div>
 
       <div class="demo-card">
-        <div class="manual-card-head"><span>Do Not Demo First</span></div>
-        <div class="demo-avoid">
-          <span>Do not start with Settings unless someone asks install questions.</span>
-          <span>Do not press E-stop, delete, archive, SD cleanup, or format actions during a casual walkthrough.</span>
-          <span>Do not open all camera feeds on a small Pi while screen sharing unless host health looks comfortable.</span>
-          <span>Do not explain every edge case. Show the daily workflow first, then go deeper.</span>
+        <div class="manual-card-head"><span>Easy as 1-2-3</span></div>
+        <div class="walkthrough-quick">
+          ${_walkthroughQuickStep(1, 'Add printers', '#/settings/printers', 'Connect Bambu, Voron/Klipper, or Moonraker machines.', 'Printers')}
+          ${_walkthroughQuickStep(2, 'Add spools', '#/spools', 'Build the filament stock list Flightdeck will trust.', 'Spools')}
+          ${_walkthroughQuickStep(3, 'Add a file', '#/files', 'Drop a sliced job or source model into the Print Vault.', 'Print Bay')}
+          ${_walkthroughQuickStep(4, 'Print', '#/queue', 'Queue the job, let preflight explain readiness, then send it.', 'Queue')}
         </div>
       </div>
     </section>
@@ -2690,12 +4086,22 @@ function parseRoute() {
   if (hash === '#/stats' || hash.startsWith('#/stats?')) return { view: 'stats' };
   if (hash === '#/queue') return { view: 'queue' };
   if (hash === '#/fleet') return { view: 'fleet' };
+  if (hash === '#/filament' || hash.startsWith('#/filament?')) return { view: 'filament' };
   if (hash === '#/files') return { view: 'files' };
+  const projectMatch = hash.match(/^#\/projects\/(\d+)/);
+  if (projectMatch) return { view: 'projects', id: parseInt(projectMatch[1], 10) };
+  if (hash === '#/projects') return { view: 'projects' };
   if (hash === '#/memory' || hash.startsWith('#/memory?')) return { view: 'memory' };
   if (hash === '#/failures' || hash.startsWith('#/failures?')) return { view: 'failures' };
   if (hash === '#/spools' || hash.startsWith('#/spools?')) return { view: 'spools' };
-  if (hash === '#/demo') return { view: 'demo' };
+  if (hash === '#/walkthrough' || hash === '#/demo') return { view: 'demo' };
+  if (hash === '#/makerworld') return { view: 'makerworld' };
+  if (hash === '#/makerdeck') return { view: 'makerdeck' };
+  if (hash === '#/meshprep') return { view: 'meshprep' };
+  if (hash === '#/painter' || hash.startsWith('#/painter?')) return { view: 'painter' };
+  if (hash === '#/chop') return { view: 'chop' };
   if (hash === '#/manual') return { view: 'manual' };
+  if (hash === '#/about') return { view: 'about' };
   const settingsMatch = hash.match(/^#\/settings\/([^/]+)/);
   if (settingsMatch?.[1] === 'spools') return { view: 'spools' };
   if (settingsMatch?.[1] === 'filament') return { view: 'spools', legacyFilament: true };
@@ -2716,6 +4122,40 @@ function _stopCameraImages(selector) {
     img.removeAttribute('src');
     img.dataset.stopped = '1';
   });
+}
+
+function _ensureMakerDeckFrame() {
+  const frame = document.getElementById('makerdeck-frame');
+  if (!frame || frame.dataset.loaded === '1') return;
+  frame.src = '/makerdeck/?v=623';
+  frame.dataset.loaded = '1';
+}
+
+function _ensureMeshPrepFrame() {
+  const frame = document.getElementById('meshprep-frame');
+  if (!frame || frame.dataset.loaded === '1') return;
+  frame.src = '/makerdeck/meshprep.html?v=651';
+  frame.dataset.loaded = '1';
+}
+
+function _ensurePainterFrame() {
+  const frame = document.getElementById('painter-frame');
+  if (!frame) return;
+  const file = _routeParams('#/painter').get('src') || '';
+  const name = _routeParams('#/painter').get('name') || '';
+  let next = '/makerdeck/painter.html?v=630';
+  if (file) next += `&src=${encodeURIComponent(file)}`;
+  if (name) next += `&name=${encodeURIComponent(name)}`;
+  if (frame.dataset.src === next) return;
+  frame.src = next;
+  frame.dataset.src = next;
+}
+
+function _ensureChopFrame() {
+  const frame = document.getElementById('chop-frame');
+  if (!frame || frame.dataset.loaded === '1') return;
+  frame.src = '/makerdeck/chop.html';
+  frame.dataset.loaded = '1';
 }
 
 function router() {
@@ -2746,38 +4186,76 @@ function router() {
     _stopCameraImages('#fleet-wall-page img');
     _fleetWallSignature = '';
   }
+  if (route.view !== 'filament') {
+    _fleetFilamentSignature = '';
+  }
+  if (route.view !== 'memory') _teardownMediaIn(document.getElementById('memory-passport'));
+  if (route.view !== 'printer' || route.subtab !== 'history') {
+    _teardownMediaIn(document.getElementById('history-day-detail'));
+  }
   const wasOnSettings = _onSettings;
   const wasOnFailures = _onFailures;
   const wasOnSpools = _onSpools;
+  const wasOnFilament = _onFilament;
   const wasOnMemory = _onMemory;
+  const wasOnProjects = _onProjects;
   const wasOnManual = _onManual;
   const wasOnDemo = _onDemo;
+  const wasOnAbout = _onAbout;
+  const wasOnMakerWorld = _onMakerWorld;
   const wasSpoolDetailId = _renderedSpoolDetailId;
   const spoolsRouteKey = route.view === 'spools' ? (location.hash || '#/spools') : '';
   const memoryRouteKey = route.view === 'memory' ? (location.hash || '#/memory') : '';
+  const projectsRouteKey = route.view === 'projects' ? (location.hash || '#/projects') : '';
   _onSettings = route.view === 'settings';
   _onFailures = route.view === 'failures';
   _onSpools = route.view === 'spools';
+  _onFilament = route.view === 'filament';
   _onMemory = route.view === 'memory';
+  _onProjects = route.view === 'projects';
   _onManual = route.view === 'manual';
   _onDemo = route.view === 'demo';
+  _onAbout = route.view === 'about';
+  _onMakerWorld = route.view === 'makerworld';
+  _onMakerDeck = route.view === 'makerdeck';
+  _onMeshPrep = route.view === 'meshprep';
+  _onPainter = route.view === 'painter';
+  _onChop = route.view === 'chop';
   if (route.view !== 'spool') _renderedSpoolDetailId = null;
+
+  if (route.view !== 'settings' && wasOnSettings) {
+    const settingsContent = document.getElementById('settings-content');
+    if (settingsContent) settingsContent.innerHTML = '';
+    _bambuTokenEditorOpen = false;
+  }
+  if (route.view !== 'makerworld' && wasOnMakerWorld) {
+    _bambuTokenEditorOpen = false;
+  }
 
   document.getElementById('view-dashboard').hidden = route.view !== 'dashboard';
   document.getElementById('view-mission').hidden   = route.view !== 'mission';
   document.getElementById('view-fleet').hidden     = route.view !== 'fleet';
+  document.getElementById('view-filament').hidden  = route.view !== 'filament';
   document.getElementById('view-stats').hidden     = route.view !== 'stats';
   document.getElementById('view-printer').hidden   = route.view !== 'printer';
   document.getElementById('view-spool').hidden     = route.view !== 'spool';
   document.getElementById('view-cameras').hidden   = route.view !== 'cameras';
   document.getElementById('view-queue').hidden     = route.view !== 'queue';
   document.getElementById('view-files').hidden     = route.view !== 'files';
+  const projectsView = document.getElementById('view-projects');
+  if (projectsView) projectsView.hidden = route.view !== 'projects';
   document.getElementById('view-memory').hidden    = route.view !== 'memory';
   document.getElementById('view-failures').hidden  = route.view !== 'failures';
   document.getElementById('view-spools').hidden    = route.view !== 'spools';
   document.getElementById('view-settings').hidden  = route.view !== 'settings';
   document.getElementById('view-demo').hidden      = route.view !== 'demo';
+  document.getElementById('view-makerworld').hidden = route.view !== 'makerworld';
+  document.getElementById('view-makerdeck').hidden = route.view !== 'makerdeck';
+  document.getElementById('view-meshprep').hidden = route.view !== 'meshprep';
+  document.getElementById('view-painter').hidden  = route.view !== 'painter';
+  document.getElementById('view-chop').hidden     = route.view !== 'chop';
   document.getElementById('view-manual').hidden    = route.view !== 'manual';
+  document.getElementById('view-about').hidden     = route.view !== 'about';
 
   document.querySelectorAll('#tab-strip .tab').forEach(tab => {
     const href = tab.getAttribute('href');
@@ -2785,16 +4263,24 @@ function router() {
     tab.classList.toggle('active',
       (route.view === 'dashboard' && href === '#/') ||
       (route.view === 'fleet'     && href === '#/fleet') ||
+      (route.view === 'filament'  && href === '#/filament') ||
       (route.view === 'mission'   && href === '#/mission') ||
       (route.view === 'stats'     && href === '#/stats') ||
       printerTabActive ||
       (route.view === 'queue'    && href === '#/queue') ||
       (route.view === 'files'    && href === '#/files') ||
+      (route.view === 'projects' && (href === '#/projects' || (href || '').startsWith('#/projects/'))) ||
       (route.view === 'memory'   && href === '#/memory') ||
       (route.view === 'failures' && href === '#/failures') ||
       (route.view === 'spools'   && href === '#/spools') ||
-      (route.view === 'demo'     && href === '#/demo') ||
+      (route.view === 'demo'     && (href === '#/walkthrough' || href === '#/demo')) ||
+      (route.view === 'makerworld' && href === '#/makerworld') ||
+      (route.view === 'makerdeck' && href === '#/makerdeck') ||
+      (route.view === 'meshprep' && href === '#/meshprep') ||
+      (route.view === 'painter'  && href === '#/painter') ||
+      (route.view === 'chop'     && href === '#/chop') ||
       (route.view === 'manual'   && href === '#/manual') ||
+      (route.view === 'about'    && href === '#/about') ||
       (route.view === 'settings' && (
         href === '#/settings' ||
         href === `#/settings/${_settingsCategory}` ||
@@ -2805,6 +4291,7 @@ function router() {
 
   if (route.view === 'printer') renderPrinterDetail(route.id, route.subtab);
   if (route.view === 'fleet') renderFleetWall();
+  if (route.view === 'filament') renderFleetFilament();
   if (route.view === 'mission') renderMissionControl();
   if (route.view === 'stats') renderStatsView();
   if (route.view === 'spool' && wasSpoolDetailId !== route.id) {
@@ -2814,6 +4301,11 @@ function router() {
   if (route.view === 'cameras') renderCamerasView();
   if (route.view === 'queue') renderQueueView();
   if (route.view === 'files' && !_fileDeskRenderInFlight) renderFileDeskView();
+  if (route.view === 'projects' && (!wasOnProjects || _lastProjectsRouteKey !== projectsRouteKey)) {
+    _lastProjectsRouteKey = projectsRouteKey;
+    renderProjectsView(route.id);
+  }
+  if (route.view !== 'projects') _lastProjectsRouteKey = '';
   if (route.view === 'memory' && (!wasOnMemory || _lastMemoryRouteKey !== memoryRouteKey)) {
     _lastMemoryRouteKey = memoryRouteKey;
     renderPrintMemoryView();
@@ -2827,53 +4319,112 @@ function router() {
   if (route.view !== 'memory') _lastMemoryRouteKey = '';
   if (route.view === 'settings' && (!wasOnSettings || categoryBeforeRoute !== _settingsCategory)) renderSettingsView();
   if (route.view === 'demo' && !wasOnDemo) renderDemoView();
+  if (route.view === 'makerworld' && !wasOnMakerWorld) renderMakerWorldView();
+  if (route.view === 'makerdeck') _ensureMakerDeckFrame();
+  if (route.view === 'meshprep') _ensureMeshPrepFrame();
+  if (route.view === 'painter') _ensurePainterFrame();
+  if (route.view === 'chop') _ensureChopFrame();
   if (route.view === 'manual' && !wasOnManual) renderManualView();
+  if (route.view === 'about' && !wasOnAbout) renderAboutView();
+}
+
+const _SIDEBAR_SECTIONS_KEY = 'flightdeck-sidebar-sections-v2';
+
+function _sidebarSectionsState() {
+  try {
+    return JSON.parse(localStorage.getItem(_SIDEBAR_SECTIONS_KEY) || '{}') || {};
+  } catch {
+    return {};
+  }
+}
+
+function _sidebarSectionOpen(id, defaultOpen = true) {
+  const state = _sidebarSectionsState();
+  return state[id] !== undefined ? !!state[id] : defaultOpen;
+}
+
+function _bindSidebarSections() {
+  document.querySelectorAll('[data-sidebar-section]').forEach((el) => {
+    if (el.dataset.bound === '1') return;
+    el.dataset.bound = '1';
+    el.addEventListener('toggle', () => {
+      const id = el.dataset.sidebarSection;
+      if (!id) return;
+      const state = _sidebarSectionsState();
+      state[id] = el.open;
+      localStorage.setItem(_SIDEBAR_SECTIONS_KEY, JSON.stringify(state));
+    });
+  });
 }
 
 function buildTabs(printers) {
   const nav = document.getElementById('tab-strip');
-  const printerGroups = printers.map((p, i) => {
+  const ordered = [...printers].sort(_comparePrintersByBench);
+  const printerGroups = ordered.map((p, i) => {
     const color = _PRINTER_ACCENT_PALETTE[i % _PRINTER_ACCENT_PALETTE.length];
     const label = _printerNavLabel(p);
     const subLabel = _printerSecondaryLabel(p);
     const state = p.state || 'unknown';
     const stateClass = _printerDisplayStateClass(p);
-    const progress = _printerProgressBadge(p);
     return `<a class="tab tab-printer" href="#/printer/${p.id}" style="--tab-accent:${color}" title="${esc(label)} · ${esc(_printerDisplayStateLabel(p))}">
       <span class="tab-printer-state tab-printer-state-${esc(stateClass)}"></span>
       <span class="tab-printer-title">
         <span class="tab-printer-name">${esc(label)}</span>
         ${subLabel ? `<span class="tab-printer-sub">${esc(subLabel)}</span>` : ''}
       </span>
-      ${progress ? `<span class="tab-printer-progress">${progress}</span>` : ''}
     </a>`;
   }).join('');
   const settingsLinks = _SETTINGS_CATEGORIES.map(c =>
     `<a class="tab-settings-child tab" href="#/settings/${c.id}">${esc(c.label)}</a>`
   ).join('');
+  const section = (id, title, body, defaultOpen = true) =>
+    `<details class="tab-section-group" data-sidebar-section="${id}"${_sidebarSectionOpen(id, defaultOpen) ? ' open' : ''}>
+      <summary class="tab-section">${title}</summary>
+      <div class="tab-section-body">${body}</div>
+    </details>`;
   nav.innerHTML = [
     `<a class="tab" href="#/">Dashboard</a>`,
     `<a class="tab" href="#/fleet">Fleet Wall</a>`,
     `<a class="tab" href="#/mission">Flight Tower</a>`,
     `<a class="tab" href="#/stats">Telemetry</a>`,
-    `<div class="tab-section">Printers</div>`,
-    printerGroups,
-    `<div class="tab-section">Operations</div>`,
-    `<a class="tab" href="#/queue">Queue</a>`,
-    `<a class="tab" href="#/files">Global Print Bay</a>`,
-    `<a class="tab" href="#/memory">Print Memory</a>`,
-    `<a class="tab" href="#/spools">Spools</a>`,
-    `<div class="tab-section">System</div>`,
-    `<a class="tab" href="#/demo">Demo Mode</a>`,
-    `<a class="tab" href="#/manual">Flight Manual</a>`,
-    `<div class="tab-flyout">
-      <a class="tab tab-settings-root" href="#/settings">Settings</a>
-      <div class="tab-flyout-menu">${settingsLinks}</div>
-    </div>`,
+    section('printers', 'Printers', printerGroups, true),
+    section('operations', 'Operations', [
+      `<a class="tab" href="#/queue">Queue</a>`,
+      `<a class="tab" href="#/files">Global Print Bay</a>`,
+      `<a class="tab" href="#/projects">Projects</a>`,
+      `<a class="tab" href="#/memory">Print Memory</a>`,
+      `<a class="tab" href="#/filament">Fleet Filament</a>`,
+      `<a class="tab" href="#/spools">Spools</a>`,
+    ].join(''), true),
+    section('system', 'System', [
+      `<a class="tab" href="#/walkthrough">Walkthrough Mode</a>`,
+      `<a class="tab" href="#/makerworld">MakerWorld</a>`,
+      `<a class="tab tab-makerdeck" href="#/makerdeck">MakerDeck</a>`,
+      `<a class="tab tab-meshprep" href="#/meshprep">Mesh Prep</a>`,
+      `<a class="tab tab-painter" href="#/painter">STL Painter</a>`,
+      `<a class="tab tab-chop" href="#/chop">Chop</a>`,
+      `<a class="tab" href="#/manual">Flight Manual</a>`,
+      `<a class="tab" href="#/about">About</a>`,
+      `<div class="tab-flyout">
+        <a class="tab tab-settings-root" href="#/settings">Settings</a>
+        <div class="tab-flyout-menu">${settingsLinks}</div>
+      </div>`,
+    ].join(''), true),
   ].join('');
   _tabsBuilt = true;
+  _bindSidebarSections();
+  _syncMobileNavSections();
   router();
 }
+
+/** On phone widths, keep sidebar <details> open so the horizontal strip can show tabs. */
+function _syncMobileNavSections() {
+  const mobile = window.matchMedia('(max-width: 760px)').matches;
+  document.querySelectorAll('#tab-strip .tab-section-group').forEach((el) => {
+    if (mobile) el.open = true;
+  });
+}
+window.matchMedia('(max-width: 760px)').addEventListener('change', _syncMobileNavSections);
 
 // ── Printer detail helpers ─────────────────────────────────────────────────
 
@@ -2917,6 +4468,37 @@ function _liveEtaText(p) {
   return `Slicer ${formatEta(job.eta_seconds)}`;
 }
 
+function _detailLiveToolbarHeader(p, printerColor, bannerTextColor) {
+  const stateLabel = _printerDisplayStateLabel(p);
+  const stateClass = _printerDisplayStateClass(p);
+  const primary = _printerPrimaryLabel(p);
+  const secondary = _printerSecondaryLabel(p);
+  const job = _activePrinterJob(p);
+  const progress = job?.progress != null ? `${Math.round(job.progress * 100)}%` : null;
+  const jobName = job ? jobDisplayName(job) : (p.idle_info?.['Last print'] || 'Ready for next job');
+  const statusMeta = job
+    ? [progress, _liveEtaText(p)].filter(Boolean).join(' · ')
+    : _dashboardIssueText(p);
+  const signals = _liveSignalItems(p).filter(s => s.cls === 'danger' || s.cls === 'warn');
+  if (!(p.print_enabled ?? true)) {
+    signals.unshift({ cls: 'warn', label: p.print_enabled_note || 'Dispatch locked' });
+  }
+  return `<div class="live-command-header live-deck-command live-toolbar-compact" style="--tab-accent:${printerColor}">
+    <div class="live-toolbar-primary">
+      <span class="live-toolbar-name" style="color:${bannerTextColor}">${esc(primary)}</span>
+      ${secondary ? `<span class="live-toolbar-model">${esc(secondary)}</span>` : ''}
+      <span class="live-toolbar-sep" aria-hidden="true">·</span>
+      <span class="live-toolbar-job" title="${esc(job?.filename || jobName)}">${esc(jobName)}</span>
+      ${statusMeta ? `<span class="live-toolbar-meta">${esc(statusMeta)}</span>` : ''}
+    </div>
+    <div class="live-toolbar-trailing">
+      <span class="badge badge-${esc(stateClass)} live-state-badge live-toolbar-badge">${esc(stateLabel)}</span>
+      ${_detailTransportControls(p.id, p)}
+    </div>
+    ${signals.length ? `<div class="live-toolbar-signals">${signals.map(s => `<span class="live-signal live-signal-${esc(s.cls)}">${esc(s.label)}</span>`).join('')}</div>` : ''}
+  </div>`;
+}
+
 function _detailLiveHeader(p, printerColor, bannerTextColor) {
   const stateLabel = _printerDisplayStateLabel(p);
   const stateClass = _printerDisplayStateClass(p);
@@ -2930,7 +4512,8 @@ function _detailLiveHeader(p, printerColor, bannerTextColor) {
     : _dashboardIssueText(p);
   const signals = _detailLiveSignals(p);
   const disabledNote = (p.print_enabled ?? true) ? '' : (p.print_enabled_note || 'No reason entered');
-  return `<div class="live-command-header" style="--tab-accent:${printerColor}">
+  const canReprintLast = ['idle', 'finished'].includes(String(p.state || '').toLowerCase());
+  return `<div class="live-command-header live-deck-command" style="--tab-accent:${printerColor}">
     <div class="live-printer-mark" style="color:${bannerTextColor}">
       <span class="live-printer-name">${esc(primary)}</span>
       ${secondary ? `<span class="live-printer-shop">${esc(secondary)}</span>` : ''}
@@ -2942,6 +4525,7 @@ function _detailLiveHeader(p, printerColor, bannerTextColor) {
     </div>
     <div class="live-state-wrap">
       <span class="badge badge-${esc(stateClass)} live-state-badge">${esc(stateLabel)}</span>
+      ${canReprintLast ? `<button class="live-reprint-last" type="button" data-live-reprint-last data-printer-id="${esc(p.id)}" title="Queue the last completed file again">Reprint last</button>` : ''}
       <label class="live-print-enabled">
         <input type="checkbox"
           data-live-print-enabled
@@ -2961,7 +4545,44 @@ function _detailLiveHeader(p, printerColor, bannerTextColor) {
   </div>`;
 }
 
-function _detailLiveSignals(p) {
+function _isTimelapseRecording(p) {
+  return p?.kind === 'bambu'
+    && p?.timelapse_state === 'enable'
+    && ['printing', 'paused'].includes(String(p?.state || ''));
+}
+
+function _detailTimelapseRecOverlay(p) {
+  if (!_isTimelapseRecording(p)) return '';
+  return `<div class="camera-rec-indicator" aria-label="Timelapse recording">
+    <span class="camera-rec-dot" aria-hidden="true"></span>
+    <span class="camera-rec-label">REC</span>
+  </div>`;
+}
+
+function _detailCameraBottomStatus(id) {
+  return `<div class="camera-bottom-status" id="detail-camera-status" data-camera-status-for="${esc(id)}"></div>`;
+}
+
+function _detailCameraHeroInner(id, p, camSrc) {
+  return `${_detailCameraContent(id, p, camSrc)}<div class="camera-hud" id="detail-camera-hud">${_detailCameraHud(p)}</div>${_detailCameraBottomStatus(id)}`;
+}
+
+function _cameraStatusBarFor(img) {
+  return img?.parentElement?.querySelector('#detail-camera-status') || img?.parentElement || null;
+}
+
+function _syncTimelapseRecOverlay(heroEl, p) {
+  const statusBar = heroEl?.querySelector('#detail-camera-status');
+  if (!statusBar) return;
+  const existing = statusBar.querySelector('.camera-rec-indicator');
+  if (_isTimelapseRecording(p)) {
+    if (!existing) statusBar.insertAdjacentHTML('afterbegin', _detailTimelapseRecOverlay(p));
+  } else if (existing) {
+    existing.remove();
+  }
+}
+
+function _liveSignalItems(p) {
   const signals = [];
   if (p.state === 'estop') signals.push({ cls: 'danger', label: 'E-stop active' });
   else if (p.state === 'error') signals.push({ cls: 'danger', label: p.error || 'Printer fault' });
@@ -2979,7 +4600,7 @@ function _detailLiveSignals(p) {
     .slice(0, 3);
   low.forEach(s => signals.push({
     cls: 'warn',
-    label: `Low spool #${s.id}: ${Math.round(Number(s.remaining_g || 0))}g`,
+    label: `Low spool ${_spoolDisplayLabel(s)}: ${Math.round(Number(s.remaining_g || 0))}g`,
   }));
 
   signals.push(..._amsMismatchSignals(p, loaded));
@@ -2992,7 +4613,11 @@ function _detailLiveSignals(p) {
     seen.add(key);
     unique.push(signal);
   });
+  return unique;
+}
 
+function _detailLiveSignals(p) {
+  const unique = _liveSignalItems(p);
   if (!unique.length) return `<span class="live-signal live-signal-ok">Clear skies</span>`;
   return unique.slice(0, 5).map(signal => {
     const title = signal.title || signal.label;
@@ -3052,7 +4677,7 @@ function _detailLiveSpoolChips(p) {
   return spools.map(s => {
     const pct = s.label_weight_g > 0 ? Math.round(Number(s.remaining_g || 0) * 100 / Number(s.label_weight_g || 1)) : 0;
     const cls = pct < 20 ? ' live-spool-row-low' : pct < 50 ? ' live-spool-row-warn' : '';
-    const title = [s.color_name, s.material, s.brand].filter(Boolean).join(' · ') || `Spool #${s.id}`;
+    const title = [s.color_name, s.material, s.brand].filter(Boolean).join(' · ') || `Spool ${_spoolDisplayLabel(s)}`;
     const grams = Math.round(Number(s.remaining_g || 0));
     const total = Math.round(Number(s.label_weight_g || 0));
     const slot = s.location_slot != null ? _amsSlotLabel(p, Number(s.location_slot)) : (s.storage_location_name || 'Loaded');
@@ -3060,7 +4685,7 @@ function _detailLiveSpoolChips(p) {
       <span class="live-spool-swatch" style="${_spoolColorStyle(s)}"></span>
       <span class="live-spool-main">
         <strong>${esc(title)}</strong>
-        <em>#${s.id} · ${esc(slot)} · ${grams}g${total ? ` of ${total}g` : ''}</em>
+        <em>${_spoolDisplayLabel(s)} · ${esc(slot)} · ${grams}g${total ? ` of ${total}g` : ''}</em>
       </span>
       <span class="live-spool-meter"><b style="width:${Math.max(2, Math.min(100, pct))}%"></b></span>
       <span class="live-spool-pct">${pct}%</span>
@@ -3105,21 +4730,28 @@ function _detailLiveAmsLoadoutRows(p) {
         : (slot.empty ? 'Empty' : 'Unassigned');
       const title = [
         label,
-        loadedSpool ? `#${loadedSpool.id} ${loadedSpool.color_name || ''} ${loadedSpool.material || ''}` : '',
+        loadedSpool ? `${_spoolDisplayLabel(loadedSpool)} ${loadedSpool.color_name || ''} ${loadedSpool.material || ''}` : '',
         !slot.empty ? _slotProfileLabel(slot) : '',
+        pct != null ? `${pct}% left` : '',
         mismatch,
       ].filter(Boolean).join(' · ');
+      const remainCls = pct == null ? '' : pct < 20 ? ' is-low' : pct < 50 ? ' is-warn' : '';
+      const remain = pct == null ? '' : `<span class="ams-loadout-remain${remainCls}">
+          <i><b style="width:${Math.max(2, Math.min(100, pct))}%"></b></i>
+          <em>${pct}%</em>
+        </span>`;
       return `<button class="ams-loadout-slot${slot.empty ? ' is-empty' : ''}${loadedSpool ? ' has-spool' : ''}${routeActive ? ' is-feeding' : ''}${mismatch ? ' has-warning' : ''}"
           style="--slot-colour:${colour};--slot-text:${_spoolTextColor(colour)}"
           data-slot-edit data-printer-id="${p.id}" data-slot-index="${flatSlot}" data-slot-label="${esc(label)}"
           title="${esc(title)}">
+        ${remain}
         <span class="ams-loadout-lip">
           <b>${esc(label.split(' · ').pop() || label)}</b>
           <small>${esc(stateLabel)}</small>
         </span>
         <span class="ams-loadout-spool" aria-hidden="true">
           <span class="ams-loadout-rim"></span>
-          <span class="ams-loadout-core">${loadedSpool ? `#${loadedSpool.id}` : ''}</span>
+          <span class="ams-loadout-core">${loadedSpool ? esc(_spoolDisplayLabel(loadedSpool)) : ''}</span>
           <span class="ams-loadout-hub"></span>
         </span>
         <span class="ams-loadout-info">
@@ -3155,6 +4787,458 @@ function _detailLiveAmsLoadoutRows(p) {
   </div>`;
 }
 
+let _fleetFilamentIntelCache = null;
+let _fleetFilamentQueueCache = null;
+let _fleetFilamentActionsBound = false;
+
+function _fleetFilamentMismatchItems(p, loaded = _latestSpoolsByPrinter[p.id] || []) {
+  const items = [];
+  (p.ams || []).forEach(unit => (unit.slots || []).forEach(slot => {
+    const flatSlot = _amsFlatSlot(unit, slot);
+    const spool = loaded.find(s => Number(s.location_slot) === flatSlot);
+    if (!spool || !_slotMismatch(spool, slot)) return;
+    items.push({
+      printer: p,
+      flatSlot,
+      spool,
+      slot,
+      label: _amsSlotLabel(p, flatSlot),
+    });
+  }));
+  return items;
+}
+
+function _fleetFilamentStaleEmptyItems(p, loaded = _latestSpoolsByPrinter[p.id] || []) {
+  const items = [];
+  (p.ams || []).forEach(unit => (unit.slots || []).forEach(slot => {
+    if (!slot.empty) return;
+    const flatSlot = _amsFlatSlot(unit, slot);
+    const spool = loaded.find(s => Number(s.location_slot) === flatSlot);
+    if (!spool) return;
+    items.push({
+      printer: p,
+      flatSlot,
+      spool,
+      label: _amsSlotLabel(p, flatSlot),
+    });
+  }));
+  return items;
+}
+
+function _spoolTrustAmsProfile(spool) {
+  const material = String(spool?.material || 'PLA').trim().toUpperCase();
+  const fallback = _amsProfileTempRange(material);
+  const parsed = _amsProfileParts('', spool);
+  return {
+    profile_name: parsed.profileName || material,
+    tray_type: material,
+    tray_info_idx: _amsGenericFilamentId(material),
+    brand: spool?.brand || '',
+    color: spool?.color_hex || '#808080',
+    nozzle_temp_min: fallback.min,
+    nozzle_temp_max: fallback.max,
+  };
+}
+
+function _fleetFilamentRoomOps(printers) {
+  const mismatches = printers.flatMap(p => _fleetFilamentMismatchItems(p));
+  const staleEmpties = printers.flatMap(p => _fleetFilamentStaleEmptyItems(p));
+  return { mismatches, staleEmpties };
+}
+
+function _fleetFilamentQueueFilamentGaps(jobs = []) {
+  return jobs.filter(job => {
+    if (job.status !== 'pending') return false;
+    const issues = job.preflight?.issues || [];
+    return issues.some(issue => /filament|ams|colour|color|spool|nozzle|loaded/i.test(String(issue.message || '')));
+  });
+}
+
+function _fleetFilamentHealthStrip(intel, room, queueJobs = []) {
+  const summary = intel?.summary || {};
+  const chips = [];
+  if (room.mismatches) {
+    chips.push(`<a class="fleet-filament-health-chip is-warn" href="#/filament">AMS review <strong>${room.mismatches}</strong></a>`);
+  }
+  if (summary.unattributed_prints) {
+    chips.push(`<a class="fleet-filament-health-chip is-watch" href="#/memory">Unattributed <strong>${summary.unattributed_prints}</strong></a>`);
+  }
+  if (summary.loaded_low) {
+    chips.push(`<a class="fleet-filament-health-chip is-warn" href="#/spools?filter=loaded">Loaded low <strong>${summary.loaded_low}</strong></a>`);
+  }
+  const queueGaps = _fleetFilamentQueueFilamentGaps(queueJobs).length;
+  if (queueGaps) {
+    chips.push(`<a class="fleet-filament-health-chip is-watch" href="#/queue">Queue gaps <strong>${queueGaps}</strong></a>`);
+  }
+  if (!chips.length) {
+    chips.push('<span class="fleet-filament-health-chip is-ok">Filament tracking clean</span>');
+  }
+  return `<section class="fleet-filament-health" aria-label="Filament health">
+    <span class="fleet-filament-health-label">Room health</span>
+    <div class="fleet-filament-health-chips">${chips.join('')}</div>
+  </section>`;
+}
+
+function _fleetFilamentActionsBar(ops) {
+  const mismatchCount = ops.mismatches.length;
+  const emptyCount = ops.staleEmpties.length;
+  return `<section class="fleet-filament-actions" aria-label="Room actions">
+    <div class="fleet-filament-actions-copy">
+      <strong>Room actions</strong>
+      <span>Click any slot for quick load by # · bulk fixes below</span>
+    </div>
+    <div class="fleet-filament-actions-buttons">
+      <button type="button" class="fleet-filament-action${mismatchCount ? ' is-warn' : ''}" data-fleet-trust-all ${mismatchCount ? '' : 'disabled'}>
+        Trust all <span>${mismatchCount}</span>
+      </button>
+      <button type="button" class="fleet-filament-action${emptyCount ? '' : ''}" data-fleet-return-empties ${emptyCount ? '' : 'disabled'}>
+        Return empties <span>${emptyCount}</span>
+      </button>
+    </div>
+  </section>`;
+}
+
+function _fleetFilamentQueueMapping(jobs, printers) {
+  const pending = jobs.filter(j => j.status === 'pending');
+  if (!pending.length) return '';
+  const rows = pending.slice(0, 10).map(job => {
+    const printer = printers.find(p => p.id === job.printer_id);
+    const readiness = _missionJobReadiness(job);
+    const requirements = _missionColourRequirements(job);
+    const loaded = _latestSpoolsByPrinter[job.printer_id] || [];
+    const coverage = requirements.length
+      ? _missionCoverageForRequirements(requirements, loaded, printer)
+      : { ok: !!loaded.length, text: loaded.length ? 'Loaded spools present' : 'No loaded spools' };
+    const colours = requirements.map(req => {
+      const ok = coverage.picks?.some(spool => _missionSpoolMatchesColour(spool, req.colour));
+      return `<span class="fleet-filament-queue-colour${ok ? ' is-ready' : ' is-missing'}">${esc(_missionColourLabel(req.colour))}${req.type ? ` ${esc(req.type)}` : ''}</span>`;
+    }).join('');
+    const issue = job.preflight?.issues?.find(i => i.level === 'block' || i.level === 'wait') || job.preflight?.issues?.[0];
+    return `<article class="fleet-filament-queue-row fleet-filament-queue-${readiness.cls}">
+      <div class="fleet-filament-queue-main">
+        <strong>${esc(job.filename.replace(/.*[\\/]/, ''))}</strong>
+        <span>${esc(printer ? _printerPrimaryLabel(printer) : job.printer_id)} · ${esc(job.filament_type || 'Filament')}${job.filament_weight_g ? ` · ${Math.round(job.filament_weight_g)}g` : ''}</span>
+      </div>
+      <div class="fleet-filament-queue-colours">${colours || '<span class="fleet-filament-queue-colour is-neutral">Single material</span>'}</div>
+      <div class="fleet-filament-queue-status">
+        <span class="fleet-filament-queue-badge is-${readiness.cls}">${esc(readiness.label)}</span>
+        <small>${esc(issue?.message || coverage.text || job.preflight?.label || 'Ready to map')}</small>
+      </div>
+      <a class="fleet-filament-queue-link" href="#/queue">Open queue</a>
+    </article>`;
+  }).join('');
+  return `<section class="fleet-filament-queue" aria-label="Queue filament mapping">
+    <header class="fleet-filament-queue-head">
+      <div>
+        <span>Dispatch mapping</span>
+        <strong>Pending queue vs loaded filament</strong>
+      </div>
+      <a href="#/queue">Full queue</a>
+    </header>
+    <div class="fleet-filament-queue-list">${rows}</div>
+  </section>`;
+}
+
+async function _fleetFilamentBulkTrust(items) {
+  let ok = 0;
+  for (const item of items) {
+    const r = await fetch(`/api/spools/${item.spool.id}/move`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        printer_id: item.printer.id,
+        slot: Number(item.flatSlot),
+        ams_profile: _spoolTrustAmsProfile(item.spool),
+        sync_ams: true,
+      }),
+    });
+    if (r.ok) ok += 1;
+  }
+  return ok;
+}
+
+async function _fleetFilamentReturnEmpties(items) {
+  let ok = 0;
+  for (const item of items) {
+    const r = await fetch(`/api/spools/${item.spool.id}/move`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ printer_id: null, slot: null, storage_location_id: null }),
+    });
+    if (r.ok) ok += 1;
+  }
+  return ok;
+}
+
+function _bindFleetFilamentActions() {
+  const page = document.getElementById('fleet-filament-page');
+  if (!page || _fleetFilamentActionsBound) return;
+  _fleetFilamentActionsBound = true;
+  page.addEventListener('click', async e => {
+    const trustBtn = e.target.closest('[data-fleet-trust-all]');
+    if (trustBtn) {
+      const printers = [...(_latestPrinters || [])].sort(_comparePrintersByBench);
+      const items = _fleetFilamentRoomOps(printers).mismatches;
+      if (!items.length) return;
+      const confirmed = await _confirmModal(`Trust Flightdeck on ${items.length} AMS slot${items.length === 1 ? '' : 's'}? This pushes each assigned spool profile back to the printer.`);
+      if (!confirmed) return;
+      trustBtn.disabled = true;
+      trustBtn.classList.add('is-busy');
+      try {
+        const ok = await _fleetFilamentBulkTrust(items);
+        showToast('Trust complete', `${ok}/${items.length} slot${items.length === 1 ? '' : 's'} synced to AMS.`, ok ? 'success' : 'error');
+        await refreshPrinters();
+        await _refreshSpoolsByPrinter();
+        _fleetFilamentSignature = '';
+        renderFleetFilament();
+      } finally {
+        trustBtn.disabled = false;
+        trustBtn.classList.remove('is-busy');
+      }
+      return;
+    }
+    const returnBtn = e.target.closest('[data-fleet-return-empties]');
+    if (returnBtn) {
+      const printers = [...(_latestPrinters || [])].sort(_comparePrintersByBench);
+      const items = _fleetFilamentRoomOps(printers).staleEmpties;
+      if (!items.length) return;
+      const confirmed = await _confirmModal(`Return ${items.length} spool${items.length === 1 ? '' : 's'} from empty AMS slots to home shelves?`);
+      if (!confirmed) return;
+      returnBtn.disabled = true;
+      returnBtn.classList.add('is-busy');
+      try {
+        const ok = await _fleetFilamentReturnEmpties(items);
+        showToast('Return complete', `${ok}/${items.length} spool${items.length === 1 ? '' : 's'} sent home.`, ok ? 'success' : 'error');
+        await _refreshSpoolsByPrinter();
+        _fleetFilamentSignature = '';
+        renderFleetFilament();
+      } finally {
+        returnBtn.disabled = false;
+        returnBtn.classList.remove('is-busy');
+      }
+    }
+  });
+}
+
+function _fleetFilamentPrinterSummary(p) {
+  const loaded = (_latestSpoolsByPrinter[p.id] || []).filter(s => !s.archived_at);
+  let mismatches = 0;
+  let feeding = 0;
+  let slots = 0;
+  let assigned = 0;
+  for (const unit of (p.ams || [])) {
+    for (const slot of (unit.slots || [])) {
+      slots += 1;
+      const flatSlot = _amsFlatSlot(unit, slot);
+      const spool = loaded.find(s => Number(s.location_slot) === flatSlot);
+      if (spool) assigned += 1;
+      if (_slotMismatch(spool, slot)) mismatches += 1;
+      if (_slotRouteActive(p, unit, slot)) feeding += 1;
+    }
+  }
+  if (!slots && loaded.length) {
+    assigned = loaded.length;
+  }
+  return { loaded, mismatches, feeding, slots, assigned };
+}
+
+function _fleetFilamentRoomSummary(printers) {
+  let mismatches = 0;
+  let feeding = 0;
+  let assigned = 0;
+  let slots = 0;
+  printers.forEach(p => {
+    const s = _fleetFilamentPrinterSummary(p);
+    mismatches += s.mismatches;
+    feeding += s.feeding;
+    assigned += s.assigned;
+    slots += s.slots;
+  });
+  return { mismatches, feeding, assigned, slots, printers: printers.length };
+}
+
+function _fleetFilamentRackSummary(p) {
+  if (!_isH2CPrinter(p)) return null;
+  const rack = _asList(p.toolheads).filter(tool => tool?.zone === 'rack');
+  if (!rack.length) return null;
+  return {
+    loaded: rack.filter(tool => tool.present).length,
+    total: Math.max(rack.length, 6),
+  };
+}
+
+function _fleetFilamentHSeriesTabs(p) {
+  if (!_isH2CPrinter(p)) return '';
+  const rack = _asList(p.toolheads).filter(tool => tool?.zone === 'rack');
+  if (!rack.length) return '';
+  const active = _hSeriesFleetTabByPrinter[p.id] === 'rack' ? 'rack' : 'ams';
+  const rackCount = rack.filter(tool => tool.present).length;
+  const rackTotal = rack.length || 6;
+  const tab = (key, label, count) => `<button class="hseries-tooldeck-tab fleet-filament-hseries-tab${active === key ? ' is-active' : ''}" type="button" role="tab" aria-selected="${active === key ? 'true' : 'false'}" data-hseries-fleet-tab="${key}" data-printer-id="${esc(p.id)}">${esc(label)} <span>${esc(count)}</span></button>`;
+  return `<div class="hseries-tooldeck-tabs fleet-filament-hseries-tabs" role="tablist" aria-label="H2C loadout view">
+    ${tab('ams', 'AMS', String(_asList(p.ams).length || 0))}
+    ${tab('rack', 'Rack', `${rackCount}/${rackTotal}`)}
+  </div>`;
+}
+
+function _fleetFilamentPrinterCard(p) {
+  const summary = _fleetFilamentPrinterSummary(p);
+  const rackSummary = _fleetFilamentRackSummary(p);
+  const tone = _printerDisplayStateClass(p);
+  const primary = _printerPrimaryLabel(p);
+  const secondary = _printerSecondaryLabel(p);
+  const stateLabel = _printerDisplayStateLabel(p);
+  const accent = _printerColor(p.id);
+  const h2cTabs = _fleetFilamentHSeriesTabs(p);
+  const activeFleetTab = _hSeriesFleetTabByPrinter[p.id] === 'rack' ? 'rack' : 'ams';
+  const showRackPanel = !!h2cTabs && activeFleetTab === 'rack';
+  const statBits = [
+    summary.slots ? `${summary.assigned}/${summary.slots} slots` : `${summary.assigned} loaded`,
+    rackSummary ? `${rackSummary.loaded}/${rackSummary.total} rack` : '',
+    summary.feeding ? `${summary.feeding} feeding` : '',
+    summary.mismatches ? `${summary.mismatches} review` : '',
+  ].filter(Boolean);
+  const routeStrip = p.ams?.length && !showRackPanel ? _fleetWallAmsRouteStrip(p) : '';
+  let loadout = '';
+  if (showRackPanel) {
+    loadout = _detailLiveToolheadRows(p, 'rack')
+      || '<div class="fleet-filament-empty">No hotend rack data reported yet.</div>';
+  } else if (p.ams?.length) {
+    loadout = _detailLiveAmsLoadoutRows(p);
+  } else if (p.mmu?.length) {
+    loadout = `<div class="fleet-filament-mmu">${_detailLiveMmuRows(p)}</div>`;
+  } else {
+    const chips = _detailLiveSpoolChips(p);
+    loadout = chips
+      ? `<div class="fleet-filament-external">${chips}</div>`
+      : '<div class="fleet-filament-empty">No AMS or loaded spools tracked on this printer.</div>';
+  }
+  const trackNote = (_isH2CPrinter(p) || _isH2dPrinter(p)) && !showRackPanel
+    ? '<span class="fleet-filament-track-note">Track Switch routes AMS to either nozzle on this printer.</span>'
+    : '';
+  const cardViewClass = h2cTabs ? ` is-h2c-${activeFleetTab}-view` : '';
+  return `<article class="fleet-filament-card fleet-filament-card-${tone}${cardViewClass}" data-printer-id="${esc(p.id)}" style="--printer-accent:${accent}">
+    <header class="fleet-filament-card-head">
+      <div class="fleet-filament-card-title">
+        <h2>${esc(primary)}</h2>
+        ${secondary ? `<span class="fleet-filament-card-model">${esc(secondary)}</span>` : ''}
+        <span class="badge badge-${esc(tone)} fleet-filament-state">${esc(stateLabel)}</span>
+      </div>
+      <div class="fleet-filament-card-meta">
+        <div class="fleet-filament-card-stats">
+          ${statBits.map((bit, i) => {
+            const cls = bit.includes('review') ? 'is-warn' : bit.includes('feeding') ? 'is-feeding' : '';
+            return `<span class="fleet-filament-stat ${cls}">${esc(bit)}</span>`;
+          }).join('')}
+        </div>
+        <div class="fleet-filament-card-links">
+          <a href="#/printer/${esc(p.id)}">Live</a>
+          <a href="#/spools?filter=loaded&amp;printer=${encodeURIComponent(p.id)}">Spools</a>
+        </div>
+      </div>
+    </header>
+    ${trackNote}
+    ${routeStrip ? `<div class="fleet-filament-routes">${routeStrip}</div>` : ''}
+    ${h2cTabs}
+    <div class="fleet-filament-loadout">${loadout}</div>
+  </article>`;
+}
+
+async function renderFleetFilament() {
+  const el = document.getElementById('fleet-filament-page');
+  if (!el) return;
+  _bindFleetFilamentActions();
+  const printers = [...(_latestPrinters || [])].sort(_comparePrintersByBench);
+  if (!printers.length) {
+    el.innerHTML = `<div class="fleet-filament-empty-page">
+      <strong>No printers configured</strong>
+      <p>Add a printer in Settings to see the room filament map.</p>
+      <a href="#/settings/printers">Add printer</a>
+    </div>`;
+    _fleetFilamentSignature = '';
+    return;
+  }
+
+  const room = _fleetFilamentRoomSummary(printers);
+  const ops = _fleetFilamentRoomOps(printers);
+  const [intel, queueJobs] = await Promise.all([
+    fetch('/api/spools/intelligence?days=30').then(r => r.ok ? r.json() : (_fleetFilamentIntelCache || {})).catch(() => (_fleetFilamentIntelCache || {})),
+    fetch('/api/queue').then(r => r.ok ? r.json() : (_fleetFilamentQueueCache || [])).catch(() => (_fleetFilamentQueueCache || [])),
+  ]);
+  _fleetFilamentIntelCache = intel;
+  _fleetFilamentQueueCache = queueJobs;
+
+  const signature = [
+    room.mismatches,
+    room.feeding,
+    room.assigned,
+    ops.mismatches.length,
+    ops.staleEmpties.length,
+    intel?.summary?.unattributed_prints || 0,
+    intel?.summary?.loaded_low || 0,
+    _fleetFilamentQueueFilamentGaps(queueJobs).length,
+    queueJobs.filter(j => j.status === 'pending').length,
+    printers.map(p => {
+      const s = _fleetFilamentPrinterSummary(p);
+      const spools = (s.loaded || []).map(x => `${x.id}:${x.location_slot}:${x.remaining_g}`).join(';');
+      const rack = _fleetFilamentRackSummary(p);
+      return `${p.id}:${p.state}:${s.mismatches}:${s.feeding}:${spools}:${JSON.stringify(p.ams || [])}:${JSON.stringify(p.toolheads || [])}:${rack ? `${rack.loaded}/${rack.total}` : ''}`;
+    }).join('|'),
+  ].join('::');
+
+  if (_fleetFilamentSignature === signature && el.querySelector('.fleet-filament-grid')) {
+    return;
+  }
+  _fleetFilamentSignature = signature;
+
+  const activeJob = printers.filter(p => p.state === 'printing' || p.state === 'paused').length;
+  el.innerHTML = `<div class="fleet-filament-page-inner">
+    <header class="fleet-filament-hero">
+      <div class="fleet-filament-hero-copy">
+        <span class="mission-eyebrow">Operations</span>
+        <h1>Fleet Filament</h1>
+        <p>Whole-room AMS loadout, feed routes, spool assignments, and dispatch readiness on one board.</p>
+      </div>
+      <div class="fleet-filament-hero-stats">
+        <div class="fleet-filament-hero-stat">
+          <strong>${room.printers}</strong>
+          <span>printers</span>
+        </div>
+        <div class="fleet-filament-hero-stat">
+          <strong>${room.assigned}</strong>
+          <span>loaded${room.slots ? ` / ${room.slots} slots` : ''}</span>
+        </div>
+        <div class="fleet-filament-hero-stat${room.feeding ? ' is-feeding' : ''}">
+          <strong>${room.feeding}</strong>
+          <span>feeding now</span>
+        </div>
+        <div class="fleet-filament-hero-stat${room.mismatches ? ' is-warn' : ''}">
+          <strong>${room.mismatches}</strong>
+          <span>need review</span>
+        </div>
+        <div class="fleet-filament-hero-stat">
+          <strong>${activeJob}</strong>
+          <span>active jobs</span>
+        </div>
+      </div>
+      <div class="fleet-filament-hero-links">
+        <a href="#/spools">Spool inventory</a>
+        <a href="#/fleet">Fleet Wall</a>
+        <a href="#/queue">Queue</a>
+      </div>
+    </header>
+    ${_fleetFilamentHealthStrip(intel, room, queueJobs)}
+    ${_fleetFilamentActionsBar(ops)}
+    <div class="fleet-filament-briefing">
+      <span>Click any slot to quick-load by spool # or open Profile Doctor. Each printer is its own filament island — H2C Track Switch only routes that machine's AMS to its left or right nozzle.</span>
+    </div>
+    ${_fleetFilamentQueueMapping(queueJobs, printers)}
+    <div class="fleet-filament-grid">
+      ${printers.map(_fleetFilamentPrinterCard).join('')}
+    </div>
+  </div>`;
+}
+
 function _detailLiveMmuRows(p) {
   if (!p.mmu?.length) return '';
   const loaded = _latestSpoolsByPrinter[p.id] || [];
@@ -3166,7 +5250,7 @@ function _detailLiveMmuRows(p) {
       const gateLabel = `T${Number(gate.idx)}`;
       const style = (!gate.empty && gate.color) ? `style="background:${gate.color}"` : '';
       const slotText = loadedSpool
-        ? `#${loadedSpool.id}`
+        ? _spoolDisplayLabel(loadedSpool)
         : (gate.empty ? 'Empty' : (gate.material || gateLabel));
       const status = gate.active ? routeState.gateStatus : gate.status === 2 ? 'Buffered' : gate.empty ? 'Empty' : 'Ready';
       const title = [
@@ -3199,7 +5283,8 @@ function _detailLiveMmuRows(p) {
   }).join('');
 }
 
-function _detailLiveToolheadRows(p) {
+function _detailLiveToolheadRows(p, view = 'nozzles') {
+  if (_hasHSeriesNozzleRack(p)) return _detailLiveHSeriesToolheadRows(p, view);
   if (!_isSnapmakerU1(p)) return '';
   const loaded = _latestSpoolsByPrinter[p.id] || [];
   const reported = _asList(p.toolheads);
@@ -3229,7 +5314,7 @@ function _detailLiveToolheadRows(p) {
       </span>
       <span class="snapmaker-tool-nozzle" aria-hidden="true"></span>
       <span class="snapmaker-tool-info">
-        <strong>${esc(loadedSpool ? (loadedSpool.color_name || `Spool #${loadedSpool.id}`) : 'No spool assigned')}</strong>
+        <strong>${esc(loadedSpool ? (loadedSpool.color_name || `Spool ${_spoolDisplayLabel(loadedSpool)}`) : 'No spool assigned')}</strong>
         <em>${esc(loadedSpool ? [loadedSpool.material, loadedSpool.brand].filter(Boolean).join(' · ') : 'Click to assign')}</em>
       </span>
       <span class="snapmaker-tool-foot">
@@ -3244,6 +5329,163 @@ function _detailLiveToolheadRows(p) {
       <span>Four independent tools · T0-T3</span>
     </div>
     <div class="snapmaker-tools">${cards}</div>
+  </div>`;
+}
+
+function _detailLiveHSeriesToolheadRows(p, view = 'nozzles') {
+  const tools = _asList(p.toolheads).filter(tool => tool?.zone === 'toolhead' || tool?.zone === 'rack');
+  if (!tools.length) return '';
+  const showRack = _isH2CPrinter(p);
+  const toolheads = tools.filter(tool => tool.zone === 'toolhead');
+  const rack = showRack ? tools.filter(tool => tool.zone === 'rack') : [];
+  const loadedToolheadCount = toolheads.filter(tool => tool.loaded || tool.active).length;
+  const routeColours = [];
+  _asList(p.ams).forEach((unit) => {
+    _asList(unit?.slots).forEach((slot) => {
+      if (!slot || slot.empty) return;
+      if (!_slotRouteActive(p, unit, slot) && !_slotRouteFed(p, unit, slot)) return;
+      const colour = slot.color || slot.colour || slot.color_hex || '';
+      if (colour) routeColours.push(colour);
+    });
+  });
+  const liveToolheadColour = [...new Set(routeColours)].length === 1 ? routeColours[0] : '';
+  const toolMeta = (tool) => {
+    const routeColour = tool.zone === 'toolhead' && liveToolheadColour && (tool.active || loadedToolheadCount === 1)
+      ? liveToolheadColour
+      : '';
+    const colour = routeColour || tool.color || '#64748b';
+    const textColour = _spoolTextColor(colour);
+    const diameter = Number(tool.diameter || 0);
+    const diameterText = diameter ? `${diameter.toFixed(1)}mm` : '';
+    const typeText = String(tool.type || '').trim();
+    const materialText = _bambuFilamentIdLabel(tool.filament_id) || tool.filament_id || '';
+    const serialText = tool.serial ? `SN ${String(tool.serial).slice(-6)}` : '';
+    const isRack = tool.zone === 'rack';
+    const state = tool.present
+      ? (isRack ? 'Stored' : (tool.loaded ? 'Loaded' : 'Installed'))
+      : 'Empty';
+    const meta = [diameterText, typeText, materialText].filter(Boolean).join(' · ') || 'No hotend detected';
+    const title = [tool.label, state, meta, serialText].filter(Boolean).join(' · ');
+    return { colour, textColour, state, meta, serialText, title, isRack };
+  };
+  const card = (tool) => {
+    const { colour, textColour, state, meta, serialText, title, isRack } = toolMeta(tool);
+    return `<div class="snapmaker-tool-card hseries-tool-card${tool.active ? ' is-active' : ''}${tool.present ? ' has-spool' : ' is-empty'}"
+        style="--tool-colour:${colour};--tool-text:${textColour}" title="${esc(title)}">
+      <span class="snapmaker-tool-head">
+        <b>${esc(tool.label || 'Hotend')}</b>
+        <small>${esc(state)}</small>
+      </span>
+      <span class="snapmaker-tool-nozzle" aria-hidden="true"></span>
+      <span class="snapmaker-tool-info">
+        <strong>${esc(meta)}</strong>
+        <em>${esc(serialText || (isRack ? 'Rack bay' : 'Toolhead'))}</em>
+      </span>
+      <span class="snapmaker-tool-foot">
+        <small>${esc(tool.active ? 'Selected' : '')}</small>
+        <small>${esc(tool.max_temp ? `${tool.max_temp}° max` : '')}</small>
+      </span>
+    </div>`;
+  };
+  const rackSlotNumber = (tool) => {
+    const explicit = [tool.idx, tool.slot, tool.rack_slot, tool.rackSlot, tool.rack_index, tool.slot_id]
+      .map((value) => Number(value))
+      .find((value) => Number.isFinite(value) && value >= 1 && value <= 6);
+    if (explicit) return explicit;
+    const labelMatch = String(tool.label || '').match(/(\d+)/);
+    if (labelMatch) {
+      const fromLabel = Number(labelMatch[1]);
+      if (Number.isFinite(fromLabel) && fromLabel >= 1 && fromLabel <= 6) return fromLabel;
+    }
+    const rawId = Number(tool.id);
+    if (Number.isFinite(rawId) && rawId >= 16 && rawId <= 21) return rawId - 15;
+    if (Number.isFinite(rawId) && rawId >= 1 && rawId <= 6) return rawId;
+    return null;
+  };
+  const rackBay = (tool, slot) => {
+    const { colour, textColour, state, title } = toolMeta(tool);
+    const diameter = Number(tool.diameter || 0);
+    const diameterText = diameter ? `${diameter.toFixed(1)}mm` : '';
+    const typeText = String(tool.type || '').trim();
+    const materialText = _bambuFilamentIdLabel(tool.filament_id) || tool.filament_id || '';
+    const loadedText = [diameterText, typeText].filter(Boolean).join(' · ') || (tool.present ? 'Hotend' : 'Empty');
+    const materialLine = materialText ? ` · ${materialText}` : '';
+    return `<div class="hseries-rack-bay${tool.active ? ' is-active' : ''}${tool.present ? ' has-tool' : ' is-empty'}"
+        style="--tool-colour:${colour};--tool-text:${textColour}" title="${esc(title || `Rack ${slot}`)}">
+      <span class="hseries-rack-bay-number">${esc(slot)}</span>
+      <span class="hseries-rack-hotend-icon" aria-hidden="true"></span>
+      <strong>${esc(loadedText)}</strong>
+      <small>${esc(tool.present ? `${state}${materialLine}` : 'Empty')}</small>
+    </div>`;
+  };
+  const rackBoard = () => {
+    const bySlot = new Map();
+    rack.forEach((tool) => {
+      const slot = rackSlotNumber(tool);
+      if (slot) bySlot.set(slot, tool);
+    });
+    const toolForSlot = (slot) => bySlot.get(slot) || {
+      zone: 'rack',
+      label: `Rack ${slot}`,
+      present: false,
+      slot,
+      color: '#1e293b',
+    };
+    const topSlots = [1, 3, 5].map((slot) => rackBay(toolForSlot(slot), slot)).join('');
+    const bottomSlots = [2, 4, 6].map((slot) => rackBay(toolForSlot(slot), slot)).join('');
+    const rackCount = rack.filter((tool) => tool.present).length;
+    const rackTotal = Math.max(rack.length, 6);
+    const compactToolheads = toolheads.map((tool) => {
+      const { colour, textColour, state, meta, title } = toolMeta(tool);
+      return `<div class="hseries-rack-toolhead${tool.active ? ' is-active' : ''}${tool.present ? ' has-tool' : ' is-empty'}"
+          style="--tool-colour:${colour};--tool-text:${textColour}" title="${esc(title)}">
+        <span class="hseries-rack-hotend-icon" aria-hidden="true"></span>
+        <b>${esc(tool.label || 'Toolhead')}</b>
+        <strong>${esc(meta)}</strong>
+        <small>${esc(state)}</small>
+      </div>`;
+    }).join('');
+    return `<div class="hseries-rack-board" aria-label="H2C hotends and rack">
+      <div class="hseries-rack-toolhead-panel">
+        <span class="hseries-rack-panel-title">Toolhead</span>
+        <div class="hseries-rack-toolhead-stack">${compactToolheads || '<span class="mini-muted">No toolhead data reported yet.</span>'}</div>
+      </div>
+      <div class="hseries-rack-grid-panel">
+        <span class="hseries-rack-panel-title">Induction hotend rack <small>${esc(rackCount)}/${esc(rackTotal)} loaded</small></span>
+        <div class="hseries-rack-grid-wrap">
+          <div class="hseries-rack-grid">
+            ${topSlots}
+            ${bottomSlots}
+          </div>
+          <div class="hseries-rack-row-labels" aria-hidden="true">
+            <span>Row A</span>
+            <span>Row B</span>
+          </div>
+        </div>
+      </div>
+    </div>`;
+  };
+  const toolheadCards = toolheads.map(card).join('');
+  const rackCards = rack.length ? rackBoard() : '';
+  const activeView = view === 'rack' && rackCards ? 'rack' : 'nozzles';
+  return `<div class="snapmaker-tooldeck hseries-tooldeck${rackCards ? ' has-rack' : ' no-rack'}" data-hseries-tooldeck>
+    ${activeView === 'rack'
+      ? `<div class="hseries-tooldeck-panel" data-hseries-panel="rack">${rackCards}</div>`
+      : `<div class="hseries-tooldeck-panel" data-hseries-panel="nozzles">${toolheadCards ? `<div class="snapmaker-tools hseries-tools hseries-toolheads">${toolheadCards}</div>` : '<div class="mini-muted">No nozzle data reported yet.</div>'}</div>`}
+  </div>`;
+}
+
+function _detailLiveHSeriesTabs(p) {
+  if (!_isH2CPrinter(p)) return '';
+  const rack = _asList(p.toolheads).filter(tool => tool?.zone === 'rack');
+  if (!rack.length) return '';
+  const active = _hSeriesLiveTabByPrinter[p.id] === 'rack' ? 'rack' : 'ams';
+  const rackCount = rack.filter(tool => tool.present).length;
+  const rackTotal = rack.length || 6;
+  const tab = (key, label, count) => `<button class="hseries-tooldeck-tab${active === key ? ' is-active' : ''}" type="button" role="tab" aria-selected="${active === key ? 'true' : 'false'}" data-hseries-live-tab="${key}" data-printer-id="${esc(p.id)}">${esc(label)} <span>${esc(count)}</span></button>`;
+  return `<div class="hseries-tooldeck-tabs" role="tablist" aria-label="H2C loaded view">
+    ${tab('ams', 'AMS', String(_asList(p.ams).length || 0))}
+    ${tab('rack', 'Rack', `${rackCount}/${rackTotal}`)}
   </div>`;
 }
 
@@ -3290,8 +5532,45 @@ function _mmuRouteState(unit = {}) {
   };
 }
 
+document.addEventListener('click', e => {
+  const fleetTab = e.target.closest('[data-hseries-fleet-tab]');
+  if (fleetTab) {
+    const printerId = fleetTab.dataset.printerId || '';
+    _hSeriesFleetTabByPrinter[printerId] = fleetTab.dataset.hseriesFleetTab === 'rack' ? 'rack' : 'ams';
+    _fleetFilamentSignature = '';
+    if (parseRoute().view === 'filament') renderFleetFilament();
+    return;
+  }
+  const liveTab = e.target.closest('[data-hseries-live-tab]');
+  if (liveTab) {
+    const printerId = liveTab.dataset.printerId || '';
+    _hSeriesLiveTabByPrinter[printerId] = liveTab.dataset.hseriesLiveTab === 'rack' ? 'rack' : 'ams';
+    const stripEl = document.getElementById('detail-live-strip');
+    const printer = _latestPrinters.find(p => p.id === printerId);
+    if (stripEl && printer) stripEl.innerHTML = _detailLiveStrip(printer);
+    return;
+  }
+  const tab = e.target.closest('[data-hseries-tab]');
+  if (!tab) return;
+  const deck = tab.closest('[data-hseries-tooldeck]');
+  if (!deck) return;
+  const target = tab.dataset.hseriesTab;
+  deck.querySelectorAll('[data-hseries-tab]').forEach(btn => {
+    const active = btn.dataset.hseriesTab === target;
+    btn.classList.toggle('is-active', active);
+    btn.setAttribute('aria-selected', active ? 'true' : 'false');
+  });
+  deck.querySelectorAll('[data-hseries-panel]').forEach(panel => {
+    panel.hidden = panel.dataset.hseriesPanel !== target;
+  });
+});
+
 function _isH2dPrinter(p) {
   return String(p?.model_name || p?.id || '').toLowerCase().includes('h2d');
+}
+
+function _hasDualNozzleTemps(p) {
+  return p?.temps?.hotend_l != null || p?.temps?.hotend_r != null;
 }
 
 function _isAmsHtUnit(unit) {
@@ -3323,8 +5602,92 @@ function _h2dNozzleActivity(p) {
   };
 }
 
+function _routeNozzleIndex(unit, slot = null) {
+  const raw = slot?.nozzle ?? unit?.nozzle;
+  const n = Number(raw);
+  return n === 0 || n === 1 ? n : null;
+}
+
+function _nozzleLabelFromIndex(nozzle) {
+  if (nozzle === 0) return 'Left nozzle';
+  if (nozzle === 1) return 'Right nozzle';
+  return '';
+}
+
+function _activeNozzleIndex(p) {
+  const nozzles = _h2dNozzleActivity(p);
+  if (nozzles.left && !nozzles.right) return 0;
+  if (nozzles.right && !nozzles.left) return 1;
+  if (_isH2CPrinter(p)) {
+    const loaded = _asList(p.toolheads).find(tool => tool?.zone === 'toolhead' && tool.loaded && tool.present);
+    if (loaded) {
+      const nozzle = Number(loaded.nozzle);
+      if (nozzle === 0 || nozzle === 1) return nozzle;
+      const pos = String(loaded.position || '').toLowerCase();
+      if (pos === 'left') return 0;
+      if (pos === 'right') return 1;
+    }
+  }
+  return null;
+}
+
+function _slotTrayStateNumber(slot) {
+  const n = Number(slot?.tray_state);
+  return Number.isFinite(n) ? n : null;
+}
+
+function _hSeriesSlotRouteSignal(p, unit, slot) {
+  if (!slot || slot.empty || _isH2dPrinter(p) || !_hasDualNozzleTemps(p)) return null;
+  const activeNozzle = _activeNozzleIndex(p);
+  if (activeNozzle == null) return null;
+  const routeNozzle = _routeNozzleIndex(unit, slot);
+  const trayState = _slotTrayStateNumber(slot);
+  if (routeNozzle != null && routeNozzle !== activeNozzle) return false;
+  if (routeNozzle != null) return !!slot.active || trayState === 27;
+  const htLoaded = _asList(p?.ams).some(u => _isAmsHtUnit(u)
+    && _asList(u?.slots).some(s => s && !s.empty && _slotTrayStateNumber(s) === 27));
+  if (activeNozzle === 0 && _isAmsHtUnit(unit) && trayState === 27) return true;
+  if (activeNozzle === 0 && htLoaded && !_isAmsHtUnit(unit) && slot.active) return false;
+  return null;
+}
+
+function _activeHotendReading(p) {
+  const temps = p?.temps || {};
+  if (!_isH2dPrinter(p) && !_hasDualNozzleTemps(p)) return temps.hotend || {};
+  const left = temps.hotend_l || {};
+  const right = temps.hotend_r || {};
+  const hotends = [right, left, temps.hotend || {}].filter(t => t && (t.actual != null || t.target != null));
+  const working = hotends
+    .filter(t => _hotendIsWorking(p, t))
+    .sort((a, b) => Number(b.target || b.actual || 0) - Number(a.target || a.actual || 0));
+  if (working.length) return working[0];
+  const units = _asList(p?.ams);
+  for (const unit of units) {
+    const slots = _asList(unit?.slots);
+    if (slots.some(slot => slot && !slot.empty && slot.active)) {
+      return _isAmsHtUnit(unit) ? (temps.hotend_r || temps.hotend || {}) : (temps.hotend_l || temps.hotend || {});
+    }
+  }
+  const nozzles = _h2dNozzleActivity(p);
+  if (nozzles.right && !nozzles.left) return temps.hotend_r || temps.hotend || {};
+  if (nozzles.left && !nozzles.right) return temps.hotend_l || temps.hotend || {};
+  const leftActual = Number(left.actual ?? -1);
+  const rightActual = Number(right.actual ?? -1);
+  if (rightActual > leftActual) return right;
+  if (leftActual >= 0) return left;
+  return temps.hotend || {};
+}
+
+function _activeNozzleLabel(p) {
+  const activeNozzle = _activeNozzleIndex(p);
+  if (activeNozzle != null) return _nozzleLabelFromIndex(activeNozzle);
+  return _hasDualNozzleTemps(p) ? 'Toolhead' : 'Nozzle';
+}
+
 function _slotRouteActive(p, unit, slot) {
   if (!slot || slot.empty) return false;
+  const hSeriesSignal = _hSeriesSlotRouteSignal(p, unit, slot);
+  if (hSeriesSignal != null) return hSeriesSignal;
   if (_isH2dPrinter(p)) {
     const nozzles = _h2dNozzleActivity(p);
     const hasNozzleSignal = nozzles.left || nozzles.right;
@@ -3340,6 +5703,8 @@ function _slotRouteActive(p, unit, slot) {
 
 function _slotRouteFed(p, unit, slot) {
   if (!slot || slot.empty) return false;
+  const hSeriesSignal = _hSeriesSlotRouteSignal(p, unit, slot);
+  if (hSeriesSignal != null) return hSeriesSignal;
   if (_isH2dPrinter(p)) {
     const nozzles = _h2dNozzleActivity(p);
     const hasNozzleSignal = nozzles.left || nozzles.right;
@@ -3349,9 +5714,13 @@ function _slotRouteFed(p, unit, slot) {
   return !!slot.active;
 }
 
-function _routeDestinationLabel(p, unit) {
+function _routeDestinationLabel(p, unit, slot = null) {
+  const routedNozzle = _routeNozzleIndex(unit, slot);
+  if (routedNozzle != null) return _nozzleLabelFromIndex(routedNozzle);
   if (_isH2dPrinter(p)) return _isAmsHtUnit(unit) ? 'Right nozzle' : 'Left nozzle';
-  return p?.temps?.hotend_l != null || p?.temps?.hotend_r != null ? 'Toolhead' : 'Nozzle';
+  const activeNozzle = _activeNozzleIndex(p);
+  if (activeNozzle != null) return _nozzleLabelFromIndex(activeNozzle);
+  return _activeNozzleLabel(p);
 }
 
 function _detailFilamentRoute(p) {
@@ -3369,7 +5738,7 @@ function _detailFilamentRoute(p) {
       const colour = spool?.color_hex || '#60a5fa';
       const textColour = _spoolTextColor(colour);
       const spoolLabel = spool
-        ? `#${spool.id} ${[spool.color_name, spool.material].filter(Boolean).join(' · ')}`
+        ? `${_spoolDisplayLabel(spool)} ${[spool.color_name, spool.material].filter(Boolean).join(' · ')}`
         : 'No Flightdeck spool assigned';
       routes.push(`<div class="live-filament-route live-filament-route-snapmaker" style="--route-colour:${colour};--route-text:${textColour}" title="${esc(`${toolLabel} selected · ${spoolLabel}`)}">
         <button class="live-route-node live-route-source" data-slot-edit data-printer-id="${p.id}" data-slot-index="${idx}" data-slot-label="${esc(toolLabel)}">
@@ -3396,13 +5765,13 @@ function _detailFilamentRoute(p) {
       const textColour = _spoolTextColor(colour);
       const slotLabel = _amsSlotLabel(p, flatSlot);
       const spoolLabel = spool
-        ? `#${spool.id} ${[spool.color_name, spool.material].filter(Boolean).join(' · ')}`
+        ? `${_spoolDisplayLabel(spool)} ${[spool.color_name, spool.material].filter(Boolean).join(' · ')}`
         : _slotProfileLabel(slot) || slot.type || 'Loaded filament';
-      const dest = _routeDestinationLabel(p, unit);
+      const dest = _routeDestinationLabel(p, unit, slot);
       const fedNow = _slotRouteFed(p, unit, slot);
       const routeClass = `${fedNow ? '' : ' live-filament-route-idle'}${mismatch ? ' live-filament-route-warning' : ''}`;
-      const routeBadge = mismatch ? 'Review' : fedNow ? 'Fed now' : 'Ready';
-      const routeStatus = mismatch ? 'needs review for' : fedNow ? 'feeding' : 'ready for';
+      const routeBadge = mismatch ? 'Review' : fedNow ? 'Loaded' : 'Ready';
+      const routeStatus = mismatch ? 'needs review for' : fedNow ? 'loaded for' : 'ready for';
       const title = `${slotLabel} ${routeStatus} ${dest}${spoolLabel ? ' · ' + spoolLabel : ''}${mismatch ? ' · ' + mismatch : ''}`;
       if (FLIGHTDECK_DEMO) {
         routes.push(`<div class="demo-filament-route${routeClass}${_isAmsHtUnit(unit) ? ' demo-filament-route-ht' : ''}" style="--route-colour:${colour};--route-text:${textColour};--route-slot:${Number(slot.idx || 0)}" title="${esc(title)}">
@@ -3424,7 +5793,7 @@ function _detailFilamentRoute(p) {
           <span class="live-route-line" aria-hidden="true"></span>
           <span class="live-route-node live-route-destination">
             <span class="live-route-nozzle" aria-hidden="true"></span>
-            <span><strong>${esc(dest)}</strong><em>${fedNow ? 'Filament fed' : 'Filament ready'}</em></span>
+            <span><strong>${esc(dest)}</strong><em>${fedNow ? 'Filament loaded' : 'Filament ready'}</em></span>
           </span>
         </div>`);
       }
@@ -3440,7 +5809,7 @@ function _detailFilamentRoute(p) {
       const textColour = _spoolTextColor(colour);
       const gateLabel = `T${Number(gate.idx)}`;
       const spoolLabel = spool
-        ? `#${spool.id} ${[spool.color_name, spool.material].filter(Boolean).join(' · ')}`
+        ? `${_spoolDisplayLabel(spool)} ${[spool.color_name, spool.material].filter(Boolean).join(' · ')}`
         : _slotProfileLabel(gate) || gate.material || 'Loaded filament';
       const title = `${gateLabel} to ${routeState.destination}${spoolLabel ? ' · ' + spoolLabel : ''}`;
       routes.push(`<div class="live-filament-route live-filament-route-mmu" style="--route-colour:${colour};--route-text:${textColour}" title="${esc(title)}">
@@ -3507,12 +5876,32 @@ function _detailCameraHud(p) {
 }
 
 function _detailLiveStrip(p) {
-  const loadedHtml = _detailLiveAmsRows(p) || _detailLiveMmuRows(p) || _detailLiveToolheadRows(p) || _detailLiveSpoolChips(p);
+  const amsHtml = _detailLiveAmsRows(p);
+  const mmuHtml = _detailLiveMmuRows(p);
+  const isHSeries = _hasHSeriesNozzleRack(p);
+  const isH2C = _isH2CPrinter(p);
+  const activeHSeriesTab = _hSeriesLiveTabByPrinter[p.id] === 'rack' ? 'rack' : 'ams';
+  const showHSeriesToolSection = isH2C && isHSeries;
+  const toolHtml = showHSeriesToolSection
+    ? _detailLiveToolheadRows(p, activeHSeriesTab === 'rack' ? 'rack' : 'nozzles')
+    : '';
+  const spoolHtml = _detailLiveSpoolChips(p);
+  const primaryHtml = amsHtml || mmuHtml || toolHtml || spoolHtml;
+  const loadedHtml = isH2C
+    ? (activeHSeriesTab === 'rack'
+      ? (toolHtml || '<span class="live-strip-empty">No hotend rack data reported yet</span>')
+      : (amsHtml || mmuHtml || spoolHtml || '<span class="live-strip-empty">No Flightdeck spools assigned</span>'))
+    : isHSeries
+    ? (amsHtml || mmuHtml || spoolHtml)
+    : primaryHtml;
   const routeHtml = _detailFilamentRoute(p);
-  return `<div class="live-environment-panel">
+  const panelClasses = ['live-environment-panel'];
+  if (isH2C) panelClasses.push(`is-h2c-${activeHSeriesTab}-view`);
+  return `<div class="${panelClasses.join(' ')}">
     <div class="live-environment-head">
       <span class="live-strip-label live-environment-title">Environment</span>
       <div class="live-chip-row">${_detailLiveTempChips(p)}</div>
+      ${_detailLiveHSeriesTabs(p)}
     </div>
     ${routeHtml}
     <div class="live-environment-section live-environment-loaded">
@@ -3521,6 +5910,16 @@ function _detailLiveStrip(p) {
     </div>
   </div>`;
 }
+
+function _detailThumbKey(id, name) {
+  return `${id || ''}::${name || ''}`;
+}
+
+window._flightdeckMarkDetailThumbMissing = function(img, key) {
+  if (key) _detailThumbMissing.add(String(key));
+  const parent = img?.parentElement;
+  if (parent) parent.hidden = true;
+};
 
 function _detailPrintPanel(p) {
   const title = `<div class="detail-panel-title">Print Details</div>`;
@@ -3543,9 +5942,11 @@ function _detailPrintPanel(p) {
   const layers = job.layer_current != null && job.layer_total != null
     ? `${job.layer_current} / ${job.layer_total}` : '—';
 
-  const thumb = `<div class="detail-thumb">
+  const thumbKey = _detailThumbKey(p.id, name);
+  const thumbArg = esc(JSON.stringify(thumbKey));
+  const thumb = _detailThumbMissing.has(thumbKey) ? '' : `<div class="detail-thumb">
     <img class="detail-thumb-img" src="${_mediaUrl(`/api/printers/${p.id}/thumbnail`, name)}" alt="Print thumbnail"
-         onerror="this.parentElement.hidden=true">
+         onerror="window._flightdeckMarkDetailThumbMissing?.(this, ${thumbArg})">
   </div>`;
 
   const cal = p.eta_calibration;  // {ratio: float|null, count: int} or undefined
@@ -3567,7 +5968,7 @@ function _detailPrintPanel(p) {
     `<div class="detail-row"><span class="detail-label">ETA</span><span class="detail-value eta-row">${etaValue}</span></div>`;
 }
 
-const _TEMP_CTRL_HEATERS = new Set(['hotend', 'bed']);
+const _TEMP_CTRL_HEATERS = new Set(['hotend', 'hotend_l', 'hotend_r', 'bed']);
 const _TEMP_LABELS = { hotend: 'Hotend', hotend_l: 'Left', hotend_r: 'Right', bed: 'Bed', chamber: 'Chamber' };
 
 function _getDisplayTarget(id, heater, wsTarget) {
@@ -3602,18 +6003,14 @@ function _detailTempsPanel(p) {
 
     const targetHtml = targetC > 0
       ? `<span class="temp-sep">/</span>
-         <span class="temp-target-val" data-temp-edit="${k}" data-printer-id="${p.id}">${_toDisplayTemp(targetC)}${unit}</span>`
-      : `<span class="temp-sep" style="font-size:0.75rem">off</span>`;
+         <span class="temp-target-val">${_toDisplayTemp(targetC)}${unit}</span>`
+      : `<span class="temp-target-val temp-target-off">off</span>`;
 
     return `<div class="temp-ctrl-row">
       <span class="temp-row-label">${label}</span>
       <div class="temp-readings" data-temp-edit="${k}" data-printer-id="${p.id}" style="cursor:pointer">
         <span class="temp-actual${cls}">${actual}${unit}</span>
         ${targetHtml}
-      </div>
-      <div class="temp-nudge">
-        <button class="temp-btn" data-temp-action="dec" data-heater="${k}" data-printer-id="${p.id}" data-target="${Math.round(targetC)}">−</button>
-        <button class="temp-btn" data-temp-action="inc" data-heater="${k}" data-printer-id="${p.id}" data-target="${Math.round(targetC)}">+</button>
       </div>
     </div>`;
   }).join('');
@@ -3725,19 +6122,23 @@ function _detailAmsPanel(p) {
       const flatSlot = _amsFlatSlot(unit, slot);
       const loaded = (_latestSpoolsByPrinter[p.id] || []).find(s => Number(s.location_slot) === flatSlot);
       const mismatch = _slotMismatch(loaded, slot);
+      const unassigned = !loaded && !slot.empty;
       const style = (!slot.empty && slot.color) ? `style="background:${slot.color}"` : '';
       const activeCls = slot.active ? ' ams-active' : '';
       const emptyCls  = slot.empty  ? ' ams-empty'  : '';
       const mappedCls = loaded ? ' ams-mapped' : '';
-      const warnCls = mismatch ? ' ams-warning' : '';
+      const warnCls = mismatch || unassigned ? ' ams-warning' : '';
       const tip = slot.empty
         ? `Slot ${slot.idx + 1}: empty`
-        : _slotProfileLabel(slot);
+        : unassigned
+          ? `${_slotProfileLabel(slot)} · assign a Flightdeck spool`
+          : _slotProfileLabel(slot);
       return `<div class="ams-slot-wrap">
         <button class="ams-slot${activeCls}${emptyCls}${mappedCls}${warnCls}" ${style}
           data-slot-edit data-printer-id="${p.id}" data-slot-index="${flatSlot}"
           data-slot-label="${esc(_amsSlotLabel(p, flatSlot))}" title="${esc([tip, mismatch].filter(Boolean).join(' · '))}"></button>
-        <span class="ams-slot-type">${loaded ? `#${loaded.id}` : (slot.empty ? '' : slot.type)}</span>
+        <span class="ams-slot-type">${loaded ? esc(_spoolDisplayLabel(loaded)) : (slot.empty ? '' : 'Assign')}</span>
+        <button type="button" class="ams-slot-doctor" data-slot-doctor data-printer-id="${p.id}" data-slot-index="${flatSlot}" data-slot-label="${esc(_amsSlotLabel(p, flatSlot))}" title="Full AMS Profile Doctor">⋯</button>
       </div>`;
     }).join('');
     return `<div class="ams-unit">
@@ -3988,7 +6389,7 @@ function _detailMmuPanel(p) {
       <button class="ams-slot${activeCls}${emptyCls}${bufferedCls}${mappedCls}${warnCls}" ${style}
         data-slot-edit data-printer-id="${p.id}" data-slot-index="${gate.idx}"
         data-slot-label="${esc(_amsSlotLabel(p, gate.idx))}" title="${esc([tip, mismatch].filter(Boolean).join(' · '))}"></button>
-      <span class="ams-slot-type">${loaded ? `#${loaded.id}` : (gate.empty ? '' : (gate.material || ''))}</span>
+      <span class="ams-slot-type">${loaded ? esc(_spoolDisplayLabel(loaded)) : (gate.empty ? '' : (gate.material || ''))}</span>
     </div>`;
   }).join('');
 
@@ -4022,14 +6423,80 @@ function _detailObjectsUnavailablePanel(data) {
   </div>`;
 }
 
+function _objectMapUsesPreviewLayout(data) {
+  return _objectMapIsTopDown(data) && Array.isArray(data?.bbox_all) && data.bbox_all.length >= 4;
+}
+
+function _objectMapHasBedGeometry(obj, topDown) {
+  if (obj?.bbox) return true;
+  if (!topDown) return false;
+  if (_objectMapHasPoint(obj)) return true;
+  const shape = obj?.shape;
+  return Boolean(shape?.polygon?.length >= 3 || shape?.segments?.length);
+}
+
+function _objectMapHasMarker(obj, topDown, data) {
+  if (!topDown) return Boolean(obj?.bbox);
+  if (_objectMapUsesPreviewLayout(data)) return true;
+  return _objectMapHasBedGeometry(obj, topDown);
+}
+
+function _objectMapPreviewMarkerPosition(obj, data) {
+  const padding = 8;
+  const contentArea = 100 - (padding * 2);
+  const bboxAll = data?.bbox_all;
+  if (_objectMapHasPoint(obj) && Array.isArray(bboxAll) && bboxAll.length >= 4) {
+    const [xMin, yMin, xMax, yMax] = bboxAll.map(Number);
+    const bw = xMax - xMin;
+    const bh = yMax - yMin;
+    if (bw > 0 && bh > 0) {
+      let x = padding + ((Number(obj.x) - xMin) / bw) * contentArea;
+      let y = padding + ((yMax - Number(obj.y)) / bh) * contentArea;
+      return {
+        x: Math.max(5, Math.min(95, x)),
+        y: Math.max(5, Math.min(95, y)),
+      };
+    }
+  }
+  if (_objectMapHasPoint(obj)) {
+    const plate = Number(data?.bed_bounds?.w) || Number(data?.plate_bounds?.w) || 256;
+    return {
+      x: Math.max(5, Math.min(95, (Number(obj.x) / plate) * 100)),
+      y: Math.max(5, Math.min(95, 100 - (Number(obj.y) / plate) * 100)),
+    };
+  }
+  return null;
+}
+
+function _objectMapPreviewGridPosition(index, total) {
+  const cols = Math.ceil(Math.sqrt(Math.max(total, 1)));
+  const row = Math.floor(index / cols);
+  const col = index % cols;
+  const rows = Math.ceil(total / cols);
+  return {
+    x: 15 + (col * (70 / cols)) + (35 / cols),
+    y: 15 + (row * (70 / rows)) + (35 / rows),
+  };
+}
+
+function _objectMapPreviewMarkerStyle(obj, data, index, total) {
+  const p = _objectMapPreviewMarkerPosition(obj, data) || _objectMapPreviewGridPosition(index, total);
+  return `left:${p.x.toFixed(2)}%;top:${p.y.toFixed(2)}%;transform:translate(-50%,-50%)`;
+}
+
 function _objectMapHtml(id, data) {
   const objects = data?.objects || [];
-  const bounds = data?.plate_bounds;
   const topDown = _objectMapIsTopDown(data);
-  const hasGeometry = bounds && bounds.w > 0 && bounds.h > 0 && objects.some(o => o.bbox || (topDown && _objectMapHasPoint(o)));
+  const previewLayout = _objectMapUsesPreviewLayout(data);
+  const bounds = previewLayout ? null : ((topDown && data?.bed_bounds) ? data.bed_bounds : data?.plate_bounds);
+  const hasGeometry = previewLayout
+    ? objects.length > 0
+    : (bounds && bounds.w > 0 && bounds.h > 0 && objects.some(o => _objectMapHasMarker(o, topDown, data)));
   const availableObjects = objects.filter(o => o.state !== 'excluded');
-  const mappedAvailableObjects = hasGeometry ? availableObjects.filter(o => o.bbox || (topDown && _objectMapHasPoint(o))) : availableObjects;
-  const mapButtons = objects.map(obj => {
+  const mappedAvailableObjects = hasGeometry
+    ? (previewLayout ? availableObjects : availableObjects.filter(o => _objectMapHasMarker(o, topDown, data)))
+    : availableObjects;
+  const mapButtons = objects.map((obj, idx) => {
     const isExcluded = obj.state === 'excluded';
     const isCurrent = obj.state === 'current';
     const rawName = obj.name || `Object ${obj.id ?? ''}`;
@@ -4037,18 +6504,28 @@ function _objectMapHtml(id, data) {
     const safeId = obj.id ?? '';
     const shortName = (obj.label || rawName).replace(/.*[/\\]/, '');
     const displayId = safeId !== '' ? `#${esc(safeId)}` : esc(shortName);
+    const fallbackLabel = safeId !== ''
+      ? `<span class="obj-chip-id">${displayId}</span><span>${esc(shortName)}</span>`
+      : `<span class="obj-chip-id">${displayId}</span>`;
     const pointGeometry = topDown && _objectMapHasPoint(obj);
-    if (hasGeometry && (obj.bbox || pointGeometry)) {
-      const geom = pointGeometry ? _objectMapPointHitStyle(bounds, obj) : _objectMapBoxStyle(bounds, obj.bbox, data);
-      return `<button type="button" class="obj-map-region obj-exclude-btn${isExcluded ? ' is-excluded' : ''}${isCurrent ? ' is-current' : ''}"
+    if (hasGeometry && _objectMapHasMarker(obj, topDown, data)) {
+      const geom = previewLayout
+        ? _objectMapPreviewMarkerStyle(obj, data, idx, objects.length)
+        : (topDown
+          ? _objectMapTopDownRegionStyle(bounds, obj, data)
+          : (pointGeometry ? _objectMapPointHitStyle(bounds, obj, data) : _objectMapBoxStyle(bounds, obj.bbox, data)));
+      const inner = topDown
+        ? `<span class="obj-map-id-dot">${displayId}</span>`
+        : `<span class="obj-chip-id">${displayId}</span>`;
+      return `<button type="button" class="obj-map-region obj-exclude-btn${topDown ? ' is-top-down' : ''}${isExcluded ? ' is-excluded' : ''}${isCurrent ? ' is-current' : ''}"
         style="${geom}"
         data-obj-name="${safeName}" data-obj-label="${esc(shortName)}" data-printer-id="${id}" data-obj-id="${safeId}" ${isExcluded ? 'disabled' : ''}
-        title="${esc(shortName)}"><span class="obj-chip-id">${displayId}</span></button>`;
+        title="${esc(shortName)}">${inner}</button>`;
     }
     if (hasGeometry && topDown) return '';
     return `<button type="button" class="obj-id-select obj-exclude-btn${isExcluded ? ' is-excluded' : ''}${isCurrent ? ' is-current' : ''}"
       data-obj-name="${safeName}" data-obj-label="${esc(shortName)}" data-printer-id="${id}" data-obj-id="${safeId}" ${isExcluded ? 'disabled' : ''}
-      title="${esc(shortName)}"><span class="obj-chip-id">${displayId}</span><span>${esc(shortName)}</span></button>`;
+      title="${esc(shortName)}">${fallbackLabel}</button>`;
   }).join('');
   const imageVersion = objects.map(o => `${o.id ?? ''}:${o.state ?? ''}`).join('-') || 'current';
   const plateImageUrl = _objectMapPlateImageUrl(data, topDown);
@@ -4056,16 +6533,18 @@ function _objectMapHtml(id, data) {
   const image = imageSrc
     ? `<img class="${topDown ? 'obj-map-preview-image' : ''}" src="${esc(imageSrc)}" alt="Plate object map" loading="lazy">`
     : '';
-  const objectImages = topDown ? _objectMapTopDownObjects(data) : _objectMapImagePieces(data, imageVersion);
+  const objectImages = previewLayout ? '' : (topDown ? _objectMapTopDownObjects(data) : _objectMapImagePieces(data, imageVersion));
   const rotation = Number(data?.map_rotation || 0);
   const imageRotation = Number(data?.map_image_rotation || 0);
   const imageOffsetX = Number(data?.map_image_offset_x || 0);
   const imageOffsetY = Number(data?.map_image_offset_y || 0);
-  const rotated = rotation > 0 || imageRotation > 0;
-  const classes = `obj-map${hasGeometry ? ' obj-map-has-geometry' : ' obj-map-no-geometry'}${topDown ? ' obj-map-topdown' : ''}${rotated ? ' obj-map-transformed' : ''}${rotation > 0 ? ' obj-map-overlay-rotated' : ''}${imageRotation > 0 ? ' obj-map-image-rotated' : ''}`;
-  const rotationStyle = _objectMapStyleVars(bounds, rotated, rotation, imageRotation, imageOffsetX, imageOffsetY);
+  const rotated = !previewLayout && (rotation > 0 || imageRotation > 0);
+  const classes = `obj-map${hasGeometry ? ' obj-map-has-geometry' : ' obj-map-no-geometry'}${topDown ? ' obj-map-topdown' : ''}${previewLayout ? ' obj-map-preview-layout' : ''}${rotated ? ' obj-map-transformed' : ''}${rotation > 0 ? ' obj-map-overlay-rotated' : ''}${imageRotation > 0 ? ' obj-map-image-rotated' : ''}`;
+  const rotationStyle = _objectMapStyleVars(bounds, rotated, rotation, imageRotation, imageOffsetX, imageOffsetY, topDown, previewLayout);
   const helper = hasGeometry
-    ? 'Match the ID to the printer screen, then tap the map or list.'
+    ? (previewLayout
+      ? 'Match the numbered markers to your printer screen, then tap the preview or list.'
+      : 'Tap a shape or ID on the map, or use the list below.')
     : `No bed positions in this 3MF; use the object ID shown on the printer screen. Bambu/Orca IDs can be high. ${availableObjects.length} objects still available.`;
   const objectList = _objectMapObjectList(id, objects, hasGeometry);
   const activeBadge = mappedAvailableObjects.length === availableObjects.length
@@ -4080,7 +6559,7 @@ function _objectMapHtml(id, data) {
       <div class="obj-map-plane">
         ${hasGeometry ? `<div class="obj-map-overlay">${mapButtons}</div>` : ''}
       </div>
-      ${topDown ? '<div class="obj-map-front-marker" aria-hidden="true">Front</div>' : ''}
+      ${topDown && !previewLayout ? '<div class="obj-map-front-marker" aria-hidden="true">Front</div>' : ''}
       ${topDown ? `<div class="obj-map-active-count">${esc(activeBadge)}</div>` : ''}
     </div>
     ${objectList || (hasGeometry ? '' : `<div class="obj-id-selector"><span>Printer object IDs</span><div>${mapButtons}</div></div>`)}
@@ -4145,7 +6624,14 @@ function _objectMapHasPoint(obj) {
   return Number.isFinite(Number(obj?.x)) && Number.isFinite(Number(obj?.y));
 }
 
-function _objectMapPointPosition(bounds, obj) {
+function _objectMapPointPosition(bounds, obj, data = {}) {
+  if (_objectMapIsTopDown(data)) {
+    const t = _objectMapTransformPoint(bounds, obj.x, obj.y, data);
+    return {
+      x: Math.max(0, Math.min(100, t.x)),
+      y: Math.max(0, Math.min(100, t.y)),
+    };
+  }
   const padding = 8;
   const contentArea = 100 - (padding * 2);
   const yMax = Number(bounds.y) + Number(bounds.h);
@@ -4157,8 +6643,21 @@ function _objectMapPointPosition(bounds, obj) {
 }
 
 function _objectMapTransformPoint(bounds, x, y, data = {}) {
-  let px = ((Number(x) - bounds.x) / bounds.w) * 100;
-  let py = ((Number(y) - bounds.y) / bounds.h) * 100;
+  const bx = Number(bounds.x);
+  const by = Number(bounds.y);
+  const bw = Number(bounds.w);
+  const bh = Number(bounds.h);
+  if (!(bw > 0 && bh > 0)) return { x: 50, y: 50 };
+  if (_objectMapIsTopDown(data)) {
+    // Bambu gcode: x = left→right facing front, y = back→front (0 at back).
+    // Map view: bed depth on horizontal axis (back=left, front=right), lateral x on vertical (left=top).
+    return {
+      x: ((Number(y) - by) / bh) * 100,
+      y: ((Number(x) - bx) / bw) * 100,
+    };
+  }
+  let px = ((Number(x) - bx) / bw) * 100;
+  let py = ((Number(y) - by) / bh) * 100;
   if (data?.map_mirror_x) px = 100 - px;
   if (data?.map_mirror_y) py = 100 - py;
   const rotation = Number(data?.map_coordinate_rotation || 0);
@@ -4177,6 +6676,12 @@ function _objectMapTransformPoint(bounds, x, y, data = {}) {
     py = 100 - py;
   }
   return { x: px, y: py };
+}
+
+function _objectMapTopDownRegionStyle(bounds, obj, data = {}) {
+  if (obj?.bbox) return _objectMapBadgeCenterStyle(bounds, obj.bbox, data);
+  const p = _objectMapPointPosition(bounds, obj, data);
+  return `left:${p.x.toFixed(2)}%;top:${p.y.toFixed(2)}%;transform:translate(-50%,-50%)`;
 }
 
 function _objectMapBoxParts(bounds, box, data = {}) {
@@ -4212,73 +6717,36 @@ function _objectMapMarkerStyle(bounds, box, data = {}) {
   return `left:${centerX.toFixed(2)}%;top:${centerY.toFixed(2)}%`;
 }
 
-function _objectMapPointMarkerStyle(bounds, obj) {
-  const p = _objectMapPointPosition(bounds, obj);
+function _objectMapPointMarkerStyle(bounds, obj, data = {}) {
+  const p = _objectMapPointPosition(bounds, obj, data);
   return `left:${p.x.toFixed(2)}%;top:${p.y.toFixed(2)}%`;
 }
 
-function _objectMapPointHitStyle(bounds, obj) {
-  const p = _objectMapPointPosition(bounds, obj);
+function _objectMapPointHitStyle(bounds, obj, data = {}) {
+  const p = _objectMapPointPosition(bounds, obj, data);
   const size = 12;
   return `left:${Math.max(0, p.x - (size / 2)).toFixed(2)}%;top:${Math.max(0, p.y - (size / 2)).toFixed(2)}%;width:${size.toFixed(2)}%;height:${size.toFixed(2)}%`;
 }
 
-function _objectMapTopDownObjects(data) {
-  const objects = data?.objects || [];
-  const bounds = data?.plate_bounds;
-  if (!bounds || bounds.w <= 0 || bounds.h <= 0) return '';
-  return objects.filter(obj => obj.bbox || _objectMapHasPoint(obj)).map(obj => {
-    const isExcluded = obj.state === 'excluded';
-    const isCurrent = obj.state === 'current';
-    const rawName = obj.name || `Object ${obj.id ?? ''}`;
-    const shortName = (obj.label || rawName).replace(/.*[/\\]/, '');
-    const displayId = obj.id !== undefined && obj.id !== null ? `#${obj.id}` : '?';
-    if (obj.bbox && obj.shape?.polygon) {
-      const shape = _objectMapShapeSvg(obj, bounds, data);
-      const style = _objectMapBoxStyle(bounds, obj.bbox, data);
-      return `<div class="obj-map-top-object obj-map-top-shape${isExcluded ? ' is-excluded' : ''}${isCurrent ? ' is-current' : ''}"
-        style="${style}"
-        title="${esc(shortName)}" aria-hidden="true">${shape}<span class="obj-map-id-dot">${esc(displayId)}</span></div>`;
-    }
-    const style = _objectMapHasPoint(obj)
-      ? _objectMapPointMarkerStyle(bounds, obj)
-      : _objectMapMarkerStyle(bounds, obj.bbox, data);
-    return `<div class="obj-map-top-object${isExcluded ? ' is-excluded' : ''}${isCurrent ? ' is-current' : ''}"
-      style="${style}"
-      title="${esc(shortName)}" aria-hidden="true"><span class="obj-map-top-block"></span><span class="obj-map-id-dot">${esc(displayId)}</span></div>`;
-  }).join('');
+function _objectMapBadgeCenterStyle(bounds, box, data = {}) {
+  const p = _objectMapBoxParts(bounds, box, data);
+  const cx = Math.max(0, Math.min(100, p.left + p.width / 2));
+  const cy = Math.max(0, Math.min(100, p.top + p.height / 2));
+  return `left:${cx.toFixed(2)}%;top:${cy.toFixed(2)}%;transform:translate(-50%,-50%)`;
 }
 
-function _objectMapShapeSvg(obj, bounds, data = {}) {
-  const box = obj?.bbox;
-  const segments = Array.isArray(obj?.shape?.segments) ? obj.shape.segments : [];
-  const polygon = Array.isArray(obj?.shape?.polygon) ? obj.shape.polygon : [];
-  if (!bounds || !box || (!segments.length && !polygon.length) || box.w <= 0 || box.h <= 0) return '';
-  const view = _objectMapBoxParts(bounds, box, data);
-  const point = pt => {
-    if (!Array.isArray(pt) || pt.length < 2) return null;
-    const transformed = _objectMapTransformPoint(bounds, pt[0], pt[1], data);
-    if (!Number.isFinite(transformed.x) || !Number.isFinite(transformed.y)) return null;
-    return transformed;
-  };
-  const polygonHtml = polygon.length >= 3
-    ? `<polygon points="${polygon.map(point).filter(Boolean).map(pt => `${pt.x.toFixed(3)},${pt.y.toFixed(3)}`).join(' ')}"></polygon>`
-    : '';
-  const lines = segments.slice(0, 260).map(seg => {
-    if (!Array.isArray(seg) || seg.length < 4) return '';
-    const a = point([seg[0], seg[1]]);
-    const b = point([seg[2], seg[3]]);
-    if (!a || !b) return '';
-    return `<line x1="${a.x.toFixed(3)}" y1="${a.y.toFixed(3)}" x2="${b.x.toFixed(3)}" y2="${b.y.toFixed(3)}"></line>`;
-  }).join('');
-  if (!lines && !polygonHtml) return '';
-  return `<svg class="obj-map-shape" viewBox="${view.left.toFixed(3)} ${view.top.toFixed(3)} ${view.width.toFixed(3)} ${view.height.toFixed(3)}" preserveAspectRatio="none" focusable="false">${polygonHtml}${lines}</svg>`;
+function _objectMapTopDownObjects(_data) {
+  return '';
 }
 
-function _objectMapStyleVars(bounds, rotated, rotation, imageRotation, imageOffsetX, imageOffsetY) {
+function _objectMapStyleVars(bounds, rotated, rotation, imageRotation, imageOffsetX, imageOffsetY, topDown = false, previewLayout = false) {
   const vars = [];
-  if (bounds && bounds.w > 0 && bounds.h > 0) {
-    const aspect = Math.max(0.65, Math.min(1.85, Number(bounds.w) / Number(bounds.h)));
+  if (previewLayout) {
+    vars.push('--obj-map-aspect:1');
+  } else if (bounds && bounds.w > 0 && bounds.h > 0) {
+    const aspect = topDown
+      ? Math.max(0.65, Math.min(1.85, Number(bounds.h) / Number(bounds.w)))
+      : Math.max(0.65, Math.min(1.85, Number(bounds.w) / Number(bounds.h)));
     vars.push(`--obj-map-aspect:${aspect.toFixed(4)}`);
   }
   if (rotated) {
@@ -4297,25 +6765,30 @@ function _objectMapStyleVars(bounds, rotated, rotation, imageRotation, imageOffs
 
 function _largeObjectMapHtml(id, data) {
   const objects = data?.objects || [];
-  const bounds = data?.plate_bounds;
   const topDown = _objectMapIsTopDown(data);
-  const hasGeometry = bounds && bounds.w > 0 && bounds.h > 0 && objects.some(o => o.bbox || (topDown && _objectMapHasPoint(o)));
+  const previewLayout = _objectMapUsesPreviewLayout(data);
+  const bounds = previewLayout ? null : ((topDown && data?.bed_bounds) ? data.bed_bounds : data?.plate_bounds);
+  const hasGeometry = previewLayout
+    ? objects.length > 0
+    : (bounds && bounds.w > 0 && bounds.h > 0 && objects.some(o => _objectMapHasMarker(o, topDown, data)));
   const availableObjects = objects.filter(o => o.state !== 'excluded');
-  const mappedAvailableObjects = hasGeometry ? availableObjects.filter(o => o.bbox || (topDown && _objectMapHasPoint(o))) : availableObjects;
+  const mappedAvailableObjects = hasGeometry
+    ? (previewLayout ? availableObjects : availableObjects.filter(o => _objectMapHasMarker(o, topDown, data)))
+    : availableObjects;
   const imageVersion = objects.map(o => `${o.id ?? ''}:${o.state ?? ''}`).join('-') || 'current';
   const plateImageUrl = _objectMapPlateImageUrl(data, topDown);
   const imageSrc = _objectMapImageSrc(plateImageUrl, imageVersion);
   const image = imageSrc
     ? `<img class="${topDown ? 'obj-map-preview-image' : ''}" src="${esc(imageSrc)}" alt="Large plate preview" loading="eager">`
     : '<div class="object-map-missing">No thumbnail available</div>';
-  const objectImages = topDown ? _objectMapTopDownObjects(data) : _objectMapImagePieces(data, imageVersion);
+  const objectImages = previewLayout ? '' : (topDown ? _objectMapTopDownObjects(data) : _objectMapImagePieces(data, imageVersion));
   const rotation = Number(data?.map_rotation || 0);
   const imageRotation = Number(data?.map_image_rotation || 0);
   const imageOffsetX = Number(data?.map_image_offset_x || 0);
   const imageOffsetY = Number(data?.map_image_offset_y || 0);
-  const rotated = rotation > 0 || imageRotation > 0;
-  const rotationStyle = _objectMapStyleVars(bounds, rotated, rotation, imageRotation, imageOffsetX, imageOffsetY);
-  const buttons = objects.map(obj => {
+  const rotated = !previewLayout && (rotation > 0 || imageRotation > 0);
+  const rotationStyle = _objectMapStyleVars(bounds, rotated, rotation, imageRotation, imageOffsetX, imageOffsetY, topDown, previewLayout);
+  const buttons = objects.map((obj, idx) => {
     const isExcluded = obj.state === 'excluded';
     const isCurrent = obj.state === 'current';
     const rawName = obj.name || `Object ${obj.id ?? ''}`;
@@ -4323,27 +6796,40 @@ function _largeObjectMapHtml(id, data) {
     const safeId = obj.id ?? '';
     const shortName = (obj.label || rawName).replace(/.*[/\\]/, '');
     const displayId = safeId !== '' ? `#${esc(safeId)}` : esc(shortName);
+    const fallbackLabel = safeId !== ''
+      ? `<span class="obj-chip-id">${displayId}</span><span>${esc(shortName)}</span>`
+      : `<span class="obj-chip-id">${displayId}</span>`;
     const pointGeometry = topDown && _objectMapHasPoint(obj);
-    if (hasGeometry && (obj.bbox || pointGeometry)) {
-      return `<button type="button" class="obj-map-region obj-exclude-btn${isExcluded ? ' is-excluded' : ''}${isCurrent ? ' is-current' : ''}"
-        style="${pointGeometry ? _objectMapPointHitStyle(bounds, obj) : _objectMapBoxStyle(bounds, obj.bbox, data)}"
+    if (hasGeometry && _objectMapHasMarker(obj, topDown, data)) {
+      const geom = previewLayout
+        ? _objectMapPreviewMarkerStyle(obj, data, idx, objects.length)
+        : (topDown
+          ? _objectMapTopDownRegionStyle(bounds, obj, data)
+          : (pointGeometry ? _objectMapPointHitStyle(bounds, obj, data) : _objectMapBoxStyle(bounds, obj.bbox, data)));
+      const inner = topDown
+        ? `<span class="obj-map-id-dot">${displayId}</span>`
+        : `<span class="obj-chip-id">${displayId}</span>`;
+      return `<button type="button" class="obj-map-region obj-exclude-btn${topDown ? ' is-top-down' : ''}${isExcluded ? ' is-excluded' : ''}${isCurrent ? ' is-current' : ''}"
+        style="${geom}"
         data-obj-name="${safeName}" data-obj-label="${esc(shortName)}" data-printer-id="${id}" data-obj-id="${safeId}" ${isExcluded ? 'disabled' : ''}
-        title="${esc(shortName)}"><span class="obj-chip-id">${displayId}</span></button>`;
+        title="${esc(shortName)}">${inner}</button>`;
     }
     if (hasGeometry && topDown) return '';
     return `<button type="button" class="obj-id-select obj-exclude-btn${isExcluded ? ' is-excluded' : ''}${isCurrent ? ' is-current' : ''}"
       data-obj-name="${safeName}" data-obj-label="${esc(shortName)}" data-printer-id="${id}" data-obj-id="${safeId}" ${isExcluded ? 'disabled' : ''}
-      title="${esc(shortName)}"><span class="obj-chip-id">${displayId}</span><span>${esc(shortName)}</span></button>`;
+      title="${esc(shortName)}">${fallbackLabel}</button>`;
   }).join('');
   const helper = hasGeometry
-    ? 'Match the ID to the printer screen, then tap the map or list.'
+    ? (previewLayout
+      ? 'Match the numbered markers to your printer screen, then tap the preview or list.'
+      : 'Tap a shape or ID on the map, or use the list below.')
     : 'This file has no bed-position metadata. Match the object ID shown on the printer screen, then select it below.';
   const objectList = _objectMapObjectList(id, objects, hasGeometry);
   const activeBadge = mappedAvailableObjects.length === availableObjects.length
     ? `${availableObjects.length} active`
     : `${mappedAvailableObjects.length} mapped`;
   return `<div class="object-map-modal-body">
-    <div class="object-map-modal-stage${hasGeometry ? ' has-geometry' : ''}${topDown ? ' obj-map-topdown' : ''}${rotated ? ' obj-map-transformed' : ''}${rotation > 0 ? ' obj-map-overlay-rotated' : ''}${imageRotation > 0 ? ' obj-map-image-rotated' : ''}"${rotationStyle}>
+    <div class="object-map-modal-stage${hasGeometry ? ' has-geometry' : ''}${topDown ? ' obj-map-topdown' : ''}${previewLayout ? ' obj-map-preview-layout' : ''}${rotated ? ' obj-map-transformed' : ''}${rotation > 0 ? ' obj-map-overlay-rotated' : ''}${imageRotation > 0 ? ' obj-map-image-rotated' : ''}"${rotationStyle}>
       <div class="obj-map-image-plane">
         ${topDown ? image : ''}
         ${objectImages || (topDown ? '' : image)}
@@ -4351,7 +6837,7 @@ function _largeObjectMapHtml(id, data) {
       <div class="obj-map-plane">
         ${hasGeometry ? `<div class="obj-map-overlay">${buttons}</div>` : ''}
       </div>
-      ${topDown ? '<div class="obj-map-front-marker" aria-hidden="true">Front</div>' : ''}
+      ${topDown && !previewLayout ? '<div class="obj-map-front-marker" aria-hidden="true">Front</div>' : ''}
       ${topDown ? `<div class="obj-map-active-count">${esc(activeBadge)}</div>` : ''}
     </div>
     <div class="obj-map-helper">${esc(helper)}</div>
@@ -4698,9 +7184,233 @@ function _printRowHtml(print, idx, dateStr) {
   </div>`;
 }
 
+async function _refreshPrintDetailFromServer(printerId, dateStr, printId, targetEl = null) {
+  const key = `${printerId}:${dateStr}`;
+  try {
+    const r = await fetch(`/api/printers/${printerId}/history/day/${dateStr}`);
+    if (!r.ok) throw new Error('history refresh failed');
+    const prints = await r.json();
+    _dayPrintsCache[key] = prints;
+    const next = prints.find(p => String(p.id) === String(printId));
+    if (next) _showPrintDetail(printerId, dateStr, next, targetEl);
+  } catch {
+    delete _dayPrintsCache[key];
+    await _loadDayDetail(printerId, dateStr);
+  }
+}
+
+function _printSpoolCorrectionLabel(spool) {
+  const printer = _latestPrinters.find(p => p.id === spool.location_printer_id);
+  const where = spool.location_printer_id
+    ? `${_printerNavLabel(printer || { id: spool.location_printer_id })}${spool.location_slot != null ? ` · ${printer ? _amsSlotLabel(printer, Number(spool.location_slot)) : `slot ${Number(spool.location_slot) + 1}`}` : ''}`
+    : (spool.storage_location_name || 'Shelf');
+  const name = [spool.color_name, spool.material, spool.subtype].filter(Boolean).join(' ') || 'Filament';
+  const brand = spool.brand ? ` · ${spool.brand}` : '';
+  return `${_spoolDisplayLabel(spool)} ${name}${brand} · ${Math.round(Number(spool.remaining_g || 0))}g · ${where}`;
+}
+
+async function _showSpoolUsageCorrectionModal({ print, usage, printerId }) {
+  await _commandEnsureSpools();
+  const fromId = String(usage.spool_id);
+  const sourceGrams = Number(usage.actual_grams ?? usage.grams ?? 0);
+  const candidates = (_allSpools || [])
+    .filter(s => !s.archived_at && String(s.id) !== fromId)
+    .sort((a, b) => {
+      const aLoaded = a.location_printer_id === printerId ? 0 : a.location_printer_id ? 1 : 2;
+      const bLoaded = b.location_printer_id === printerId ? 0 : b.location_printer_id ? 1 : 2;
+      return aLoaded - bLoaded || String(a.material || '').localeCompare(String(b.material || '')) || Number(a.id) - Number(b.id);
+    });
+  if (!candidates.length) {
+    showToast('No correction candidates', 'No active spools are available to assign this usage to.', 'error');
+    return null;
+  }
+  return new Promise(resolve => {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `
+      <div class="modal-box input-modal spool-correction-modal">
+        <div class="modal-message">Correct spool used</div>
+        <div class="modal-submessage">Move ${sourceGrams.toFixed(1)}g from spool #${esc(_spoolDisplayNumberById(fromId))} to the spool that actually printed ${esc(print.subtask_name || print.filename || 'this job')}.</div>
+        <label class="modal-field-label" for="spool-correction-target">Correct spool</label>
+        <select id="spool-correction-target" class="modal-input">
+          ${candidates.map(s => `<option value="${s.id}">${esc(_printSpoolCorrectionLabel(s))}</option>`).join('')}
+        </select>
+        <label class="modal-field-label" for="spool-correction-note">Note</label>
+        <input id="spool-correction-note" class="modal-input" type="text" value="Corrected spool attribution" placeholder="Why this changed">
+        <div class="modal-actions">
+          <button class="modal-btn" data-correction-cancel>Cancel</button>
+          <button class="modal-btn modal-btn-danger" data-correction-ok>Correct</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    const select = overlay.querySelector('#spool-correction-target');
+    const note = overlay.querySelector('#spool-correction-note');
+    const close = result => { overlay.remove(); resolve(result); };
+    overlay.addEventListener('click', e => { if (e.target === overlay) close(null); });
+    overlay.querySelector('[data-correction-cancel]').addEventListener('click', () => close(null));
+    overlay.querySelector('[data-correction-ok]').addEventListener('click', () => close({
+      to_spool_id: Number(select.value),
+      note: note.value || '',
+    }));
+  });
+}
+
+async function _showSpoolUsageAssignmentModal({ print, printerId }) {
+  await _commandEnsureSpools();
+  const printMaterial = String(print.material || '').trim().toUpperCase();
+  const defaultGrams = Number(print.filament_grams || 0);
+  const candidates = (_allSpools || [])
+    .filter(s => !s.archived_at)
+    .sort((a, b) => {
+      const aLoaded = a.location_printer_id === printerId ? 0 : a.location_printer_id ? 1 : 2;
+      const bLoaded = b.location_printer_id === printerId ? 0 : b.location_printer_id ? 1 : 2;
+      const aMat = printMaterial && String(a.material || '').trim().toUpperCase() === printMaterial ? 0 : 1;
+      const bMat = printMaterial && String(b.material || '').trim().toUpperCase() === printMaterial ? 0 : 1;
+      return aLoaded - bLoaded || aMat - bMat || String(a.material || '').localeCompare(String(b.material || '')) || Number(a.id) - Number(b.id);
+    });
+  if (!candidates.length) {
+    showToast('No spool candidates', 'No active spools are available to assign to this print.', 'error');
+    return null;
+  }
+  return new Promise(resolve => {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `
+      <div class="modal-box input-modal spool-correction-modal">
+        <div class="modal-message">Assign spool after print</div>
+        <div class="modal-submessage">Deduct filament from the spool that actually printed ${esc(print.subtask_name || print.filename || 'this job')}.</div>
+        <label class="modal-field-label" for="spool-assignment-target">Spool used</label>
+        <select id="spool-assignment-target" class="modal-input">
+          ${candidates.map(s => `<option value="${s.id}">${esc(_printSpoolCorrectionLabel(s))}</option>`).join('')}
+        </select>
+        <label class="modal-field-label" for="spool-assignment-grams">Grams to deduct</label>
+        <input id="spool-assignment-grams" class="modal-input" type="number" min="0" step="0.1" value="${defaultGrams > 0 ? defaultGrams.toFixed(1) : ''}" placeholder="grams">
+        <label class="modal-field-label" for="spool-assignment-note">Note</label>
+        <input id="spool-assignment-note" class="modal-input" type="text" value="Assigned after print" placeholder="Why this was assigned later">
+        <div class="modal-actions">
+          <button class="modal-btn" data-assignment-cancel>Cancel</button>
+          <button class="modal-btn modal-btn-danger" data-assignment-ok>Assign and deduct</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    const select = overlay.querySelector('#spool-assignment-target');
+    const grams = overlay.querySelector('#spool-assignment-grams');
+    const note = overlay.querySelector('#spool-assignment-note');
+    const close = result => { overlay.remove(); resolve(result); };
+    overlay.addEventListener('click', e => { if (e.target === overlay) close(null); });
+    overlay.querySelector('[data-assignment-cancel]').addEventListener('click', () => close(null));
+    overlay.querySelector('[data-assignment-ok]').addEventListener('click', () => {
+      const amount = parseFloat(grams.value);
+      if (isNaN(amount) || amount <= 0) {
+        showToast('Invalid gram value', 'Enter the amount this print used.', 'error');
+        return;
+      }
+      close({
+        spool_id: Number(select.value),
+        grams: amount,
+        note: note.value || '',
+      });
+    });
+    grams.focus();
+    grams.select();
+  });
+}
+
+function _setHistoryPassportMode(active) {
+  document.getElementById('history-body')?.classList.toggle('history-passport-open', !!active);
+}
+
+function _passportSection(title, bodyHtml, { open = false, extraClass = '' } = {}) {
+  const cls = ['print-passport-section', extraClass].filter(Boolean).join(' ');
+  return `<details class="${cls}"${open ? ' open' : ''}>
+    <summary>${title}</summary>
+    <div class="print-passport-section-body">${bodyHtml}</div>
+  </details>`;
+}
+
+function _teardownMediaIn(el) {
+  if (!el) return;
+  el.querySelectorAll('video, audio').forEach((media) => {
+    try {
+      media.pause();
+      media.removeAttribute('src');
+      media.querySelectorAll('source').forEach((s) => s.remove());
+      media.load();
+    } catch {}
+  });
+}
+
+function _printCostMoney(n, digits = 2) {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return '—';
+  return `$${v.toFixed(digits)}`;
+}
+
+function _printCostTitle(item) {
+  const bits = [];
+  const filament = item.filament_cost != null ? item.filament_cost : item.total_cost;
+  if (filament != null) bits.push(`Filament ${_printCostMoney(filament)}`);
+  if (item.time_cost != null) bits.push(`Time ${_printCostMoney(item.time_cost)}`);
+  if (item.labour_cost != null) bits.push(`My time ${_printCostMoney(item.labour_cost)}`);
+  if (item.floor_price != null) bits.push(`Floor ${_printCostMoney(item.floor_price)}`);
+  if (item.suggested_price != null) bits.push(`Suggested ${_printCostMoney(item.suggested_price)}`);
+  return bits.join(' · ');
+}
+
+function _printCostDetailRows(print) {
+  const rows = [];
+  const hasFilament = print.total_cost != null || print.cost_pending;
+  const hasShop = print.floor_price != null || print.suggested_price != null || print.time_cost != null || print.labour_cost != null;
+  if (!hasFilament && !hasShop) return rows;
+  if (hasFilament) {
+    const fil = print.total_cost != null
+      ? `${_printCostMoney(print.total_cost)}${print.cost_pending ? ' · partial' : ''}`
+      : 'Set filament costs';
+    rows.push(`<div class="detail-row"><span class="detail-label">Filament cost</span><span class="detail-value">${fil}</span></div>`);
+  }
+  if (print.duration_seconds) {
+    const hours = Number(print.duration_seconds) / 3600;
+    const rate = Number(print.shop_rate || 0);
+    let timeText;
+    if (print.time_cost != null) {
+      timeText = `${_printCostMoney(print.time_cost)} · ${hours.toFixed(1)} h × ${_printCostMoney(rate)}/h`;
+    } else if (rate > 0) {
+      timeText = `${_printCostMoney(hours * rate)} · ${hours.toFixed(1)} h`;
+    } else {
+      timeText = `${hours.toFixed(1)} h · <a href="#/settings/costing">set shop hours in Costing</a>`;
+    }
+    rows.push(`<div class="detail-row"><span class="detail-label">Time</span><span class="detail-value">${timeText}</span></div>`);
+  }
+  if (print.labour_cost != null) {
+    const labourRate = Number(print.labour_rate || 0);
+    const extra = labourRate > 0 ? ` · ${_printCostMoney(labourRate)}/h` : '';
+    rows.push(`<div class="detail-row"><span class="detail-label">My time</span><span class="detail-value">${_printCostMoney(print.labour_cost)}${extra}</span></div>`);
+  }
+  if (print.floor_price != null) {
+    rows.push(`<div class="detail-row"><span class="detail-label">Floor</span><span class="detail-value">${_printCostMoney(print.floor_price)}</span></div>`);
+  }
+  if (print.suggested_price != null) {
+    const strategy = _pricingStrategyLabel(print.pricing_strategy);
+    rows.push(`<div class="detail-row detail-row-quote"><span class="detail-label">Suggested · ${esc(strategy)}</span><span class="detail-value">${_printCostMoney(print.suggested_price)}</span></div>`);
+  }
+  if (print.batch_price != null || print.machine_price != null || print.value_price != null) {
+    const bits = [
+      print.shop_price != null ? `Shop ${_printCostMoney(print.shop_price)}` : '',
+      print.batch_price != null ? `Batch ${_printCostMoney(print.batch_price)}` : '',
+      print.machine_price != null ? `Machine ${_printCostMoney(print.machine_price)}` : '',
+      print.value_price != null ? `Value ${_printCostMoney(print.value_price)}` : '',
+    ].filter(Boolean).join(' · ');
+    if (bits) {
+      rows.push(`<div class="detail-row"><span class="detail-label">Sell strategies</span><span class="detail-value">${bits}</span></div>`);
+    }
+  }
+  return rows;
+}
+
 function _showPrintDetail(printerId, dateStr, print, targetEl = null) {
   const el = targetEl || document.getElementById('history-day-detail');
   if (!el) return;
+  _teardownMediaIn(el);
 
   const raw = print.subtask_name || print.filename.replace(/.*[/\\]/, '');
   const name = raw.replace(/\.gcode$/i, '');
@@ -4727,6 +7437,7 @@ function _showPrintDetail(printerId, dateStr, print, targetEl = null) {
     const mat = print.material ? ` · ${print.material}` : '';
     rows.push(`<div class="detail-row"><span class="detail-label">Filament</span><span class="detail-value">${print.filament_grams.toFixed(1)}g${mat}</span></div>`);
   }
+  rows.push(..._printCostDetailRows(print));
 
   const errorHtml = print.error_message
     ? `<div class="print-detail-error">${print.error_message}</div>`
@@ -4739,10 +7450,38 @@ function _showPrintDetail(printerId, dateStr, print, targetEl = null) {
        </div>`
     : '';
 
+  const recorderUrl = print.has_timelapse
+    ? _mediaUrl(`/api/printers/${printerId}/prints/${print.id}/timelapse`, print.filename || 'Flight Recorder')
+    : '';
+  const recorderNeedsUpgrade = !!print.timelapse_should_upgrade;
+  const recorderDebugHtml = print.id ? `<details class="flight-recorder-debug" data-print-id="${print.id}" data-printer-id="${printerId}">
+    <summary>Recorder debug</summary>
+    <div class="flight-recorder-debug-body"><span class="decision-empty">Open to inspect timelapse hints and candidate clips.</span></div>
+  </details>` : '';
+  const recorderHtml = print.id ? `<div class="flight-recorder-block" data-print-id="${print.id}" data-printer-id="${printerId}">
+    <div class="flight-recorder-head">
+      <div>
+        <span>Flight Recorder</span>
+        <em>${print.has_timelapse ? esc(_timelapseRecorderCaption(print)) : 'Flightdeck auto-harvests Bambu timelapses after finish. Use Find clip for older prints or Add video manually.'}</em>
+      </div>
+      ${!print.has_timelapse || recorderNeedsUpgrade ? `<div class="flight-recorder-actions">
+        <button type="button" class="flight-recorder-discover">${recorderNeedsUpgrade ? 'Find better clip' : 'Find clip'}</button>
+        ${print.has_timelapse ? '' : `<label class="flight-recorder-upload">
+          <input type="file" accept="video/mp4,video/webm,video/quicktime,video/x-msvideo">
+          <span>Add video</span>
+        </label>`}
+      </div>` : ''}
+    </div>
+    ${print.has_timelapse
+      ? `<video class="flight-recorder-video${print.timelapse_source === 'flightdeck-native' ? ' flight-recorder-timelapse' : ''}${recorderNeedsUpgrade ? ' flight-recorder-low-coverage' : ''}" src="${recorderUrl}" controls preload="none" playsinline${print.timelapse_source === 'flightdeck-native' ? ' data-timelapse-native="1"' : ''}></video>`
+      : `<div class="flight-recorder-empty">No recorder clip attached yet.</div>`}
+    ${recorderDebugHtml}
+  </div>` : '';
+
   const decisionHtml = print.id
-    ? `<details class="decision-trail" data-print-id="${print.id}" data-printer-id="${printerId}">
+    ? `<details class="print-passport-section decision-trail" data-print-id="${print.id}" data-printer-id="${printerId}">
          <summary>Decision trail</summary>
-         <div class="decision-list"><span class="decision-empty">Loading…</span></div>
+         <div class="decision-list"><span class="decision-empty">Expand to load event log.</span></div>
        </details>`
     : '';
 
@@ -4766,25 +7505,69 @@ function _showPrintDetail(printerId, dateStr, print, targetEl = null) {
     </div>
   </div>` : '';
 
+  const canAssignSpoolUsage = print.id && !print.spool_usage?.length && Number(print.filament_grams || 0) > 0;
+  const canRecoverFilamentUsage = print.id && !print.spool_usage?.length && print.filament_grams == null && String(print.final_state || '').toUpperCase() === 'FINISHED';
+  const spoolExpectedRemainingHtml = (u) => {
+    const remaining = Number(u.remaining_after_g);
+    if (!Number.isFinite(remaining)) return '';
+    return `<em>Expected remaining ${remaining.toFixed(1)}g</em>`;
+  };
   const spoolUsageHtml = print.spool_usage?.length
     ? `<div class="print-spool-usage">
         <div class="print-spool-title">Spool usage</div>
         ${print.spool_usage.map(u => `
           <div class="print-spool-row${u.reconcile_suggested ? ' print-spool-row-suggested' : ''}">
-            <a href="#/spool/${u.spool_id}">Spool #${u.spool_id}${u.slot != null ? ` · ${(_latestPrinters.find(x => x.id === printerId) ? _amsSlotLabel(_latestPrinters.find(x => x.id === printerId), u.slot) : `S${u.slot + 1}`)}` : ''}</a>
+            <a href="#/spool/${u.spool_id}">Spool #${_spoolDisplayNumberById(u.spool_id)}${u.slot != null ? ` · ${(_latestPrinters.find(x => x.id === printerId) ? _amsSlotLabel(_latestPrinters.find(x => x.id === printerId), u.slot) : `S${u.slot + 1}`)}` : ''}</a>
             <span class="print-spool-grams">
               <strong>${Number(u.actual_grams ?? u.grams ?? 0).toFixed(1)}g</strong>
+              ${spoolExpectedRemainingHtml(u)}
+              ${u.cost != null ? `<em class="print-spool-cost">$${Number(u.cost).toFixed(2)} · ${esc(u.cost_source || 'costed')}</em>` : ''}
               ${u.waste_grams ? `<em>${Number(u.grams || 0).toFixed(1)}g model · ${Number(u.waste_grams || 0).toFixed(1)}g purge</em>` : ''}
               ${u.reconcile_suggested ? `<em class="weigh-suggested">Weigh-in suggested · ${(u.reconcile_reasons || []).join(', ')}</em>` : ''}
             </span>
             ${u.actual_grams != null
               ? '<span class="print-spool-reconciled">Reconciled</span>'
-              : `<button class="print-spool-reconcile${u.reconcile_suggested ? ' suggested' : ''}" data-print-id="${print.id}" data-spool-id="${u.spool_id}">${u.reconcile_suggested ? 'Weigh' : 'Reconcile'}</button>`}
+              : ''}
+            <span class="print-spool-actions">
+              ${u.actual_grams == null ? `<button class="print-spool-reconcile${u.reconcile_suggested ? ' suggested' : ''}" data-print-id="${print.id}" data-spool-id="${u.spool_id}">${u.reconcile_suggested ? 'Weigh' : 'Reconcile'}</button>` : ''}
+              <button class="print-spool-correct" data-print-id="${print.id}" data-spool-id="${u.spool_id}">Correct</button>
+            </span>
           </div>`).join('')}
       </div>`
+    : canAssignSpoolUsage
+      ? `<div class="print-spool-usage print-spool-unassigned">
+          <div class="print-spool-title">Spool usage</div>
+          <div class="print-spool-row print-spool-row-suggested">
+            <span>No spool assigned</span>
+            <span class="print-spool-grams">
+              <strong>${Number(print.filament_grams || 0).toFixed(1)}g</strong>
+              <em>Assign after print to deduct stock</em>
+            </span>
+            <span class="print-spool-actions">
+              <button class="print-spool-assign" data-print-id="${print.id}">Assign spool</button>
+            </span>
+          </div>
+        </div>`
+    : canRecoverFilamentUsage
+      ? `<div class="print-spool-usage print-spool-unassigned">
+          <div class="print-spool-title">Spool usage</div>
+          <div class="print-spool-row print-spool-row-suggested">
+            <span>No filament metadata</span>
+            <span class="print-spool-grams">
+              <strong>Unknown grams</strong>
+              <em>Recover from relay log or printer storage, then assign a spool</em>
+            </span>
+            <span class="print-spool-actions">
+              <button class="print-filament-repair" data-print-id="${print.id}">Recover grams</button>
+              <button class="print-spool-assign" data-print-id="${print.id}">Assign manually</button>
+            </span>
+          </div>
+        </div>`
     : '';
 
-  el.innerHTML = `<div class="history-day-panel">
+  const statsHtml = `<div class="print-passport-stats">${rows.join('')}</div>`;
+
+  el.innerHTML = `<div class="history-day-panel print-detail-panel">
     <div class="print-detail-nav">
       <button class="print-detail-back" data-back-date="${dateStr}">&larr; ${dateLabel}</button>
     </div>
@@ -4794,12 +7577,117 @@ function _showPrintDetail(printerId, dateStr, print, targetEl = null) {
     </div>
     ${snapshotHtml}
     ${errorHtml}
-    <div>${rows.join('')}</div>
-    ${spoolUsageHtml}
-    ${notesHtml}
-    ${memoryMetaHtml}
+    ${recorderHtml ? _passportSection('Flight Recorder', recorderHtml, { open: true, extraClass: 'print-passport-recorder' }) : ''}
+    ${_passportSection('Print details', statsHtml, { open: true, extraClass: 'print-passport-compact' })}
+    ${spoolUsageHtml ? _passportSection('Spool usage', spoolUsageHtml, { open: true }) : ''}
+    ${_passportSection('Notes', notesHtml, { open: !!print.notes })}
+    ${memoryMetaHtml ? _passportSection('Memory tags', memoryMetaHtml, { open: !!(print.tags || []).length || print.exclude_from_stats }) : ''}
     ${decisionHtml}
   </div>`;
+
+  const recorderBlock = el.querySelector('.flight-recorder-block');
+  if (recorderBlock) {
+    const nativeVideo = recorderBlock.querySelector('[data-timelapse-native="1"]');
+    if (nativeVideo && !nativeVideo.dataset.timelapseTuned) {
+      nativeVideo.dataset.timelapseTuned = '1';
+      nativeVideo.addEventListener('loadedmetadata', () => {
+        const duration = Number(nativeVideo.duration || 0);
+        if (duration > 180 && !nativeVideo.classList.contains('flight-recorder-low-coverage')) {
+          nativeVideo.playbackRate = Math.min(8, Math.max(2, duration / 120));
+        }
+      }, { once: true });
+    }
+    const fileInput = recorderBlock.querySelector('input[type="file"]');
+    fileInput?.addEventListener('change', async () => {
+      const file = fileInput.files?.[0];
+      if (!file) return;
+      const form = new FormData();
+      form.append('file', file);
+      const uploadLabel = recorderBlock.querySelector('.flight-recorder-upload span');
+      if (uploadLabel) uploadLabel.textContent = 'Uploading...';
+      try {
+        const r = await fetch(`/api/printers/${printerId}/prints/${print.id}/timelapse`, { method: 'POST', body: form });
+        if (!r.ok) throw new Error(await r.text());
+        const saved = await r.json();
+        print = { ...print, ...saved };
+        showToast('Flight Recorder clip attached', 'success');
+        _showPrintDetail(printerId, dateStr, print);
+      } catch (err) {
+        showToast(`Recorder upload failed: ${err.message || err}`, 'error');
+        if (uploadLabel) uploadLabel.textContent = 'Add video';
+      }
+    });
+
+    const discoverBtn = recorderBlock.querySelector('.flight-recorder-discover');
+    discoverBtn?.addEventListener('click', async () => {
+      const originalText = discoverBtn.textContent;
+      discoverBtn.disabled = true;
+      discoverBtn.textContent = 'Searching...';
+      try {
+        const r = await fetch(`/api/printers/${printerId}/prints/${print.id}/timelapse/discover`, { method: 'POST' });
+        const raw = await r.text();
+        let saved = {};
+        try { saved = raw ? JSON.parse(raw) : {}; } catch { saved = { detail: raw }; }
+        if (!r.ok) {
+          const detail = typeof saved.detail === 'string' ? saved.detail : (saved.detail?.message || 'Recorder search failed');
+          throw new Error(detail);
+        }
+        print = { ...print, ...saved };
+        showToast('Flight Recorder clip found', 'success');
+        _showPrintDetail(printerId, dateStr, print);
+      } catch (err) {
+        showToast(`Recorder search failed: ${err.message || err}`, 'error');
+        discoverBtn.disabled = false;
+        discoverBtn.textContent = originalText || 'Find clip';
+      }
+    });
+
+    const debugPanel = recorderBlock.querySelector('.flight-recorder-debug');
+    debugPanel?.addEventListener('toggle', async () => {
+      if (!debugPanel.open || debugPanel.dataset.loaded === 'true' || debugPanel.dataset.loading === 'true') return;
+      const body = debugPanel.querySelector('.flight-recorder-debug-body');
+      if (!body) return;
+      debugPanel.dataset.loading = 'true';
+      body.innerHTML = '<span class="decision-empty">Loading recorder debug…</span>';
+      try {
+        const r = await fetch(`/api/printers/${printerId}/prints/${print.id}/timelapse/debug`);
+        const raw = await r.text();
+        let info = {};
+        try { info = raw ? JSON.parse(raw) : {}; } catch { info = { detail: raw }; }
+        if (!r.ok) throw new Error(info.detail || 'Unable to load recorder debug');
+        const sampleHtml = (items) => (items || []).length
+          ? `<div class="flight-recorder-debug-list">${items.map(item => `
+              <div class="flight-recorder-debug-row">
+                <strong>${esc(item.path || item.name || 'unknown')}</strong>
+                <span>${esc(item.source || 'candidate')}${item.score != null ? ` · score ${Number(item.score).toFixed(1)}` : ''}${item.size ? ` · ${Math.round(Number(item.size) / (1024 * 1024) * 10) / 10} MB` : ''}</span>
+              </div>`).join('')}</div>`
+          : '<span class="decision-empty">No candidates listed.</span>';
+        body.innerHTML = `
+          <div class="flight-recorder-debug-grid">
+            <div><strong>Printer state</strong><span>${esc(info.printer_state || 'unknown')}</span></div>
+            <div><strong>Last finished print</strong><span>${esc(info.last_finished_print_id ?? 'none')}</span></div>
+            <div><strong>MQTT timelapse hint</strong><span>${esc(info.mqtt_timelapse_hint || 'none')}</span></div>
+            <div><strong>Suggested FTP paths</strong><span>${esc((info.mqtt_ftp_hint_paths || []).join(', ') || 'none')}</span></div>
+            <div><strong>Local best</strong><span>${esc(info.local_best?.path || 'none')}</span></div>
+            <div><strong>Bambu best</strong><span>${esc(info.bambu_best?.path || 'none')}</span></div>
+          </div>
+          <div class="flight-recorder-debug-section">
+            <strong>Local samples (${Number(info.local_candidate_count || 0)})</strong>
+            ${sampleHtml(info.local_samples)}
+          </div>
+          <div class="flight-recorder-debug-section">
+            <strong>Bambu samples (${Number(info.bambu_candidate_count || 0)})</strong>
+            ${sampleHtml(info.bambu_samples)}
+            ${info.bambu_error ? `<div class="flight-recorder-debug-error">${esc(info.bambu_error)}</div>` : ''}
+          </div>`;
+        debugPanel.dataset.loaded = 'true';
+      } catch (err) {
+        body.innerHTML = `<div class="flight-recorder-debug-error">${esc(err.message || String(err))}</div>`;
+      } finally {
+        delete debugPanel.dataset.loading;
+      }
+    });
+  }
 
   const notesBlock = el.querySelector('.print-notes-block');
   if (notesBlock) {
@@ -4840,25 +7728,32 @@ function _showPrintDetail(printerId, dateStr, print, targetEl = null) {
       e.preventDefault();
       const printId = btn.dataset.printId;
       const spoolId = btn.dataset.spoolId;
-      const value = await _inputModal({
-        title: `Reconcile spool #${spoolId}`,
-        message: 'Actual remaining grams after this print',
-        inputType: 'number',
-        placeholder: 'grams',
-        okLabel: 'Continue',
-      });
-      if (value === null) return;
-      const remaining = parseFloat(value);
-      if (isNaN(remaining) || remaining < 0) {
-        showToast('Invalid gram value', 'Enter a valid remaining gram value.', 'error');
-        return;
-      }
+      const useScale = btn.classList.contains('suggested');
       const usage = print.spool_usage.find(u => String(u.spool_id) === String(spoolId));
+      let remaining = null;
+      if (useScale) {
+        const ok = await _confirmModal(`Place spool #${_spoolDisplayNumberById(spoolId)} on the scale. Flightdeck will read the gross weight and subtract that spool's empty-spool weight automatically.`);
+        if (!ok) return;
+      } else {
+        const value = await _inputModal({
+          title: `Reconcile spool #${spoolId}`,
+          message: 'Actual remaining filament grams after this print',
+          inputType: 'number',
+          placeholder: 'grams',
+          okLabel: 'Continue',
+        });
+        if (value === null) return;
+        remaining = parseFloat(value);
+        if (isNaN(remaining) || remaining < 0) {
+          showToast('Invalid gram value', 'Enter a valid remaining gram value.', 'error');
+          return;
+        }
+      }
       let startRemaining = null;
-      if (usage && usage.remaining_start_g == null) {
+      if (!useScale && usage && usage.remaining_start_g == null) {
         const startValue = await _inputModal({
           title: `Starting weight for spool #${spoolId}`,
-          message: 'Optional. Leave blank to keep the existing model value.',
+          message: 'Optional filament grams before this print. Leave blank to keep the existing model value.',
           value: usage.remaining_before_g ?? '',
           inputType: 'number',
           okLabel: 'Continue',
@@ -4873,14 +7768,27 @@ function _showPrintDetail(printerId, dateStr, print, targetEl = null) {
         }
       }
       let exclusive = false;
-      if (print.spool_usage.length > 1) {
+      if (!useScale && print.spool_usage.length > 1) {
         exclusive = await _confirmModal('Was this the only spool actually used? Confirm will remove other usage rows and restore their deducted grams.');
       }
       const old = btn.textContent;
       btn.disabled = true;
-      btn.textContent = '...';
+      btn.textContent = useScale ? 'Reading...' : '...';
       try {
-        const payload = { remaining_g: remaining, exclusive };
+        const payload = { exclusive };
+        if (useScale) {
+          await fetch('/api/scale/keep-awake', { method: 'POST' }).catch(() => {});
+          const sr = await fetch('/api/scale/read');
+          const scaleRaw = await sr.text();
+          let scaleData = {};
+          try { scaleData = scaleRaw ? JSON.parse(scaleRaw) : {}; } catch { scaleData = { detail: scaleRaw }; }
+          if (!sr.ok) throw new Error(scaleData.detail || 'Scale read failed');
+          const gross = parseFloat(scaleData.grams);
+          if (isNaN(gross) || gross < 0) throw new Error('Scale read did not return a valid gram value');
+          payload.reading_g = gross;
+          btn.textContent = '...';
+        }
+        if (remaining !== null) payload.remaining_g = remaining;
         if (startRemaining !== null) payload.start_remaining_g = startRemaining;
         const r = await fetch(`/api/prints/${printId}/spool_usage/${spoolId}/reconcile`, {
           method: 'POST',
@@ -4893,15 +7801,104 @@ function _showPrintDetail(printerId, dateStr, print, targetEl = null) {
           usage.actual_grams = data.actual_grams;
           usage.waste_grams = data.waste_grams;
           usage.remaining_after_g = data.remaining_g;
+          usage.scale_reading_g = data.scale_reading_g;
+          usage.empty_spool_weight_g = data.empty_spool_weight_g;
           if (startRemaining !== null) usage.remaining_start_g = startRemaining;
         }
         if (exclusive) {
           print.spool_usage = print.spool_usage.filter(u => String(u.spool_id) === String(spoolId));
         }
         await _refreshSpoolsByPrinter();
-        _showPrintDetail(printerId, dateStr, print);
+        await _refreshPrintDetailFromServer(printerId, dateStr, printId, targetEl);
       } catch (err) {
-        showToast('Reconcile failed', err.message || '', 'error');
+        showToast(useScale ? 'Scale weigh failed' : 'Reconcile failed', _scaleFriendlyMessage(err.message || ''), 'error');
+        btn.disabled = false;
+        btn.textContent = old;
+      }
+    });
+  });
+
+  el.querySelectorAll('.print-filament-repair').forEach(btn => {
+    btn.addEventListener('click', async e => {
+      e.preventDefault();
+      const printId = btn.dataset.printId;
+      const old = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = '...';
+      try {
+        const r = await fetch(`/api/print-memory/${printId}/repair-filament`, { method: 'POST' });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.detail || 'Recovery failed');
+        const source = data.source === 'printer_ftp'
+          ? 'printer storage'
+          : 'slicer relay metadata';
+        showToast('Filament recovered', `${Number(data.filament_grams || 0).toFixed(1)}g recovered from ${source}.`, 'success');
+        await _refreshPrintDetailFromServer(printerId, dateStr, printId, targetEl);
+      } catch (err) {
+        showToast('Recovery failed', err.message || '', 'error');
+        btn.disabled = false;
+        btn.textContent = old;
+      }
+    });
+  });
+
+  el.querySelectorAll('.print-spool-assign').forEach(btn => {
+    btn.addEventListener('click', async e => {
+      e.preventDefault();
+      const printId = btn.dataset.printId;
+      const assignment = await _showSpoolUsageAssignmentModal({ print, printerId });
+      if (!assignment) return;
+      const ok = await _confirmModal(`Deduct ${Number(assignment.grams || 0).toFixed(1)}g from spool #${_spoolDisplayNumberById(assignment.spool_id)} for this print?`);
+      if (!ok) return;
+      const old = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = '...';
+      try {
+        const r = await fetch(`/api/prints/${printId}/spool_usage/assign`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(assignment),
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.detail || 'Assignment failed');
+        showToast('Spool assigned', `Deducted ${Number(data.grams || 0).toFixed(1)}g from spool #${_spoolDisplayNumberById(data.spool_id)}.`, 'success');
+        await _refreshSpoolsByPrinter();
+        await _refreshPrintDetailFromServer(printerId, dateStr, printId, targetEl);
+      } catch (err) {
+        showToast('Spool assignment failed', err.message || '', 'error');
+        btn.disabled = false;
+        btn.textContent = old;
+      }
+    });
+  });
+
+  el.querySelectorAll('.print-spool-correct').forEach(btn => {
+    btn.addEventListener('click', async e => {
+      e.preventDefault();
+      const printId = btn.dataset.printId;
+      const spoolId = btn.dataset.spoolId;
+      const usage = print.spool_usage.find(u => String(u.spool_id) === String(spoolId));
+      if (!usage) return;
+      const correction = await _showSpoolUsageCorrectionModal({ print, usage, printerId });
+      if (!correction) return;
+      const ok = await _confirmModal(`Move ${Number(usage.actual_grams ?? usage.grams ?? 0).toFixed(1)}g from spool #${_spoolDisplayNumberById(spoolId)} to spool #${_spoolDisplayNumberById(correction.to_spool_id)}?`);
+      if (!ok) return;
+      const old = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = '...';
+      try {
+        const r = await fetch(`/api/prints/${printId}/spool_usage/${spoolId}/correct`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(correction),
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.detail || 'Correction failed');
+        showToast('Spool usage corrected', `Moved ${Number(data.grams || 0).toFixed(1)}g to spool #${_spoolDisplayNumberById(data.to_spool_id)}.`, 'success');
+        await _refreshSpoolsByPrinter();
+        await _refreshPrintDetailFromServer(printerId, dateStr, printId, targetEl);
+      } catch (err) {
+        showToast('Correction failed', err.message || '', 'error');
         btn.disabled = false;
         btn.textContent = old;
       }
@@ -4915,11 +7912,18 @@ function _showPrintDetail(printerId, dateStr, print, targetEl = null) {
       const list = this.querySelector('.decision-list');
       if (list.dataset.loaded) return;
       list.dataset.loaded = '1';
+      list.innerHTML = '<span class="decision-empty">Loading…</span>';
       const pid = this.dataset.printId;
       const prid = this.dataset.printerId;
       fetch(`/api/printers/${prid}/prints/${pid}/decisions`)
         .then(r => r.ok ? r.json() : [])
         .then(decisions => {
+          const summary = trail.querySelector('summary');
+          if (summary) {
+            summary.textContent = decisions.length
+              ? `Decision trail (${decisions.length})`
+              : 'Decision trail';
+          }
           if (!decisions.length) {
             list.innerHTML = '<span class="decision-empty">No decisions recorded.</span>';
             return;
@@ -4946,9 +7950,13 @@ function _showPrintDetail(printerId, dateStr, print, targetEl = null) {
         .catch(() => { list.innerHTML = '<span class="decision-empty">Failed to load.</span>'; });
     });
   }
+
+  el.querySelector('.print-detail-panel')?.scrollIntoView({ block: 'nearest' });
+  _setHistoryPassportMode(el.id === 'history-day-detail');
 }
 
 function _renderDayList(printerId, dateStr, prints, el) {
+  _setHistoryPassportMode(false);
   const d = new Date(dateStr + 'T00:00:00Z');
   const header = d.toLocaleDateString([], { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC' });
   if (!prints.length) {
@@ -5039,6 +8047,279 @@ async function _renderHistoryBody(printerId) {
   });
 }
 
+function _projectMoney(n) {
+  const v = Number(n);
+  if (!Number.isFinite(v) || v <= 0) return '—';
+  return `$${v.toFixed(2)}`;
+}
+
+function _projectHours(n) {
+  const v = Number(n);
+  if (!Number.isFinite(v) || v <= 0) return '—';
+  return `${v.toFixed(1)} h`;
+}
+
+function _projectQuoteStrip(quote, { compact = false } = {}) {
+  const q = quote || {};
+  const elapsed = q.elapsed || {};
+  const fleet = q.fleet || {};
+  const floor = q.quote_floor != null ? q.quote_floor : elapsed.floor_price;
+  const suggested = q.quote_suggested != null ? q.quote_suggested : elapsed.suggested_price;
+  const timeCost = elapsed.time_cost != null ? elapsed.time_cost : fleet.time_cost;
+  const labour = elapsed.labour_cost != null ? elapsed.labour_cost : fleet.labour_cost;
+  if (compact) {
+    return `<div class="project-quote project-quote-compact">
+      <div><span>Filament</span><strong>${q.grams != null ? `${Number(q.grams).toFixed(0)} g` : '—'}</strong></div>
+      <div class="project-quote-local"><span>Suggested</span><strong>${_projectMoney(suggested)}</strong></div>
+    </div>`;
+  }
+  const labourRow = Number(labour) > 0
+    ? `<div><span>My time</span><strong>${_projectMoney(labour)}</strong><em>labour rate on print hours</em></div>`
+    : '';
+  return `<div class="project-quote">
+    <div><span>Filament</span><strong>${q.grams != null ? `${Number(q.grams).toFixed(0)} g` : '—'}</strong><em>${_projectMoney(q.filament_cost)}</em></div>
+    <div><span>Printer-hours</span><strong>${_projectHours(q.printer_hours)}</strong><em>shop ${_projectMoney(timeCost)}</em></div>
+    ${labourRow}
+    <div class="project-quote-local"><span>Local quote</span><strong>${_projectMoney(suggested)}</strong><em>floor ${_projectMoney(floor)} · ${_pricingStrategyLabel(q.pricing_strategy || elapsed.pricing_strategy)}</em></div>
+    ${(q.batch_price != null || q.machine_price != null || q.value_price != null) ? `<div><span>Strategies</span><strong>${_projectMoney(q.batch_price)}</strong><em>batch · machine ${_projectMoney(q.machine_price)} · value ${_projectMoney(q.value_price)}</em></div>` : ''}
+  </div>`;
+}
+
+function _projectFileRow(file) {
+  let detail;
+  const status = file.status || '';
+  if (file.sliced) {
+    const plates = Number(file.plate_count || 0);
+    const plateBit = plates > 1 ? `${plates} plates · ` : '';
+    detail = `${plateBit}${file.grams != null ? `${Number(file.grams).toFixed(0)} g` : '—'} · ${file.seconds ? formatTime(file.seconds) : '—'}`;
+  } else {
+    detail = file.status_detail || 'Not sliced yet';
+  }
+  const cls = status === 'slicing' ? ' is-slicing' : (status === 'error' ? ' is-error' : '');
+  return `<div class="project-file-row${cls}">
+    <strong title="${esc(file.path || file.name || '')}">${esc(file.name || 'file')}</strong>
+    <span title="${esc(detail)}">${esc(detail)}</span>
+  </div>`;
+}
+
+async function renderProjectsView(projectId) {
+  const page = document.getElementById('projects-page');
+  if (!page) return;
+  if (projectId) {
+    await _renderProjectDetail(page, projectId);
+    return;
+  }
+  page.innerHTML = '<div class="detail-placeholder">Loading projects…</div>';
+  let items = [];
+  try {
+    const r = await fetch('/api/projects');
+    if (r.ok) {
+      const data = await r.json();
+      items = data.items || [];
+    }
+  } catch {}
+  const cards = items.length ? items.map(p => {
+    const q = p.quote || {};
+    return `<a class="project-card" href="#/projects/${p.id}">
+      <strong>${esc(p.name)}</strong>
+      <em>${esc(p.vault_folder || '')}</em>
+      <span>${p.file_count || 0} file${p.file_count === 1 ? '' : 's'}${p.sliced_count ? ` · ${p.sliced_count} sliced` : ''}${p.slicing ? ' · slicing…' : ''}</span>
+      ${_projectQuoteStrip(q, { compact: true })}
+    </a>`;
+  }).join('') : '<div class="filedesk-empty">No projects yet. Create one, drop sliced plates in, and Flightdeck will total grams and time.</div>';
+  page.innerHTML = `<div class="projects-shell">
+    <section class="project-hero">
+      <div>
+        <span class="memory-hero-eyebrow">Print Vault</span>
+        <h1>Projects</h1>
+        <p>Drop a MakerWorld / Save Project <code>.3mf</code> and Flightdeck slices it for the quote. Or drop plate <strong>.gcode.3mf</strong> exports if you already sliced.</p>
+      </div>
+      <form class="project-create" data-project-create>
+        <input class="settings-input" name="name" type="text" maxlength="80" placeholder="Summer Goose" required>
+        <button type="submit" class="settings-save-btn">New project</button>
+      </form>
+    </section>
+    <div class="project-grid">${cards}</div>
+  </div>`;
+  page.querySelector('[data-project-create]')?.addEventListener('submit', async e => {
+    e.preventDefault();
+    const name = e.currentTarget.querySelector('[name="name"]')?.value.trim();
+    if (!name) return;
+    try {
+      const r = await fetch('/api/projects', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.detail || 'Could not create project');
+      showToast('Project created', data.name || name, 'success');
+      location.hash = `#/projects/${data.id}`;
+    } catch (err) {
+      showToast('Project create failed', err.message || '', 'error');
+    }
+  });
+}
+
+async function _renderProjectDetail(page, projectId) {
+  page.innerHTML = '<div class="detail-placeholder">Loading project…</div>';
+  let project = null;
+  try {
+    const r = await fetch(`/api/projects/${projectId}`);
+    if (!r.ok) throw new Error('Project not found');
+    project = await r.json();
+  } catch (err) {
+    page.innerHTML = `<div class="filedesk-empty">${esc(err.message || 'Unable to load project.')} <a href="#/projects">Back</a></div>`;
+    return;
+  }
+  const files = project.files || [];
+  const quote = project.quote || {};
+  const fileRows = files.length
+    ? files.map(_projectFileRow).join('')
+    : '<div class="filedesk-empty">Drop a .3mf / STL here. Unsliced files are sliced in the background, then quoted.</div>';
+  page.innerHTML = `<div class="projects-shell">
+    <div class="project-detail-head">
+      <a href="#/projects">All projects</a>
+      <h1>${esc(project.name)}</h1>
+      <p class="settings-hint">Vault folder <code>${esc(project.vault_folder || '')}</code> · ${files.length} file${files.length === 1 ? '' : 's'}</p>
+    </div>
+    ${_projectQuoteStrip(quote)}
+    ${project.slicing ? '<p class="settings-hint project-slicing-note">Slicing in the background — quote fills in when the plate export lands.</p>' : ''}
+    <div class="project-toolbar">
+      <label>Slice / quote printer
+        <select class="settings-input" data-project-printer>
+          <option value="">Auto (match 3MF or first with defaults)</option>
+          ${(project.slice_targets || []).map(t => `
+            <option value="${esc(t.id)}"${project.quote_printer_id === t.id ? ' selected' : ''}${t.has_defaults ? '' : ' disabled'}>
+              ${esc(t.label)}${t.has_defaults ? '' : ' — set slicer defaults'}
+            </option>`).join('')}
+        </select>
+      </label>
+      <label>Printers overlapping
+        <input class="settings-input" data-project-parallel type="number" min="1" max="12" step="1" value="${esc(String(project.parallel_printers || 1))}">
+      </label>
+      <span class="settings-hint">Elapsed quote uses max(longest plate, total hours ÷ printers). Leave at 1 for sequential.</span>
+      <label class="project-drop">
+        <input type="file" multiple accept=".3mf,.gcode,.gcode.3mf,.gcode.gz,.stl,.obj,.step,.stp">
+        <span>Drop .3mf / plates here</span>
+      </label>
+      <button type="button" class="costing-ghost-btn" data-project-slice>Slice unsliced</button>
+      <a class="costing-ghost-btn" href="#/files">Open Print Bay</a>
+      <button type="button" class="settings-delete-btn" data-project-delete>Delete project</button>
+    </div>
+    <div class="project-files">${fileRows}</div>
+  </div>`;
+
+  const printerSel = page.querySelector('[data-project-printer]');
+  printerSel?.addEventListener('change', async () => {
+    try {
+      const r = await fetch(`/api/projects/${projectId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ quote_printer_id: printerSel.value || '' }),
+      });
+      if (!r.ok) throw new Error('Save failed');
+      showToast('Quote printer saved', printerSel.selectedOptions[0]?.text || 'Auto', 'success');
+    } catch (err) {
+      showToast('Could not save printer', err.message || '', 'error');
+    }
+  });
+
+  page.querySelector('[data-project-slice]')?.addEventListener('click', async () => {
+    const btn = page.querySelector('[data-project-slice]');
+    if (btn) btn.disabled = true;
+    try {
+      const r = await fetch(`/api/projects/${projectId}/slice`, { method: 'POST' });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.detail || 'Slice failed');
+      showToast('Slicing', data.started ? `${data.started} file(s)` : 'Nothing new to slice', 'success');
+      _lastProjectsRouteKey = '';
+      renderProjectsView(projectId);
+    } catch (err) {
+      showToast('Slice failed', err.message || '', 'error');
+      if (btn) btn.disabled = false;
+    }
+  });
+  const parallel = page.querySelector('[data-project-parallel]');
+  parallel?.addEventListener('change', async () => {
+    const n = Number(parallel.value || 1);
+    try {
+      const r = await fetch(`/api/projects/${projectId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ parallel_printers: n }),
+      });
+      if (!r.ok) throw new Error('Save failed');
+      _lastProjectsRouteKey = '';
+      renderProjectsView(projectId);
+    } catch (err) {
+      showToast('Could not save printers', err.message || '', 'error');
+    }
+  });
+
+  const uploadInput = page.querySelector('.project-drop input[type="file"]');
+  const drop = page.querySelector('.project-drop');
+  const sendFiles = async list => {
+    const picked = [...list];
+    if (!picked.length) return;
+    let last = {};
+    for (const file of picked) {
+      const form = new FormData();
+      form.append('file', file);
+      const r = await fetch(`/api/projects/${projectId}/files`, { method: 'POST', body: form });
+      last = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(last.detail || `Upload failed: ${file.name}`);
+    }
+    showToast(
+      last.slicing ? 'Slicing for quote' : 'Files added',
+      `${picked.length} into ${project.name}`,
+      'success',
+    );
+    _lastProjectsRouteKey = '';
+    renderProjectsView(projectId);
+  };
+  uploadInput?.addEventListener('change', async () => {
+    try {
+      await sendFiles(uploadInput.files || []);
+    } catch (err) {
+      showToast('Upload failed', err.message || '', 'error');
+    }
+    uploadInput.value = '';
+  });
+  drop?.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('is-drop'); });
+  drop?.addEventListener('dragleave', () => drop.classList.remove('is-drop'));
+  drop?.addEventListener('drop', async e => {
+    e.preventDefault();
+    drop.classList.remove('is-drop');
+    try {
+      await sendFiles(e.dataTransfer?.files || []);
+    } catch (err) {
+      showToast('Upload failed', err.message || '', 'error');
+    }
+  });
+  page.querySelector('[data-project-delete]')?.addEventListener('click', async () => {
+    if (!confirm(`Delete project “${project.name}”? Vault files stay on disk.`)) return;
+    try {
+      const r = await fetch(`/api/projects/${projectId}`, { method: 'DELETE' });
+      if (!r.ok) throw new Error('Delete failed');
+      showToast('Project deleted', `${project.name} · files kept in vault`, 'success');
+      _lastProjectsRouteKey = '';
+      location.hash = '#/projects';
+      renderProjectsView();
+    } catch (err) {
+      showToast('Delete failed', err.message || '', 'error');
+    }
+  });
+  clearTimeout(_projectSlicePoll);
+  if (project.slicing) {
+    _projectSlicePoll = setTimeout(() => {
+      if (location.hash !== `#/projects/${projectId}`) return;
+      _lastProjectsRouteKey = '';
+      renderProjectsView(projectId);
+    }, 4000);
+  }
+}
+
 // ── Print Memory ─────────────────────────────────────────────────────────
 
 function _memoryPrintName(item) {
@@ -5062,7 +8343,8 @@ function _memoryFlags(item) {
   const excluded = item.exclude_from_stats ? '<span class="memory-pill memory-pill-muted">no stats</span>' : '';
   const notes = item.notes ? '<span class="memory-pill">note</span>' : '';
   const snap = item.has_snapshot ? '<span class="memory-pill memory-pill-warn">snapshot</span>' : '';
-  return `${tags}${moreTags}${excluded}${notes}${snap}`;
+  const recorder = item.has_timelapse ? '<span class="memory-pill memory-pill-good">recorder</span>' : '';
+  return `${tags}${moreTags}${excluded}${notes}${snap}${recorder}`;
 }
 
 function _memoryRow(item) {
@@ -5075,11 +8357,16 @@ function _memoryRow(item) {
     : '';
   const material = item.material || (item.spool_usage || [])[0]?.material || '';
   const spoolCount = (item.spool_usage || []).length;
-  return `<button class="memory-row" type="button" data-print-id="${item.id}" data-printer-id="${esc(item.printer_id)}">
+  const quote = item.suggested_price != null
+    ? Number(item.suggested_price)
+    : (item.floor_price != null ? Number(item.floor_price) : (item.total_cost != null ? Number(item.total_cost) : null));
+  const cost = quote != null ? ` · $${quote.toFixed(2)}` : '';
+  const costTitle = _printCostTitle(item);
+  return `<button class="memory-row ${_memoryRowStateClass(item)}" type="button" data-print-id="${item.id}" data-printer-id="${esc(item.printer_id)}">
     <span class="memory-date"><strong>${esc(dateLabel)}</strong><em>${esc(timeLabel)}</em></span>
     <span class="memory-main">
       <strong title="${esc(item.filename || '')}">${esc(_memoryPrintName(item))}</strong>
-      <em>${esc(_memoryPrinterLabel(item.printer_id))}${material ? ` · ${esc(material)}` : ''}${spoolCount ? ` · ${spoolCount} spool${spoolCount !== 1 ? 's' : ''}` : ''}</em>
+      <em${costTitle ? ` title="${esc(costTitle)}"` : ''}>${esc(_memoryPrinterLabel(item.printer_id))}${material ? ` · ${esc(material)}` : ''}${spoolCount ? ` · ${spoolCount} spool${spoolCount !== 1 ? 's' : ''}` : ''}${cost}</em>
     </span>
     <span class="memory-meta">${_memoryStateBadge(item.final_state)}<em>${esc(dur)}</em>${estimate}</span>
     <span class="memory-flags">${_memoryFlags(item)}</span>
@@ -5130,6 +8417,12 @@ function _memorySummary(items) {
   const cancelled = items.filter(i => i.final_state === 'CANCELLED').length;
   const excluded = items.filter(i => i.exclude_from_stats).length;
   const hours = items.reduce((sum, i) => sum + Number(i.duration_seconds || 0), 0) / 3600;
+  const filament = items.reduce((sum, i) => sum + Number(i.total_cost || 0), 0);
+  const filamentCount = items.filter(i => i.total_cost != null).length;
+  const floor = items.reduce((sum, i) => sum + Number(i.floor_price || 0), 0);
+  const floorCount = items.filter(i => i.floor_price != null).length;
+  const suggested = items.reduce((sum, i) => sum + Number(i.suggested_price || 0), 0);
+  const suggestedCount = items.filter(i => i.suggested_price != null).length;
   return `<div class="memory-summary">
     <span><strong>${items.length}</strong> prints</span>
     <span><strong>${finished}</strong> finished</span>
@@ -5137,6 +8430,9 @@ function _memorySummary(items) {
     <span><strong>${failed}</strong> failed</span>
     ${excluded ? `<span><strong>${excluded}</strong> no stats</span>` : ''}
     <span><strong>${hours.toFixed(1)}</strong> h</span>
+    ${floorCount ? `<span><strong>$${floor.toFixed(2)}</strong> floor</span>` : ''}
+    ${suggestedCount ? `<span><strong>$${suggested.toFixed(2)}</strong> suggested</span>` : ''}
+    ${filamentCount ? `<span><strong>$${filament.toFixed(2)}</strong> filament</span>` : ''}
   </div>`;
 }
 
@@ -5149,6 +8445,72 @@ function _memoryScoreClass(score) {
   if (score >= 95) return 'memory-score-good';
   if (score >= 85) return 'memory-score-watch';
   return 'memory-score-review';
+}
+
+function _memoryHistoryHours(seconds) {
+  const n = Number(seconds || 0);
+  if (n <= 0) return '0m';
+  return formatTime(n);
+}
+
+function _memoryHistoryGrams(grams) {
+  const n = Number(grams || 0);
+  if (n <= 0) return '0g';
+  return _fmtGrams(n);
+}
+
+function _memoryHistoryWindow(score) {
+  const days = Number(score?.days || 0);
+  return days > 0 ? `Last ${days} days` : 'All time';
+}
+
+function _memoryHistoryPrinters(score) {
+  const printers = [...(score?.printers || [])];
+  const order = (_latestPrinters || []).map(p => p.id);
+  printers.sort((a, b) => {
+    const ia = order.indexOf(a.printer_id);
+    const ib = order.indexOf(b.printer_id);
+    if (ia === -1 && ib === -1) return String(a.printer_id).localeCompare(String(b.printer_id));
+    if (ia === -1) return 1;
+    if (ib === -1) return -1;
+    return ia - ib;
+  });
+  return printers;
+}
+
+function _renderMemoryHistory(score, selectedPrinter) {
+  const fleet = score?.fleet || {};
+  const printers = _memoryHistoryPrinters(score);
+  const cards = printers.length ? printers.map(p => {
+    const selected = selectedPrinter && selectedPrinter === p.printer_id;
+    const failed = Number(p.failed || 0);
+    return `<button class="memory-history-card${selected ? ' is-selected' : ''}" type="button" data-history-printer="${esc(p.printer_id)}" title="Show this printer in the list">
+      <span class="memory-history-name">${esc(_memoryPrinterLabel(p.printer_id))}</span>
+      <strong class="memory-history-hours">${esc(_memoryHistoryHours(p.finished_seconds))}</strong>
+      <em>print time</em>
+      <span class="memory-history-grams">${esc(_memoryHistoryGrams(p.filament_grams))}</span>
+      <span class="memory-history-counts">
+        <b class="is-good">${Number(p.finished || 0)} finished</b>
+        <b class="${failed ? 'is-bad' : ''}">${failed} failed</b>
+        <b>${Number(p.cancelled || 0)} cancelled</b>
+      </span>
+    </button>`;
+  }).join('') : '<div class="memory-history-empty">No finished history yet.</div>';
+  return `<section class="memory-history" aria-label="Fleet print history">
+    <div class="memory-history-head">
+      <div>
+        <span>Fleet history</span>
+        <strong>${esc(_memoryHistoryWindow(score))}</strong>
+      </div>
+      <div class="memory-history-totals">
+        <span><b>${esc(_memoryHistoryHours(fleet.finished_seconds))}</b> print time</span>
+        <span><b>${esc(_memoryHistoryGrams(fleet.filament_grams))}</b> filament</span>
+        <span><b>${Number(fleet.finished || 0)}</b> finished</span>
+        <span><b>${Number(fleet.failed || 0)}</b> failed</span>
+      </div>
+    </div>
+    <div class="memory-history-grid">${cards}</div>
+  </section>`;
 }
 
 function _memoryScorePanel(score) {
@@ -5186,6 +8548,147 @@ function _memoryScorePanel(score) {
   </section>`;
 }
 
+function _memoryRowStateClass(item) {
+  const state = String(item.final_state || '').toUpperCase();
+  if (state === 'ERROR' || state === 'ESTOP') return 'memory-row-failed';
+  if (state === 'CANCELLED') return 'memory-row-cancelled';
+  if (state === 'FINISHED') return 'memory-row-finished';
+  return 'memory-row-open';
+}
+
+function _memorySnapshot(items, score) {
+  const fleet = score?.fleet || {};
+  const failed = items.filter(i => i.final_state === 'ERROR' || i.final_state === 'ESTOP').length;
+  const finished = items.filter(i => i.final_state === 'FINISHED').length;
+  const cancelled = items.filter(i => i.final_state === 'CANCELLED').length;
+  const clips = items.filter(i => i.has_timelapse).length;
+  const missingNotes = items.filter(i => !i.notes && (i.final_state === 'ERROR' || i.final_state === 'ESTOP')).length;
+  const missingClips = items.filter(i => !i.has_timelapse && i.final_state === 'FINISHED').length;
+  const trustedAttempts = Number(fleet.finished || 0) + Number(fleet.failed || 0);
+  return {
+    total: items.length,
+    finished,
+    failed,
+    cancelled,
+    clips,
+    missingNotes,
+    missingClips,
+    score: fleet.score,
+    trustedAttempts,
+    excluded: Number(fleet.excluded || 0),
+  };
+}
+
+function _memoryHeroStatusLine(snap) {
+  if (!snap.total) return 'No prints in this view yet — finish a job to start building memory.';
+  if (snap.failed) return `${snap.failed} failed print${snap.failed === 1 ? '' : 's'} worth reviewing in this range`;
+  if (snap.score != null && snap.score >= 95) return 'Fleet reliability is strong in this window';
+  if (snap.missingClips) return 'Finished prints are landing — recorder clips still catching up';
+  return `${snap.finished} finished print${snap.finished === 1 ? '' : 's'} logged in this view`;
+}
+
+function _renderMemoryHero(items, score) {
+  const snap = _memorySnapshot(items, score);
+  const scoreCls = _memoryScoreClass(snap.score);
+  return `<section class="memory-hero" aria-label="Print Memory snapshot">
+    <div class="memory-hero-copy">
+      <span class="memory-hero-eyebrow">Fleet learning</span>
+      <h1 class="memory-hero-title">Print Memory</h1>
+      <p class="memory-hero-status">${esc(_memoryHeroStatusLine(snap))}</p>
+    </div>
+    <div class="memory-hero-metrics" aria-label="Reliability counts">
+      <div class="memory-hero-metric memory-hero-metric-score ${scoreCls}">
+        <strong>${_memoryScoreLabel(snap.score)}</strong>
+        <span>Score</span>
+      </div>
+      <div class="memory-hero-metric">
+        <strong>${snap.total}</strong>
+        <span>In view</span>
+      </div>
+      <div class="memory-hero-metric memory-hero-metric-good">
+        <strong>${snap.finished}</strong>
+        <span>Finished</span>
+      </div>
+      <div class="memory-hero-metric${snap.failed ? ' memory-hero-metric-review' : ''}">
+        <strong>${snap.failed}</strong>
+        <span>Failed</span>
+      </div>
+      <div class="memory-hero-metric${snap.clips ? ' memory-hero-metric-good' : ''}">
+        <strong>${snap.clips}</strong>
+        <span>Clips</span>
+      </div>
+    </div>
+    <div class="memory-hero-links">
+      <a href="#/failures">Failure Lab</a>
+      <a href="#/mission">Flight Tower</a>
+      <a href="#/">Dashboard</a>
+    </div>
+  </section>`;
+}
+
+function _renderMemoryBriefing(items, score) {
+  const snap = _memorySnapshot(items, score);
+  const rows = [];
+  if (snap.failed) {
+    rows.push({
+      tone: 'review',
+      kicker: 'Review',
+      title: `${snap.failed} failed print${snap.failed === 1 ? '' : 's'} in range`,
+      detail: snap.missingNotes
+        ? `${snap.missingNotes} still missing operator notes`
+        : 'Open a passport to read errors, snapshots, and recorder clips',
+    });
+  }
+  if (snap.missingClips) {
+    rows.push({
+      tone: 'info',
+      kicker: 'Recorder',
+      title: `${snap.missingClips} finished print${snap.missingClips === 1 ? '' : 's'} without a clip yet`,
+      detail: 'Flightdeck now auto-harvests Bambu timelapses after finish; older prints can still use Find clip',
+    });
+  }
+  if (snap.excluded) {
+    rows.push({
+      tone: 'muted',
+      kicker: 'Stats',
+      title: `${snap.excluded} print${snap.excluded === 1 ? '' : 's'} excluded from reliability score`,
+      detail: 'Tagged out of fleet stats but still searchable here',
+    });
+  }
+  const calm = !rows.length;
+  const body = calm
+    ? `<div class="briefing-clear briefing-clear-hero memory-briefing-clear">
+        <div class="briefing-clear-icon" aria-hidden="true">✓</div>
+        <div class="briefing-clear-copy">
+          <strong>${snap.trustedAttempts ? 'Learning loop healthy' : 'Notebook open'}</strong>
+          <span>${snap.trustedAttempts
+            ? `${snap.trustedAttempts} scored attempts in this window. Nothing urgent needs a review pass.`
+            : 'Filter or search prints to build reliability signal and operator notes.'}</span>
+        </div>
+        <div class="briefing-clear-links">
+          <a href="#/failures">Failure Lab</a>
+          <a href="#/queue">Queue</a>
+        </div>
+      </div>`
+    : rows.map(row => `<article class="memory-briefing-row memory-briefing-${row.tone}">
+        <span class="memory-briefing-kicker">${esc(row.kicker)}</span>
+        <div class="memory-briefing-copy">
+          <strong>${esc(row.title)}</strong>
+          <span>${esc(row.detail)}</span>
+        </div>
+      </article>`).join('');
+  return `<section class="memory-briefing${calm ? ' memory-briefing-calm' : ''}" aria-label="Print Memory briefing">
+    <div class="memory-briefing-head">
+      <div>
+        <span>Operator learning</span>
+        <strong>${calm ? 'Nothing urgent to review' : 'Worth a closer look'}</strong>
+      </div>
+      <a href="#/failures">Failure Lab</a>
+    </div>
+    <div class="memory-briefing-list">${body}</div>
+  </section>`;
+}
+
 function _memoryParamsFromControls(page) {
   const params = new URLSearchParams();
   const q = page.querySelector('.memory-search')?.value.trim();
@@ -5206,6 +8709,7 @@ function _memorySetHash(page) {
 async function _memoryOpenPassport(printId) {
   const detail = document.getElementById('memory-passport');
   if (!detail) return;
+  _teardownMediaIn(detail);
   detail.innerHTML = '<div class="history-day-loading">...</div>';
   try {
     const r = await fetch(`/api/print-memory/${printId}`);
@@ -5228,6 +8732,7 @@ async function _memoryOpenPassport(printId) {
 async function renderPrintMemoryView() {
   const page = document.getElementById('memory-page');
   if (!page) return;
+  _teardownMediaIn(page);
   const params = Object.fromEntries(_routeParams('#/memory').entries());
   const apiParams = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
@@ -5248,15 +8753,12 @@ async function renderPrintMemoryView() {
     if (scoreResp.ok) score = await scoreResp.json();
   } catch {}
   const rows = (data.items || []).map(_memoryRow).join('');
-  page.innerHTML = `<div class="memory-shell">
+  page.innerHTML = `<div class="memory-page-stack">
+    ${_renderMemoryHero(data.items || [], score)}
+    ${_renderMemoryHistory(score, params.printer_id || '')}
+    ${_renderMemoryBriefing(data.items || [], score)}
+    <div class="memory-shell">
     <section class="memory-list-panel">
-      <div class="memory-head">
-        <div>
-          <span class="memory-eyebrow">Fleet</span>
-          <h2>Print Memory</h2>
-        </div>
-        ${_memorySummary(data.items || [])}
-      </div>
       ${_memoryFiltersHtml(data, params)}
       ${_memoryScorePanel(score)}
       <div class="memory-list">${rows || '<div class="filedesk-empty">No matching prints yet.</div>'}</div>
@@ -5264,7 +8766,7 @@ async function renderPrintMemoryView() {
     <aside class="memory-passport" id="memory-passport">
       <div class="detail-placeholder">Select a print to open its passport.</div>
     </aside>
-  </div>`;
+  </div></div>`;
 
   page.querySelector('.memory-search')?.addEventListener('keydown', e => {
     if (e.key === 'Enter') _memorySetHash(page);
@@ -5272,6 +8774,20 @@ async function renderPrintMemoryView() {
   page.querySelector('.memory-search')?.addEventListener('change', () => _memorySetHash(page));
   page.querySelectorAll('[data-memory-filter]').forEach(el => {
     el.addEventListener('change', () => _memorySetHash(page));
+  });
+  page.querySelectorAll('[data-history-printer]').forEach(card => {
+    card.addEventListener('click', () => {
+      const id = card.dataset.historyPrinter || '';
+      const next = new URLSearchParams();
+      for (const [key, value] of Object.entries(params)) {
+        if (value) next.set(key, value);
+      }
+      if (next.get('printer_id') === id) next.delete('printer_id');
+      else if (id) next.set('printer_id', id);
+      const qs = next.toString();
+      history.replaceState(null, '', qs ? `#/memory?${qs}` : '#/memory');
+      renderPrintMemoryView();
+    });
   });
   page.querySelectorAll('.memory-row').forEach(row => {
     row.addEventListener('click', () => _memoryOpenPassport(row.dataset.printId));
@@ -5612,6 +9128,10 @@ function _spoolStorageLocationName(id) {
   return loc?.name || 'Unassigned';
 }
 
+function _spoolHomeLocationId(s) {
+  return s?.home_storage_location_id ?? s?.storage_location_id ?? null;
+}
+
 function _spoolTraceRow(row) {
   const p = _latestPrinters.find(x => x.id === row.printer_id);
   const raw = row.subtask_name || row.filename.replace(/.*[/\\]/, '');
@@ -5693,6 +9213,177 @@ function _spoolActivityRow(row) {
   </div>`;
 }
 
+function _spoolDestinationSlotOptions(printer, selectedSlot = null) {
+  if (!printer) return '<option value="">Select printer first</option>';
+  const kind = printer.kind || 'bambu';
+  if (kind !== 'bambu') {
+    const mmuUnit = printer.mmu?.[0];
+    if (mmuUnit?.num_gates > 1) {
+      return Array.from({ length: mmuUnit.num_gates }, (_, i) => {
+        const gate = mmuUnit.gates?.[i];
+        const label = gate?.material ? `T${i} · ${gate.material}` : `T${i}`;
+        return `<option value="${i}"${Number(selectedSlot) === i ? ' selected' : ''}>${esc(label)}</option>`;
+      }).join('');
+    }
+    return `<option value="0"${Number(selectedSlot) === 0 ? ' selected' : ''}>Single extruder</option>`;
+  }
+  const units = printer.ams;
+  if (units?.length) {
+    const opts = [];
+    for (const unit of units) {
+      for (const slot of unit.slots) {
+        const flatIdx = _amsFlatSlot(unit, slot);
+        const label = unit.slots.length === 1
+          ? unit.label
+          : `${unit.label} · Slot ${slot.idx + 1}`;
+        opts.push(`<option value="${flatIdx}"${Number(selectedSlot) === flatIdx ? ' selected' : ''}>${esc(label)}</option>`);
+      }
+    }
+    return opts.join('');
+  }
+  return [0, 1, 2, 3].map(i =>
+    `<option value="${i}"${Number(selectedSlot) === i ? ' selected' : ''}>Slot ${i + 1}</option>`
+  ).join('');
+}
+
+function _spoolDestinationPanel(data) {
+  const loaded = !!data.location_printer_id;
+  const currentPrinter = _latestPrinters.find(p => p.id === data.location_printer_id);
+  const selectedPrinter = currentPrinter || _latestPrinters[0];
+  const printerOptions = (_latestPrinters || []).map(p =>
+    `<option value="${esc(p.id)}"${selectedPrinter?.id === p.id ? ' selected' : ''}>${esc(p.custom_name || p.model_name || p.id)}</option>`
+  ).join('');
+  const storageOptions = (_spoolLocations.length ? _spoolLocations : [{ id: '', name: 'Storage' }]).map(loc =>
+    `<option value="${esc(loc.id ?? '')}"${String(data.storage_location_id ?? '') === String(loc.id ?? '') ? ' selected' : ''}>${esc(loc.name || 'Storage')}</option>`
+  ).join('');
+  const slotOptions = _spoolDestinationSlotOptions(selectedPrinter, data.location_slot);
+  return `<section class="spool-quick-assign" data-spool-assign data-spool-id="${data.id}">
+    <div class="spool-quick-head">
+      <div>
+        <span>QR quick move</span>
+        <strong>Assign this spool</strong>
+      </div>
+      <small>${esc(_spoolLocationText(data))}</small>
+    </div>
+    <div class="spool-quick-mode">
+      <label class="${loaded ? '' : 'active'}">
+        <input type="radio" name="spool-assign-mode-${data.id}" value="storage"${loaded ? '' : ' checked'}>
+        Storage
+      </label>
+      <label class="${loaded ? 'active' : ''}">
+        <input type="radio" name="spool-assign-mode-${data.id}" value="loaded"${loaded ? ' checked' : ''}>
+        Printer slot
+      </label>
+    </div>
+    <div class="spool-quick-fields">
+      <div class="spool-quick-storage${loaded ? ' hidden' : ''}">
+        <label>Storage location</label>
+        <select data-spool-assign-storage>${storageOptions}</select>
+      </div>
+      <div class="spool-quick-loaded${loaded ? '' : ' hidden'}">
+        <label>Printer</label>
+        <select data-spool-assign-printer>${printerOptions || '<option value="">No printers configured</option>'}</select>
+        <label>Slot</label>
+        <select data-spool-assign-slot>${slotOptions}</select>
+      </div>
+      <label class="spool-quick-replace">
+        <input type="checkbox" data-spool-assign-replace checked>
+        Replace spool already assigned to that slot
+      </label>
+    </div>
+    <div class="spool-quick-actions">
+      <button type="button" data-spool-assign-submit>Assign spool</button>
+      <a href="#/spools?filter=loaded">Loaded spools</a>
+    </div>
+    <div class="spool-quick-result" data-spool-assign-result></div>
+  </section>`;
+}
+
+function _attachSpoolQuickAssign(root, spoolId) {
+  const panel = root.querySelector('[data-spool-assign]');
+  if (!panel) return;
+  const storageBlock = panel.querySelector('.spool-quick-storage');
+  const loadedBlock = panel.querySelector('.spool-quick-loaded');
+  const printerSel = panel.querySelector('[data-spool-assign-printer]');
+  const slotSel = panel.querySelector('[data-spool-assign-slot]');
+  const storageSel = panel.querySelector('[data-spool-assign-storage]');
+  const resultEl = panel.querySelector('[data-spool-assign-result]');
+  const replaceBox = panel.querySelector('[data-spool-assign-replace]');
+
+  const selectedMode = () => panel.querySelector('input[name^="spool-assign-mode-"]:checked')?.value || 'storage';
+  const refreshMode = () => {
+    const loaded = selectedMode() === 'loaded';
+    storageBlock?.classList.toggle('hidden', loaded);
+    loadedBlock?.classList.toggle('hidden', !loaded);
+    panel.querySelectorAll('.spool-quick-mode label').forEach(label => {
+      label.classList.toggle('active', label.querySelector('input')?.checked);
+    });
+  };
+  const refreshSlots = () => {
+    const printer = _latestPrinters.find(p => p.id === printerSel?.value);
+    if (slotSel) slotSel.innerHTML = _spoolDestinationSlotOptions(printer);
+  };
+
+  panel.querySelectorAll('input[name^="spool-assign-mode-"]').forEach(input => {
+    input.addEventListener('change', refreshMode);
+  });
+  printerSel?.addEventListener('change', refreshSlots);
+
+  panel.querySelector('[data-spool-assign-submit]')?.addEventListener('click', async e => {
+    const btn = e.currentTarget;
+    const mode = selectedMode();
+    const printer = _latestPrinters.find(p => p.id === printerSel?.value);
+    const slotLabel = mode === 'loaded' ? (slotSel?.options[slotSel.selectedIndex]?.textContent || 'Slot') : '';
+    btn.disabled = true;
+    const old = btn.textContent;
+    btn.textContent = 'Assigning';
+    if (resultEl) resultEl.textContent = '';
+    try {
+      if (mode === 'loaded' && (!printerSel?.value || slotSel?.value === '')) {
+        throw new Error('Choose a printer and slot first');
+      }
+      const body = mode === 'loaded'
+        ? {
+            printer_id: printerSel.value,
+            slot: Number(slotSel.value),
+            storage_location_id: null,
+            replace_existing: !!replaceBox?.checked,
+            sync_ams: true,
+          }
+        : {
+            printer_id: null,
+            slot: null,
+            storage_location_id: storageSel?.value ? Number(storageSel.value) : null,
+          };
+      const r = await fetch(`/api/spools/${spoolId}/move`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const payload = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(_spoolConflictMessage(payload) || 'Unable to assign spool');
+      if (mode === 'loaded') {
+        _spoolMoveSyncToast(payload, printer?.custom_name || printerSel.value, slotLabel);
+      } else {
+        showToast('Spool moved', storageSel?.options[storageSel.selectedIndex]?.textContent || 'Storage', 'success');
+      }
+      if (payload.replaced_spool_id && resultEl) {
+        const replacedLabel = `#${_spoolDisplayNumberById(payload.replaced_spool_id)}`;
+        resultEl.textContent = `Replaced spool ${replacedLabel}; it is now unassigned.`;
+        showToast('Slot assignment replaced', `Spool ${replacedLabel} was unassigned.`, 'warning');
+      }
+      await _refreshSpoolsByPrinter();
+      await renderSpoolDetail(spoolId);
+    } catch (err) {
+      if (resultEl) resultEl.textContent = err?.message || 'Unable to assign spool';
+      showToast('Spool assignment failed', err?.message || '', 'error');
+      btn.disabled = false;
+      btn.textContent = old;
+    }
+  });
+  refreshMode();
+}
+
 async function renderSpoolDetail(spoolId) {
   const el = document.getElementById('spool-detail');
   if (!el) return;
@@ -5700,12 +9391,14 @@ async function renderSpoolDetail(spoolId) {
 
   let data = null;
   try {
-    const [r, locs] = await Promise.all([
+    const [r, locs, printers] = await Promise.all([
       fetch(`/api/spools/${spoolId}/trace`),
       _spoolLocations.length ? Promise.resolve(null) : fetch('/api/spool-locations').catch(() => null),
+      _latestPrinters.length ? Promise.resolve(null) : fetch('/api/printers').catch(() => null),
     ]);
     if (r.ok) data = await r.json();
     if (locs?.ok) _spoolLocations = await locs.json();
+    if (printers?.ok) _latestPrinters = await printers.json();
   } catch {}
 
   if (!data) {
@@ -5773,6 +9466,7 @@ async function renderSpoolDetail(spoolId) {
       </div>
       ${data.notes ? `<div class="spool-detail-notes">${esc(data.notes)}</div>` : ''}
     </section>
+    ${_spoolDestinationPanel(data)}
     <section class="spool-trace-panel">
       <div class="history-day-header">AMS / Shelf Activity</div>
       ${activity.length ? activity.map(_spoolActivityRow).join('') : '<div class="print-empty">No spool activity recorded yet.</div>'}
@@ -5782,6 +9476,7 @@ async function renderSpoolDetail(spoolId) {
       ${trace.length ? trace.map(_spoolTraceRow).join('') : '<div class="print-empty">No print usage recorded for this spool yet.</div>'}
     </section>
   </div>`;
+  _attachSpoolQuickAssign(el, data.id);
 }
 
 // ── Failure review ────────────────────────────────────────────────────────
@@ -5817,7 +9512,7 @@ function _failureRow(item) {
   const progress = item.progress_pct != null ? `${item.progress_pct}%` : '—';
   const mat = item.material || 'Unknown material';
   const spoolLinks = item.spool_usage?.length
-    ? item.spool_usage.map(u => `<a href="#/spool/${u.spool_id}">#${u.spool_id}</a>`).join(', ')
+    ? item.spool_usage.map(u => `<a href="#/spool/${u.spool_id}">#${u.display_id || _spoolDisplayNumberById(u.spool_id)}</a>`).join(', ')
     : '—';
   const snapshot = item.has_snapshot
     ? `<img src="${_mediaUrl(`/api/printers/${item.printer_id}/prints/${item.id}/snapshot`, item.filename || 'Failure snapshot', '#ef4444')}" alt="" loading="lazy">`
@@ -5904,7 +9599,7 @@ async function renderFailuresView(options = {}) {
   }, {})).map(([spool_id, count]) => ({ spool_id, count })).sort((a, b) => b.count - a.count);
   const spoolRows = _failureFilter.printer ? scopedSpoolStats : spoolStats;
   const spoolStatHtml = spoolRows.length
-    ? _failureStatBlock('By Spool', spoolRows, r => r.spool_id && r.spool_id !== 'Unknown' ? `Spool #${r.spool_id}` : 'Unknown')
+    ? _failureStatBlock('By Spool', spoolRows, r => r.spool_id && r.spool_id !== 'Unknown' ? `Spool #${_spoolDisplayNumberById(r.spool_id)}` : 'Unknown')
     : '';
 
   el.innerHTML = `<div class="failures-header">
@@ -6049,27 +9744,51 @@ async function renderPrinterDetail(id, subtab = 'live') {
 
     try {
       const camSrc = _cameraStreamSrc(id);
-      const camHtml = _detailCameraContent(id, p, camSrc);
-
+      const opsDrawer = '';
+      const hasOps = _detailLiveHasOps(p);
       const printerColor = _printerColor(id);
       const bannerTextColor = p.icon === 'bambu' ? '#22c55e' : p.icon === 'voron' ? '#ef4444' : 'var(--text)';
       el.innerHTML =
         _detailSubTabs(id, 'live') +
-        `<div class="detail-body">
+        `<div class="detail-body live-workspace-body">
           <div class="detail-left">
-            <div id="detail-live-head">${_detailLiveHeader(p, printerColor, bannerTextColor)}</div>
-            <div class="live-main-deck">
-              <aside class="live-control-rail" id="detail-live-ops">${_detailLiveOps(p)}</aside>
-              <div class="camera-hero">${camHtml}<div class="camera-hud" id="detail-camera-hud">${_detailCameraHud(p)}</div></div>
+            <div class="live-main-deck ${hasOps ? 'has-live-ops' : ''}">
+              ${_detailLiveDeckTop(p, printerColor, bannerTextColor)}
+              <div class="live-deck-stage">
+                ${opsDrawer}
+                <div class="camera-hero">
+                  ${_detailCameraHeroInner(id, p, camSrc)}
+                </div>
+              </div>
             </div>
-            <div class="live-strip" id="detail-live-strip">${_detailLiveStrip(p)}</div>
+
           </div>
           <div class="detail-right">
             <div class="detail-panels">
               <div class="detail-panel" id="detail-print">${_detailPrintPanel(p)}</div>
             </div>
             <div id="detail-objects"></div>
+            <section class="live-workspace-panel live-workspace-queue" aria-label="Printer queue">
+              <div class="live-workspace-panel-head"><h2>Up next</h2><a href="#/queue">Manage queue</a></div>
+              <div id="detail-queue-preview" aria-live="polite">Loading queue…</div>
+              <a href="#/files">Browse print files</a>
+            </section>
           </div>
+        </div>
+        <div class="live-workspace-controls">
+          <div class="live-workspace-machine">
+          <section class="live-workspace-panel" aria-label="Movement">
+            <h2>Movement</h2><div id="detail-live-ops-body">${_detailLiveOps(p, 'movement') || '<span class="live-strip-empty">No movement controls supported</span>'}</div>
+          </section>
+          <section class="live-workspace-panel live-workspace-thermal" aria-label="Temperatures and cooling">
+            <h2>Temperatures &amp; cooling</h2>
+            <div class="live-op-temp-panel" id="detail-temps">${_detailTempsPanel(p)}</div>
+            <div id="detail-thermal-ops">${_detailLiveOps(p, 'thermal')}</div>
+          </section>
+          </div>
+          <section class="live-workspace-panel live-workspace-filament" aria-label="Loaded filament">
+            <h2>Loaded filament</h2><div class="live-strip" id="detail-live-strip">${_detailLiveStrip(p)}</div>
+          </section>
         </div>`;
     } catch (err) {
       _renderedDetailOk = false;
@@ -6078,6 +9797,7 @@ async function renderPrinterDetail(id, subtab = 'live') {
       return;
     }
     _attachCameraRetries(el);
+    _syncTimelapseRecOverlay(el.querySelector('.camera-hero'), p);
 
     // Click cycles — desktop: normal→wide→fullscreen→normal; mobile: normal↔fullscreen
     _camZoom = 0;
@@ -6123,25 +9843,31 @@ async function renderPrinterDetail(id, subtab = 'live') {
     if (p.state === 'printing' || p.state === 'paused') refreshObjectsPanel(id);
   } else {
     // Restore camera stream if it was stopped when navigating away and back.
+    const printerColor = _printerColor(id);
+    const bannerTextColor = p.icon === 'bambu' ? '#22c55e' : p.icon === 'voron' ? '#ef4444' : 'var(--text)';
     const heroEl = el.querySelector('.camera-hero');
     const camImg = el.querySelector('#detail-cam-img');
     const camSrc = _cameraStreamSrc(id);
     const shouldShowImg = !!camSrc && p.state !== 'offline';
     const hasImg = !!camImg;
     if (heroEl && shouldShowImg !== hasImg) {
-      heroEl.innerHTML = `${_detailCameraContent(id, p, camSrc)}<div class="camera-hud" id="detail-camera-hud">${_detailCameraHud(p)}</div>`;
+      heroEl.innerHTML = _detailCameraHeroInner(id, p, camSrc);
       _attachCameraRetries(el);
     } else if (camImg?.dataset.stopped && camSrc && p.state !== 'offline') {
       delete camImg.dataset.stopped;
       camImg.src = camSrc;
     }
 
-    const printerColor = _printerColor(id);
-    const bannerTextColor = p.icon === 'bambu' ? '#22c55e' : p.icon === 'voron' ? '#ef4444' : 'var(--text)';
+    _syncTimelapseRecOverlay(heroEl, p);
     const headEl = el.querySelector('#detail-live-head');
-    if (headEl) headEl.innerHTML = _detailLiveHeader(p, printerColor, bannerTextColor);
-    const opsEl = el.querySelector('#detail-live-ops');
-    if (opsEl) opsEl.innerHTML = _detailLiveOps(p);
+    if (headEl) headEl.innerHTML = _detailLiveToolbarHeader(p, printerColor, bannerTextColor);
+    const opsHtml = _detailLiveOps(p, 'movement');
+    const deckEl = el.querySelector('.live-main-deck');
+    if (deckEl) deckEl.classList.toggle('has-live-ops', _detailLiveHasOps(p));
+    const opsEl = el.querySelector('#detail-live-ops-body');
+    if (opsEl) opsEl.innerHTML = opsHtml;
+    const thermalEl = el.querySelector('#detail-thermal-ops');
+    if (thermalEl) thermalEl.innerHTML = _detailLiveOps(p, 'thermal');
     const hudEl = el.querySelector('#detail-camera-hud');
     if (hudEl) hudEl.innerHTML = _detailCameraHud(p);
     const stripEl = el.querySelector('#detail-live-strip');
@@ -6155,12 +9881,43 @@ async function renderPrinterDetail(id, subtab = 'live') {
     const tempsEl = el.querySelector('#detail-temps');
     if (tempsEl) tempsEl.innerHTML = _detailTempsPanel(p);
   }
+  _refreshLiveQueuePreview(id);
+}
+
+let _liveQueueFetchedAt = 0;
+let _liveQueueRequest = null;
+let _liveQueueError = false;
+function _liveQueuePreviewHtml(id) {
+  const jobs = _queueLatestJobs.filter(j => j.printer_id === id && ['pending', 'held', 'uploading'].includes(j.status))
+    .sort((a, b) => (a.position ?? 999) - (b.position ?? 999) || a.id - b.id);
+  const notice = _liveQueueError ? '<p class="live-strip-empty">Queue unavailable · showing last fetched list</p>' : '';
+  if (_liveQueueError && !jobs.length) return '<p class="live-strip-empty">Queue unavailable · open Manage queue to retry</p>';
+  return notice + (jobs.length ? `<ol class="live-workspace-job-list">${jobs.slice(0, 4).map(j =>
+    `<li><span>${esc(j.filename || 'Untitled job')}</span>${_queueStatusBadge(j.status)}</li>`).join('')}</ol>${jobs.length > 4 ? `<p>${jobs.length - 4} more in queue</p>` : ''}`
+    : '<p class="live-strip-empty">No upcoming jobs for this printer</p>');
+}
+async function _refreshLiveQueuePreview(id) {
+  const target = document.getElementById('detail-queue-preview');
+  if (!target) return;
+  if (Date.now() - _liveQueueFetchedAt > 15000 && !_liveQueueRequest) {
+    _liveQueueFetchedAt = Date.now();
+    _liveQueueRequest = fetch('/api/queue').then(r => {
+      if (!r.ok) throw new Error('Queue unavailable'); return r.json();
+    }).then(jobs => {
+      if (!Array.isArray(jobs)) throw new Error('Invalid queue');
+      _queueLatestJobs = jobs; _liveQueueError = false;
+    }).catch(() => { _liveQueueError = true; }).finally(() => { _liveQueueRequest = null; });
+  }
+  if (_liveQueueRequest) await _liveQueueRequest;
+  const current = parseRoute(location.hash);
+  if (current.view === 'printer' && current.id === id && target.isConnected) target.innerHTML = _liveQueuePreviewHtml(id);
 }
 
 // ── Print queue ───────────────────────────────────────────────────────────
 
 const _QUEUE_STATUS_LABEL = {
   pending:   'Pending',
+  held:      'Waiting',
   uploading: 'Uploading…',
   printing:  'Printing',
   done:      'Done',
@@ -6197,7 +9954,38 @@ function _fileKindClass(kind) {
   return String(kind || 'file').replace(/[^a-z0-9_-]/gi, '-').toLowerCase();
 }
 
+function _fileArchiveKey(name) {
+  let text = String(name || '').split(/[/\\]/).pop().toLowerCase();
+  for (const suffix of ['.gcode.3mf', '.gcode.gz', '.3mf', '.gcode', '.ufp', '.step', '.stp', '.stl', '.obj']) {
+    if (text.endsWith(suffix)) {
+      text = text.slice(0, -suffix.length);
+      break;
+    }
+  }
+  return text.trim();
+}
+
+function _matchingSlicedJob(file, siblings) {
+  if (!_fileIsSourceModel(file)) return null;
+  const key = _fileArchiveKey(file.name || file.path);
+  if (!key) return null;
+  const folder = _libraryVaultFolderKey(file);
+  const pool = Array.isArray(siblings) ? siblings : [];
+  const byName = pool.find(other => {
+    if (other === file || !_fileIsSlicedJob(other)) return false;
+    if (_libraryVaultFolderKey(other) !== folder) return false;
+    const otherKey = _fileArchiveKey(other.name || other.path);
+    return otherKey === key || otherKey.startsWith(`${key}_`) || key.startsWith(`${otherKey}_`);
+  });
+  if (byName) return byName;
+  const sliced = pool.filter(other => other !== file && _fileIsSlicedJob(other) && _libraryVaultFolderKey(other) === folder);
+  const sources = pool.filter(other => _fileIsSourceModel(other) && _libraryVaultFolderKey(other) === folder);
+  if (sliced.length === 1 && sources.length === 1) return sliced[0];
+  return null;
+}
+
 function _fileIsSourceModel(file) {
+  if (_fileIsSlicedJob(file)) return false;
   const name = String(file?.name || file?.path || '').toLowerCase();
   return name.endsWith('.stl') || name.endsWith('.obj') || name.endsWith('.step') || name.endsWith('.stp') ||
     (name.endsWith('.3mf') && !name.endsWith('.gcode.3mf'));
@@ -6205,7 +9993,26 @@ function _fileIsSourceModel(file) {
 
 function _fileIsSlicedJob(file) {
   const name = String(file?.name || file?.path || '').toLowerCase();
-  return name.endsWith('.gcode.3mf') || name.endsWith('.gcode') || name.endsWith('.gcode.gz') || name.endsWith('.ufp');
+  if (name.endsWith('.gcode.3mf') || name.endsWith('.gcode') || name.endsWith('.gcode.gz') || name.endsWith('.ufp')) {
+    return true;
+  }
+  const base = name.split(/[/\\]/).pop();
+  return base === 'result.3mf';
+}
+
+function _fileDeskHasPreview(file) {
+  const name = String(file?.name || file?.path || '').toLowerCase();
+  return name.endsWith('.3mf') || name.endsWith('.gcode.3mf');
+}
+
+function _fileDeskPreviewUrl(sourceId, filePath, view = 'top') {
+  const path = String(filePath || '').trim().replace(/^\/+/, '');
+  if (!path) return '';
+  return `/api/files/source/preview?${new URLSearchParams({
+    source_id: String(sourceId || 'library'),
+    path,
+    view,
+  }).toString()}`;
 }
 
 function _queueJobIsSourceModel(job) {
@@ -6229,7 +10036,63 @@ function _fileCompatiblePrinters(file, sourceTarget = null) {
 
 function _filePrintablePrinters(file, sourceTarget = null) {
   if (_fileIsSourceModel(file)) return [];
-  return _fileCompatiblePrinters(file, sourceTarget);
+  return _fileCompatiblePrinters(file, sourceTarget).filter(p => p.print_enabled !== false);
+}
+
+const _QUEUE_PRINTER_KEY = 'flightdeck.queue.last_printer';
+
+function _lastQueuePrinterId() {
+  return sessionStorage.getItem(_QUEUE_PRINTER_KEY) || '';
+}
+
+function _rememberQueuePrinterId(printerId) {
+  if (printerId) sessionStorage.setItem(_QUEUE_PRINTER_KEY, printerId);
+}
+
+function _printerQueueLabel(p) {
+  return p?.custom_name || p?.model_name || p?.id || 'Printer';
+}
+
+function _printerQueueIdle(p) {
+  const state = String(p?.state || '').toLowerCase();
+  return state === 'idle' || state === 'finished' || state === 'ready' || state === 'standby';
+}
+
+function _idlePrintablePrinters(file, sourceTarget = null) {
+  return _filePrintablePrinters(file, sourceTarget).filter(_printerQueueIdle);
+}
+
+function _pickAutoQueuePrinter(file, sourceTarget = null) {
+  const idle = _idlePrintablePrinters(file, sourceTarget);
+  const last = _lastQueuePrinterId();
+  if (last) {
+    const match = idle.find(p => p.id === last);
+    if (match) return match;
+  }
+  return idle.length === 1 ? idle[0] : null;
+}
+
+function _sortedQueuePrinterChoices(file, sourceTarget = null) {
+  const printers = _filePrintablePrinters(file, sourceTarget).slice();
+  const last = _lastQueuePrinterId();
+  const rank = p => (
+    (p.id === last ? 0 : 10)
+    + (_printerQueueIdle(p) ? 0 : 2)
+  );
+  return printers.sort((a, b) => {
+    const diff = rank(a) - rank(b);
+    if (diff !== 0) return diff;
+    return _printerQueueLabel(a).localeCompare(_printerQueueLabel(b), undefined, { sensitivity: 'base' });
+  });
+}
+
+function _queueButtonLabel(file, target, targetPrinterId) {
+  if (targetPrinterId) {
+    const p = _latestPrinters.find(x => x.id === targetPrinterId);
+    return p ? `Queue → ${_printerQueueLabel(p)}` : 'Queue';
+  }
+  const auto = _pickAutoQueuePrinter(file, target);
+  return auto ? `Queue → ${_printerQueueLabel(auto)}` : 'Queue';
 }
 
 function _fileSliceTargets(file) {
@@ -6275,6 +10138,161 @@ function _printBayOverview(targets) {
       <strong>${allFiles}</strong>
       <span>printable files</span>
     </div>
+  </section>`;
+}
+
+function _printBaySnapshot(targets, reprintItems = []) {
+  const sourceSummaries = (targets || []).map(t => {
+    const files = (t.files || []).filter(f => f.kind !== 'dir' && _fileCompatiblePrinters(f, t).length);
+    return { target: t, files, summary: _printBaySourceSummary(t, files) };
+  });
+  const allFiles = sourceSummaries.reduce((sum, s) => sum + s.summary.count, 0);
+  const readyFiles = sourceSummaries.reduce((sum, s) => sum + s.summary.ready, 0);
+  const vaultTarget = sourceSummaries.find(s => s.target.id === 'library');
+  const vaultFiles = vaultTarget?.summary.count || 0;
+  const printerTargets = sourceSummaries.filter(s => s.target.id !== 'library');
+  const printerFiles = sourceSummaries.reduce((sum, s) => sum + (s.target.id === 'library' ? 0 : s.summary.count), 0);
+  const printerBays = printerTargets.length;
+  const hiddenBays = printerTargets.filter(s => _printBayHiddenIds().has(s.target.id)).length;
+  const readyBays = printerTargets.filter(s => s.summary.ready > 0).length;
+  const sourceModels = sourceSummaries.reduce((sum, s) => sum + s.files.filter(_fileIsSourceModel).length, 0);
+  const slicedJobs = allFiles - sourceModels;
+  const historyOnly = (reprintItems || []).filter(item => !_printBayFindMatch(item, targets)).length;
+  return {
+    allFiles,
+    readyFiles,
+    vaultFiles,
+    printerFiles,
+    printerBays,
+    hiddenBays,
+    readyBays,
+    sourceModels,
+    slicedJobs,
+    reprints: (reprintItems || []).length,
+    historyOnly,
+  };
+}
+
+function _printBayHeroStatusLine(snap) {
+  if (!snap.allFiles) return 'Print Vault is empty — drop a model or sliced job in to start staging work.';
+  if (snap.readyFiles) {
+    return `${snap.readyFiles} file${snap.readyFiles === 1 ? '' : 's'} are ready to launch across ${snap.readyBays || 1} bay${snap.readyBays === 1 ? '' : 's'}.`;
+  }
+  if (snap.sourceModels && !snap.slicedJobs) {
+    return `${snap.sourceModels} source model${snap.sourceModels === 1 ? '' : 's'} waiting to be sliced back into the vault.`;
+  }
+  return `${snap.vaultFiles} vault file${snap.vaultFiles === 1 ? '' : 's'} staged, ${snap.printerFiles} already sitting on printers.`;
+}
+
+function _renderPrintBayHero(data, reprintItems = []) {
+  const snap = _printBaySnapshot(data.targets || [], reprintItems);
+  return `<section class="filedesk-hero filedesk-hero-polished" aria-label="Print Vault snapshot">
+    <div class="filedesk-hero-copy">
+      <div class="mission-eyebrow">Global Print Bay</div>
+      <h1>Print Vault</h1>
+      <p class="filedesk-hero-status">${esc(_printBayHeroStatusLine(snap))}</p>
+    </div>
+    <div class="filedesk-hero-metrics" aria-label="Print Vault counts">
+      <div class="filedesk-hero-metric filedesk-hero-metric-ready">
+        <strong>${snap.readyFiles}</strong>
+        <span>Ready</span>
+      </div>
+      <div class="filedesk-hero-metric">
+        <strong>${snap.vaultFiles}</strong>
+        <span>Vault</span>
+      </div>
+      <div class="filedesk-hero-metric${snap.hiddenBays ? ' filedesk-hero-metric-warn' : ''}">
+        <strong>${snap.printerBays - snap.hiddenBays}</strong>
+        <span>Bays Live</span>
+      </div>
+      <div class="filedesk-hero-metric${snap.historyOnly ? ' filedesk-hero-metric-muted' : ''}">
+        <strong>${snap.reprints}</strong>
+        <span>Reprints</span>
+      </div>
+    </div>
+    <div class="filedesk-hero-side">
+      <div class="filedesk-hero-actions">
+        <label class="filedesk-upload-source">
+          <input type="file" id="filedesk-source-upload" accept=".stl,.obj,.step,.stp,.3mf,.gcode,.gcode.gz,.ufp">
+          Upload to Vault
+        </label>
+        <div class="filedesk-library-path">${esc(data.library_path || '')}</div>
+      </div>
+      <div class="filedesk-hero-links">
+        <a href="#/makerworld">MakerWorld</a>
+        <a href="#/queue">Queue</a>
+        <a href="#/mission">Flight Tower</a>
+      </div>
+    </div>
+  </section>`;
+}
+
+function _renderPrintBayBriefing(data, reprintItems = []) {
+  const snap = _printBaySnapshot(data.targets || [], reprintItems);
+  const rows = [];
+  if (snap.readyFiles) {
+    rows.push({
+      tone: 'ok',
+      kicker: 'Launch',
+      title: `${snap.readyFiles} file${snap.readyFiles === 1 ? '' : 's'} ready to queue`,
+      detail: `${snap.readyBays || 1} printer bay${snap.readyBays === 1 ? '' : 's'} can launch work now`,
+    });
+  }
+  if (snap.sourceModels) {
+    rows.push({
+      tone: 'info',
+      kicker: 'Slice',
+      title: `${snap.sourceModels} source model${snap.sourceModels === 1 ? '' : 's'} parked in the vault`,
+      detail: 'Open Slice Model to turn raw files into printer-ready jobs',
+    });
+  }
+  if (snap.historyOnly) {
+    rows.push({
+      tone: 'warn',
+      kicker: 'Reprint',
+      title: `${snap.historyOnly} recent print${snap.historyOnly === 1 ? '' : 's'} missing a source file`,
+      detail: 'History-only items cannot be requeued until the source lands back in the vault or bay',
+    });
+  }
+  if (snap.hiddenBays) {
+    rows.push({
+      tone: 'muted',
+      kicker: 'Hidden',
+      title: `${snap.hiddenBays} printer bay${snap.hiddenBays === 1 ? '' : 's'} hidden`,
+      detail: 'Use Show hidden in Printer Bays if you want every machine storage lane visible again',
+    });
+  }
+
+  const calm = !rows.length;
+  const body = calm
+    ? `<div class="briefing-clear briefing-clear-hero filedesk-briefing-clear">
+        <div class="briefing-clear-icon" aria-hidden="true">✓</div>
+        <div class="briefing-clear-copy">
+          <strong>Vault standing by</strong>
+          <span>No slice backlog, hidden bays, or history-only reprints are asking for attention.</span>
+        </div>
+        <div class="briefing-clear-links">
+          <a href="#/makerworld">Import files</a>
+          <a href="#/queue">Queue jobs</a>
+        </div>
+      </div>`
+    : rows.map(row => `<article class="filedesk-briefing-row filedesk-briefing-${row.tone}">
+        <span class="filedesk-briefing-kicker">${esc(row.kicker)}</span>
+        <div class="filedesk-briefing-copy">
+          <strong>${esc(row.title)}</strong>
+          <span>${esc(row.detail)}</span>
+        </div>
+      </article>`).join('');
+
+  return `<section class="filedesk-briefing${calm ? ' filedesk-briefing-calm' : ''}" aria-label="Print Vault briefing">
+    <div class="filedesk-briefing-head">
+      <div>
+        <span>Vault briefing</span>
+        <strong>${calm ? 'Nothing slowing the launch surface' : 'A few useful nudges'}</strong>
+      </div>
+      <a href="#/files?tab=${encodeURIComponent(_globalPrintBayTab)}">Stay here</a>
+    </div>
+    <div class="filedesk-briefing-list">${body}</div>
   </section>`;
 }
 
@@ -6381,28 +10399,83 @@ function _printBayReprintHtml(items, targets) {
   </section>`;
 }
 
-function _fileDeskTargetHtml(target, options = {}) {
-  const targetPrinterId = options.printerId || '';
+function _printBayHiddenIds() {
+  try {
+    return new Set(JSON.parse(sessionStorage.getItem('flightdeck.printbay.hidden') || '[]'));
+  } catch {
+    return new Set();
+  }
+}
+
+function _setPrintBayHiddenIds(ids) {
+  sessionStorage.setItem('flightdeck.printbay.hidden', JSON.stringify([...ids]));
+}
+
+function _printBayOpenState() {
+  try {
+    const raw = JSON.parse(sessionStorage.getItem('flightdeck.printbay.open') || '{}');
+    return raw && typeof raw === 'object' ? raw : {};
+  } catch {
+    return {};
+  }
+}
+
+function _setPrintBayBayOpen(id, open) {
+  const state = _printBayOpenState();
+  state[id] = !!open;
+  sessionStorage.setItem('flightdeck.printbay.open', JSON.stringify(state));
+}
+
+function _printBayBayShouldOpen(targetId, summary) {
+  const state = _printBayOpenState();
+  if (Object.prototype.hasOwnProperty.call(state, targetId)) return !!state[targetId];
+  return (summary.ready || 0) > 0;
+}
+
+function _libraryVaultFolderKey(file) {
+  const raw = String(file?.folder || file?.path || file?.name || '');
+  if (file?.folder != null && file.folder !== '') return String(file.folder);
+  const slash = raw.lastIndexOf('/');
+  return slash >= 0 ? raw.slice(0, slash) : '';
+}
+
+function _fileDeskFileRowHtml(f, target, options = {}) {
+  const targetPrinterId = options.printerId || options.targetPrinterId || '';
   const directQueue = !!options.directQueue && !!targetPrinterId;
-  const files = (target.files || []).filter(f => {
-    if (f.kind === 'dir') return false;
-    const printers = _fileCompatiblePrinters(f, target);
-    return targetPrinterId ? printers.some(p => p.id === targetPrinterId) : printers.length;
-  });
-  const summary = _printBaySourceSummary(target, files);
-  const rows = files.length ? files.map(f => {
-    const path = esc(f.path || f.name);
-    const printers = _fileCompatiblePrinters(f, target);
-    const printable = _filePrintablePrinters(f, target);
-    const isSource = _fileIsSourceModel(f);
-    const ready = printers.filter(p => p.state === 'idle' || p.state === 'finished');
-    const printerChips = printers.slice(0, 4).map(p => `<span class="filedesk-printer-chip${ready.some(r => r.id === p.id) ? ' filedesk-printer-ready' : ''}">${esc(p.model_name || p.custom_name || p.id)}</span>`).join('');
-    const more = printers.length > 4 ? `<span class="filedesk-printer-chip">+${printers.length - 4}</span>` : '';
-    const vaultChip = f.in_vault && target.id !== 'library'
-      ? `<span class="filedesk-vault-chip" title="Archived in Print Vault${f.vault_path ? ': ' + esc(f.vault_path) : ''}">Vaulted</span>`
-      : '';
-    return `<article class="filedesk-file-row">
-      <input type="checkbox" class="filedesk-select" data-source-id="${esc(target.id)}" data-path="${path}" data-name="${esc(f.name || f.path || 'File')}" aria-label="Select ${esc(f.name || f.path || 'file')}">
+  const compactBay = !!options.compactBay;
+  const inFolder = !!options.inFolder;
+  const siblings = options.siblings || target.files || [];
+  const path = esc(f.path || f.name);
+  const printers = _fileCompatiblePrinters(f, target);
+  const printable = _filePrintablePrinters(f, target);
+  const slicedMatch = _matchingSlicedJob(f, siblings);
+  const queueFile = slicedMatch || f;
+  const queuePath = esc(queueFile.path || queueFile.name);
+  const isSource = _fileIsSourceModel(f) && !slicedMatch;
+  const ready = printers.filter(p => p.state === 'idle' || p.state === 'finished');
+  const printerChips = compactBay ? '' : printers.slice(0, 4).map(p => `<span class="filedesk-printer-chip${ready.some(r => r.id === p.id) ? ' filedesk-printer-ready' : ''}">${esc(p.model_name || p.custom_name || p.id)}</span>`).join('');
+  const more = compactBay ? '' : (printers.length > 4 ? `<span class="filedesk-printer-chip">+${printers.length - 4}</span>` : '');
+  const vaultChip = f.in_vault && target.id !== 'library'
+    ? `<span class="filedesk-vault-chip" title="Archived in Print Vault${f.vault_path ? ': ' + esc(f.vault_path) : ''}">Vaulted</span>`
+    : '';
+  const metaPath = (compactBay || inFolder) ? '' : `<span>${esc(f.path || '')}</span>`;
+  const compatCell = compactBay ? '' : `<div class="filedesk-compat">
+      ${printerChips}${more}
+    </div>`;
+  const showThumb = _fileDeskHasPreview(f);
+  const previewUrl = showThumb ? _fileDeskPreviewUrl(target.id, f.path || f.name) : '';
+  const thumbHtml = previewUrl
+    ? `<div class="filedesk-file-thumb${compactBay ? ' filedesk-file-thumb-compact' : ''}">
+        <img src="${esc(previewUrl)}" alt="" loading="lazy" onerror="this.parentElement.classList.add('is-missing')">
+      </div>`
+    : '';
+  const actionBtn = isSource
+    ? `<button class="filedesk-action-btn filedesk-slice-primary" data-file-action="slice" data-source-id="${esc(target.id)}" data-path="${path}" ${targetPrinterId ? `data-target-printer="${esc(targetPrinterId)}"` : ''}>Slice</button>`
+    : `<button class="filedesk-action-btn filedesk-queue-primary" data-file-action="queue" data-source-id="${esc(target.id)}" data-path="${queuePath}" ${directQueue ? `data-target-printer="${esc(targetPrinterId)}"` : ''} ${printable.length || slicedMatch ? '' : 'disabled'} title="${printable.length || slicedMatch ? 'Add to print queue' : 'No compatible printer'}">${esc(slicedMatch ? 'Queue sliced' : _queueButtonLabel(queueFile, target, targetPrinterId))}</button>`;
+  return `<article class="filedesk-file-row${compactBay ? ' filedesk-file-row-compact' : ''}${inFolder ? ' filedesk-file-row-folder' : ''}">
+    <input type="checkbox" class="filedesk-select" data-source-id="${esc(target.id)}" data-path="${path}" data-name="${esc(f.name || f.path || 'File')}" aria-label="Select ${esc(f.name || f.path || 'file')}">
+    <div class="filedesk-file-body">
+      ${thumbHtml}
       <div class="filedesk-file-main" title="${esc(f.path || f.name)}">
         <div class="filedesk-file-title">
           <span class="filedesk-kind filedesk-kind-${_fileKindClass(f.kind)}">${esc(f.kind || 'file')}</span>
@@ -6412,18 +10485,64 @@ function _fileDeskTargetHtml(target, options = {}) {
         <div class="filedesk-file-meta">
           <span>${esc(_fmtBytes(f.size))}</span>
           <span>${esc(_fileModifiedLabel(f.modified))}</span>
-          <span>${esc(f.path || '')}</span>
+          ${metaPath}
         </div>
       </div>
-      <div class="filedesk-compat">
-        ${printerChips}${more}
-      </div>
-      ${isSource
-        ? `<button class="filedesk-action-btn filedesk-slice-primary" data-file-action="slice" data-source-id="${esc(target.id)}" data-path="${path}" ${targetPrinterId ? `data-target-printer="${esc(targetPrinterId)}"` : ''}>Slice</button>`
-        : `<button class="filedesk-action-btn filedesk-queue-primary" data-file-action="queue" data-source-id="${esc(target.id)}" data-path="${path}" ${directQueue ? `data-target-printer="${esc(targetPrinterId)}"` : ''} ${printable.length ? '' : 'disabled'}>Queue</button>`}
-    </article>`;
-  }).join('') : `<div class="filedesk-empty">${target.error ? esc(target.error) : 'No printable files found.'}</div>`;
-  const formatNote = target.actions?.format_sd
+    </div>
+    ${compatCell}
+    <div class="filedesk-row-actions">${actionBtn}</div>
+  </article>`;
+}
+
+function _fileDeskLibraryGroupedRowsHtml(files, target, options = {}) {
+  const groups = new Map();
+  for (const file of files) {
+    const key = _libraryVaultFolderKey(file);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(file);
+  }
+  const keys = [...groups.keys()].sort((a, b) => {
+    if (!a) return -1;
+    if (!b) return 1;
+    return a.localeCompare(b);
+  });
+  if (keys.length <= 1 && (!keys[0] || keys[0] === '')) {
+    return files.map(f => _fileDeskFileRowHtml(f, target, { ...options, siblings: files })).join('');
+  }
+  return keys.map(key => {
+    const groupFiles = groups.get(key) || [];
+    groupFiles.sort((a, b) => String(a.path || a.name).localeCompare(String(b.path || b.name)));
+    const rowOptions = { ...options, inFolder: Boolean(key), siblings: groupFiles };
+    const rows = groupFiles.map(f => _fileDeskFileRowHtml(f, target, rowOptions)).join('');
+    if (!key) return rows;
+    const open = key.startsWith('MakerWorld/') || key === 'MakerWorld';
+    return `<details class="filedesk-folder-group"${open ? ' open' : ''}>
+      <summary class="filedesk-folder-summary">
+        <strong>${esc(key)}</strong>
+        <span>${groupFiles.length} file${groupFiles.length === 1 ? '' : 's'}</span>
+      </summary>
+      <div class="filedesk-folder-body">${rows}</div>
+    </details>`;
+  }).join('');
+}
+
+function _fileDeskTargetHtml(target, options = {}) {
+  const targetPrinterId = options.printerId || '';
+  const directQueue = !!options.directQueue && !!targetPrinterId;
+  const compactBay = !!options.compactBay;
+  const collapsible = !!options.collapsible && target.id !== 'library';
+  const files = (target.files || []).filter(f => {
+    if (f.kind === 'dir') return false;
+    const printers = _fileCompatiblePrinters(f, target);
+    return targetPrinterId ? printers.some(p => p.id === targetPrinterId) : printers.length;
+  });
+  const summary = _printBaySourceSummary(target, files);
+  const rows = files.length
+    ? (target.id === 'library' && !compactBay
+      ? _fileDeskLibraryGroupedRowsHtml(files, target, { targetPrinterId, directQueue, compactBay })
+      : files.map(f => _fileDeskFileRowHtml(f, target, { targetPrinterId, directQueue, compactBay, siblings: files })).join(''))
+    : `<div class="filedesk-empty">${target.error ? esc(target.error) : 'No printable files found.'}</div>`;
+  const formatNote = target.actions?.format_sd && !compactBay
     ? `<div class="filedesk-format-row">
         <span class="filedesk-format-note">Bambu SD cleanout deletes printable jobs only and keeps utility folders.</span>
         <button class="filedesk-danger-btn" data-file-action="clear-sd" data-source-id="${esc(target.id)}">Clear SD prints</button>
@@ -6434,25 +10553,26 @@ function _fileDeskTargetHtml(target, options = {}) {
     <div class="filedesk-bulk-actions">
       ${target.id === 'library' ? '' : `<button class="filedesk-action-btn filedesk-copy-btn" data-file-action="copy-selected" data-source-id="${esc(target.id)}" disabled>Copy to Vault</button>`}
       <button class="filedesk-action-btn filedesk-delete-btn" data-file-action="delete-selected" data-source-id="${esc(target.id)}" disabled>Delete selected</button>
+      ${target.actions?.format_sd && compactBay ? `<button class="filedesk-danger-btn filedesk-danger-btn-compact" data-file-action="clear-sd" data-source-id="${esc(target.id)}">Clear SD prints</button>` : ''}
     </div>
-  </div>` : '';
-  return `<section class="filedesk-target filedesk-${target.kind}">
-    <div class="filedesk-target-head">
-      <div>
-        <h2>${esc(target.label)}</h2>
-        <span>${esc(target.model || target.path || target.kind)}</span>
-      </div>
-      <div class="filedesk-target-meta">
-        <strong>${files.length}</strong>
-        <span>${files.length === 1 ? 'file' : 'files'}</span>
-      </div>
-    </div>
-    <div class="filedesk-source-strip">
-      <span><strong>${summary.ready}</strong> ready</span>
-      <span><strong>${summary.compatible}</strong> compatible printers</span>
-      ${target.id === 'library' ? '' : `<span><strong>${summary.vaulted}</strong> vaulted</span>`}
-      <span><strong>${_fmtBytes(summary.size)}</strong></span>
-    </div>
+  </div>` : (target.actions?.format_sd && compactBay
+    ? `<div class="filedesk-bulk-row filedesk-bulk-row-solo">
+        <button class="filedesk-danger-btn filedesk-danger-btn-compact" data-file-action="clear-sd" data-source-id="${esc(target.id)}">Clear SD prints</button>
+      </div>`
+    : '');
+  const sourceStrip = compactBay
+    ? `<div class="filedesk-source-strip filedesk-source-strip-compact">
+        <span><strong>${summary.ready}</strong> ready</span>
+        <span><strong>${summary.vaulted}</strong> vaulted</span>
+        <span><strong>${_fmtBytes(summary.size)}</strong></span>
+      </div>`
+    : `<div class="filedesk-source-strip">
+        <span><strong>${summary.ready}</strong> ready</span>
+        <span><strong>${summary.compatible}</strong> compatible printers</span>
+        ${target.id === 'library' ? '' : `<span><strong>${summary.vaulted}</strong> vaulted</span>`}
+        <span><strong>${_fmtBytes(summary.size)}</strong></span>
+      </div>`;
+  const listBlock = `${sourceStrip}
     ${formatNote}
     ${bulkBar}
     <div class="filedesk-list-head">
@@ -6461,16 +10581,127 @@ function _fileDeskTargetHtml(target, options = {}) {
     </div>
     <div class="filedesk-list-wrap">
       ${rows}
+    </div>`;
+
+  if (!collapsible) {
+    return `<section class="filedesk-target filedesk-${target.kind}${compactBay ? ' filedesk-target-compact' : ''}">
+      <div class="filedesk-target-head">
+        <div>
+          <h2>${esc(target.label)}</h2>
+          <span>${esc(target.model || target.path || target.kind)}</span>
+        </div>
+        <div class="filedesk-target-meta">
+          <strong>${files.length}</strong>
+          <span>${files.length === 1 ? 'file' : 'files'}</span>
+        </div>
+      </div>
+      ${listBlock}
+    </section>`;
+  }
+
+  const isOpen = _printBayBayShouldOpen(target.id, summary);
+  return `<details class="printbay-bay-card filedesk-${target.kind}" data-bay-id="${esc(target.id)}"${isOpen ? ' open' : ''}>
+    <summary class="printbay-bay-summary">
+      <div class="printbay-bay-title">
+        <strong>${esc(target.label)}</strong>
+        <span>${esc(target.model || target.kind)}</span>
+      </div>
+      <div class="printbay-bay-pills">
+        <span>${files.length} file${files.length === 1 ? '' : 's'}</span>
+        <span>${summary.ready} ready</span>
+        <span>${summary.vaulted} vaulted</span>
+        <span>${esc(_fmtBytes(summary.size))}</span>
+      </div>
+      <button type="button" class="printbay-bay-hide" data-bay-hide="${esc(target.id)}" title="Hide this bay">Hide</button>
+    </summary>
+    <div class="printbay-bay-body filedesk-target filedesk-${target.kind} filedesk-target-compact">
+      ${listBlock}
     </div>
-  </section>`;
+  </details>`;
+}
+
+function _fileDeskPrinterBaysHtml(targets) {
+  const hidden = _printBayHiddenIds();
+  const visible = (targets || []).filter(t => !hidden.has(t.id));
+  const hiddenCount = (targets || []).filter(t => hidden.has(t.id)).length;
+  const cards = visible.map(t => _fileDeskTargetHtml(t, { collapsible: true, compactBay: true })).join('');
+  const toolbar = `<div class="printbay-bay-toolbar">
+    <button type="button" class="settings-save-btn" data-bay-expand-all>Expand all</button>
+    <button type="button" class="settings-save-btn" data-bay-collapse-all>Collapse all</button>
+    ${hiddenCount ? `<button type="button" class="settings-save-btn" data-bay-show-hidden>Show ${hiddenCount} hidden</button>` : ''}
+  </div>`;
+  return `${toolbar}<div class="printbay-bay-stack">${cards || '<div class="filedesk-empty">All printer bays are hidden. Use Show hidden to bring them back.</div>'}</div>`;
 }
 
 let _fileDeskRenderInFlight = false;
 let _fileDeskLastHtml = '';
 let _fileDeskTargets = [];
-let _printBayVaultOpen = false;
+let _printBayVaultOpen = true;
+let _globalPrintBayTab = 'vault';
+let _fileDeskLastData = null;
+let _fileDeskLastReprints = [];
 let _printerBayLastHtml = '';
 let _printerBayLastPrinterId = '';
+
+function _buildGlobalPrintBayHtml(data, reprintItems, tab = _globalPrintBayTab) {
+  _fileDeskTargets = data.targets || [];
+  const vaultTargets = _fileDeskTargets.filter(t => t.id === 'library');
+  const printerTargets = _fileDeskTargets.filter(t => t.id !== 'library');
+  const vaultCount = vaultTargets.reduce((sum, t) => sum + (t.files || []).filter(f => f.kind !== 'dir' && _fileCompatiblePrinters(f, t).length).length, 0);
+  const reprintCount = (reprintItems || []).length;
+  const panelHtml = tab === 'vault'
+    ? `<section class="printbay-tab-section printbay-vault-section">
+        <div class="printbay-section-head printbay-section-head-compact">
+          <div>
+            <div class="mission-eyebrow">Print Vault</div>
+            <h2>Run-ready archive</h2>
+          </div>
+          <span>${vaultCount} file${vaultCount === 1 ? '' : 's'}</span>
+        </div>
+        <p class="printbay-tab-copy">Sliced jobs, MakerWorld imports, and source models staged for queueing. This is the main launch surface.</p>
+        <div class="filedesk-grid printbay-vault-grid">${vaultTargets.map(_fileDeskTargetHtml).join('') || '<div class="filedesk-empty">Print Vault is empty.</div>'}</div>
+      </section>`
+    : tab === 'printers'
+      ? `<section class="printbay-tab-section printbay-active-bays">
+          <div class="printbay-section-head printbay-section-head-compact">
+            <div>
+              <div class="mission-eyebrow">Printer Bays</div>
+              <h2>On-printer storage</h2>
+            </div>
+            <span>${printerTargets.length} bay${printerTargets.length === 1 ? '' : 's'}</span>
+          </div>
+          <p class="printbay-tab-copy">Files already on each printer. Expand a bay to queue or copy to Vault — bays with ready jobs open automatically.</p>
+          ${_fileDeskPrinterBaysHtml(printerTargets)}
+        </section>`
+      : `<section class="printbay-tab-section printbay-reprints-section">${_printBayReprintHtml(reprintItems || [], data.targets || [])}</section>`;
+
+  return `<div class="filedesk-shell">
+    ${_renderPrintBayHero(data, reprintItems)}
+    ${_renderPrintBayBriefing(data, reprintItems)}
+    ${_printBayOverview(data.targets || [])}
+    <nav class="printbay-tabbar" aria-label="Print Bay views">
+      <button type="button" class="printbay-tab${tab === 'vault' ? ' active' : ''}" data-printbay-tab="vault">
+        <strong>Print Vault</strong><span>${vaultCount} file${vaultCount === 1 ? '' : 's'}</span>
+      </button>
+      <button type="button" class="printbay-tab${tab === 'printers' ? ' active' : ''}" data-printbay-tab="printers">
+        <strong>Printer Bays</strong><span>${printerTargets.length} printer${printerTargets.length === 1 ? '' : 's'}</span>
+      </button>
+      <button type="button" class="printbay-tab${tab === 'reprints' ? ' active' : ''}" data-printbay-tab="reprints">
+        <strong>Reprints</strong><span>${reprintCount} recent</span>
+      </button>
+    </nav>
+    <div class="printbay-tab-panel">${panelHtml}</div>
+  </div>`;
+}
+
+function _paintGlobalPrintBay(el) {
+  if (!_fileDeskLastData) return;
+  const html = _buildGlobalPrintBayHtml(_fileDeskLastData, _fileDeskLastReprints, _globalPrintBayTab);
+  if (html === _fileDeskLastHtml) return;
+  el.innerHTML = html;
+  _fileDeskLastHtml = html;
+  _attachFileDeskEvents(el);
+}
 
 function _pollPrintBayIfVisible() {
   if (document.hidden) return;
@@ -6484,11 +10715,13 @@ function _pollPrintBayIfVisible() {
 
 setInterval(_pollPrintBayIfVisible, 5000);
 setInterval(() => {
+  _pollCameraHealth();
   _refreshVisibleCameraStreams();
   _refreshCameraSignals();
-}, 30000);
+}, _CAMERA_HEALTH_POLL_MS);
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) {
+    _pollCameraHealth();
     _refreshVisibleCameraStreams(true);
     _refreshCameraSignals();
   }
@@ -6507,50 +10740,9 @@ async function renderFileDeskView() {
     const reprints = await fetch('/api/files/reprints?limit=12')
       .then(r => r.ok ? r.json() : { items: [] })
       .catch(() => ({ items: [] }));
-    _fileDeskTargets = data.targets || [];
-    const vaultTargets = _fileDeskTargets.filter(t => t.id === 'library');
-    const printerTargets = _fileDeskTargets.filter(t => t.id !== 'library');
-    const vaultCount = vaultTargets.reduce((sum, t) => sum + (t.files || []).filter(f => f.kind !== 'dir' && _fileCompatiblePrinters(f, t).length).length, 0);
-    const html = `<div class="filedesk-shell">
-      <section class="filedesk-hero">
-        <div>
-          <div class="mission-eyebrow">Print Bay</div>
-          <h1>Run-ready library</h1>
-          <p>Launch from printer bays, keep the deep archive in the vault, and queue compatible jobs without starting them.</p>
-        </div>
-        <div class="filedesk-hero-actions">
-          <label class="filedesk-upload-source">
-            <input type="file" id="filedesk-source-upload" accept=".stl,.obj,.step,.stp,.3mf,.gcode,.gcode.gz,.ufp">
-            Upload Source
-          </label>
-          <div class="filedesk-library-path">${esc(data.library_path || '')}</div>
-        </div>
-      </section>
-      ${_printBayOverview(data.targets || [])}
-      ${_printBayReprintHtml(reprints.items || [], data.targets || [])}
-      <section class="printbay-active-bays">
-        <div class="printbay-section-head printbay-section-head-compact">
-          <div>
-            <div class="mission-eyebrow">Printer Bays</div>
-            <h2>Active storage</h2>
-          </div>
-          <span>${printerTargets.length} bay${printerTargets.length === 1 ? '' : 's'}</span>
-        </div>
-        <div class="filedesk-grid">${printerTargets.map(_fileDeskTargetHtml).join('')}</div>
-      </section>
-      <details class="printbay-vault"${_printBayVaultOpen ? ' open' : ''}>
-        <summary>
-          <span><b>Print Vault</b><small>Pi / USB / HDD backup area</small></span>
-          <em>${vaultCount} file${vaultCount === 1 ? '' : 's'}</em>
-        </summary>
-        <div class="filedesk-grid printbay-vault-grid">${vaultTargets.map(_fileDeskTargetHtml).join('')}</div>
-      </details>
-    </div>`;
-    if (html !== _fileDeskLastHtml) {
-      el.innerHTML = html;
-      _fileDeskLastHtml = html;
-      _attachFileDeskEvents(el);
-    }
+    _fileDeskLastData = data;
+    _fileDeskLastReprints = reprints.items || [];
+    _paintGlobalPrintBay(el);
   } catch (err) {
     if (!_fileDeskLastHtml) el.innerHTML = `<div class="detail-placeholder">File Desk unavailable.</div>`;
   } finally {
@@ -6584,12 +10776,101 @@ async function _renderPrinterBayBody(printerId) {
     const printerFileCount = printerTarget
       ? (printerTarget.files || []).filter(f => f.kind !== 'dir' && _fileCompatiblePrinters(f, printerTarget).some(p => p.id === printerId)).length
       : 0;
+    const activeJob = _activePrinterJob(printer || {});
+    const stateLabel = _printerDisplayStateLabel(printer || { state: 'idle' });
+    const stateClass = _printerDisplayStateClass(printer || { state: 'idle' });
+    const bayReady = printerTarget
+      ? _printBaySourceSummary(
+        printerTarget,
+        (printerTarget.files || []).filter(f => f.kind !== 'dir' && _fileCompatiblePrinters(f, printerTarget).some(p => p.id === printerId))
+      ).ready
+      : 0;
+    const bayStatus = activeJob?.filename
+      ? `${jobDisplayName(activeJob)}${activeJob.progress != null ? ` · ${Math.round(activeJob.progress * 100)}%` : ''}`
+      : printerFileCount
+        ? `${printerFileCount} local file${printerFileCount === 1 ? '' : 's'} on machine`
+        : 'No machine-local files yet';
+    const briefingRows = [];
+    if (bayReady) {
+      briefingRows.push({
+        tone: 'ok',
+        kicker: 'Launch',
+        title: `${bayReady} machine file${bayReady === 1 ? '' : 's'} ready to queue`,
+        detail: 'Local storage already has launch candidates for this printer.',
+      });
+    }
+    if (vaultFiles) {
+      briefingRows.push({
+        tone: 'info',
+        kicker: 'Vault',
+        title: `${vaultFiles} matching vault file${vaultFiles === 1 ? '' : 's'} available`,
+        detail: 'Open the vault section below to queue or slice compatible files without copying them first.',
+      });
+    }
+    if (recent.length) {
+      briefingRows.push({
+        tone: 'muted',
+        kicker: 'Recent',
+        title: `${recent.length} recent print${recent.length === 1 ? '' : 's'} remembered`,
+        detail: 'Reprints and matching source files are ready in the recent-work panel.',
+      });
+    }
+    const briefingHtml = briefingRows.length
+      ? `<section class="printer-bay-briefing" aria-label="Printer bay briefing">
+          <div class="printer-bay-briefing-head">
+            <div>
+              <span>Bay briefing</span>
+              <strong>Launch surface for ${esc(_dashboardPrinterName(printer || { id: printerId }))}</strong>
+            </div>
+            <a class="filedesk-action-btn" href="#/files">Fleet bay</a>
+          </div>
+          <div class="printer-bay-briefing-list">
+            ${briefingRows.map(row => `<article class="printer-bay-briefing-row printer-bay-briefing-${row.tone}">
+              <span class="printer-bay-briefing-kicker">${esc(row.kicker)}</span>
+              <div class="printer-bay-briefing-copy">
+                <strong>${esc(row.title)}</strong>
+                <span>${esc(row.detail)}</span>
+              </div>
+            </article>`).join('')}
+          </div>
+        </section>`
+      : `<section class="printer-bay-briefing printer-bay-briefing-calm" aria-label="Printer bay briefing">
+          <div class="briefing-clear briefing-clear-hero filedesk-briefing-clear">
+            <div class="briefing-clear-icon" aria-hidden="true">✓</div>
+            <div class="briefing-clear-copy">
+              <strong>Bay standing by</strong>
+              <span>No launch backlog or vault follow-up is asking for attention on this printer.</span>
+            </div>
+            <div class="briefing-clear-links">
+              <a href="#/files">Fleet bay</a>
+              <a href="#/queue">Queue</a>
+            </div>
+          </div>
+        </section>`;
     const html = `<div class="printer-bay-shell">
       <section class="printer-bay-hero">
-        <div>
+        <div class="printer-bay-hero-copy">
           <div class="mission-eyebrow">Print Bay</div>
           <h2>${esc(_dashboardPrinterName(printer || { id: printerId }))}</h2>
-          <p>Machine-local files, recent work, and vault candidates for this printer.</p>
+          <p>${esc(bayStatus)}</p>
+        </div>
+        <div class="printer-bay-hero-metrics">
+          <div class="printer-bay-metric printer-bay-metric-${esc(stateClass)}">
+            <strong>${esc(stateLabel)}</strong>
+            <span>Printer</span>
+          </div>
+          <div class="printer-bay-metric">
+            <strong>${printerFileCount}</strong>
+            <span>Local</span>
+          </div>
+          <div class="printer-bay-metric">
+            <strong>${vaultFiles}</strong>
+            <span>Vault</span>
+          </div>
+          <div class="printer-bay-metric">
+            <strong>${recent.length}</strong>
+            <span>Recent</span>
+          </div>
         </div>
         <div class="printer-bay-hero-actions">
           <label class="filedesk-upload-source">
@@ -6603,6 +10884,7 @@ async function _renderPrinterBayBody(printerId) {
           </div>
         </div>
       </section>
+      ${briefingHtml}
       ${_printBayReprintHtml(recent, _fileDeskTargets)}
       <section class="printbay-active-bays">
         <div class="printbay-section-head printbay-section-head-compact">
@@ -6645,9 +10927,15 @@ function _attachFileDeskEvents(el) {
         _queueFileToPrinter({ sourceId, path, printerId: targetPrinter, button: btn });
         return;
       }
-      const file = (_fileDeskTargets.find(t => t.id === sourceId)?.files || [])
+      const target = _fileDeskTargets.find(t => t.id === sourceId);
+      const file = (target?.files || [])
         .find(f => (f.path || f.name) === path);
-      const printers = _fileCompatiblePrinters(file);
+      const auto = file ? _pickAutoQueuePrinter(file, target) : null;
+      if (auto) {
+        _queueFileToPrinter({ sourceId, path, printerId: auto.id, button: btn });
+        return;
+      }
+      const printers = file ? _sortedQueuePrinterChoices(file, target) : [];
       if (!printers.length) return;
       _openFileQueueDialog({ sourceId, path, file, printers });
     });
@@ -6703,12 +10991,54 @@ function _attachFileDeskEvents(el) {
       if (target && files.length) _openFileDeleteDialog({ target, files });
     });
   });
+  el.querySelectorAll('[data-printbay-tab]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const tab = btn.dataset.printbayTab;
+      if (!tab || tab === _globalPrintBayTab) return;
+      _globalPrintBayTab = tab;
+      const page = document.getElementById('filedesk-page');
+      if (page) _paintGlobalPrintBay(page);
+    });
+  });
+  el.querySelectorAll('[data-bay-hide]').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.preventDefault();
+      e.stopPropagation();
+      const id = btn.dataset.bayHide;
+      if (!id) return;
+      const hidden = _printBayHiddenIds();
+      hidden.add(id);
+      _setPrintBayHiddenIds(hidden);
+      _fileDeskLastHtml = '';
+      const page = document.getElementById('filedesk-page');
+      if (page && _globalPrintBayTab === 'printers') _paintGlobalPrintBay(page);
+    });
+  });
+  el.querySelector('[data-bay-show-hidden]')?.addEventListener('click', () => {
+    _setPrintBayHiddenIds(new Set());
+    _fileDeskLastHtml = '';
+    const page = document.getElementById('filedesk-page');
+    if (page) _paintGlobalPrintBay(page);
+  });
+  el.querySelector('[data-bay-expand-all]')?.addEventListener('click', () => {
+    _fileDeskTargets.filter(t => t.id !== 'library').forEach(t => _setPrintBayBayOpen(t.id, true));
+    el.querySelectorAll('.printbay-bay-card[data-bay-id]').forEach(card => { card.open = true; });
+  });
+  el.querySelector('[data-bay-collapse-all]')?.addEventListener('click', () => {
+    _fileDeskTargets.filter(t => t.id !== 'library').forEach(t => _setPrintBayBayOpen(t.id, false));
+    el.querySelectorAll('.printbay-bay-card[data-bay-id]').forEach(card => { card.open = false; });
+  });
+  el.querySelectorAll('.printbay-bay-card[data-bay-id]').forEach(card => {
+    card.addEventListener('toggle', () => {
+      _setPrintBayBayOpen(card.dataset.bayId, card.open);
+    });
+  });
   el.querySelector('.printbay-vault')?.addEventListener('toggle', e => {
     _printBayVaultOpen = e.currentTarget.open;
   });
 }
 
-async function _queueFileToPrinter({ sourceId, path, printerId, button }) {
+async function _queueFileToPrinter({ sourceId, path, printerId, button, goQueue = true }) {
   const old = button?.textContent;
   if (button) {
     button.disabled = true;
@@ -6722,8 +11052,14 @@ async function _queueFileToPrinter({ sourceId, path, printerId, button }) {
     });
     const data = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(data.detail || 'Unable to queue file');
-    showToast('Added to queue', _latestPrinters.find(p => p.id === printerId)?.custom_name || printerId, 'success');
+    _rememberQueuePrinterId(printerId);
+    const name = _printerQueueLabel(_latestPrinters.find(p => p.id === printerId));
+    const n = Number(data.count || 1);
+    showToast('Added to queue', n > 1
+      ? `${name} · ${n} plates · auto-sends when free`
+      : `${name} · auto-sends when free`, 'success');
     _updateQueueBadge();
+    if (goQueue) location.hash = '#/queue';
   } catch (err) {
     showToast('Queue failed', err.message || '', 'error');
     if (button) {
@@ -6735,6 +11071,7 @@ async function _queueFileToPrinter({ sourceId, path, printerId, button }) {
 
 function _openFileQueueDialog({ sourceId, path, file, printers }) {
   document.querySelector('.filedesk-queue-dialog')?.remove();
+  const last = _lastQueuePrinterId();
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay filedesk-queue-dialog';
   overlay.innerHTML = `
@@ -6748,10 +11085,14 @@ function _openFileQueueDialog({ sourceId, path, file, printers }) {
         <button class="filedesk-dialog-close" data-dialog-close aria-label="Close">x</button>
       </div>
       <div class="filedesk-queue-options">
-        ${printers.map(p => `<button class="filedesk-printer-choice" data-printer-id="${esc(p.id)}">
-          <strong>${esc(p.custom_name || p.model_name || p.id)}</strong>
-          <span>${esc(p.shop_name || p.model_name || p.kind || '')}</span>
-        </button>`).join('')}
+        ${printers.map(p => {
+          const idle = _printerQueueIdle(p);
+          const note = p.id === last ? 'Last used' : idle ? 'Ready' : String(p.state || 'busy');
+          return `<button class="filedesk-printer-choice${p.id === last ? ' is-recommended' : ''}" data-printer-id="${esc(p.id)}">
+          <strong>${esc(_printerQueueLabel(p))}</strong>
+          <span>${esc(note)}</span>
+        </button>`;
+        }).join('')}
       </div>
       <div class="filedesk-dialog-error" hidden></div>
       <div class="modal-actions">
@@ -6780,6 +11121,7 @@ function _openFileQueueDialog({ sourceId, path, file, printers }) {
       .then(async r => {
         const data = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(data.detail || 'Unable to queue file');
+        _rememberQueuePrinterId(choice.dataset.printerId);
         close();
         location.hash = '#/queue';
       })
@@ -7087,6 +11429,124 @@ function _queuePreflightModal(jobId, filename, preflight) {
   overlay.querySelector('#queue-preflight-close').addEventListener('click', close);
 }
 
+function _queueErrorText(job) {
+  return String(job?.error_msg || '').trim() || 'The printer stopped before this job completed.';
+}
+
+async function _queueFetchJson(url, options = {}) {
+  const r = await fetch(url, options);
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    const detail = body?.detail;
+    if (typeof detail === 'string') throw new Error(detail);
+    if (detail?.preflight?.issues?.length) {
+      const issue = detail.preflight.issues.find(i => i.level === 'block' || i.level === 'wait') || detail.preflight.issues[0];
+      throw new Error(issue?.message || detail.message || 'Preflight blocked');
+    }
+    throw new Error(detail?.message || body?.message || `${r.status} ${r.statusText}`.trim());
+  }
+  return body;
+}
+
+function _queueRecoveryModal(job) {
+  if (!job) return;
+  const printer = _latestPrinters.find(p => p.id === job.printer_id);
+  const printerName = printer ? _printerPrimaryLabel(printer) : job.printer_id;
+  const reason = _queueErrorText(job);
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal-box queue-recovery-modal" role="dialog" aria-modal="true" aria-label="Recover stopped print">
+      <div class="queue-recovery-head">
+        <div class="queue-recovery-icon" aria-hidden="true"><span></span></div>
+        <div>
+          <div class="queue-recovery-title">Print stopped</div>
+          <div class="queue-recovery-printer">${esc(printerName)}</div>
+        </div>
+      </div>
+      <div class="queue-recovery-job">${esc(job.filename || `Queue job #${job.id}`)}</div>
+      <div class="queue-recovery-reason">${esc(reason)}</div>
+      <div class="queue-recovery-links">
+        <button type="button" class="queue-recovery-link" data-recovery-check>Filament / nozzle check <span>›</span></button>
+        <a class="queue-recovery-link" href="#/printer/${encodeURIComponent(job.printer_id)}/live" data-recovery-live>Open live view <span>›</span></a>
+      </div>
+      <div class="queue-recovery-steps">
+        <button type="button" class="modal-btn" data-recovery-clear>Clear printer state</button>
+        <label class="queue-recovery-confirm">
+          <input type="checkbox" data-recovery-bed-clear>
+          <span>Bed is clear and the printer is ready to start again</span>
+        </label>
+      </div>
+      <div class="queue-recovery-status" data-recovery-status></div>
+      <div class="modal-actions queue-recovery-actions">
+        <button class="modal-btn" data-recovery-close>OK</button>
+        <button class="modal-btn modal-btn-primary" data-recovery-print disabled>Print again</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+
+  const close = () => overlay.remove();
+  const status = overlay.querySelector('[data-recovery-status]');
+  const clearBtn = overlay.querySelector('[data-recovery-clear]');
+  const printBtn = overlay.querySelector('[data-recovery-print]');
+  const bedClear = overlay.querySelector('[data-recovery-bed-clear]');
+  const setStatus = (message, tone = '') => {
+    status.textContent = message || '';
+    status.dataset.tone = tone;
+  };
+
+  bedClear.addEventListener('change', () => {
+    printBtn.disabled = !bedClear.checked;
+  });
+  overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+  overlay.querySelector('[data-recovery-close]').addEventListener('click', close);
+  overlay.querySelector('[data-recovery-live]').addEventListener('click', close);
+  overlay.querySelector('[data-recovery-check]').addEventListener('click', async () => {
+    try {
+      const payload = await _queueFetchJson(`/api/queue/${job.id}/preflight`);
+      _queuePreflightModal(job.id, job.filename, payload?.preflight || {});
+    } catch (err) {
+      showToast('Filament check failed', err.message || '', 'error');
+    }
+  });
+  clearBtn.addEventListener('click', async () => {
+    clearBtn.disabled = true;
+    setStatus('Clearing printer state...', 'info');
+    try {
+      await _queueFetchJson(`/api/printers/${encodeURIComponent(job.printer_id)}/control`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'cancel' }),
+      });
+      setStatus('Printer clear command sent. Remove the failed print, then tick bed clear.', 'ok');
+    } catch (err) {
+      setStatus(err.message || 'Clear command failed. Clear it on the printer, then tick bed clear.', 'warn');
+      showToast('Clear printer state failed', err.message || '', 'warning');
+    } finally {
+      clearBtn.disabled = false;
+    }
+  });
+  printBtn.addEventListener('click', async () => {
+    if (!bedClear.checked) return;
+    printBtn.disabled = true;
+    setStatus('Retrying job...', 'info');
+    try {
+      await _queueFetchJson(`/api/queue/${job.id}/retry`, { method: 'POST' });
+      setStatus('Preflight running...', 'info');
+      await _queueFetchJson(`/api/queue/${job.id}/send`, { method: 'POST' });
+      showToast('Print started', job.filename || `Queue job #${job.id}`, 'success');
+      close();
+      await renderQueueView();
+    } catch (err) {
+      setStatus(err.message || 'Print again failed', 'warn');
+      showToast('Print again blocked', err.message || '', 'warning');
+      await renderQueueView();
+    } finally {
+      if (document.body.contains(overlay)) printBtn.disabled = !bedClear.checked;
+    }
+  });
+}
+
 function _fmtSeconds(s) {
   if (!s) return '';
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
@@ -7102,6 +11562,7 @@ function _missionJobEta(job) {
 }
 
 function _missionJobReadiness(job) {
+  if (job.status === 'printing' || job.status === 'uploading') return { cls: 'ready', label: 'Printing', ok: true };
   if (job.status === 'failed') return { cls: 'blocked', label: 'Failed', ok: false };
   if (job.status === 'cancelled') return { cls: 'blocked', label: 'Cancelled', ok: false };
   if (job.preflight?.can_start === false) return { cls: 'blocked', label: 'Blocked', ok: false };
@@ -7151,7 +11612,7 @@ function _missionSignalHtml(signal) {
 
 function _missionQueueForPrinter(jobs, printerId) {
   return jobs
-    .filter(j => j.printer_id === printerId && !['done'].includes(j.status))
+    .filter(j => j.printer_id === printerId && ['pending', 'printing', 'uploading'].includes(j.status))
     .sort((a, b) => (a.position ?? 999) - (b.position ?? 999) || a.id - b.id);
 }
 
@@ -7177,8 +11638,28 @@ function _missionRecommendation(p, laneJobs, signals) {
   return 'Available for new work';
 }
 
+function _missionHeroStatusLine(printers, { active, pendingCount, blocked, caution, forecast }) {
+  if (blocked) {
+    return `${blocked} queue item${blocked === 1 ? '' : 's'} blocked — clear those before dispatch`;
+  }
+  if (active && pendingCount) {
+    return `${active} printing · ${pendingCount} queued · forecast clear ${forecast}`;
+  }
+  if (active) {
+    return `${active} printer${active === 1 ? '' : 's'} in flight · forecast clear ${forecast}`;
+  }
+  if (pendingCount) {
+    if (caution) return `${pendingCount} queued · ${caution} need a second look`;
+    return `${pendingCount} job${pendingCount === 1 ? '' : 's'} waiting — queue looks healthy`;
+  }
+  if (printers.some(p => p.state === 'offline' || p.state === 'error')) {
+    return 'No queue pressure — check printer faults before loading more work';
+  }
+  return 'Queue is quiet — printers ready for the next job';
+}
+
 function _missionPrinterBucket(p, laneJobs, signals) {
-  if (signals.some(s => s.level === 'bad') || ['offline', 'error', 'estop'].includes(p.state)) return 'blocked';
+  if (signals.some(s => s.level === 'bad') || ['offline', 'error', 'estop'].includes(p.state)) return 'offline';
   if (p.state === 'printing') return 'printing';
   if (p.state === 'paused' || signals.some(s => s.level === 'warn') || laneJobs.some(j => _missionJobReadiness(j).cls === 'blocked')) return 'attention';
   return 'ready';
@@ -7186,9 +11667,10 @@ function _missionPrinterBucket(p, laneJobs, signals) {
 
 function _missionControlPrefs() {
   const params = new URLSearchParams(location.hash.split('?')[1] || '');
-  const filter = params.get('filter') || 'all';
+  let filter = params.get('filter') || 'all';
+  if (filter === 'blocked') filter = 'offline';
   return {
-    filter: ['all', 'ready', 'printing', 'attention', 'blocked'].includes(filter) ? filter : 'all',
+    filter: ['all', 'ready', 'printing', 'attention', 'offline'].includes(filter) ? filter : 'all',
     sim: params.get('sim') === '30',
   };
 }
@@ -7310,7 +11792,7 @@ function _missionSpoolLabel(spool, printer) {
   const where = spool.location_printer_id
     ? `${printer ? _amsSlotLabel(printer, spool.location_slot ?? 0) : `slot ${Number(spool.location_slot ?? 0) + 1}`}`
     : (spool.storage_location_name || 'storage');
-  return `#${spool.id} ${material} · ${grams}g · ${where}`;
+  return `${_spoolDisplayLabel(spool)} ${material} · ${grams}g · ${where}`;
 }
 
 function _missionCoverageForRequirements(requirements, spools, printer) {
@@ -7659,9 +12141,12 @@ function _missionActionInbox(jobs, printers, spools, maint) {
     });
 
   if (!unique.length) {
-    return `<div class="mission-action-empty">
-      <strong>Clear deck</strong>
-      <span>No current operator actions</span>
+    return `<div class="mission-action-empty mission-action-empty-hero">
+      <span class="mission-action-empty-icon" aria-hidden="true">✓</span>
+      <div class="mission-action-empty-copy">
+        <strong>Clear deck</strong>
+        <span>No current operator actions</span>
+      </div>
     </div>`;
   }
 
@@ -7699,14 +12184,15 @@ async function renderMissionControl() {
       }
     }));
     const maint = Object.fromEntries(maintPairs);
+    const missionJobs = jobs.filter(j => ['pending', 'printing', 'uploading'].includes(j.status));
     const active = missionPrinters.filter(p => p.state === 'printing' || p.state === 'paused').length;
-    const pendingJobs = jobs.filter(j => j.status === 'pending');
-    const blocked = jobs.filter(j => _missionJobReadiness(j).cls === 'blocked').length;
-    const caution = jobs.filter(j => _missionJobReadiness(j).cls === 'warn').length;
+    const pendingJobs = missionJobs.filter(j => j.status === 'pending');
+    const blocked = missionJobs.filter(j => _missionJobReadiness(j).cls === 'blocked').length;
+    const caution = missionJobs.filter(j => _missionJobReadiness(j).cls === 'warn').length;
     const forecastSeconds = pendingJobs.reduce((sum, j) => sum + _missionJobEta(j), 0);
     const forecast = forecastSeconds ? new Date(Date.now() + forecastSeconds * 1000).toLocaleTimeString([], _clockOpts()) : 'Clear';
     const printerContexts = missionPrinters.map(p => {
-      const laneJobs = _missionQueueForPrinter(jobs, p.id.replace(/-sim-\d+$/, ''));
+      const laneJobs = _missionQueueForPrinter(missionJobs, p.id.replace(/-sim-\d+$/, ''));
       const signals = _missionPrinterSignals(p, laneJobs, spools, maint);
       return { p, laneJobs, signals, bucket: _missionPrinterBucket(p, laneJobs, signals) };
     });
@@ -7726,7 +12212,7 @@ async function renderMissionControl() {
       ['ready', 'Ready', counts.ready || 0],
       ['printing', 'Printing', counts.printing || 0],
       ['attention', 'Needs attention', counts.attention || 0],
-      ['blocked', 'Blocked', counts.blocked || 0],
+      ['offline', 'Offline', counts.offline || 0],
     ].map(([id, label, count]) =>
       `<a class="mission-filter ${prefs.filter === id ? 'active' : ''}" href="${_missionHref(id, prefs.sim)}">${label}<b>${count}</b></a>`
     ).join('');
@@ -7770,7 +12256,7 @@ async function renderMissionControl() {
       </section>`;
     }).join('') || `<div class="mission-empty-filter">No printers match this filter.</div>`;
 
-    const dispatchReady = jobs
+    const dispatchReady = missionJobs
       .filter(j => j.status === 'pending' && _missionJobReadiness(j).cls === 'ready')
       .sort((a, b) => (a.status === 'pending' ? 0 : 1) - (b.status === 'pending' ? 0 : 1) || (a.position ?? 999) - (b.position ?? 999))
       .slice(0, 6)
@@ -7783,7 +12269,7 @@ async function renderMissionControl() {
         </a>`;
       }).join('') || '<div class="mission-empty-list">Nothing ready right now.</div>';
 
-    const blockedJobs = jobs
+    const blockedJobs = missionJobs
       .filter(j => _missionJobReadiness(j).cls === 'blocked')
       .slice(0, 6)
       .map(j => {
@@ -7794,29 +12280,44 @@ async function renderMissionControl() {
           <small>${esc(p ? _dashboardPrinterName(p) : j.printer_id)} · ${ready.label}</small>
         </a>`;
       }).join('') || '<div class="mission-empty-list">No blocked queue items.</div>';
-    const actionInbox = _missionActionInbox(jobs, printers, spools, maint);
-    const fixIt = _missionFixItPanel(jobs, printers, spools);
-    const dispatchIntel = _missionDispatchIntel(jobs, printers, spools, maint);
+    const actionInbox = _missionActionInbox(missionJobs, printers, spools, maint);
+    const fixIt = _missionFixItPanel(missionJobs, printers, spools);
+    const dispatchIntel = _missionDispatchIntel(missionJobs, printers, spools, maint);
 
     const html = `
-      <section class="mission-hero">
-        <div>
+      <section class="mission-hero mission-hero-card">
+        <div class="mission-hero-copy">
           <div class="mission-eyebrow">Flight Tower</div>
-          <h1>Farm forecast</h1>
-          <p>${missionPrinters.length} printers${prefs.sim ? ' simulated' : ''} · ${active} active · ${pendingJobs.length} pending · finish forecast ${esc(forecast)}</p>
+          <h1>Dispatch center</h1>
+          <p class="mission-hero-status">${esc(_missionHeroStatusLine(missionPrinters, {
+            active,
+            pendingCount: pendingJobs.length,
+            blocked,
+            caution,
+            forecast,
+          }))}</p>
         </div>
-        <div class="mission-kpis">
-          <div><strong>${pendingJobs.length}</strong><span>Pending</span></div>
-          <div class="${blocked ? 'mission-kpi-bad' : ''}"><strong>${blocked}</strong><span>Blocked</span></div>
-          <div class="${caution ? 'mission-kpi-warn' : ''}"><strong>${caution}</strong><span>Caution</span></div>
-          <div><strong>${_fmtSeconds(forecastSeconds) || '0m'}</strong><span>Queued time</span></div>
+        <div class="mission-hero-side">
+          <div class="mission-kpis">
+            <div><strong>${pendingJobs.length}</strong><span>Pending</span></div>
+            <div class="${blocked ? 'mission-kpi-bad' : ''}"><strong>${blocked}</strong><span>Blocked</span></div>
+            <div class="${caution ? 'mission-kpi-warn' : ''}"><strong>${caution}</strong><span>Caution</span></div>
+            <div><strong>${_fmtSeconds(forecastSeconds) || '0m'}</strong><span>Queued time</span></div>
+          </div>
+          <div class="mission-hero-links">
+            <a href="#/">Dashboard</a>
+            <a href="#/fleet">Fleet Wall</a>
+            <a href="#/queue">Queue</a>
+          </div>
         </div>
       </section>
-      <section class="mission-commandbar">
+      <section class="mission-commandbar mission-commandbar-card">
         <div class="mission-filters">${filterBar}</div>
         ${simToggle}
       </section>
       <section class="mission-dispatch-board" aria-label="Dispatch board">
+        <div class="mission-board-eyebrow">Operator board</div>
+        <div class="mission-dispatch-grid">
         <div class="mission-dispatch-panel mission-dispatch-primary">
           <div class="mission-panel-title">Run Now</div>
           <div class="mission-job-list">${dispatchReady}</div>
@@ -7837,8 +12338,13 @@ async function renderMissionControl() {
           <div class="mission-panel-title">Fix It</div>
           <div class="mission-fix-list">${fixIt}</div>
         </div>
+        </div>
       </section>
       <section class="mission-grid">
+        <div class="mission-lanes-head">
+          <div class="mission-board-eyebrow">Printer lanes</div>
+          <span class="mission-lanes-count">${filteredContexts.length} shown</span>
+        </div>
         <div class="mission-lanes">${lanes}</div>
       </section>`;
     if (html !== _missionLastHtml) {
@@ -7854,14 +12360,209 @@ async function renderMissionControl() {
   }
 }
 
-function _queueJobCard(job, isFirst, isLast) {
+function _queueSnapshot(jobs, printers) {
+  const pending = jobs.filter(j => j.status === 'pending');
+  const active = jobs.filter(j => j.status === 'printing' || j.status === 'uploading');
+  let ready = 0;
+  let blocked = 0;
+  let caution = 0;
+  pending.forEach(j => {
+    const readiness = _missionJobReadiness(j);
+    if (readiness.cls === 'ready') ready += 1;
+    else if (readiness.cls === 'blocked') blocked += 1;
+    else if (readiness.cls === 'warn') caution += 1;
+  });
+  const queuedSeconds = pending.reduce((sum, j) => sum + (j.estimated_seconds || 0), 0);
+  return {
+    pending,
+    active,
+    ready,
+    blocked,
+    caution,
+    queuedSeconds,
+    total: jobs.length,
+    printers: printers.length,
+  };
+}
+
+function _queueHeroStatusLine(snap) {
+  if (snap.blocked) {
+    return `${snap.blocked} blocked job${snap.blocked === 1 ? '' : 's'} need preflight or recovery before dispatch`;
+  }
+  if (snap.active.length) {
+    const lead = snap.active[0]?.filename?.replace(/.*[\\/]/, '') || 'job';
+    return snap.active.length === 1
+      ? `${lead} is uploading or printing now`
+      : `${snap.active.length} jobs in flight · leading with ${lead}`;
+  }
+  if (snap.ready) {
+    const eta = snap.queuedSeconds ? ` · ~${_fmtSeconds(snap.queuedSeconds)} queued` : '';
+    return `${snap.ready} ready to send${eta} · auto-sends when printers are free`;
+  }
+  if (snap.total) return 'Queues are clear — stage sliced jobs from Print Vault';
+  return 'No jobs queued yet — drop a file below or queue from Print Vault';
+}
+
+function _renderQueueHero(jobs, printers) {
+  const snap = _queueSnapshot(jobs, printers);
+  return `<section class="queue-hero" aria-label="Queue snapshot">
+    <div class="queue-hero-copy">
+      <span class="queue-hero-eyebrow">Print bay</span>
+      <h1 class="queue-hero-title">Queue</h1>
+      <p class="queue-hero-status">${esc(_queueHeroStatusLine(snap))}</p>
+    </div>
+    <div class="queue-hero-metrics" aria-label="Queue counts">
+      <div class="queue-hero-metric queue-hero-metric-ready">
+        <strong>${snap.ready}</strong>
+        <span>Ready</span>
+      </div>
+      <div class="queue-hero-metric${snap.blocked ? ' queue-hero-metric-blocked' : ''}">
+        <strong>${snap.blocked}</strong>
+        <span>Blocked</span>
+      </div>
+      <div class="queue-hero-metric${snap.caution ? ' queue-hero-metric-caution' : ''}">
+        <strong>${snap.caution}</strong>
+        <span>Caution</span>
+      </div>
+      <div class="queue-hero-metric${snap.active.length ? ' queue-hero-metric-active' : ''}">
+        <strong>${snap.active.length}</strong>
+        <span>Active</span>
+      </div>
+    </div>
+    <div class="queue-hero-links">
+      <a href="#/">Dashboard</a>
+      <a href="#/mission">Flight Tower</a>
+      <a href="#/files">Print Vault</a>
+    </div>
+  </section>`;
+}
+
+function _renderQueueBriefing(jobs, printers) {
+  const pending = jobs.filter(j => j.status === 'pending');
+  const blockedJobs = pending.filter(j => _missionJobReadiness(j).cls === 'blocked');
+  const cautionJobs = pending.filter(j => _missionJobReadiness(j).cls === 'warn');
+  const activeJobs = jobs.filter(j => j.status === 'printing' || j.status === 'uploading');
+  const recoverJobs = jobs.filter(j => j.status === 'failed' || j.status === 'cancelled');
+  const attentionRows = [];
+
+  blockedJobs.forEach(j => {
+    const p = printers.find(x => x.id === j.printer_id);
+    const issue = j.preflight?.issues?.find(i => i.level === 'block' || i.level === 'wait') || j.preflight?.issues?.[0];
+    attentionRows.push({
+      tone: 'critical',
+      kicker: 'Blocked',
+      title: j.filename.replace(/.*[\\/]/, ''),
+      detail: issue?.message || j.preflight?.label || 'Preflight blocked',
+      printer: p ? _printerQueueLabel(p) : j.printer_id,
+    });
+  });
+
+  cautionJobs.slice(0, 4).forEach(j => {
+    const p = printers.find(x => x.id === j.printer_id);
+    attentionRows.push({
+      tone: 'warn',
+      kicker: 'Caution',
+      title: j.filename.replace(/.*[\\/]/, ''),
+      detail: j.preflight?.label || 'Review metadata or filament match',
+      printer: p ? _printerQueueLabel(p) : j.printer_id,
+    });
+  });
+
+  recoverJobs.slice(0, 4).forEach(j => {
+    const p = printers.find(x => x.id === j.printer_id);
+    attentionRows.push({
+      tone: 'warn',
+      kicker: j.status === 'failed' ? 'Failed' : 'Cancelled',
+      title: j.filename.replace(/.*[\\/]/, ''),
+      detail: 'Recovery available',
+      printer: p ? _printerQueueLabel(p) : j.printer_id,
+    });
+  });
+
+  const calm = !attentionRows.length;
+  const inFlightNote = activeJobs.length
+    ? `${activeJobs.length} job${activeJobs.length === 1 ? '' : 's'} in flight — nothing needs operator action.`
+    : 'Ready jobs auto-send when a printer is free.';
+  const body = calm
+    ? `<div class="briefing-clear briefing-clear-hero queue-briefing-clear">
+        <div class="briefing-clear-icon" aria-hidden="true">✓</div>
+        <div class="briefing-clear-copy">
+          <strong>${activeJobs.length ? 'Dispatch healthy' : 'Queues clear'}</strong>
+          <span>Nothing blocked or waiting on preflight. ${inFlightNote}</span>
+        </div>
+        <div class="briefing-clear-links">
+          <a href="#/files">Print Vault</a>
+          <a href="#/mission">Flight Tower</a>
+        </div>
+      </div>`
+    : attentionRows.map(row => `<article class="queue-briefing-row queue-briefing-${row.tone}">
+        <span class="queue-briefing-kicker">${esc(row.kicker)}</span>
+        <div class="queue-briefing-copy">
+          <strong>${esc(row.title)}</strong>
+          <span>${esc(row.detail)}${row.printer ? ` · ${esc(row.printer)}` : ''}</span>
+        </div>
+      </article>`).join('');
+
+  return `<section class="queue-briefing${calm ? ' queue-briefing-calm' : ''}" aria-label="Queue briefing">
+    <div class="queue-briefing-head">
+      <div>
+        <span>Dispatch briefing</span>
+        <strong>${calm ? 'Ready for new work' : 'Items needing a look'}</strong>
+      </div>
+      <a href="#/mission">Flight Tower</a>
+    </div>
+    <div class="queue-briefing-list">${body}</div>
+  </section>`;
+}
+
+function _queuePrinterSectionTone(jobs, printer) {
+  if (jobs.some(j => j.status === 'printing' || j.status === 'uploading')) return 'active';
+  if (jobs.some(j => j.status === 'pending' && _missionJobReadiness(j).cls === 'blocked')) return 'blocked';
+  if (printer?.state === 'offline') return 'offline';
+  return 'idle';
+}
+
+function _queueJobLooksLive(job, printer) {
+  if (!job || !printer) return false;
+  const state = String(printer.state || '').toLowerCase();
+  if (!['printing', 'paused'].includes(state)) return false;
+  const jobName = String(job.filename || '').trim().toLowerCase();
+  if (!jobName) return false;
+  const liveJob = printer.job || {};
+  const candidates = [liveJob.filename, liveJob.subtask_name]
+    .map(v => String(v || '').trim().toLowerCase())
+    .filter(Boolean);
+  const jobBase = jobName.split(/[/\\]/).pop();
+  return candidates.some(c => {
+    const cBase = c.split(/[/\\]/).pop();
+    return jobName === c || jobBase === cBase || cBase.includes(jobBase) || jobBase.includes(cBase);
+  });
+}
+
+function _queueReleaseConfirmMessage(job, printer) {
+  if (_queueJobLooksLive(job, printer)) {
+    return 'The printer still looks like it is running this file. Release anyway? This only removes it from Flightdeck — it will not stop the printer.';
+  }
+  return 'Remove this from Flightdeck only? It will not cancel anything on the printer. If the bay is idle, the next queued job may start.';
+}
+
+function _queueJobCard(job, isFirst, isLast, printerKind = '') {
   const isPending   = job.status === 'pending';
+  const isHeld      = job.status === 'held';
+  const isQueued    = isPending || isHeld;
   const isActive    = job.status === 'printing' || job.status === 'uploading';
   const isRecoverable = job.status === 'failed' || job.status === 'cancelled';
+  const isReprintable = job.status === 'done';
   const previewSrc  = job.has_preview ? _mediaUrl(`/api/queue/${job.id}/preview`, job.filename || 'Queued print') : '';
   const preflight = job.preflight;
   const isSourceModel = _queueJobIsSourceModel(job);
   const canSend = !preflight || preflight.can_start;
+  const plateCount = Number(job.plate_count || 0);
+  const plateNumber = Number(job.plate_number || 0);
+  const plateLabel = plateCount > 1 && plateNumber
+    ? `Plate ${plateNumber} of ${plateCount}`
+    : '';
+  const displayName = plateLabel ? `${job.filename} · ${plateLabel}` : job.filename;
   const meta = [
     isSourceModel ? 'STEP source model' : '',
     job.filament_type || '',
@@ -7869,14 +12570,28 @@ function _queueJobCard(job, isFirst, isLast) {
     job.estimated_seconds ? _fmtSeconds(job.estimated_seconds) : '',
   ].filter(Boolean).join(' · ');
 
-  return `<div class="queue-job ${isActive ? 'queue-job-active' : ''}" data-job-id="${job.id}">
+  const readiness = _missionJobReadiness(job);
+  const calibrateToggle = isQueued && printerKind === 'bambu'
+    ? `<label class="queue-calibrate-toggle" title="Run printer calibration before this job starts">
+        <input type="checkbox" data-action="calibrate" data-id="${job.id}" ${job.calibrate_before_start ? 'checked' : ''}>
+        <span>Cal first</span>
+      </label>`
+    : '';
+  const shortFilamentToggle = isQueued
+    ? `<label class="queue-calibrate-toggle" title="Allow start even if loaded filament is short — you can swap rolls mid-print">
+        <input type="checkbox" data-action="allow-short" data-id="${job.id}" ${job.allow_short_filament ? 'checked' : ''}>
+        <span>Allow short</span>
+      </label>`
+    : '';
+
+  return `<div class="queue-job ${isActive ? 'queue-job-active' : ''} queue-job-${readiness.cls}" data-job-id="${job.id}">
     <div class="queue-job-thumb">
       ${previewSrc
         ? `<img src="${previewSrc}" alt="" loading="lazy">`
         : `<div class="queue-job-thumb-placeholder">${isSourceModel ? 'STEP' : '🖨'}</div>`}
     </div>
     <div class="queue-job-body">
-      <div class="queue-job-name" title="${job.filename}">${job.filename}</div>
+      <div class="queue-job-name" title="${esc(displayName || job.filename || '')}">${esc(displayName || job.filename || '')}</div>
       ${meta ? `<div class="queue-job-meta">${meta}</div>` : ''}
       <div class="queue-job-status-row">
         ${_queueStatusBadge(job.status)}
@@ -7884,45 +12599,64 @@ function _queueJobCard(job, isFirst, isLast) {
         ${job.error_msg ? `<span class="queue-job-error" title="${job.error_msg}">⚠ ${job.error_msg}</span>` : ''}
       </div>
       ${_queuePreflightIssues(preflight)}
+      <div class="queue-job-toggles">${calibrateToggle}${shortFilamentToggle}</div>
     </div>
     <div class="queue-job-actions">
-    ${isPending ? `
-        <button class="queue-act-btn" data-action="up"   data-id="${job.id}" title="Move up"   ${isFirst ? 'disabled' : ''}>▲</button>
-        <button class="queue-act-btn" data-action="down" data-id="${job.id}" title="Move down" ${isLast  ? 'disabled' : ''}>▼</button>
+    ${isQueued ? `
+        ${isPending ? `<button class="queue-act-btn" data-action="up"   data-id="${job.id}" title="Move up"   ${isFirst ? 'disabled' : ''}>▲</button>
+        <button class="queue-act-btn" data-action="down" data-id="${job.id}" title="Move down" ${isLast  ? 'disabled' : ''}>▼</button>` : ''}
         ${isSourceModel ? `<button class="queue-act-btn queue-act-slice" data-action="slice" data-id="${job.id}" data-printer-id="${esc(job.printer_id)}" data-filename="${esc(job.filename || '')}" title="Slice source model">Slice</button>` : ''}
         <button class="queue-act-btn queue-act-send" data-action="send"   data-id="${job.id}" title="${canSend ? 'Send now' : 'Preflight blocked'}" ${canSend ? '' : 'disabled'}>▶</button>
         <button class="queue-act-btn queue-act-check" data-action="check"  data-id="${job.id}" title="Run filament check">FIL</button>
         <button class="queue-act-btn queue-act-del"  data-action="delete" data-id="${job.id}" title="Remove">✕</button>
       ` : isRecoverable ? `
-        <button class="queue-act-btn queue-act-retry" data-action="retry"  data-id="${job.id}" title="Retry">↺</button>
+        <button class="queue-act-btn queue-act-recover" data-action="recover" data-id="${job.id}" title="Recover stopped print">Recover</button>
+        <button class="queue-act-btn queue-act-retry" data-action="retry"  data-id="${job.id}" title="Retry without recovery">↺</button>
         <button class="queue-act-btn queue-act-del"   data-action="delete" data-id="${job.id}" title="Remove">✕</button>
+      ` : isReprintable ? `
+        <button class="queue-act-btn queue-act-reprint" data-action="reprint" data-id="${job.id}" title="Queue this file again">Reprint</button>
+        <button class="queue-act-btn queue-act-del"     data-action="delete"  data-id="${job.id}" title="Remove">✕</button>
+      ` : isActive ? `
+        <button class="queue-act-btn queue-act-release" data-action="release" data-id="${job.id}" title="Remove from Flightdeck only — does not stop the printer">Release</button>
       ` : ''}
     </div>
   </div>`;
 }
 
-function _queuePrinterSection(printerId, printerLabel, jobs, kind) {
+function _queuePrinterSection(printerId, printerLabel, jobs, kind, printer = null) {
   const accept   = kind === 'bambu' ? '.3mf,.gcode.3mf,.step,.stp' : '.gcode,.gcode.gz,.ufp,.step,.stp';
   const acceptedText = kind === 'bambu' ? '.gcode.3mf / .step' : '.gcode / .step';
   const pending  = jobs.filter(j => j.status === 'pending');
+  const held     = jobs.filter(j => j.status === 'held');
+  const waiting  = pending.concat(held);
   const active   = jobs.filter(j => j.status === 'printing' || j.status === 'uploading');
   const completed = jobs.filter(j => ['done','failed','cancelled'].includes(j.status));
+  const tone = _queuePrinterSectionTone(jobs, printer);
+  const stateLabel = printer ? _printerDisplayStateLabel(printer) : '';
+  const stateClass = printer ? _printerDisplayStateClass(printer) : 'muted';
 
-  const totalSecs = pending.reduce((s, j) => s + (j.estimated_seconds || 0), 0);
-  const summary = pending.length
-    ? `${pending.length} pending${totalSecs ? ` · ~${_fmtSeconds(totalSecs)}` : ''}`
+  const totalSecs = waiting.reduce((s, j) => s + (j.estimated_seconds || 0), 0);
+  const heldNote = held.length ? `${held.length} waiting` : '';
+  const pendingNote = pending.length
+    ? `${pending.length} pending${active.length ? '' : ' · auto-sends when free'}`
+    : '';
+  const summary = (pendingNote || heldNote)
+    ? [pendingNote, heldNote, totalSecs ? `~${_fmtSeconds(totalSecs)}` : ''].filter(Boolean).join(' · ')
     : active.length ? 'Printing…' : '';
 
   const jobsHtml = jobs.length
     ? jobs.map(j => {
         const pIdx = pending.indexOf(j);
-        return _queueJobCard(j, pIdx === 0, pIdx === pending.length - 1);
+        return _queueJobCard(j, pIdx === 0, pIdx === pending.length - 1, kind);
       }).join('')
-    : '<div class="queue-empty">No jobs queued</div>';
+    : '<div class="queue-empty">No jobs queued — drop a file here or queue from Print Vault</div>';
 
-  return `<section class="queue-printer-section" data-printer-id="${printerId}">
+  return `<section class="queue-printer-section queue-printer-section-${tone}" data-printer-id="${printerId}">
     <div class="queue-printer-header">
-      <h2 class="queue-printer-name">${printerLabel}</h2>
+      <div class="queue-printer-title">
+        <h2 class="queue-printer-name">${printerLabel}</h2>
+        ${stateLabel ? `<span class="badge badge-${stateClass} queue-printer-state">${esc(stateLabel)}</span>` : ''}
+      </div>
       ${summary ? `<span class="queue-section-summary">${summary}</span>` : ''}
       <div class="queue-header-right">
         ${completed.length ? `<button class="queue-clear-btn" data-action="clear-completed" data-printer-id="${printerId}">Clear done</button>` : ''}
@@ -7951,6 +12685,7 @@ async function renderQueueView() {
     ]);
     const jobs = Array.isArray(jobsRaw) ? jobsRaw : [];
     const printers = Array.isArray(printersRaw) ? printersRaw : [];
+    _queueLatestJobs = jobs;
 
     const byPrinter = {};
     for (const p of printers) byPrinter[p.id] = { label: _printerNavLabel(p), kind: p.kind, jobs: [] };
@@ -7958,10 +12693,19 @@ async function renderQueueView() {
       if (byPrinter[j.printer_id]) byPrinter[j.printer_id].jobs.push(j);
     }
 
-    el.innerHTML = Object.entries(byPrinter)
-      .map(([pid, { label, kind, jobs: pjobs }]) =>
-        _queuePrinterSection(pid, label, pjobs, kind))
+    const printerSections = Object.entries(byPrinter)
+      .map(([pid, { label, kind, jobs: pjobs }]) => {
+        const printer = printers.find(p => p.id === pid) || null;
+        return _queuePrinterSection(pid, label, pjobs, kind, printer);
+      })
       .join('');
+
+    el.innerHTML = `${_renderQueueHero(jobs, printers)}${_renderQueueBriefing(jobs, printers)}
+      <div class="queue-lanes-head">
+        <span class="queue-board-eyebrow">Printer lanes</span>
+        <span>${printers.length} bay${printers.length === 1 ? '' : 's'}</span>
+      </div>
+      <div class="queue-sections">${printerSections}</div>`;
 
     el.querySelectorAll('.queue-file-input').forEach(inp => {
       inp.addEventListener('change', e => _queueHandleFile(e.target));
@@ -7975,6 +12719,46 @@ async function renderQueueView() {
         const inp = area.querySelector('.queue-file-input');
         if (e.dataTransfer.files[0] && inp) {
           _queueHandleFileRaw(inp.dataset.printerId, inp.dataset.kind, e.dataTransfer.files[0], area);
+        }
+      });
+    });
+    el.querySelectorAll('[data-action="calibrate"]').forEach(inp => {
+      inp.addEventListener('change', async () => {
+        const jobId = inp.dataset.id;
+        const enabled = inp.checked;
+        try {
+          await _queueFetchJson(`/api/queue/${jobId}/calibrate-before`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ calibrate_before_start: enabled }),
+          });
+          showToast(enabled ? 'Calibrate before start enabled' : 'Calibrate before start off', '', 'success');
+          await renderQueueView();
+        } catch (err) {
+          inp.checked = !enabled;
+          showToast('Could not update calibration setting', err.message || '', 'error');
+        }
+      });
+    });
+    el.querySelectorAll('[data-action="allow-short"]').forEach(inp => {
+      inp.addEventListener('change', async () => {
+        const jobId = inp.dataset.id;
+        const enabled = inp.checked;
+        try {
+          await _queueFetchJson(`/api/queue/${jobId}/allow-short-filament`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ allow_short_filament: enabled }),
+          });
+          showToast(
+            enabled ? 'Short filament override on — you can start and swap rolls' : 'Short filament override off',
+            '',
+            'success',
+          );
+          await renderQueueView();
+        } catch (err) {
+          inp.checked = !enabled;
+          showToast('Could not update filament override', err.message || '', 'error');
         }
       });
     });
@@ -8006,7 +12790,9 @@ async function _queueHandleFileRaw(printerId, kind, file, area) {
       const err = await r.json().catch(() => ({}));
       throw new Error(err.detail || r.statusText);
     }
-    progress.textContent = '✓ Added to queue';
+    const data = await r.json().catch(() => ({}));
+    const n = Number(data.count || 1);
+    progress.textContent = n > 1 ? `✓ Queued ${n} plates` : '✓ Added to queue';
     setTimeout(() => renderQueueView(), 800);
   } catch (e) {
     progress.textContent = `✗ ${e.message}`;
@@ -8035,13 +12821,28 @@ async function _queueHandleAction(e) {
         }
       });
       return;
+    } else if (action === 'release') {
+      btn.disabled = false;
+      const job = _queueLatestJobs.find(j => String(j.id) === String(id));
+      const printer = _latestPrinters.find(p => p.id === job?.printer_id);
+      _modal.show(_queueReleaseConfirmMessage(job, printer), async () => {
+        btn.disabled = true;
+        try {
+          await _queueFetchJson(`/api/queue/${id}/release`, { method: 'POST' });
+          await renderQueueView();
+        } catch (err) {
+          showToast('Queue action failed', err.message || '', 'error');
+          btn.disabled = false;
+        }
+      });
+      return;
     } else if (action === 'up' || action === 'down') {
-      await fetch(`/api/queue/${id}/reorder`, {
+      await _queueFetchJson(`/api/queue/${id}/reorder`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ direction: action }),
       });
     } else if (action === 'send') {
-      await fetch(`/api/queue/${id}/send`, { method: 'POST' });
+      await _queueFetchJson(`/api/queue/${id}/send`, { method: 'POST' });
     } else if (action === 'slice') {
       const printer = _latestPrinters.find(p => p.id === (printerId || btn.dataset.printerId));
       if (!printer) throw new Error('Target printer not found');
@@ -8058,10 +12859,14 @@ async function _queueHandleAction(e) {
       if (!r.ok) throw new Error((await r.json())?.detail || `Queue preflight ${r.status}`);
       const payload = await r.json();
       _queuePreflightModal(id, payload?.filename || null, payload?.preflight || {});
-    } else if (action === 'retry') {
-      await fetch(`/api/queue/${id}/retry`, { method: 'POST' });
+    } else if (action === 'recover') {
+      btn.disabled = false;
+      _queueRecoveryModal(_queueLatestJobs.find(j => String(j.id) === String(id)));
+      return;
+    } else if (action === 'retry' || action === 'reprint') {
+      await _queueFetchJson(`/api/queue/${id}/retry`, { method: 'POST' });
     } else if (action === 'clear-completed') {
-      await fetch(`/api/queue/completed?printer_id=${encodeURIComponent(printerId)}`, { method: 'DELETE' });
+      await _queueFetchJson(`/api/queue/completed/clear?printer_id=${encodeURIComponent(printerId)}`, { method: 'DELETE' });
     } else {
       btn.disabled = false; return;
     }
@@ -8164,13 +12969,14 @@ function _cameraSignalText(img, state) {
 }
 
 function _ensureCameraSignal(img) {
-  if (!img?.parentElement) return null;
-  let signal = img.parentElement.querySelector(':scope > .camera-signal');
+  const parent = _cameraStatusBarFor(img);
+  if (!parent) return null;
+  let signal = parent.querySelector(':scope > .camera-signal');
   if (!signal) {
     signal = document.createElement('span');
     signal.className = 'camera-signal';
     signal.setAttribute('aria-live', 'polite');
-    img.parentElement.appendChild(signal);
+    parent.appendChild(signal);
   }
   return signal;
 }
@@ -8195,11 +13001,13 @@ function _refreshCameraSignals(root = document) {
     const current = img.dataset.cameraSignalState || 'waiting';
     if (current === 'reconnecting' || current === 'refreshing') return;
     const loadedAt = Number(img.dataset.streamLoadedAt || 0);
-    if (img.dataset.fleetStill === '1' && loadedAt && (now - loadedAt) > _CAMERA_SIGNAL_STALE_MS) {
+    const lastFrameAt = Number(img.dataset.cameraFrameAt || 0);
+    const freshness = Math.max(loadedAt, lastFrameAt);
+    if (freshness && (now - freshness) > _CAMERA_SIGNAL_STALE_MS) {
       _setCameraSignal(img, 'stale');
       return;
     }
-    _setCameraSignal(img, loadedAt ? 'live' : 'waiting');
+    _setCameraSignal(img, freshness ? 'live' : 'waiting');
   });
 }
 
@@ -8286,7 +13094,9 @@ function _attachCameraRetries(root) {
     });
     img.addEventListener('load', () => {
       tries = 0;
-      img.dataset.streamLoadedAt = String(Date.now());
+      const now = Date.now();
+      img.dataset.streamLoadedAt = String(now);
+      img.dataset.cameraFrameAt = String(now);
       _setCameraSignal(img, 'live');
     });
   });
@@ -8304,9 +13114,52 @@ function _refreshVisibleCameraStreams(force = false) {
     const rect = img.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0 || rect.bottom < 0 || rect.right < 0 || rect.top > window.innerHeight || rect.left > window.innerWidth) return;
     const loadedAt = Number(img.dataset.streamLoadedAt || 0);
-    if (!force && loadedAt && (now - loadedAt) < _CAMERA_STREAM_REFRESH_MS) return;
+    const lastFrameAt = Number(img.dataset.cameraFrameAt || 0);
+    const freshness = Math.max(loadedAt, lastFrameAt);
+    if (!force && freshness && (now - freshness) < _CAMERA_STREAM_REFRESH_MS) return;
     _setCameraImageSrc(img, url, 'refresh');
   });
+}
+
+async function _pollCameraHealth() {
+  if (FLIGHTDECK_DEMO || document.hidden) return;
+  const now = Date.now();
+  const visible = [];
+  document.querySelectorAll('img[data-camera-id]').forEach(img => {
+    if (img.dataset.fleetStill === '1') return;
+    const cameraId = img.dataset.cameraId;
+    const url = _cameraUrlCache[cameraId];
+    if (!url || url.startsWith('data:')) return;
+    const rect = img.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0 || rect.bottom < 0 || rect.right < 0 || rect.top > window.innerHeight || rect.left > window.innerWidth) return;
+    visible.push({ img, cameraId, url });
+  });
+  await Promise.all(visible.map(async ({ img, cameraId, url }) => {
+    try {
+      const r = await fetch(`/api/camera/${encodeURIComponent(cameraId)}/health`);
+      if (!r.ok) return;
+      const body = await r.json();
+      const changedSeq = Number(body?.changed_seq || 0);
+      const prev = _cameraHealthCache[cameraId];
+      _cameraHealthCache[cameraId] = { changed_seq: changedSeq, checked_at: now };
+      if (prev && changedSeq > prev.changed_seq) {
+        img.dataset.cameraFrameAt = String(now);
+        img.dataset.cameraChangedSeq = String(changedSeq);
+        _setCameraSignal(img, 'live');
+        return;
+      }
+      const lastFrameAt = Number(img.dataset.cameraFrameAt || img.dataset.streamLoadedAt || 0);
+      const staleFor = lastFrameAt ? (now - lastFrameAt) : (now - Number(img.dataset.streamLoadedAt || 0));
+      if (staleFor >= _CAMERA_HEALTH_STALE_MS) {
+        _setCameraSignal(img, 'reconnecting');
+        _setCameraImageSrc(img, url, 'health');
+      } else if (staleFor >= _CAMERA_SIGNAL_STALE_MS) {
+        _setCameraSignal(img, 'stale');
+      }
+    } catch {
+      // ignore transient health poll failures
+    }
+  }));
 }
 
 function _camTileHtml(p) {
@@ -8500,6 +13353,35 @@ function _ensurePrintWatchCameraUrls(printers) {
   });
 }
 
+function _fleetWallHeroStatusLine(printers) {
+  const snap = _dashboardFleetSnapshot(printers);
+  const printing = printers.filter(p => p.state === 'printing');
+  if (printing.length === 1) {
+    const job = _activePrinterJob(printing[0]);
+    const jobName = job ? jobDisplayName(job) : 'a job';
+    return `${_printerPrimaryLabel(printing[0])} printing ${jobName}`;
+  }
+  if (snap.active) {
+    return `${snap.active} printer${snap.active === 1 ? '' : 's'} live on the wall`;
+  }
+  if (snap.attention) {
+    return `${snap.attention} need${snap.attention === 1 ? 's' : ''} eyes — feeds stay up for review`;
+  }
+  if (snap.offline) {
+    return `${snap.offline} offline · ${snap.idle} idle and watching`;
+  }
+  return 'All quiet — cameras ready when you need them';
+}
+
+function _fleetWallSummaryHtml(printers) {
+  const snap = _dashboardFleetSnapshot(printers);
+  return `
+    ${_fleetWallMetric('Live', String(snap.active), snap.active ? 'warm' : '')}
+    ${_fleetWallMetric('Idle', String(snap.idle))}
+    ${_fleetWallMetric('Attention', String(snap.attention), snap.attention ? 'hot' : '')}
+    ${_fleetWallMetric('Offline', String(snap.offline), snap.offline ? 'muted' : '')}`;
+}
+
 function _fleetWallTone(p) {
   if (_printerPrintLocked(p)) return 'locked';
   if (p.state === 'error' || p.state === 'estop') return 'critical';
@@ -8600,7 +13482,15 @@ function _fleetWallWarnings(p) {
       const threshold = Math.max(10, Math.ceil(grams / 10) * 10);
       warnings.push(`#${s.id} <${threshold}g`);
     });
-  if (!warnings.length) return `<div class="fleet-wall-clear">No active warnings</div>`;
+  if (!warnings.length) {
+    return `<div class="fleet-wall-clear fleet-wall-clear-hero">
+      <span class="fleet-wall-clear-icon" aria-hidden="true">✓</span>
+      <div class="fleet-wall-clear-copy">
+        <strong>All clear</strong>
+        <span>No lockouts, faults, or low-spool warnings on this printer.</span>
+      </div>
+    </div>`;
+  }
   return `<div class="fleet-wall-warnings">${warnings.slice(0, 4).map(w => `<span>${esc(w)}</span>`).join('')}</div>`;
 }
 
@@ -8628,7 +13518,7 @@ function _fleetWallSpools(p) {
     const tc = _spoolTextColor(s.color_hex || '#808080');
     const loc = s.location_slot != null ? _amsSlotLabel(p, Number(s.location_slot)) : 'Loaded';
     return `<a class="fleet-wall-spool ${low ? 'fleet-wall-spool-low' : ''}" href="#/spool/${s.id}" style="${_spoolColorStyle(s)};color:${tc}" title="${esc(`${loc} · ${s.material || ''} ${s.color_name || ''}`)}">
-      <strong>#${s.id}</strong>
+      <strong>${_spoolDisplayLabel(s)}</strong>
       <span>${esc(s.color_name || s.material || loc)}</span>
     </a>`;
   }).join('')}</div>`;
@@ -8672,9 +13562,9 @@ function _fleetWallAmsRouteStrip(p) {
       const colour = spool?.color_hex || slot.color || '#22c55e';
       const slotLabel = _amsSlotLabel(p, flatSlot);
       const spoolLabel = spool
-        ? `#${spool.id} ${[spool.color_name, spool.material].filter(Boolean).join(' · ')}`
+        ? `${_spoolDisplayLabel(spool)} ${[spool.color_name, spool.material].filter(Boolean).join(' · ')}`
         : _slotProfileLabel(slot) || slot.type || 'Filament';
-      const dest = _routeDestinationLabel(p, unit);
+      const dest = _routeDestinationLabel(p, unit, slot);
       const fedNow = _slotRouteFed(p, unit, slot);
       routes.push(`<button class="fleet-wall-route${fedNow ? ' is-fed' : ' is-ready'}" data-slot-edit data-printer-id="${esc(p.id)}" data-slot-index="${flatSlot}" data-slot-label="${esc(slotLabel)}" style="--route-colour:${esc(colour)}" title="${esc(`${slotLabel} ${fedNow ? 'feeding' : 'ready for'} ${dest} · ${spoolLabel}`)}">
         <span class="fleet-wall-route-source">
@@ -8719,7 +13609,7 @@ function _fleetWallFeedHtml(p) {
 function _fleetWallCardBody(p) {
   const tone = _fleetWallTone(p);
   const temps = p.temps || {};
-  const hotend = temps.hotend_l || temps.hotend || temps.hotend_r || {};
+  const hotend = _activeHotendReading(p);
   const bed = temps.bed || {};
   const chamber = temps.chamber || {};
   const activeJob = _activePrinterJob(p);
@@ -8747,28 +13637,34 @@ function _fleetWallCardBody(p) {
     `;
 }
 
-function _fleetWallHeadHtml(p) {
-  return `<div class="printer-identity">
-    <div class="printer-icon">${getIcon(p.icon)}</div>
-    ${connDot(p.last_seen)}
-    <div class="printer-names">
-      <span class="printer-custom">${esc(_printerPrimaryLabel(p))}</span>
-      ${_printerModelHtml(p)}
+function _fleetWallFeedCapHtml(p) {
+  const flags = _fleetWallHeaderFlags(p);
+  const secondary = _printerSecondaryLabel(p) || p.model || '';
+  return `<div class="fleet-wall-feed-cap">
+    <div class="fleet-wall-feed-title">
+      ${connDot(p.last_seen)}
+      <span class="fleet-wall-feed-name">${esc(_printerPrimaryLabel(p))}</span>
+      ${secondary ? `<span class="fleet-wall-feed-model">${esc(secondary)}</span>` : ''}
     </div>
-  </div>
-  <div class="fleet-wall-head-right">
-    ${_fleetWallHeaderFlags(p)}
-    <span class="fleet-wall-kind">${esc(p.kind || p.connection?.type || 'printer')}</span>
+    ${flags ? `<div class="fleet-wall-feed-flags">${flags}</div>` : ''}
   </div>`;
+}
+
+function _fleetWallRefreshFeedMedia(feed, p) {
+  const media = feed?.querySelector('.fleet-wall-feed-media');
+  if (media) media.innerHTML = _fleetWallFeedHtml(p);
+}
+
+function _fleetWallHeadHtml(p) {
+  return _fleetWallFeedCapHtml(p);
 }
 
 function _fleetWallCardHtml(p) {
   return `<article class="fleet-wall-card fleet-wall-card-${_fleetWallTone(p)}" data-printer-id="${esc(p.id)}">
-    <div class="fleet-wall-card-head">
-      ${_fleetWallHeadHtml(p)}
-    </div>
+    ${_fleetLayoutTools(p)}
     <a class="fleet-wall-feed" href="#/printer/${esc(p.id)}" data-fleet-feed="${esc(p.id)}" data-fleet-live="${esc(p.id)}">
-      ${_fleetWallFeedHtml(p)}
+      <div class="fleet-wall-feed-media">${_fleetWallFeedHtml(p)}</div>
+      ${_fleetWallFeedCapHtml(p)}
     </a>
     <div class="fleet-wall-card-body">${_fleetWallCardBody(p)}</div>
   </article>`;
@@ -8784,20 +13680,89 @@ async function _ensureFleetWallCameraUrls(printers) {
       const printer = (_latestPrinters || []).find(x => x.id === printerId);
       const feed = card?.querySelector('[data-fleet-feed]');
       if (!printer || !feed || printer.state === 'offline') return;
-      feed.innerHTML = _fleetWallFeedHtml(printer);
+      _fleetWallRefreshFeedMedia(feed, printer);
       _attachCameraRetries(feed);
       _fleetWallSignature = '';
     });
   });
 }
 
+let _fleetLayoutPins;
+try { _fleetLayoutPins = readPins(JSON.parse(localStorage.getItem('fleetWallPins') || '{}')); }
+catch { _fleetLayoutPins = readPins(null); }
+let _fleetLayoutDrag = null;
+function _fleetLayoutOrder() {
+  return orderFleet(_latestPrinters || [], _fleetLayoutPins, (a, b) =>
+    _dashboardStateRank(a) - _dashboardStateRank(b) || _comparePrintersByBench(a, b));
+}
+function _fleetLayoutSave() {
+  try { localStorage.setItem('fleetWallPins', JSON.stringify(_fleetLayoutPins)); }
+  catch { showToast('Layout changed; browser storage is unavailable.'); }
+}
+function _fleetLayoutMove(id, slot) {
+  _fleetLayoutPins = moveFleetPin(_fleetLayoutOrder(), _fleetLayoutPins, id, slot);
+  _fleetLayoutSave();
+  renderFleetWall();
+}
+function _fleetLayoutTools(p) {
+  const pinned = Object.hasOwn(_fleetLayoutPins, p.id);
+  return `<div class="fleet-layout-tools">
+    <button type="button" data-fleet-move="${esc(p.id)}" aria-label="Move ${esc(_printerPrimaryLabel(p))} camera" title="Drag to place; arrow keys move one position">Move</button>
+    <button type="button" data-fleet-pin="${esc(p.id)}" aria-pressed="${pinned}" aria-label="${pinned ? 'Unpin' : 'Pin'} ${esc(_printerPrimaryLabel(p))} camera">${pinned ? 'Unpin' : 'Pin'}</button>
+  </div>`;
+}
+function _attachFleetLayout(el) {
+  if (el.dataset.layoutAttached) return;
+  el.dataset.layoutAttached = '1';
+  el.addEventListener('click', event => {
+    const pin = event.target.closest('[data-fleet-pin]');
+    if (pin) {
+      const id = pin.dataset.fleetPin;
+      if (Object.hasOwn(_fleetLayoutPins, id)) delete _fleetLayoutPins[id];
+      else _fleetLayoutPins[id] = _fleetLayoutOrder().findIndex(p => p.id === id);
+      _fleetLayoutSave(); renderFleetWall();
+    }
+    if (event.target.closest('[data-fleet-layout-reset]')) {
+      _fleetLayoutPins = readPins(null); _fleetLayoutSave(); renderFleetWall();
+    }
+  });
+  el.addEventListener('keydown', event => {
+    const handle = event.target.closest('[data-fleet-move]');
+    if (!handle || !['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
+    event.preventDefault();
+    const id = handle.dataset.fleetMove;
+    const slot = _fleetLayoutOrder().findIndex(p => p.id === id);
+    _fleetLayoutMove(id, slot + (['ArrowLeft', 'ArrowUp'].includes(event.key) ? -1 : 1));
+    el.querySelector(`[data-fleet-move="${CSS.escape(id)}"]`)?.focus();
+  });
+  el.addEventListener('pointerdown', event => {
+    const handle = event.target.closest('[data-fleet-move]');
+    if (!handle || event.button !== 0) return;
+    handle.focus();
+    _fleetLayoutDrag = { id: handle.dataset.fleetMove, pointer: event.pointerId, handle };
+    handle.setPointerCapture(event.pointerId);
+    event.preventDefault();
+  });
+  el.addEventListener('pointerup', event => {
+    if (!_fleetLayoutDrag || event.pointerId !== _fleetLayoutDrag.pointer) return;
+    const drag = _fleetLayoutDrag; _fleetLayoutDrag = null;
+    if (drag.handle.hasPointerCapture(event.pointerId)) drag.handle.releasePointerCapture(event.pointerId);
+    const target = document.elementFromPoint(event.clientX, event.clientY)?.closest('.fleet-wall-card');
+    if (target && el.contains(target)) {
+      const slot = _fleetLayoutOrder().findIndex(p => p.id === target.dataset.printerId);
+      _fleetLayoutMove(drag.id, slot);
+    }
+  });
+  el.addEventListener('pointercancel', () => { _fleetLayoutDrag = null; });
+  el.addEventListener('lostpointercapture', () => { _fleetLayoutDrag = null; });
+}
+
 async function renderFleetWall() {
   const el = document.getElementById('fleet-wall-page');
   _fleetWallMode = _safeFleetWallMode(_fleetWallMode);
-  const printers = [...(_latestPrinters || [])].sort((a, b) =>
-    _dashboardStateRank(a) - _dashboardStateRank(b) ||
-    _dashboardPrinterName(a).localeCompare(_dashboardPrinterName(b))
-  );
+  if (_fleetLayoutDrag) return;
+  const printers = _fleetLayoutOrder();
+  _attachFleetLayout(el);
   if (!printers.length) {
     el.innerHTML = `<div class="fleet-wall-empty">
       <strong>No printers on the wall yet</strong>
@@ -8809,21 +13774,26 @@ async function renderFleetWall() {
 
   _ensureFleetWallCameraUrls(printers);
 
-  const signature = `${_fleetWallMode}|${printers.map(p => `${p.id}:${_cameraUrlCache[p.id] ? 'cam' : 'nocam'}`).join('|')}`;
+  const signature = `${_fleetWallMode}|${printers.map(p => p.id).sort().join('|')}`;
   if (_fleetWallSignature !== signature || !el.querySelector('.fleet-wall-grid')) {
-    const active = printers.filter(p => ['printing', 'paused'].includes(p.state)).length;
-    const attention = printers.filter(p => _printerWarningTarget(p) || _printerPrintLocked(p)).length;
     el.className = `fleet-wall-page fleet-wall-${_fleetWallMode}`;
     el.innerHTML = `<div class="fleet-wall-hero">
-      <div>
-        <span>Fleet Wall</span>
+      <div class="fleet-wall-hero-copy">
+        <span>Camera wall</span>
         <h1>Shop floor live</h1>
+        <p class="fleet-wall-hero-status">${esc(_fleetWallHeroStatusLine(printers))}</p>
       </div>
-      ${_fleetWallModeControls()}
-      <div class="fleet-wall-summary">
-        ${_fleetWallMetric('Printers', String(printers.length))}
-        ${_fleetWallMetric('Active', String(active), active ? 'warm' : '')}
-        ${_fleetWallMetric('Attention', String(attention), attention ? 'hot' : '')}
+      <div class="fleet-layout-options">${_fleetWallModeControls()}
+        <span>Finishing soonest first · move a camera to pin its position</span>
+        <button type="button" data-fleet-layout-reset>Restore automatic order</button>
+      </div>
+      <div class="fleet-wall-hero-side">
+        <div class="fleet-wall-summary">${_fleetWallSummaryHtml(printers)}</div>
+        <div class="fleet-wall-hero-links">
+          <a href="#/">Dashboard</a>
+          <a href="#/mission">Flight Tower</a>
+          <a href="#/queue">Queue</a>
+        </div>
       </div>
     </div>
     <div class="fleet-wall-grid">
@@ -8845,25 +13815,39 @@ async function renderFleetWall() {
       const card = el.querySelector(`.fleet-wall-card[data-printer-id="${CSS.escape(p.id)}"]`);
       if (!card) return;
       card.className = `fleet-wall-card fleet-wall-card-${_fleetWallTone(p)}`;
-      const head = card.querySelector('.fleet-wall-card-head');
-      if (head) head.innerHTML = _fleetWallHeadHtml(p);
+      const cap = card.querySelector('.fleet-wall-feed-cap');
+      if (cap) cap.outerHTML = _fleetWallFeedCapHtml(p);
       const body = card.querySelector('.fleet-wall-card-body');
       if (body) body.innerHTML = _fleetWallCardBody(p);
       const feed = card.querySelector('[data-fleet-feed]');
-      const hasImg = !!feed?.querySelector('img[data-camera-id]');
+      const media = feed?.querySelector('.fleet-wall-feed-media');
+      const hasImg = !!media?.querySelector('img[data-camera-id]');
       const shouldImg = !!_fleetWallCameraSrc(p.id) && p.state !== 'offline';
-      if (feed && hasImg !== shouldImg) feed.innerHTML = _fleetWallFeedHtml(p);
+      if (feed && hasImg !== shouldImg) _fleetWallRefreshFeedMedia(feed, p);
     });
   }
 
-  const active = printers.filter(p => ['printing', 'paused'].includes(p.state)).length;
-  const attention = printers.filter(p => _printerWarningTarget(p) || _printerPrintLocked(p)).length;
+  const grid = el.querySelector('.fleet-wall-grid');
+  printers.forEach((p, slot) => {
+    const card = grid.querySelector(`.fleet-wall-card[data-printer-id="${CSS.escape(p.id)}"]`);
+    if (card && grid.children[slot] !== card) grid.insertBefore(card, grid.children[slot] || null);
+    const pin = card?.querySelector('[data-fleet-pin]');
+    if (pin) {
+      const pinned = Object.hasOwn(_fleetLayoutPins, p.id);
+      pin.textContent = pinned ? 'Unpin' : 'Pin';
+      pin.setAttribute('aria-pressed', String(pinned));
+      pin.setAttribute('aria-label', `${pinned ? 'Unpin' : 'Pin'} ${_printerPrimaryLabel(p)} camera`);
+    }
+  });
+  const reset = el.querySelector('[data-fleet-layout-reset]');
+  if (reset) reset.disabled = !printers.some(p => Object.hasOwn(_fleetLayoutPins, p.id));
   const summary = el.querySelector('.fleet-wall-summary');
   if (summary) {
-    summary.innerHTML = `
-      ${_fleetWallMetric('Printers', String(printers.length))}
-      ${_fleetWallMetric('Active', String(active), active ? 'warm' : '')}
-      ${_fleetWallMetric('Attention', String(attention), attention ? 'hot' : '')}`;
+    summary.innerHTML = _fleetWallSummaryHtml(printers);
+  }
+  const statusLine = el.querySelector('.fleet-wall-hero-status');
+  if (statusLine) {
+    statusLine.textContent = _fleetWallHeroStatusLine(printers);
   }
   _attachCameraRetries(el);
 }
@@ -9155,10 +14139,7 @@ function updateDashboard(printers) {
     if (_rp?.state === 'printing' || _rp?.state === 'paused') refreshObjectsPanel(_route.id);
   }
 
-  const sortedPrinters = [...printers].sort((a, b) =>
-    _dashboardStateRank(a) - _dashboardStateRank(b) ||
-    _dashboardPrinterName(a).localeCompare(_dashboardPrinterName(b))
-  );
+  const sortedPrinters = [...printers].sort(_comparePrintersForDashboard);
 
   if (parseRoute().view === 'stats') renderStatsView();
 
@@ -9166,7 +14147,7 @@ function updateDashboard(printers) {
   const printerCards = sortedPrinters.length
     ? sortedPrinters.map(renderCard).join('')
     : _renderAddPrinterCard(true);
-  grid.innerHTML = `${_renderDashboardBriefing(sortedPrinters)}${printerCards}`;
+  grid.innerHTML = `<div class="dashboard-top">${_renderDashboardHero(sortedPrinters)}${_renderDashboardBriefing(sortedPrinters)}</div><div class="dashboard-cards">${printerCards}</div>`;
 
   grid.querySelectorAll('[data-printer-id]').forEach(card => {
     const p = printers.find(x => x.id === card.dataset.printerId);
@@ -9237,6 +14218,15 @@ function _statsMonthRows(rows) {
   </div>`;
 }
 
+function _statsPrinterStateClass(state) {
+  const s = String(state || '').toLowerCase();
+  if (s === 'printing') return 'printing';
+  if (s === 'paused') return 'paused';
+  if (s === 'offline') return 'offline';
+  if (s === 'error' || s === 'estop') return 'fault';
+  return 'idle';
+}
+
 function _statsPrinterRows(printers, filamentSummary, failureSummary, allSpools = [], usageSummary = []) {
   const byPrinter = Object.fromEntries((filamentSummary.by_printer || []).map(r => [r.printer_id, r.grams]));
   const failures = Object.fromEntries((failureSummary.by_printer || []).map(r => [r.key, r.count]));
@@ -9247,7 +14237,7 @@ function _statsPrinterRows(printers, filamentSummary, failureSummary, allSpools 
     const loadedG = loaded.reduce((sum, s) => sum + Number(s.remaining_g || 0), 0);
     const u = usage[p.id] || {};
     const hours = Number(u.total_seconds || 0) / 3600;
-    return `<a class="stats-printer-row" href="#/printer/${p.id}">
+    return `<a class="stats-printer-row stats-printer-row-${_statsPrinterStateClass(p.state)}" href="#/printer/${p.id}">
       <div>
         <strong>${esc(_dashboardPrinterName(p))}</strong>
         <span>${esc(p.custom_name || '')}</span>
@@ -9408,17 +14398,145 @@ function _statsRhDetail(readings) {
   </section>`;
 }
 
-function _statsActionSummary(jobs, printers) {
-  const pending = jobs.filter(j => j.status === 'pending').length;
-  const blocked = jobs.filter(j => _missionJobReadiness(j).cls === 'blocked').length;
-  const active = printers.filter(p => p.state === 'printing' || p.state === 'paused').length;
-  const offline = printers.filter(p => p.state === 'offline').length;
-  const cls = blocked || offline ? 'stats-pulse-bad' : pending || active ? 'stats-pulse-watch' : 'stats-pulse-ok';
-  const label = blocked ? `${blocked} blocked` : offline ? `${offline} offline` : pending ? `${pending} queued` : active ? `${active} active` : 'clear';
-  return `<div class="stats-pulse ${cls}">
-    <span>Operator pulse</span>
-    <strong>${esc(label)}</strong>
-  </div>`;
+function _telemetryHeroStatusLine(printers, rhReadings, instance, failures, spools) {
+  const snap = _dashboardFleetSnapshot(printers);
+  const maxRh = rhReadings.length ? Math.max(...rhReadings.map(r => r.rh)) : null;
+  const badRh = rhReadings.filter(r => _statsRhClass(r.rh) === 'bad').length;
+  const warnRh = rhReadings.filter(r => _statsRhClass(r.rh) === 'warn').length;
+  const loadPct = Number(instance?.host?.load?.pct);
+  const memoryPct = Number(instance?.host?.memory?.pct);
+  const diskPct = Number(instance?.host?.disk?.pct);
+  const lowStock = Number(spools?.low_stock_count || 0);
+
+  if (badRh) {
+    return `${badRh} AMS sensor${badRh === 1 ? '' : 's'} above drying threshold — humidity needs attention`;
+  }
+  if (loadPct >= 90 || memoryPct >= 88 || diskPct >= 90) {
+    return 'Flightdeck host is under pressure — check system health below';
+  }
+  if (warnRh) {
+    return `Moisture rising on ${warnRh} bay${warnRh === 1 ? '' : 's'} · max ${Math.round(maxRh)}% RH`;
+  }
+  if (lowStock) {
+    return `${lowStock} spool${lowStock === 1 ? '' : 's'} below low-stock threshold — inventory watch`;
+  }
+  if (failures?.total) {
+    return `${failures.total} failure review${failures.total === 1 ? '' : 's'} in the last 30 days`;
+  }
+  if (snap.active) {
+    return `${snap.active} print${snap.active === 1 ? '' : 's'} active · long-view metrics updating live`;
+  }
+  if (snap.offline) {
+    return `${snap.offline} offline · utilisation and RH still tracking for the rest of the fleet`;
+  }
+  return 'Long view looks healthy — filament, utilisation, RH, and host metrics are steady';
+}
+
+function _renderTelemetryHero(printers, rhReadings, instance, failures, spools, filament, active) {
+  const avgRh = rhReadings.length
+    ? Math.round(rhReadings.reduce((sum, r) => sum + r.rh, 0) / rhReadings.length)
+    : null;
+  const maxRh = rhReadings.length ? Math.max(...rhReadings.map(r => r.rh)) : null;
+  const rhTone = maxRh == null ? 'muted' : maxRh >= 45 ? 'warn' : maxRh >= 35 ? 'watch' : '';
+  const failureTone = failures?.total ? 'warn' : '';
+  const hostLoad = Number(instance?.host?.load?.pct);
+  const hostMem = Number(instance?.host?.memory?.pct);
+  const hostTone = (hostLoad >= 90 || hostMem >= 88) ? 'warn' : '';
+
+  return `<section class="telemetry-hero" aria-label="Telemetry snapshot">
+    <div class="telemetry-hero-copy">
+      <span class="telemetry-hero-eyebrow">Fleet telemetry</span>
+      <h1 class="telemetry-hero-title">Shop telemetry</h1>
+      <p class="telemetry-hero-status">${esc(_telemetryHeroStatusLine(printers, rhReadings, instance, failures, spools))}</p>
+    </div>
+    <div class="telemetry-hero-metrics" aria-label="Telemetry summary">
+      <div class="telemetry-hero-metric telemetry-hero-metric-active">
+        <strong>${active}</strong>
+        <span>Active</span>
+      </div>
+      <div class="telemetry-hero-metric${rhTone ? ` telemetry-hero-metric-${rhTone}` : ''}">
+        <strong>${avgRh != null ? `${avgRh}%` : '--'}</strong>
+        <span>Avg RH</span>
+      </div>
+      <div class="telemetry-hero-metric">
+        <strong>${_fmtGrams(filament.total_grams || 0)}</strong>
+        <span>Logged</span>
+      </div>
+      <div class="telemetry-hero-metric${failureTone ? ` telemetry-hero-metric-${failureTone}` : ''}">
+        <strong>${failures?.total || 0}</strong>
+        <span>Failures 30d</span>
+      </div>
+      <div class="telemetry-hero-metric${hostTone ? ` telemetry-hero-metric-${hostTone}` : ''}">
+        <strong>${Number.isFinite(hostLoad) ? `${Math.round(hostLoad)}%` : '--'}</strong>
+        <span>Host CPU</span>
+      </div>
+    </div>
+    <div class="telemetry-hero-links">
+      <a href="#/">Dashboard</a>
+      <a href="#/spools">Spools</a>
+      <a href="#/failures?days=30">Failures</a>
+      <a href="#/settings?category=setup">Setup</a>
+    </div>
+  </section>`;
+}
+
+function _renderTelemetryBriefing(printers, rhReadings, instance, spools, failures) {
+  const badRh = rhReadings.filter(r => _statsRhClass(r.rh) === 'bad');
+  const warnRh = rhReadings.filter(r => _statsRhClass(r.rh) === 'warn');
+  const loadPct = Number(instance?.host?.load?.pct);
+  const memoryPct = Number(instance?.host?.memory?.pct);
+  const diskPct = Number(instance?.host?.disk?.pct);
+  const lowStock = Number(spools?.low_stock_count || 0);
+  const hostStressed = loadPct >= 90 || memoryPct >= 88 || diskPct >= 90;
+
+  if (badRh.length) {
+    const top = badRh[0];
+    return `<section class="telemetry-briefing telemetry-briefing-bad" aria-label="Humidity alert">
+      <div class="telemetry-briefing-icon" aria-hidden="true">💧</div>
+      <div class="telemetry-briefing-copy">
+        <strong>Drying suggested</strong>
+        <span>${esc(top.printer)} · ${esc(top.label)} at ${Math.round(top.rh)}% RH${badRh.length > 1 ? ` · +${badRh.length - 1} more` : ''}</span>
+      </div>
+      <div class="telemetry-briefing-links">
+        <a href="#/stats?focus=rh">RH detail</a>
+        <a href="${top.href}">Open printer</a>
+      </div>
+    </section>`;
+  }
+
+  if (hostStressed) {
+    return `<section class="telemetry-briefing telemetry-briefing-warn" aria-label="Host health alert">
+      <div class="telemetry-briefing-icon" aria-hidden="true">⚙</div>
+      <div class="telemetry-briefing-copy">
+        <strong>Host under load</strong>
+        <span>CPU ${Number.isFinite(loadPct) ? `${Math.round(loadPct)}%` : '--'} · memory ${Number.isFinite(memoryPct) ? `${Math.round(memoryPct)}%` : '--'} · disk ${Number.isFinite(diskPct) ? `${Math.round(diskPct)}%` : '--'}</span>
+      </div>
+      <div class="telemetry-briefing-links">
+        <a href="#/settings?category=setup">Setup</a>
+      </div>
+    </section>`;
+  }
+
+  if (warnRh.length || lowStock || failures?.total) {
+    const bits = [];
+    if (warnRh.length) bits.push(`${warnRh.length} AMS moisture watch`);
+    if (lowStock) bits.push(`${lowStock} low-stock spool${lowStock === 1 ? '' : 's'}`);
+    if (failures?.total) bits.push(`${failures.total} failure review${failures.total === 1 ? '' : 's'}`);
+    return `<section class="telemetry-briefing telemetry-briefing-watch" aria-label="Telemetry watch">
+      <div class="telemetry-briefing-icon" aria-hidden="true">◎</div>
+      <div class="telemetry-briefing-copy">
+        <strong>Worth a glance</strong>
+        <span>${esc(bits.join(' · '))}</span>
+      </div>
+      <div class="telemetry-briefing-links">
+        ${warnRh.length ? '<a href="#/stats?focus=rh">RH detail</a>' : ''}
+        ${lowStock ? '<a href="#/spools?filter=low">Low stock</a>' : ''}
+        ${failures?.total ? '<a href="#/failures?days=30">Failures</a>' : ''}
+      </div>
+    </section>`;
+  }
+
+  return '';
 }
 
 function _statsHealthTone(pct, warn = 70, bad = 85) {
@@ -9437,7 +14555,7 @@ function _statsHealthCard(label, value, detail, tone = 'ok') {
   </div>`;
 }
 
-function _statsSystemHealthPanel(instance) {
+function _statsSystemHealthCards(instance) {
   const info = instance || _instanceInfo || {};
   const host = info.host || {};
   const load = host.load || {};
@@ -9459,16 +14577,168 @@ function _statsSystemHealthPanel(instance) {
     : '--';
   const hardware = info.hardware || info.address || 'Flightdeck host';
   const runtime = [info.runtime, info.address].filter(Boolean).join(' · ') || 'local runtime';
-  return `<div class="stats-panel stats-panel-wide stats-system-panel">
-    <div class="stats-panel-head"><span>System Health</span><a href="#/settings?category=setup">Setup</a></div>
-    <div class="stats-system-grid">
+  return `
       ${_statsHealthCard('Host', hardware, runtime, 'ok')}
       ${_statsHealthCard('CPU Load', loadText, Number.isFinite(loadPct) ? `${Math.round(loadPct)}% of ${load.cores || 1} cores` : 'unavailable', _statsHealthTone(loadPct, 65, 90))}
       ${_statsHealthCard('Memory', memoryText, `${_fmtBytes(memory.used)} used · ${_fmtBytes(memory.available)} free`, _statsHealthTone(memoryPct, 72, 88))}
       ${_statsHealthCard('Data Disk', diskText, `${_fmtBytes(disk.free)} free`, _statsHealthTone(diskPct, 75, 90))}
-      ${_statsHealthCard('Camera Workers', cameraWorkers.count == null ? '--' : String(cameraWorkers.count), cameraWorkers.detail || 'not checked', cameraTone)}
-    </div>
+      ${_statsHealthCard('Camera Workers', cameraWorkers.count == null ? '--' : String(cameraWorkers.count), cameraWorkers.detail || 'not checked', cameraTone)}`;
+}
+
+function _statsSystemHealthPanel(instance) {
+  return `<div class="stats-panel stats-panel-wide stats-system-panel telemetry-system-panel">
+    <div class="stats-panel-head"><span>System Health</span><a href="#/settings?category=setup">Setup</a></div>
+    <div class="stats-system-grid telemetry-system-grid">${_statsSystemHealthCards(instance)}</div>
   </div>`;
+}
+
+function _telemetryBentoHead(title, href, linkLabel) {
+  return `<div class="telemetry-bento-head">
+    <span>${esc(title)}</span>
+    ${href ? `<a href="${href}">${esc(linkLabel)}</a>` : ''}
+  </div>`;
+}
+
+function _statsFilamentBentoBody(filament, spools) {
+  const months = _statsMonthRows(filament.by_month || []);
+  const materials = _statsBarRows(filament.by_material || [], {
+    total: filament.total_grams || 0,
+    limit: 3,
+  });
+  const lowStock = Number(spools.low_stock_count || 0);
+  return `${months}
+    <div class="telemetry-bento-subhead">Top materials</div>
+    ${materials}
+    <div class="telemetry-bento-foot">
+      <span>${_fmtGrams(spools.total_remaining_g || 0)} in inventory · ${spools.total_count || 0} spools</span>
+      ${lowStock ? `<a href="#/spools?filter=low">${lowStock} low stock</a>` : ''}
+    </div>`;
+}
+
+function _statsRhBentoBody(readings) {
+  if (!readings.length) {
+    return `<div class="stats-empty">No AMS humidity telemetry yet.</div>`;
+  }
+  const watch = _moistureWatch(readings).filter(w => w.level !== 'ok').slice(0, 2);
+  const sensors = readings.slice(0, 3);
+  const watchHtml = watch.length
+    ? `<div class="telemetry-bento-subhead">Moisture watch</div>${_statsMoistureWatchPanel(watch)}`
+    : `<div class="telemetry-bento-okline">All AMS sensors in a comfortable range.</div>`;
+  const sensorHtml = `<div class="telemetry-bento-subhead">Sensors</div>
+    <div class="stats-rh-list telemetry-rh-compact">${sensors.map(r => {
+      const cls = _statsRhClass(r.rh);
+      return `<a class="stats-rh-row stats-rh-${cls}" href="${r.href}">
+        <div><strong>${esc(r.label)} · ${esc(r.printer)}</strong></div>
+        <div><b>${Math.round(r.rh)}%</b></div>
+      </a>`;
+    }).join('')}</div>
+    ${readings.length > sensors.length ? `<div class="telemetry-bento-more">+${readings.length - sensors.length} more in full RH detail</div>` : ''}`;
+  return `${watchHtml}${sensorHtml}`;
+}
+
+function _statsPrinterBentoBody(printers, filamentSummary, failureSummary, allSpools = [], usageSummary = []) {
+  const byPrinter = Object.fromEntries((filamentSummary.by_printer || []).map(r => [r.printer_id, r.grams]));
+  const usage = Object.fromEntries((usageSummary || []).map(r => [r.printer_id, r]));
+  if (!printers.length) return `<div class="stats-empty">No printers configured.</div>`;
+  return `<div class="stats-printer-list telemetry-printer-compact">${printers.map(p => {
+    const u = usage[p.id] || {};
+    const hours = Number(u.total_seconds || 0) / 3600;
+    return `<a class="stats-printer-row stats-printer-row-compact stats-printer-row-${_statsPrinterStateClass(p.state)}" href="#/printer/${p.id}">
+      <div>
+        <strong>${esc(_dashboardPrinterName(p))}</strong>
+        <span>${esc(p.custom_name || p.model_name || '')}</span>
+      </div>
+      <div><b>${esc(p.state || 'unknown')}</b><span>state</span></div>
+      <div><b>${Number(u.total_prints || 0)}</b><span>prints</span></div>
+      <div><b>${hours ? hours.toFixed(0) : '0'}h</b><span>time</span></div>
+      <div><b>${_fmtGrams(byPrinter[p.id] || 0)}</b><span>used</span></div>
+    </a>`;
+  }).join('')}</div>`;
+}
+
+function _renderTelemetryBento(instance, filament, spools, rhReadings, printers, failures, allSpools, printerUsage) {
+  return `<section class="telemetry-bento" aria-label="Shop vitals">
+    <article class="telemetry-bento-tile telemetry-bento-host">
+      ${_telemetryBentoHead('System health', '#/settings?category=setup', 'Setup')}
+      <div class="telemetry-bento-body">
+        <div class="stats-system-grid telemetry-system-grid telemetry-system-compact">${_statsSystemHealthCards(instance)}</div>
+      </div>
+    </article>
+    <article class="telemetry-bento-tile telemetry-bento-filament">
+      ${_telemetryBentoHead('Filament', '#/spools?view=catalogue', 'Catalogue')}
+      <div class="telemetry-bento-body telemetry-bento-body-chart">${_statsFilamentBentoBody(filament, spools)}</div>
+    </article>
+    <article class="telemetry-bento-tile telemetry-bento-rh">
+      ${_telemetryBentoHead('AMS humidity', '#/stats?focus=rh', 'RH detail')}
+      <div class="telemetry-bento-body">${_statsRhBentoBody(rhReadings)}</div>
+    </article>
+    <article class="telemetry-bento-tile telemetry-bento-printers">
+      ${_telemetryBentoHead('Printer balance', '#/stats?focus=printers', 'Full table')}
+      <div class="telemetry-bento-body">${_statsPrinterBentoBody(printers, filament, failures.summary || {}, allSpools, printerUsage)}</div>
+    </article>
+  </section>
+  <div class="telemetry-expand-bar">
+    <a class="telemetry-expand-link" href="#/stats?focus=boards">Expand all boards</a>
+    <span>Full filament trends, spool tracking, and inventory mix</span>
+  </div>`;
+}
+
+function _renderTelemetryBoards(filament, spools, rhReadings, printers, failures, allSpools, printerUsage, intel, instance, focus) {
+  const spoolAlerts = intel.alerts || [];
+  const topSpools = intel.by_spool || [];
+  return `
+    <div class="telemetry-back-bar">
+      <a href="#/stats">← Compact view</a>
+    </div>
+    <div class="telemetry-section-head telemetry-section-head-board">
+      <span>Long view boards</span>
+      <small>Full filament trends, RH lists, spool tracking, and printer balance</small>
+    </div>
+    <section class="stats-layout telemetry-layout">
+      ${_statsSystemHealthPanel(instance)}
+      <div class="stats-panel stats-panel-wide">
+        <div class="stats-panel-head"><span>Filament Trend</span><a href="#/spools?view=catalogue">Catalogue</a></div>
+        ${_statsMonthRows(filament.by_month || [])}
+      </div>
+      <div class="stats-panel">
+        <div class="stats-panel-head"><span>By Material</span><a href="#/spools">Spools</a></div>
+        ${_statsBarRows(filament.by_material || [], { total: filament.total_grams || 0 })}
+      </div>
+      <div class="stats-panel">
+        <div class="stats-panel-head"><span>Inventory Mix</span><a href="#/spools">Open</a></div>
+        ${_statsBarRows(spools.by_material || [], { total: spools.total_remaining_g || 0 })}
+      </div>
+      ${focus !== 'rh' ? `<div class="stats-panel">
+        <div class="stats-panel-head"><span>AMS Humidity</span><a href="#/stats?focus=rh">Detail</a></div>
+        ${_statsMoistureWatchPanel(rhReadings)}
+      </div>` : ''}
+      <div class="stats-panel">
+        <div class="stats-panel-head"><span>AMS Sensors</span><a href="#/stats?focus=rh">Detail</a></div>
+        ${_statsRhPanel(rhReadings)}
+      </div>
+      <div class="stats-panel">
+        <div class="stats-panel-head"><span>Spool Tracking</span><a href="#/spools">Inventory</a></div>
+        <div class="stats-alert-list">
+          ${spoolAlerts.map(a => `<div class="stats-alert stats-alert-${a.level}">${esc(a.message)}</div>`).join('')}
+        </div>
+        <div class="stats-mini-grid">
+          <div><strong>${_fmtGrams(intel.summary?.deducted_g || 0)}</strong><span>deducted 30d</span></div>
+          <div><strong>${intel.summary?.tracked_prints || intel.summary?.deducted_prints || 0}</strong><span>tracked prints</span></div>
+          <div><strong>${intel.summary?.unattributed_prints || 0}</strong><span>unattributed</span></div>
+        </div>
+      </div>
+      <div class="stats-panel">
+        <div class="stats-panel-head"><span>Most Used Spools</span><a href="#/spools">Manage</a></div>
+        ${_statsBarRows(topSpools, {
+          total: topSpools.reduce((sum, r) => sum + Number(r.grams || 0), 0),
+          label: r => `#${r.spool_id} ${[r.color_name, r.material].filter(Boolean).join(' · ')}`,
+        })}
+      </div>
+      <div class="stats-panel stats-panel-wide${focus === 'printers' ? ' stats-panel-focus' : ''}">
+        <div class="stats-panel-head"><span>Printer Balance</span><a href="#/">Dashboard</a></div>
+        ${_statsPrinterRows(printers, filament, failures.summary || {}, allSpools, printerUsage)}
+      </div>
+    </section>`;
 }
 
 async function renderStatsView() {
@@ -9481,96 +14751,45 @@ async function renderStatsView() {
   const focus = params.get('focus') || '';
 
   try {
-    const [filament, spools, allSpools, intel, failures, jobs, printerUsage, instance] = await Promise.all([
+    const [filament, spools, allSpools, intel, failures, printerUsage, instance] = await Promise.all([
       fetch('/api/filament/summary').then(r => r.ok ? r.json() : {}),
       fetch('/api/spools/summary').then(r => r.ok ? r.json() : {}),
       fetch('/api/spools').then(r => r.ok ? r.json() : []),
       fetch('/api/spools/intelligence?days=30').then(r => r.ok ? r.json() : {}),
       fetch('/api/failures?days=30').then(r => r.ok ? r.json() : {}),
-      fetch('/api/queue').then(r => r.ok ? r.json() : []),
       fetch('/api/printers/usage').then(r => r.ok ? r.json() : []),
       fetch('/api/instance').then(r => r.ok ? r.json() : (_instanceInfo || {})),
     ]);
     if (instance?.app) _instanceInfo = instance;
 
     const printers = _latestPrinters || [];
-    const states = _statsStateCounts(printers);
-    const totalPrints30 = (failures.summary?.by_printer || []).reduce((sum, r) => sum + Number(r.count || 0), 0);
-    const spoolAlerts = intel.alerts || [];
-    const topSpools = intel.by_spool || [];
     const active = printers.filter(p => p.state === 'printing' || p.state === 'paused').length;
     const rhReadings = _statsRhReadings(printers);
-    const avgRh = rhReadings.length
-      ? Math.round(rhReadings.reduce((sum, r) => sum + r.rh, 0) / rhReadings.length)
-      : null;
-    const maxRh = rhReadings.length ? Math.max(...rhReadings.map(r => r.rh)) : null;
+
+    let body = '';
+    if (focus === 'boards') {
+      body = _renderTelemetryBoards(filament, spools, rhReadings, printers, failures, allSpools, printerUsage, intel, instance, focus);
+    } else if (focus === 'rh') {
+      body = `<div class="telemetry-back-bar"><a href="#/stats">← Compact view</a></div>${_statsRhDetail(rhReadings)}`;
+    } else if (focus === 'printers') {
+      body = `<div class="telemetry-back-bar"><a href="#/stats">← Compact view</a></div>
+        <section class="stats-panel stats-panel-wide stats-panel-focus telemetry-printer-drill">
+          <div class="stats-panel-head"><span>Printer Balance</span><a href="#/">Dashboard</a></div>
+          ${_statsPrinterRows(printers, filament, failures.summary || {}, allSpools, printerUsage)}
+        </section>
+        <div class="telemetry-expand-bar">
+          <a class="telemetry-expand-link" href="#/stats?focus=boards">Expand all boards</a>
+        </div>`;
+    } else {
+      body = _renderTelemetryBento(instance, filament, spools, rhReadings, printers, failures, allSpools, printerUsage);
+    }
+
+    const compact = !focus || focus === '';
     const html = `
-      <div class="stats-page">
-        <section class="stats-hero">
-          <div>
-            <div class="mission-eyebrow">Fleet Telemetry</div>
-            <h1>Shop telemetry</h1>
-            <p>${printers.length} printers · ${active} active · ${_fmtGrams(filament.total_grams || 0)} recorded filament · ${spools.total_count || 0} live spools</p>
-          </div>
-          ${_statsActionSummary(jobs, printers)}
-        </section>
-
-        <section class="stats-kpi-grid">
-          <a class="stats-kpi-card" href="#/stats?focus=printers"><strong>${printers.length}</strong><span>Printers</span><small>${states.idle || 0} idle · ${active} active</small></a>
-          <a class="stats-kpi-card" href="#/spools?view=catalogue"><strong>${_fmtGrams(filament.total_grams || 0)}</strong><span>Filament used</span><small>${filament.total_cost != null ? `$${filament.total_cost.toFixed(2)} estimated` : 'cost pending'}</small></a>
-          <a class="stats-kpi-card" href="#/spools"><strong>${_fmtGrams(spools.total_remaining_g || 0)}</strong><span>Inventory</span><small>${spools.total_count || 0} spools · ${spools.in_printer_count || 0} loaded</small></a>
-          <a class="stats-kpi-card ${maxRh != null && maxRh >= 35 ? 'stats-kpi-warn' : ''}" href="#/stats?focus=rh"><strong>${avgRh != null ? `${avgRh}%` : '--'}</strong><span>AMS RH</span><small>${maxRh != null ? `Max ${Math.round(maxRh)}% · ${rhReadings.length} sensors` : 'no telemetry'}</small></a>
-          <a class="stats-kpi-card ${spools.low_stock_count ? 'stats-kpi-warn' : ''}" href="#/spools?filter=low"><strong>${spools.low_stock_count || 0}</strong><span>Low stock</span><small>Below ${Math.round(spools.low_stock_pct || 20)}%</small></a>
-          <a class="stats-kpi-card ${failures.total ? 'stats-kpi-warn' : ''}" href="#/failures?days=30"><strong>${failures.total || 0}</strong><span>Failure review</span><small>Last 30 days</small></a>
-        </section>
-
-        ${focus === 'rh' ? _statsRhDetail(rhReadings) : ''}
-
-        <section class="stats-layout">
-          ${_statsSystemHealthPanel(instance)}
-          <div class="stats-panel stats-panel-wide">
-            <div class="stats-panel-head"><span>Filament Trend</span><a href="#/spools?view=catalogue">Catalogue</a></div>
-            ${_statsMonthRows(filament.by_month || [])}
-          </div>
-          <div class="stats-panel">
-            <div class="stats-panel-head"><span>By Material</span><a href="#/spools">Spools</a></div>
-            ${_statsBarRows(filament.by_material || [], { total: filament.total_grams || 0 })}
-          </div>
-          <div class="stats-panel">
-            <div class="stats-panel-head"><span>Inventory Mix</span><a href="#/spools">Open</a></div>
-            ${_statsBarRows(spools.by_material || [], { total: spools.total_remaining_g || 0 })}
-          </div>
-          ${focus !== 'rh' ? `<div class="stats-panel">
-            <div class="stats-panel-head"><span>AMS Humidity</span><a href="#/stats?focus=rh">Detail</a></div>
-            ${_statsMoistureWatchPanel(rhReadings)}
-          </div>` : ''}
-          <div class="stats-panel">
-            <div class="stats-panel-head"><span>AMS Sensors</span><a href="#/stats?focus=rh">Detail</a></div>
-            ${_statsRhPanel(rhReadings)}
-          </div>
-          <div class="stats-panel">
-            <div class="stats-panel-head"><span>Spool Tracking</span><a href="#/spools">Inventory</a></div>
-            <div class="stats-alert-list">
-              ${spoolAlerts.map(a => `<div class="stats-alert stats-alert-${a.level}">${esc(a.message)}</div>`).join('')}
-            </div>
-            <div class="stats-mini-grid">
-              <div><strong>${_fmtGrams(intel.summary?.deducted_g || 0)}</strong><span>deducted 30d</span></div>
-              <div><strong>${intel.summary?.tracked_prints || intel.summary?.deducted_prints || 0}</strong><span>tracked prints</span></div>
-              <div><strong>${intel.summary?.unattributed_prints || 0}</strong><span>unattributed</span></div>
-            </div>
-          </div>
-          <div class="stats-panel">
-            <div class="stats-panel-head"><span>Most Used Spools</span><a href="#/spools">Manage</a></div>
-            ${_statsBarRows(topSpools, {
-              total: topSpools.reduce((sum, r) => sum + Number(r.grams || 0), 0),
-              label: r => `#${r.spool_id} ${[r.color_name, r.material].filter(Boolean).join(' · ')}`,
-            })}
-          </div>
-          <div class="stats-panel stats-panel-wide${focus === 'printers' ? ' stats-panel-focus' : ''}">
-            <div class="stats-panel-head"><span>Printer Balance</span><a href="#/">Dashboard</a></div>
-            ${_statsPrinterRows(printers, filament, failures.summary || {}, allSpools, printerUsage)}
-          </div>
-        </section>
+      <div class="stats-page telemetry-page${compact ? ' telemetry-page-compact' : ' telemetry-page-expanded'}">
+        ${_renderTelemetryHero(printers, rhReadings, instance, failures, spools, filament, active)}
+        ${_renderTelemetryBriefing(printers, rhReadings, instance, spools, failures)}
+        ${body}
       </div>`;
 
     if (html !== _statsLastHtml) {
@@ -9638,6 +14857,8 @@ const _SETTINGS_CATEGORIES = [
   { id: 'appearance', label: 'Appearance' },
   { id: 'slicer',     label: 'Slicer'     },
   { id: 'locations',  label: 'Locations'  },
+  { id: 'costing',    label: 'Costing'    },
+  { id: 'tools',      label: 'Tools'      },
 ];
 
 async function refreshPrinters() {
@@ -9665,33 +14886,53 @@ const _PRINTER_SETUP_FAMILIES = {
     label: 'Bambu',
     connType: 'bambu',
     icon: 'bambu',
+    setupBadge: 'Beta ready',
+    setupNote: 'Tested setup path for this beta.',
     idPlaceholder: 'h2d',
     customPlaceholder: 'BigBoy',
     models: ['H2D', 'H2C', 'H2S', 'X2D', 'X1C', 'X1E', 'P2S', 'P1S', 'P1P', 'A1', 'A1 mini', 'Custom Bambu'],
   },
   voron: {
-    label: 'Voron / Klipper',
+    label: 'Klipper',
     connType: 'moonraker',
     icon: 'voron',
-    idPlaceholder: 'voron24',
+    setupBadge: 'Tester wanted',
+    setupNote: 'Coming soon. Visible so Klipper/Voron owners can see the direction, but locked for the Bambu beta.',
+    setupLocked: true,
+    idPlaceholder: 'klipper_printer',
     customPlaceholder: 'Greyhound Elite V2',
-    models: ['Voron 2.4 250', 'Voron 2.4 300', 'Voron 2.4 350', 'Voron Trident 250', 'Voron Trident 300', 'Voron Trident 350', 'Voron 0.1', 'Voron 0.2', 'Voron Switchwire', 'Custom Voron / Klipper'],
+    models: [
+      'Voron 2.4 250', 'Voron 2.4 300', 'Voron 2.4 350',
+      'Voron Trident 250', 'Voron Trident 300', 'Voron Trident 350',
+      'Voron 0.1', 'Voron 0.2', 'Voron Switchwire',
+      'Rat Rig V-Core 3.1 300', 'Rat Rig V-Core 3.1 400', 'Rat Rig V-Core 3.1 500',
+      'Rat Rig V-Core 4 300', 'Rat Rig V-Core 4 400', 'Rat Rig V-Core 4 500', 'Rat Rig V-Minion',
+      'Sovol SV08', 'Sovol SV06', 'Sovol SV06 Plus', 'Sovol SV07', 'Sovol SV07 Plus',
+      'Qidi Q1 Pro', 'Qidi Plus4', 'Qidi X-Plus 3', 'Qidi X-Max 3',
+      'FLSUN V400', 'FLSUN S1', 'FLSUN T1',
+      'VzBot 235', 'VzBot 330', 'Annex K3', 'RailCore II 300ZL', 'HevORT',
+      'Creality K1', 'Creality K1C', 'Creality K1 Max', 'Elegoo Neptune 4', 'Elegoo Neptune 4 Plus', 'Elegoo Neptune 4 Max',
+      'Custom Klipper',
+    ],
   },
   snapmaker_u1: {
     label: 'Snapmaker',
     connType: 'snapmaker_u1',
     icon: 'generic',
+    setupBadge: 'Tester wanted',
+    setupNote: 'Coming soon. Planned printer family, but not part of the tested beta setup path yet.',
+    setupLocked: true,
     idPlaceholder: 'u1',
     customPlaceholder: 'Printer Beast',
     models: ['Snapmaker U1'],
   },
   moonraker: {
-    label: 'Other Moonraker',
+    label: 'Klipper',
     connType: 'moonraker',
     icon: 'generic',
-    idPlaceholder: 'my_printer',
+    idPlaceholder: 'klipper_printer',
     customPlaceholder: 'Workshop Beast',
-    models: ['Sovol SV08', 'Qidi', 'FLSUN', 'IdeaFormer IR3 V2', 'Custom Moonraker'],
+    models: ['Custom Klipper'],
   },
   simulated: {
     label: 'Simulated',
@@ -9703,7 +14944,7 @@ const _PRINTER_SETUP_FAMILIES = {
   },
 };
 
-const _PRINTER_FAMILY_ORDER = ['bambu', 'voron', 'snapmaker_u1', 'moonraker'];
+const _PRINTER_FAMILY_ORDER = ['bambu', 'voron', 'snapmaker_u1'];
 
 const _CUSTOM_MODEL_RE = /custom|other/i;
 const _PRINTER_MODEL_BUILD_VOLUME = {
@@ -9727,8 +14968,37 @@ const _PRINTER_MODEL_BUILD_VOLUME = {
   'Voron 0.1': { x: 120, y: 120, z: 120 },
   'Voron 0.2': { x: 120, y: 120, z: 120 },
   'Voron Switchwire': { x: 250, y: 210, z: 220 },
-  'Snapmaker U1': { x: 270, y: 270, z: 270 },
+  'Rat Rig V-Core 3.1 300': { x: 300, y: 300, z: 300 },
+  'Rat Rig V-Core 3.1 400': { x: 400, y: 400, z: 400 },
+  'Rat Rig V-Core 3.1 500': { x: 500, y: 500, z: 500 },
+  'Rat Rig V-Core 4 300': { x: 300, y: 300, z: 300 },
+  'Rat Rig V-Core 4 400': { x: 400, y: 400, z: 400 },
+  'Rat Rig V-Core 4 500': { x: 500, y: 500, z: 500 },
+  'Rat Rig V-Minion': { x: 180, y: 180, z: 180 },
   'Sovol SV08': { x: 350, y: 350, z: 345 },
+  'Sovol SV06': { x: 220, y: 220, z: 250 },
+  'Sovol SV06 Plus': { x: 300, y: 300, z: 340 },
+  'Sovol SV07': { x: 220, y: 220, z: 250 },
+  'Sovol SV07 Plus': { x: 300, y: 300, z: 350 },
+  'Qidi Q1 Pro': { x: 245, y: 245, z: 240 },
+  'Qidi Plus4': { x: 305, y: 305, z: 280 },
+  'Qidi X-Plus 3': { x: 280, y: 280, z: 270 },
+  'Qidi X-Max 3': { x: 325, y: 325, z: 315 },
+  'FLSUN V400': { x: 300, y: 300, z: 410 },
+  'FLSUN S1': { x: 320, y: 320, z: 430 },
+  'FLSUN T1': { x: 260, y: 260, z: 330 },
+  'VzBot 235': { x: 235, y: 235, z: 240 },
+  'VzBot 330': { x: 330, y: 330, z: 330 },
+  'Annex K3': { x: 180, y: 180, z: 180 },
+  'RailCore II 300ZL': { x: 300, y: 300, z: 330 },
+  'HevORT': { x: 400, y: 400, z: 400 },
+  'Creality K1': { x: 220, y: 220, z: 250 },
+  'Creality K1C': { x: 220, y: 220, z: 250 },
+  'Creality K1 Max': { x: 300, y: 300, z: 300 },
+  'Elegoo Neptune 4': { x: 225, y: 225, z: 265 },
+  'Elegoo Neptune 4 Plus': { x: 320, y: 320, z: 385 },
+  'Elegoo Neptune 4 Max': { x: 420, y: 420, z: 480 },
+  'Snapmaker U1': { x: 270, y: 270, z: 270 },
 };
 
 function _setupFamilyForPrinter(printer) {
@@ -9737,15 +15007,14 @@ function _setupFamilyForPrinter(printer) {
   if (connType === 'bambu') return 'bambu';
   if (connType === 'snapmaker_u1') return 'snapmaker_u1';
   if (connType === 'simulated') return 'simulated';
-  if (model.includes('voron') || printer?.icon === 'voron') return 'voron';
-  return 'moonraker';
+  return 'voron';
 }
 
 function _setupFamilyForConnType(connType, modelName = '') {
   if (connType === 'bambu') return 'bambu';
   if (connType === 'snapmaker_u1') return 'snapmaker_u1';
   if (connType === 'simulated') return 'simulated';
-  return String(modelName || '').toLowerCase().includes('voron') ? 'voron' : 'moonraker';
+  return 'voron';
 }
 
 function _modelOptionsHtml(familyId, selectedModel = '') {
@@ -9853,18 +15122,24 @@ function _printersCategoryHtml(printers) {
           <label class="settings-label" for="p-printer-family">Printer</label>
           <select class="settings-input printer-family-select" id="p-printer-family" aria-label="Printer family">
             <option value="bambu">Bambu</option>
-            <option value="voron">Voron / Klipper</option>
-            <option value="snapmaker_u1">Snapmaker</option>
-            <option value="moonraker">Other Moonraker</option>
+            <option value="voron" disabled>Klipper</option>
+            <option value="snapmaker_u1" disabled>Snapmaker</option>
           </select>
           <div class="printer-family-picker" role="radiogroup" aria-label="Printer family">
             ${_PRINTER_FAMILY_ORDER.map(id => {
               const family = _PRINTER_SETUP_FAMILIES[id];
-              return `<button type="button" class="printer-family-option" data-printer-family-option="${esc(id)}" aria-pressed="${id === 'bambu' ? 'true' : 'false'}">
+              return `<button type="button" class="printer-family-option${family.setupLocked ? ' printer-family-option-locked' : ''}" data-printer-family-option="${esc(id)}" aria-pressed="${id === 'bambu' ? 'true' : 'false'}" ${family.setupLocked ? 'aria-disabled="true"' : ''}>
                 <span class="printer-family-icon">${getIcon(family.icon)}</span>
-                <span>${esc(family.label)}</span>
+                <span class="printer-family-copy">
+                  <strong>${esc(family.label)}</strong>
+                  <small>${esc(family.setupBadge || '')}</small>
+                </span>
               </button>`;
             }).join('')}
+          </div>
+          <div class="printer-family-beta-note">
+            <strong>Bambu is the tested beta setup path.</strong>
+            <span>Klipper, Snapmaker, and other printer brands are planned tester paths, but they stay locked here until they have proper setup coverage.</span>
           </div>
         </div>
 
@@ -10139,18 +15414,19 @@ function _attachPrintersEvents(el) {
         <button type="button" class="settings-save-btn printer-scan-use" data-scan-index="${idx}" ${row.already_configured ? 'disabled' : ''}>Use</button>
       </div>`).join('');
     if (!autoAddable) {
-      box.insertAdjacentHTML('afterbegin', '<div class="settings-empty">Only unconfigured Moonraker/Snapmaker results can be bulk added. Bambu results need access code and serial first.</div>');
+      box.insertAdjacentHTML('afterbegin', '<div class="settings-empty">Bambu results need access code and serial first. Klipper, Snapmaker, and other brands are tester candidates for after the Bambu beta path is proven.</div>');
     }
   };
 
   const _scanCandidateCanAutoAdd = candidate => {
     if (!candidate || candidate.already_configured) return false;
-    return ['moonraker', 'snapmaker_u1'].includes(candidate.connection_type);
+    return false;
   };
 
   const _scanCandidateDisabledReason = candidate => {
     if (candidate?.already_configured) return 'Already configured';
     if (candidate?.connection_type === 'bambu') return 'Bambu needs access code and serial before adding';
+    if (['moonraker', 'snapmaker_u1'].includes(candidate?.connection_type)) return 'Tester candidate; locked during the Bambu beta';
     return 'Not enough information to add automatically';
   };
 
@@ -10306,7 +15582,14 @@ function _attachPrintersEvents(el) {
     setPrinterFamily(e.target.value);
   });
   el.querySelectorAll('[data-printer-family-option]').forEach(btn => {
-    btn.addEventListener('click', () => setPrinterFamily(btn.dataset.printerFamilyOption));
+    btn.addEventListener('click', () => {
+      const family = _PRINTER_SETUP_FAMILIES[btn.dataset.printerFamilyOption];
+      if (family?.setupLocked) {
+        showToast('Coming soon', `${family.label} setup is locked for the Bambu beta.`, 'warn');
+        return;
+      }
+      setPrinterFamily(btn.dataset.printerFamilyOption);
+    });
   });
   el.querySelector('#p-model-select')?.addEventListener('change', () => syncModelValue(true));
   el.querySelector('#p-model-custom')?.addEventListener('input', () => syncModelValue(false));
@@ -10492,9 +15775,13 @@ function _resetPrinterForm(el, setConnType) {
   el.querySelector('#mjpeg-fields').hidden = true;
 }
 
-function _validateFormData(data, connType, errorEl) {
+function _validateFormData(data, connType, errorEl, editingId = '') {
   const fail = msg => { errorEl.textContent = msg; errorEl.removeAttribute('hidden'); return false; };
   errorEl.setAttribute('hidden', '');
+
+  if (!editingId && connType !== 'bambu') {
+    return fail('Bambu is the only tested add-printer path in this beta. Other brands are coming soon for testers.');
+  }
 
   if (!data.id)          return fail('ID is required');
   if (!/^[a-z][a-z0-9_-]*$/.test(data.id))
@@ -10521,7 +15808,7 @@ async function _submitAddPrinter(el, connType) {
   const data      = _collectFormData(el, connType);
   if (editingId) data.id = editingId;
 
-  if (!_validateFormData(data, connType, errorEl)) return;
+  if (!_validateFormData(data, connType, errorEl, editingId)) return;
 
   const dup = await _checkDuplicateConnection(data, connType, editingId);
   if (dup) {
@@ -10823,11 +16110,11 @@ function _slicerProfilesHtml(profileData, printers) {
     <div class="settings-section slicer-profiles-panel">
       <div class="setup-version-main">
         <div>
-          <div class="settings-section-title">Standard Profiles</div>
-          <div class="settings-hint">Synced from OrcaSlicer standard profiles, local Orca AppData profiles, plus any custom profiles you upload.</div>
+          <div class="settings-section-title">Slicer Bundles & Profiles</div>
+          <div class="settings-hint">Synced from OrcaSlicer standard/local profiles, plus Orca JSON/ZIP or Bambu Studio .bbscfg bundles you upload.</div>
         </div>
         <div class="setup-version-actions">
-          <button type="button" class="settings-save-btn" id="slicer-upload-profiles">Upload profiles</button>
+          <button type="button" class="settings-save-btn" id="slicer-upload-profiles">Upload bundle</button>
           <button type="button" class="settings-save-btn" id="slicer-sync-profiles">Sync profiles</button>
         </div>
       </div>
@@ -10837,7 +16124,7 @@ function _slicerProfilesHtml(profileData, printers) {
     </div>
     <div class="settings-section slicer-profiles-panel">
       <div class="settings-section-title">Printer Defaults</div>
-      <div class="settings-hint">Choose the default profile triplet Flightdeck should use when slicing for each printer. Nozzle size lives in the printer profile; Bambu 0.4 process profiles are usually named by layer height, like 0.20mm Standard @BBL H2D.</div>
+      <div class="settings-hint">Choose the default profile triplet Flightdeck uses for slicer handoff and optional API slicing. Nozzle size lives in the printer profile; Bambu 0.4 process profiles are usually named by layer height, like 0.20mm Standard @BBL H2D.</div>
       ${_slicerDatalist('slicer-process-profiles', processProfiles)}
       ${_slicerDatalist('slicer-filament-profiles', filamentProfiles)}
       <div class="slicer-profile-headings">
@@ -10969,10 +16256,19 @@ function _slicerCategoryHtml(profileData = null, printers = []) {
   const selected = _serverSettings.preferred_slicer ?? '';
   const detected = _serverSettings.slicer_detected_version ?? '';
   const dockerUrl = (_serverSettings.orcaslicer_docker_url || '').trim();
+  const bambuStudioUrl = (_serverSettings.bambustudio_docker_url || '').trim();
+  const bambuStudioDefaultUrl = _bambuStudioDockerDefaultUrl(dockerUrl);
+  const bambuStudioEffectiveUrl = bambuStudioUrl || bambuStudioDefaultUrl;
+  const dockerUser = (_serverSettings.orcaslicer_browser_username || 'flightdeck').trim();
+  const dockerPassword = (_serverSettings.orcaslicer_browser_password || 'flightdeck').trim();
   const workerUrl = (_serverSettings.orcaslicer_worker_url || '').trim();
   const apiUrl = (_serverSettings.orcaslicer_api_url || '').trim();
-  const dockerLaunchUrl = _slicerDockerLaunchUrl(dockerUrl);
+  const openMode = (_serverSettings.slicer_open_mode || 'same').trim();
+  const useSlicerApi = String(_serverSettings.slicer_use_api || '').toLowerCase() === 'true';
+  const dockerLaunchUrl = _slicerDockerLaunchUrl(dockerUrl, { username: dockerUser, password: dockerPassword });
+  const bambuStudioLaunchUrl = _slicerDockerLaunchUrl(bambuStudioEffectiveUrl, { username: dockerUser, password: dockerPassword });
   const dockerReady = !!dockerUrl;
+  const bambuStudioReady = !!bambuStudioEffectiveUrl;
 
   const cards = _SLICER_DEFINITIONS.map(s => {
     const isSelected = s.id === selected;
@@ -11004,30 +16300,79 @@ function _slicerCategoryHtml(profileData = null, printers = []) {
     </div>
     <div class="settings-section">
       <div class="settings-section-title">OrcaSlicer Integration</div>
-      <div class="slicer-docker-panel">
+      <div class="slicer-risk-banner">
+        <strong>Manual review is the safe default</strong>
+        <span>OrcaSlicer CLI/API builds can reject or mis-handle some Bambu-authored 3MF/STL jobs. Keep Use Slicer API off for production work until the sidecar flow is proven on your printer profiles.</span>
+      </div>
+      <div class="slicer-docker-panel" data-slicer-launch-panel="orca">
         <div>
           <strong>Browser-based OrcaSlicer</strong>
           <span>NAS/PC Docker sidecar. Uses the shared Print Vault at <code>/prints</code>.</span>
         </div>
         ${dockerReady
-          ? `<a class="slicer-launch-btn" href="${esc(dockerLaunchUrl)}" target="_blank" rel="noreferrer">Open Orca</a>`
-          : `<span class="slicer-launch-btn slicer-launch-disabled">Set URL first</span>`}
+          ? `<a class="slicer-launch-btn" data-slicer-launch="orca" href="${esc(dockerLaunchUrl)}" target="_blank" rel="noreferrer">Open Orca</a>`
+          : `<span class="slicer-launch-btn slicer-launch-disabled" data-slicer-launch="orca">Set URL first</span>`}
       </div>
-      <div class="settings-form-row">
-        <label class="settings-label">Browser Orca URL</label>
-        <input class="settings-input slicer-docker-input" data-pref-key="orcaslicer_docker_url" type="url" value="${esc(dockerUrl)}" placeholder="${esc(_slicerDockerDefaultUrl())}">
-        <label class="settings-label">Slicer API URL</label>
-        <input class="settings-input pref-input" data-pref-key="orcaslicer_api_url" type="url" value="${esc(apiUrl)}" placeholder="${esc(_slicerApiDefaultUrl())}">
-        <label class="settings-label">Worker URL</label>
-        <input class="settings-input pref-input" data-pref-key="orcaslicer_worker_url" type="url" value="${esc(workerUrl)}" placeholder="http://100.x.x.x:8000">
+      <div class="slicer-docker-panel" data-slicer-launch-panel="bambu_studio">
+        <div>
+          <strong>Browser-based Bambu Studio</strong>
+          <span>Bambu-first Docker handoff for Bambu printers, AMS sync, and Bambu-authored plates.</span>
+        </div>
+        ${bambuStudioReady
+          ? `<a class="slicer-launch-btn" data-slicer-launch="bambu_studio" href="${esc(bambuStudioLaunchUrl)}" target="_blank" rel="noreferrer">Open Bambu Studio</a>`
+          : `<span class="slicer-launch-btn slicer-launch-disabled" data-slicer-launch="bambu_studio">Set URL first</span>`}
       </div>
-      <div class="settings-hint">Browser Orca URL opens the web slicer. Slicer API URL points to the background /slice service, usually port 3003. Worker URL points to a Windows Flightdeck instance with native Orca profiles installed.</div>
+      <div class="slicer-integration-grid">
+        <label class="slicer-integration-field">
+          <span>Open in Slicer</span>
+          <select class="settings-input slicer-mode-input" data-pref-key="slicer_open_mode">
+            <option value="same"${openMode === 'same' ? ' selected' : ''}>Desktop OrcaSlicer</option>
+            <option value="orca"${openMode === 'orca' ? ' selected' : ''}>Browser OrcaSlicer</option>
+            <option value="bambu_studio"${openMode === 'bambu_studio' ? ' selected' : ''}>Desktop Bambu Studio</option>
+          </select>
+        </label>
+        <div class="slicer-integration-field">
+          <span>Use Slicer API</span>
+          <div class="setting-toggle-group slicer-api-toggle-group" data-slicer-api-toggle>
+            <button type="button" class="setting-toggle-btn${!useSlicerApi ? ' setting-toggle-active' : ''}" data-slicer-api-value="false">Off</button>
+            <button type="button" class="setting-toggle-btn${useSlicerApi ? ' setting-toggle-active' : ''}" data-slicer-api-value="true">On</button>
+          </div>
+        </div>
+        <label class="slicer-integration-field slicer-integration-field-wide">
+          <span>Browser Orca URL</span>
+          <input class="settings-input slicer-docker-input" data-pref-key="orcaslicer_docker_url" type="url" value="${esc(dockerUrl)}" placeholder="${esc(_slicerDockerDefaultUrl())}">
+        </label>
+        <label class="slicer-integration-field slicer-integration-field-wide">
+          <span>Bambu Studio URL</span>
+          <input class="settings-input slicer-docker-input" data-pref-key="bambustudio_docker_url" type="url" value="${esc(bambuStudioUrl)}" placeholder="${esc(bambuStudioDefaultUrl)}">
+        </label>
+        <label class="slicer-integration-field">
+          <span>Browser Orca username</span>
+          <input class="settings-input slicer-browser-auth-input" data-pref-key="orcaslicer_browser_username" autocomplete="off" autocapitalize="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-form-type="other" value="${esc(dockerUser)}" placeholder="flightdeck">
+        </label>
+        <label class="slicer-integration-field">
+          <span>Browser Orca password</span>
+          <input class="settings-input slicer-browser-auth-input" data-pref-key="orcaslicer_browser_password" type="text" autocomplete="one-time-code" autocapitalize="off" spellcheck="false" inputmode="verbatim" data-1p-ignore="true" data-lpignore="true" data-bito-ignore="true" data-form-type="other" readonly value="" placeholder="${(_serverSettings.orcaslicer_browser_password_configured === 'true' || dockerPassword) ? 'Saved · paste to replace' : 'flightdeck'}">
+        </label>
+        <label class="slicer-integration-field slicer-integration-field-wide">
+          <span>Slicer API URL</span>
+          <input class="settings-input pref-input" data-pref-key="orcaslicer_api_url" type="url" value="${esc(apiUrl)}" placeholder="${esc(_slicerApiDefaultUrl())}">
+        </label>
+        <label class="slicer-integration-field slicer-integration-field-wide">
+          <span>Worker URL</span>
+          <input class="settings-input pref-input" data-pref-key="orcaslicer_worker_url" type="url" value="${esc(workerUrl)}" placeholder="http://100.x.x.x:8000">
+        </label>
+      </div>
+      <div class="settings-hint">Desktop OrcaSlicer opens the installed Windows slicer through the Flightdeck worker, keeping your real printers and AMS setup. Browser Orca and Bambu Studio URLs open Docker/web slicers. Slicer API URL points to the background /slice service, usually port 3003.</div>
       <div class="slicer-connection-actions">
         <button type="button" class="settings-save-btn" data-slicer-test="browser">Test Browser Orca</button>
+        <button type="button" class="settings-save-btn" data-slicer-test="bambu_browser">Test Bambu Studio</button>
         <button type="button" class="settings-save-btn" data-slicer-test="api">Test API</button>
         <button type="button" class="settings-save-btn" data-slicer-test="worker">Test Worker</button>
+        <button type="button" class="settings-save-btn" id="slicer-check-all">Check all</button>
         <span class="slicer-connection-status" id="slicer-connection-status"></span>
       </div>
+      <div class="slicer-health-grid" id="slicer-health-grid" hidden></div>
       <div class="slicer-managed-panel">
         <div class="slicer-managed-copy">
           <strong>Managed Docker Orca</strong>
@@ -11048,17 +16393,77 @@ function _slicerDockerDefaultUrl() {
   return `https://${location.hostname}:3011`;
 }
 
+function _bambuStudioDockerDefaultUrl(orcaUrl = '') {
+  try {
+    const source = new URL((orcaUrl || '').trim() || location.href);
+    source.protocol = 'https:';
+    source.port = '3012';
+    source.username = '';
+    source.password = '';
+    source.pathname = '/';
+    source.search = '';
+    source.hash = '';
+    return source.toString().replace(/\/+$/, '');
+  } catch {
+    return `https://${location.hostname}:3012`;
+  }
+}
+
 function _slicerApiDefaultUrl() {
   return `http://${location.hostname}:3003`;
 }
 
-function _slicerDockerLaunchUrl(value = '') {
+function _renderSlicerHealthGrid(data) {
+  const rows = [
+    ['Windows worker', data.worker, 'Docker Desktop on Windows may be stopped — start it and wait for containers.'],
+    ['Browser Orca', data.orca_browser, 'The Orca browser container may be stopped — use Restart Orca below.'],
+    ['Bambu Studio', data.bambu_browser, 'The Bambu Studio browser container may be stopped.'],
+    ['Slicer API', data.slicer_api, 'The OrcaSlicer API sidecar on Windows may be stopped — restart Docker Desktop.'],
+  ];
+  return rows.map(([label, r, hint]) => {
+    if (!r) return '';
+    if (!r.configured) return `<div class="slicer-health-row slicer-health-unconfigured"><span>${esc(label)}</span><span>Not configured</span></div>`;
+    const tone = r.ok ? 'ok' : 'warn';
+    const detail = r.ok ? (r.detail || 'Online') : `Offline — ${hint}`;
+    return `<div class="slicer-health-row" data-tone="${tone}"><span>${esc(label)}</span><span>${esc(detail)}</span></div>`;
+  }).join('');
+}
+
+function _slicerOfflineCopy(health) {
+  const offline = [];
+  if (health.worker?.configured && !health.worker.ok) offline.push('Windows worker');
+  if (health.slicer_api?.configured && !health.slicer_api.ok) offline.push('slicer API');
+  if (health.orca_browser?.configured && !health.orca_browser.ok) offline.push('Browser Orca');
+  if (!offline.length) return 'One or more slicer services are not responding.';
+  const list = offline.join(' and ');
+  return `${list} ${offline.length > 1 ? 'are' : 'is'} not responding. Start Docker Desktop on Windows and wait for containers to come up, then retry.`;
+}
+
+function _slicerBrowserCredentials(root = null) {
+  const username = (root?.querySelector?.('[data-pref-key="orcaslicer_browser_username"]')?.value ?? _serverSettings.orcaslicer_browser_username ?? 'flightdeck').trim();
+  const typedPassword = root?.querySelector?.('[data-pref-key="orcaslicer_browser_password"]')?.value?.trim();
+  if (typedPassword) return { username, password: typedPassword };
+  if (_serverSettings.orcaslicer_browser_password_configured === 'true') {
+    return { username, password: 'flightdeck' };
+  }
+  return { username, password: String(_serverSettings.orcaslicer_browser_password || 'flightdeck').trim() || 'flightdeck' };
+}
+
+function _slicerDockerLaunchUrl(value = '', credentials = null) {
   const raw = (value || '').trim().replace(/\/+$/, '');
   if (!raw) return '';
   try {
     const url = new URL(raw);
-    if (url.protocol === 'http:' && url.port === '3011') {
+    if (url.protocol === 'http:' && ['3011', '3012'].includes(url.port)) {
       url.protocol = 'https:';
+    }
+    if (credentials && !url.username) {
+      const username = (credentials.username || '').trim();
+      const password = (credentials.password || '').trim();
+      if (username) {
+        url.username = username;
+        url.password = password;
+      }
     }
     return url.toString().replace(/\/+$/, '');
   } catch {
@@ -11066,14 +16471,22 @@ function _slicerDockerLaunchUrl(value = '') {
   }
 }
 
-function _updateSlicerDockerLaunch(el) {
-  const input = el.querySelector('.slicer-docker-input');
-  const btn = el.querySelector('.slicer-launch-btn');
-  if (!input || !btn) return;
-  const url = _slicerDockerLaunchUrl(input.value);
+function _updateSlicerDockerLaunch(input) {
+  if (!input) return;
+  const isBambu = input.dataset.prefKey === 'bambustudio_docker_url';
+  const launchKey = isBambu ? 'bambu_studio' : 'orca';
+  const section = input.closest?.('.settings-section') || document;
+  const btn = section.querySelector?.(`[data-slicer-launch="${launchKey}"]`);
+  if (!btn) return;
+  const defaultUrl = isBambu
+    ? _bambuStudioDockerDefaultUrl(section.querySelector?.('[data-pref-key="orcaslicer_docker_url"]')?.value || _serverSettings.orcaslicer_docker_url || '')
+    : '';
+  const url = _slicerDockerLaunchUrl(input.value || defaultUrl, _slicerBrowserCredentials(section));
+  const label = isBambu ? 'Open Bambu Studio' : 'Open Orca';
   if (!url) {
     const replacement = document.createElement('span');
     replacement.className = 'slicer-launch-btn slicer-launch-disabled';
+    replacement.dataset.slicerLaunch = launchKey;
     replacement.textContent = 'Set URL first';
     btn.replaceWith(replacement);
     return;
@@ -11083,11 +16496,13 @@ function _updateSlicerDockerLaunch(el) {
     replacement.className = 'slicer-launch-btn';
     replacement.target = '_blank';
     replacement.rel = 'noreferrer';
-    replacement.textContent = 'Open Orca';
+    replacement.dataset.slicerLaunch = launchKey;
+    replacement.textContent = label;
     replacement.href = url;
     btn.replaceWith(replacement);
     return;
   }
+  btn.textContent = label;
   btn.href = url;
 }
 
@@ -11203,14 +16618,81 @@ function _attachSlicerEvents(el) {
     input.addEventListener('change', async () => {
       const key = input.dataset.prefKey;
       let value = _slicerDockerLaunchUrl(input.value);
+      const label = key === 'bambustudio_docker_url' ? 'Bambu Studio URL' : 'Browser Orca URL';
+      const fallback = key === 'bambustudio_docker_url' ? 'Using current host on port 3012' : 'Using current host on port 3011';
       try {
         const saved = await _saveSetting(key, value);
         input.value = saved;
-        _updateSlicerDockerLaunch(el);
-        showToast('Browser Orca URL saved', saved || 'Using current host on port 3011', 'success');
+        _serverSettings[key] = saved || '';
+        _updateSlicerDockerLaunch(input);
+        showToast(`${label} saved`, saved || fallback, 'success');
       } catch (err) {
         showToast('Setting save failed', err.message || '', 'error');
         input.value = input.defaultValue;
+      }
+    });
+  });
+  el.querySelectorAll('.slicer-browser-auth-input').forEach(input => {
+    input.addEventListener('focus', () => input.removeAttribute('readonly'));
+    input.addEventListener('change', async () => {
+      const key = input.dataset.prefKey;
+      const value = input.value.trim();
+      if (key === 'orcaslicer_browser_password' && !value) return;
+      input.value = '';
+      try {
+        const saved = await _saveSetting(key, value);
+        if (key === 'orcaslicer_browser_password') {
+          _serverSettings.orcaslicer_browser_password = '';
+          input.placeholder = 'Saved · paste to replace';
+          input.setAttribute('readonly', 'readonly');
+        } else {
+          _serverSettings[key] = saved || value;
+          input.value = saved || value;
+        }
+        el.querySelectorAll('.slicer-docker-input').forEach(_updateSlicerDockerLaunch);
+        showToast('Browser slicer login saved', key.includes('password') ? 'Password updated' : (value || 'Cleared'), 'success');
+      } catch (err) {
+        showToast('Setting save failed', err.message || '', 'error');
+        input.removeAttribute('readonly');
+      }
+    });
+  });
+  el.querySelectorAll('.slicer-mode-input').forEach(input => {
+    input.addEventListener('change', async () => {
+      const key = input.dataset.prefKey;
+      const value = input.value.trim() || 'same';
+      try {
+        const saved = await _saveSetting(key, value);
+        input.value = saved || 'same';
+        _serverSettings[key] = input.value;
+        showToast('Slicer handoff saved', input.options[input.selectedIndex]?.textContent || input.value, 'success');
+      } catch (err) {
+        showToast('Setting save failed', err.message || '', 'error');
+        input.value = input.defaultValue || 'same';
+      }
+    });
+  });
+  el.querySelectorAll('[data-slicer-api-toggle]').forEach(group => {
+    group.addEventListener('click', async e => {
+      const btn = e.target.closest('[data-slicer-api-value]');
+      if (!btn) return;
+      const value = btn.dataset.slicerApiValue === 'true' ? 'true' : 'false';
+      group.querySelectorAll('[data-slicer-api-value]').forEach(item => { item.disabled = true; });
+      try {
+        const saved = await _saveSetting('slicer_use_api', value);
+        _serverSettings.slicer_use_api = saved === 'true' ? 'true' : 'false';
+        group.querySelectorAll('[data-slicer-api-value]').forEach(item => {
+          item.classList.toggle('setting-toggle-active', item.dataset.slicerApiValue === _serverSettings.slicer_use_api);
+        });
+        showToast(
+          _serverSettings.slicer_use_api === 'true' ? 'Slicer API enabled' : 'Manual slicer review enabled',
+          _serverSettings.slicer_use_api === 'true' ? 'Flightdeck can offer background slicing when the sidecar is healthy.' : 'Slice actions will hand off to Orca/Bambu Studio.',
+          'success'
+        );
+      } catch (err) {
+        showToast('Setting save failed', err.message || '', 'error');
+      } finally {
+        group.querySelectorAll('[data-slicer-api-value]').forEach(item => { item.disabled = false; });
       }
     });
   });
@@ -11238,11 +16720,19 @@ function _attachSlicerEvents(el) {
         ? '[data-pref-key="orcaslicer_api_url"]'
         : kind === 'worker'
           ? '[data-pref-key="orcaslicer_worker_url"]'
-          : '[data-pref-key="orcaslicer_docker_url"]';
+          : kind === 'bambu_browser'
+            ? '[data-pref-key="bambustudio_docker_url"]'
+            : '[data-pref-key="orcaslicer_docker_url"]';
       const input = el.querySelector(selector);
-      const fallback = kind === 'api' ? _slicerApiDefaultUrl() : (kind === 'browser' ? _slicerDockerDefaultUrl() : '');
+      const fallback = kind === 'api'
+        ? _slicerApiDefaultUrl()
+        : kind === 'browser'
+          ? _slicerDockerDefaultUrl()
+          : kind === 'bambu_browser'
+            ? _bambuStudioDockerDefaultUrl(el.querySelector('[data-pref-key="orcaslicer_docker_url"]')?.value || _serverSettings.orcaslicer_docker_url || '')
+            : '';
       const rawUrl = (input?.value || fallback || '').trim().replace(/\/+$/, '');
-      const url = kind === 'browser' ? _slicerDockerLaunchUrl(rawUrl) : rawUrl;
+      const url = (kind === 'browser' || kind === 'bambu_browser') ? _slicerDockerLaunchUrl(rawUrl, _slicerBrowserCredentials(el)) : rawUrl;
       if (!url) {
         showToast('Slicer test needs a URL', 'Set the URL first.', 'warning');
         return;
@@ -11262,7 +16752,7 @@ function _attachSlicerEvents(el) {
         });
         const data = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Slicer check failed');
-        const label = kind === 'api' ? 'Slicer API' : (kind === 'worker' ? 'Slicer worker' : 'Browser Orca');
+        const label = kind === 'api' ? 'Slicer API' : (kind === 'worker' ? 'Slicer worker' : (kind === 'bambu_browser' ? 'Bambu Studio' : 'Browser Orca'));
         const detail = data.auth_required
           ? `${label} reachable · sign-in required`
           : data.version ? `${label} reachable · ${data.version}` : `${label} reachable`;
@@ -11283,6 +16773,32 @@ function _attachSlicerEvents(el) {
       }
     });
   });
+
+  const checkAllBtn = el.querySelector('#slicer-check-all');
+  if (checkAllBtn) {
+    checkAllBtn.addEventListener('click', async () => {
+      const grid = el.querySelector('#slicer-health-grid');
+      const old = checkAllBtn.textContent;
+      checkAllBtn.disabled = true;
+      checkAllBtn.textContent = 'Checking...';
+      if (grid) { grid.hidden = false; grid.textContent = 'Checking all slicer services...'; }
+      try {
+        const r = await fetch('/api/slicer/health');
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(data.detail || 'Health check failed');
+        if (grid) grid.innerHTML = _renderSlicerHealthGrid(data);
+        if (data.all_ok) showToast('All slicer services online', '', 'success');
+        else if (!data.any_configured) showToast('No slicer services configured', 'Set URLs in Settings → Slicer.', 'warning');
+        else showToast('One or more slicer services offline', _slicerOfflineCopy(data), 'error');
+      } catch (err) {
+        if (grid) { grid.hidden = true; }
+        showToast('Slicer health check failed', err.message || '', 'error');
+      } finally {
+        checkAllBtn.disabled = false;
+        checkAllBtn.textContent = old;
+      }
+    });
+  }
 
   el.querySelectorAll('[data-orca-docker-action]').forEach(btn => {
     btn.addEventListener('click', async () => {
@@ -11441,7 +16957,7 @@ function _fmtGrams(g) {
   return `${Math.round(g)}g`;
 }
 
-function _filamentCategoryHtml(summary, costs) {
+function _filamentCategoryHtml(summary, costs, emptyProfiles = []) {
   const totalG    = summary.total_grams  || 0;
   const totalCost = summary.total_cost   ?? null;
   const byMat     = summary.by_material  || [];
@@ -11505,6 +17021,18 @@ function _filamentCategoryHtml(summary, costs) {
   const allMats = [...new Set([..._DEFAULT_MATERIALS, ...Object.keys(grouped)])];
 
   const _esc = s => (s ?? '').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+  const profiles = _normaliseEmptySpoolProfiles(emptyProfiles);
+  const brandsForProfile = [...new Set(costsList.map(e => e.brand).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  const profileRows = profiles.length ? profiles.map(p => `
+      <tr class="empty-profile-row" data-profile-id="${p.id}">
+        <td>${esc(p.brand || 'Generic')}</td>
+        <td>${esc(p.material || 'Any')}</td>
+        <td>${esc(p.profile_name || 'Standard spool')}${p.is_default ? '<span class="empty-profile-default">Default</span>' : ''}</td>
+        <td>${Math.round(p.empty_spool_weight_g)}g</td>
+        <td>${esc(p.notes || '')}</td>
+        <td><button class="empty-profile-del-btn" title="Archive">×</button></td>
+      </tr>`).join('')
+    : `<tr><td colspan="6" class="filament-empty">No tare profiles yet. Add the empty spool weights you have measured.</td></tr>`;
 
   const costCards = allMats.map(mat => {
     const brands = grouped[mat] || [];
@@ -11574,8 +17102,30 @@ function _filamentCategoryHtml(summary, costs) {
     </div>
     <div class="settings-section filament-catalogue-list-section">
       <div class="settings-section-title">Filament catalogue</div>
-      <p class="filament-empty">Each material can have multiple brands with individual costs. Est. cost uses the average $/g across brands.</p>
+      <p class="filament-empty">Each material can have multiple brands with individual costs. Est. cost uses the spool brand first, then the plain material default, then the material average only as a last resort.</p>
       <div class="cost-card-grid">${costCards}</div>
+    </div>
+    <div class="settings-section">
+      <div class="settings-section-title">Empty spool profiles</div>
+      <p class="filament-empty">Measured tare weights override the broad brand tare when adding or editing spools.</p>
+      <div class="empty-profile-add cost-card">
+        <select id="empty-profile-brand" class="cost-brand-input">
+          <option value="">Brand *</option>
+          ${brandsForProfile.map(b => `<option value="${_esc(b)}">${esc(b)}</option>`).join('')}
+        </select>
+        <select id="empty-profile-material" class="cost-brand-input">
+          <option value="">Any material</option>
+          ${allMats.map(m => `<option value="${_esc(m)}">${esc(m)}</option>`).join('')}
+        </select>
+        <input id="empty-profile-name" class="cost-brand-input" type="text" placeholder="Profile name, e.g. eSun cardboard">
+        <input id="empty-profile-grams" class="cost-input" type="number" min="0" step="1" placeholder="Tare g *">
+        <label class="empty-profile-check"><input id="empty-profile-default" type="checkbox" checked> Default</label>
+        <button class="cost-add-btn" id="empty-profile-add-btn">Add</button>
+      </div>
+      <table class="empty-profile-table">
+        <thead><tr><th>Brand</th><th>Material</th><th>Profile</th><th>Tare</th><th>Notes</th><th></th></tr></thead>
+        <tbody>${profileRows}</tbody>
+      </table>
     </div>`;
 }
 
@@ -11599,6 +17149,34 @@ function _attachFilamentEvents(el, refresh = () => _renderSettingsContent('filam
       { method: 'DELETE' }
     );
     if (!r.ok) throw new Error();
+  }
+
+  async function _addEmptySpoolProfile() {
+    const brandEl = el.querySelector('#empty-profile-brand');
+    const materialEl = el.querySelector('#empty-profile-material');
+    const nameEl = el.querySelector('#empty-profile-name');
+    const gramsEl = el.querySelector('#empty-profile-grams');
+    const defaultEl = el.querySelector('#empty-profile-default');
+    const brand = brandEl?.value.trim() || '';
+    const material = materialEl?.value.trim() || null;
+    const grams = parseFloat(gramsEl?.value || '');
+    const profileName = nameEl?.value.trim() || `${brand || material || 'Generic'} spool`;
+    if (!brand) { brandEl?.focus(); return; }
+    if (Number.isNaN(grams) || grams < 0) { gramsEl?.focus(); return; }
+    const r = await fetch('/api/empty-spool-profiles', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        brand,
+        material,
+        profile_name: profileName,
+        empty_spool_weight_g: grams,
+        source: 'manual',
+        is_default: !!defaultEl?.checked,
+      }),
+    });
+    if (!r.ok) throw new Error();
+    _emptySpoolProfiles = await fetch('/api/empty-spool-profiles').then(res => res.json()).catch(() => _emptySpoolProfiles);
   }
 
   // Add brand to an existing material card
@@ -11724,6 +17302,40 @@ function _attachFilamentEvents(el, refresh = () => _renderSettingsContent('filam
       }
     });
   }
+
+  const profileBtn = el.querySelector('#empty-profile-add-btn');
+  profileBtn?.addEventListener('click', async () => {
+    const old = profileBtn.textContent;
+    profileBtn.disabled = true;
+    profileBtn.textContent = '...';
+    try {
+      await _addEmptySpoolProfile();
+      profileBtn.textContent = old;
+      profileBtn.disabled = false;
+      refresh();
+    } catch {
+      profileBtn.textContent = 'Error';
+      setTimeout(() => { profileBtn.textContent = old; profileBtn.disabled = false; }, 1500);
+    }
+  });
+
+  el.querySelectorAll('.empty-profile-del-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const row = btn.closest('.empty-profile-row');
+      const id = row?.dataset.profileId;
+      if (!id) return;
+      if (!await _confirmModal('Archive this empty spool profile?')) return;
+      btn.disabled = true;
+      try {
+        const r = await fetch(`/api/empty-spool-profiles/${id}`, { method: 'DELETE' });
+        if (!r.ok) throw new Error();
+        _emptySpoolProfiles = await fetch('/api/empty-spool-profiles').then(res => res.json()).catch(() => _emptySpoolProfiles);
+        row.remove();
+      } catch {
+        btn.disabled = false;
+      }
+    });
+  });
 }
 
 const _ACCENT_COLORS = [
@@ -11823,6 +17435,29 @@ async function _uploadSourceModel(file) {
   }
 }
 
+function _sliceWorkflowPrimaryLabel(workflow) {
+  if (workflow === 'auto') return 'Prepare headless slice';
+  if (workflow === 'bambu_studio') return 'Open in Bambu Studio';
+  if (workflow === 'browser_orca') return 'Open in Browser Orca';
+  return 'Open in Desktop Orca';
+}
+
+function _slicePrinterNeedsBambuStudio(printer) {
+  const model = String(printer?.model_name || '').toUpperCase();
+  return printer?.kind === 'bambu' && /\bH2[A-Z]?\b|H2D|H2C/.test(model);
+}
+
+function _slicePrinterHandoffHint(printer, workflow) {
+  if (!printer || workflow === 'bambu_studio' || workflow === 'auto') return '';
+  if (_slicePrinterNeedsBambuStudio(printer)) {
+    return 'H-series printers work best with Bambu Studio. Orca H2C support is still limited.';
+  }
+  if (printer.kind === 'bambu') {
+    return 'Bambu printers usually slice more reliably in Bambu Studio than Orca.';
+  }
+  return '';
+}
+
 async function _openSliceModelDialog({ sourceId, path, file, printers }) {
   document.querySelector('.filedesk-slice-dialog')?.remove();
   const profileData = _slicerProfileData || await fetch('/api/slicer/profiles').then(r => r.ok ? r.json() : null).catch(() => null);
@@ -11833,18 +17468,21 @@ async function _openSliceModelDialog({ sourceId, path, file, printers }) {
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay filedesk-slice-dialog';
   let selectedPrinterId = printers[0]?.id || '';
+  const currentOpenMode = (_serverSettings.slicer_open_mode || 'same').trim() || 'same';
+  let useSlicerApi = String(_serverSettings.slicer_use_api || '').toLowerCase() === 'true';
+  let selectedWorkflow = useSlicerApi
+    ? 'auto'
+    : (currentOpenMode === 'bambu_studio' ? 'bambu_studio' : currentOpenMode === 'orca' ? 'browser_orca' : 'desktop_orca');
   const bedTypes = ['Textured PEI Plate', 'Smooth PEI Plate', 'High Temp Plate', 'Cool Plate', 'Engineering Plate'];
   const supportModes = [
-    ['profile', 'Profile default'],
-    ['off', 'Supports off'],
     ['normal_auto', 'Normal auto'],
     ['tree_auto', 'Tree auto'],
     ['tree_strong', 'Tree strong'],
   ];
   const brimModes = [
-    ['profile', 'Profile default'],
-    ['off', 'No brim'],
+    ['auto', 'Auto brim'],
     ['outer', 'Outer brim'],
+    ['mouse_ears', 'Mouse ears'],
   ];
   overlay.innerHTML = `
     <div class="modal-box filedesk-queue-box filedesk-slice-box" role="dialog" aria-modal="true" aria-label="Slice model">
@@ -11862,6 +17500,23 @@ async function _openSliceModelDialog({ sourceId, path, file, printers }) {
           <span>${esc([p.model_name, p.kind].filter(Boolean).join(' · '))}</span>
         </button>`).join('')}
       </div>
+      <div class="filedesk-slice-plan-panel">
+        <div class="filedesk-slice-plan-copy">
+          <strong>${useSlicerApi ? 'Headless auto slice ready' : 'Manual project review'}</strong>
+          <span>${useSlicerApi ? 'Flightdeck can generate a printer-ready job with selected profiles, supports, brim, and plate settings.' : 'Open or download the model for painted supports, orientation tweaks, or final slicer inspection.'}</span>
+        </div>
+        <label class="filedesk-slice-field">
+          <span>Workflow</span>
+          <select id="slice-workflow">
+            <option value="auto"${selectedWorkflow === 'auto' ? ' selected' : ''}>Headless auto slice</option>
+            <option value="desktop_orca"${selectedWorkflow === 'desktop_orca' ? ' selected' : ''}>Open in Desktop Orca</option>
+            <option value="browser_orca"${selectedWorkflow === 'browser_orca' ? ' selected' : ''}>Open in Browser Orca</option>
+            <option value="bambu_studio"${selectedWorkflow === 'bambu_studio' ? ' selected' : ''}>Open in Bambu Studio</option>
+          </select>
+        </label>
+      </div>
+      <div class="filedesk-slice-hint" id="slice-printer-hint" hidden></div>
+      <div class="filedesk-slice-advanced" id="slice-advanced">
       <div class="filedesk-slice-profile-fields">
         <label class="filedesk-slice-field">
           <span>Printer/nozzle</span>
@@ -11889,23 +17544,37 @@ async function _openSliceModelDialog({ sourceId, path, file, printers }) {
           ${bedTypes.map(name => `<option value="${esc(name)}">${esc(name)}</option>`).join('')}
         </select>
       </label>
-      <label class="filedesk-slice-field">
-        <span>Supports</span>
-        <select id="slice-support-mode">
-          ${supportModes.map(([value, label]) => `<option value="${esc(value)}">${esc(label)}</option>`).join('')}
-        </select>
-      </label>
-      <label class="filedesk-slice-field">
-        <span>Brim</span>
-        <select id="slice-brim-mode">
-          ${brimModes.map(([value, label]) => `<option value="${esc(value)}">${esc(label)}</option>`).join('')}
-        </select>
-      </label>
+      <div class="filedesk-slice-option-row">
+        <label class="filedesk-slice-toggle">
+          <input type="checkbox" id="slice-support-enabled">
+          Enable supports
+        </label>
+        <label class="filedesk-slice-field">
+          <span>Support type</span>
+          <select id="slice-support-mode" disabled>
+            ${supportModes.map(([value, label]) => `<option value="${esc(value)}"${value === 'tree_auto' ? ' selected' : ''}>${esc(label)}</option>`).join('')}
+          </select>
+        </label>
+      </div>
+      <div class="filedesk-slice-option-row">
+        <label class="filedesk-slice-toggle">
+          <input type="checkbox" id="slice-brim-enabled">
+          Enable brim
+        </label>
+        <label class="filedesk-slice-field">
+          <span>Brim type</span>
+          <select id="slice-brim-mode" disabled>
+            ${brimModes.map(([value, label]) => `<option value="${esc(value)}">${esc(label)}</option>`).join('')}
+          </select>
+        </label>
+      </div>
+      </div>
+      <div class="settings-hint filedesk-slice-option-note" id="slice-option-note"></div>
       <div class="filedesk-dialog-error" id="slice-plan-result" hidden></div>
       <div class="filedesk-slice-actions" id="slice-handoff-actions" hidden></div>
-      <div class="settings-hint">Source models are portable. Flightdeck will create a printer-specific sliced job before queueing or sending it.</div>
+      <div class="settings-hint filedesk-slice-footnote" id="slice-footnote">Source models are portable. Flightdeck will create a printer-specific sliced job before queueing or sending it.</div>
       <div class="modal-actions">
-        <button class="modal-btn modal-btn-primary" id="slice-prepare-plan" type="button">Prepare slice</button>
+        <button class="modal-btn modal-btn-primary" id="slice-prepare-plan" type="button">${esc(_sliceWorkflowPrimaryLabel(selectedWorkflow))}</button>
         <button class="modal-btn" data-dialog-close>Close</button>
       </div>
     </div>`;
@@ -11916,6 +17585,105 @@ async function _openSliceModelDialog({ sourceId, path, file, printers }) {
     process_profile: overlay.querySelector('#slice-process-profile')?.value.trim() || '',
     filament_profile: overlay.querySelector('#slice-filament-profile')?.value.trim() || '',
   });
+  const selectedManualOpenMode = () => (
+    selectedWorkflow === 'browser_orca' ? 'orca' : selectedWorkflow === 'bambu_studio' ? 'bambu_studio' : 'same'
+  );
+  const selectedEffectiveOpenMode = () => (
+    selectedWorkflow === 'browser_orca' ? 'browser_orca' : selectedWorkflow === 'bambu_studio' ? 'bambu_studio' : 'desktop_orca'
+  );
+  const sliceOptionPayload = () => {
+    const optionsApply = selectedWorkflow === 'auto';
+    const supportEnabled = !!overlay.querySelector('#slice-support-enabled')?.checked;
+    const brimEnabled = !!overlay.querySelector('#slice-brim-enabled')?.checked;
+    return {
+      bed_type: overlay.querySelector('#slice-bed-type')?.value || 'Textured PEI Plate',
+      support_mode: optionsApply && supportEnabled ? (overlay.querySelector('#slice-support-mode')?.value || 'tree_auto') : 'off',
+      brim_mode: optionsApply && brimEnabled ? (overlay.querySelector('#slice-brim-mode')?.value || 'outer') : 'off',
+    };
+  };
+  const syncSliceOptionControls = () => {
+    const optionsApply = selectedWorkflow === 'auto';
+    const isManual = !optionsApply;
+    const supportToggle = overlay.querySelector('#slice-support-enabled');
+    const brimToggle = overlay.querySelector('#slice-brim-enabled');
+    const supportSelect = overlay.querySelector('#slice-support-mode');
+    const brimSelect = overlay.querySelector('#slice-brim-mode');
+    const note = overlay.querySelector('#slice-option-note');
+    const advanced = overlay.querySelector('#slice-advanced');
+    const footnote = overlay.querySelector('#slice-footnote');
+    const prepareBtn = overlay.querySelector('#slice-prepare-plan');
+    if (supportToggle) supportToggle.disabled = !optionsApply;
+    if (brimToggle) brimToggle.disabled = !optionsApply;
+    if (supportSelect) supportSelect.disabled = !optionsApply || !supportToggle?.checked;
+    if (brimSelect) brimSelect.disabled = !optionsApply || !brimToggle?.checked;
+    overlay.querySelectorAll('.filedesk-slice-option-row').forEach(row => row.classList.toggle('is-muted', !optionsApply));
+    if (advanced) advanced.hidden = isManual;
+    if (prepareBtn) prepareBtn.textContent = _sliceWorkflowPrimaryLabel(selectedWorkflow);
+    if (footnote) {
+      footnote.textContent = isManual
+        ? 'Manual handoff opens the source model in your slicer. Slice there, export back to Print Vault, then queue from Print Bay.'
+        : 'Headless slice uses the profiles and support/brim settings below, then saves a printer-ready job to Print Vault.';
+    }
+    if (note) {
+      note.textContent = optionsApply
+        ? 'Headless auto slice will bake these support and brim choices into the generated printer-ready job.'
+        : 'Supports, brim, and profile fields are handled inside your slicer for manual review.';
+    }
+    const copy = overlay.querySelector('.filedesk-slice-plan-copy');
+    if (copy) {
+      const title = copy.querySelector('strong');
+      const detail = copy.querySelector('span');
+      if (title) title.textContent = optionsApply ? 'Headless auto slice' : 'Manual slicer handoff';
+      if (detail) {
+        detail.textContent = optionsApply
+          ? 'Flightdeck will generate a printer-ready job with the selected profiles, supports, brim, and plate settings.'
+          : 'Pick a printer and slicer, then open the model directly. Slice and export the job back to Print Vault when ready.';
+      }
+    }
+    updateSlicePrinterHint();
+  };
+  const updateSlicePrinterHint = () => {
+    const hint = overlay.querySelector('#slice-printer-hint');
+    if (!hint) return;
+    const printer = printers.find(p => p.id === selectedPrinterId) || printers[0] || {};
+    const message = _slicePrinterHandoffHint(printer, selectedWorkflow);
+    if (!message) {
+      hint.hidden = true;
+      hint.innerHTML = '';
+      return;
+    }
+    hint.hidden = false;
+    hint.innerHTML = `<span>${esc(message)}</span><button type="button" class="filedesk-slice-link" id="slice-use-bambu-studio">Use Bambu Studio</button>`;
+    hint.querySelector('#slice-use-bambu-studio')?.addEventListener('click', () => {
+      const workflow = overlay.querySelector('#slice-workflow');
+      if (workflow) {
+        workflow.value = 'bambu_studio';
+        workflow.dispatchEvent(new Event('change'));
+      }
+    }, { once: true });
+  };
+  const triggerManualSlicerOpen = async (effectiveOpenMode, browserUrl) => {
+    if (effectiveOpenMode === 'browser_orca' && browserUrl) {
+      window.open(browserUrl, '_blank', 'noreferrer');
+    }
+    const r = await fetch('/api/slicer/open', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        source_id: sourceId,
+        path,
+        filename: file?.name || path?.split('/').pop() || '',
+        target: effectiveOpenMode,
+      }),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Unable to open slicer');
+    const label = effectiveOpenMode === 'bambu_studio' ? 'Bambu Studio' : effectiveOpenMode === 'browser_orca' ? 'Browser Orca' : 'Desktop Orca';
+    const detail = data.forwarded
+      ? (effectiveOpenMode === 'bambu_studio' ? 'Sent to Windows Bambu worker' : 'Sent to Windows Orca worker')
+      : (data.filename || 'Model handed to slicer');
+    showToast(`Opening in ${label}`, detail, 'success');
+  };
   const setProfilesForPrinter = printerId => {
     selectedPrinterId = printerId || selectedPrinterId;
     const printer = printers.find(p => p.id === selectedPrinterId) || printers[0] || {};
@@ -11953,22 +17721,28 @@ async function _openSliceModelDialog({ sourceId, path, file, printers }) {
       actionsEl.innerHTML = '';
     }
     if (errEl) errEl.hidden = true;
+    updateSlicePrinterHint();
   };
   const preparePlan = async () => {
     if (!selectedPrinterId) return;
     const errEl = overlay.querySelector('#slice-plan-result');
     const actionsEl = overlay.querySelector('#slice-handoff-actions');
     const prepareBtn = overlay.querySelector('#slice-prepare-plan');
+    const manualHandoff = selectedWorkflow !== 'auto';
+    const primaryLabel = _sliceWorkflowPrimaryLabel(selectedWorkflow);
     overlay.querySelectorAll('.filedesk-printer-choice').forEach(b => { b.disabled = true; });
     if (prepareBtn) {
       prepareBtn.disabled = true;
-      prepareBtn.textContent = 'Preparing...';
+      prepareBtn.textContent = manualHandoff ? 'Opening...' : 'Preparing...';
     }
     if (actionsEl) {
       actionsEl.hidden = true;
       actionsEl.innerHTML = '';
     }
     try {
+      const wantsAutoSlice = selectedWorkflow === 'auto';
+      useSlicerApi = wantsAutoSlice;
+      _serverSettings.slicer_use_api = wantsAutoSlice ? 'true' : 'false';
       const r = await fetch('/api/slicer/plan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -11978,9 +17752,7 @@ async function _openSliceModelDialog({ sourceId, path, file, printers }) {
           printer_id: selectedPrinterId,
           ...profilePayload(),
           plate: 'auto',
-          bed_type: overlay.querySelector('#slice-bed-type')?.value || 'Textured PEI Plate',
-          support_mode: overlay.querySelector('#slice-support-mode')?.value || 'profile',
-          brim_mode: overlay.querySelector('#slice-brim-mode')?.value || 'profile',
+          ...sliceOptionPayload(),
           all_plates: !!overlay.querySelector('#slice-all-plates')?.checked,
         }),
       });
@@ -11995,10 +17767,22 @@ async function _openSliceModelDialog({ sourceId, path, file, printers }) {
       errEl.classList.toggle('filedesk-dialog-ok', !!data.ready);
       if (data.ready && actionsEl) {
         const sourceUrl = data.source?.download_url || `/api/files/source/download?${new URLSearchParams({ source_id: sourceId, path }).toString()}`;
-        const browserUrl = _slicerDockerLaunchUrl(data.browser_url || data.sidecar_url || '');
+        const browserUrl = _slicerDockerLaunchUrl(data.browser_url || data.sidecar_url || '', _slicerBrowserCredentials());
+        const bambuStudioUrl = _slicerDockerLaunchUrl(
+          data.bambustudio_url || _serverSettings.bambustudio_docker_url || _bambuStudioDockerDefaultUrl(_serverSettings.orcaslicer_docker_url || data.browser_url || data.sidecar_url || ''),
+          _slicerBrowserCredentials(),
+        );
         const outputName = data.output?.filename || 'sliced-output';
         const profiles = data.profiles || {};
         const canBackgroundSlice = data.can_background_slice !== false;
+        const backgroundSlicePaused = !!data.background_slice_paused;
+        const openMode = selectedManualOpenMode();
+        const effectiveOpenMode = selectedEffectiveOpenMode();
+        const isBambuHandoff = effectiveOpenMode === 'bambu_studio';
+        const showBackgroundSlice = canBackgroundSlice && !isBambuHandoff;
+        const headlessBlocked = selectedWorkflow === 'auto' && !showBackgroundSlice;
+        const manualSlicerName = openMode === 'bambu_studio' ? 'Bambu Studio' : 'Orca';
+        const sourceDownloadLabel = openMode === 'bambu_studio' ? 'Download model for import' : 'Download model';
         const profileRows = [
           ['Printer', profiles.printer],
           ['Process', profiles.process],
@@ -12010,23 +17794,80 @@ async function _openSliceModelDialog({ sourceId, path, file, printers }) {
           ['Supports', sliceOptions.support],
           ['Brim', sliceOptions.brim],
         ].map(([label, value]) => `<div><span>${esc(label)}</span><strong>${esc(value || 'Profile default')}</strong></div>`).join('');
-        actionsEl.hidden = false;
-        actionsEl.dataset.browserUrl = browserUrl || '';
-        actionsEl.innerHTML = `
+        const handoffTitle = showBackgroundSlice ? 'Headless auto slice' : headlessBlocked ? 'Headless auto slice blocked' : `Manual ${manualSlicerName} review`;
+        const handoffCopy = headlessBlocked
+          ? (data.message || 'Flightdeck cannot run this headless slice until the slicer API/worker path is healthy.')
+          : isBambuHandoff
+          ? 'Flightdeck will open desktop Bambu Studio on your Windows PC via the slicer worker. Slice there, export the printer-ready job back to the Print Vault, then queue from Print Bay.'
+          : backgroundSlicePaused
+          ? `Open the model in ${manualSlicerName}, confirm printer/AMS/supports, then export the sliced job back to the Print Vault.`
+          : 'Flightdeck will run the slicer headlessly and bake the selected supports/brim/profile settings into the generated output.';
+        const openRawButton = effectiveOpenMode === 'bambu_studio'
+          ? `<button class="filedesk-slice-link" type="button" data-open-orca data-open-orca-target="bambu_studio" data-open-orca-source-id="${esc(sourceId)}" data-open-orca-path="${esc(path)}" data-open-orca-url="">Open in Bambu Studio</button>`
+          : effectiveOpenMode === 'browser_orca'
+            ? `<a class="filedesk-slice-link" href="${esc(browserUrl || '#')}" target="_blank" rel="noreferrer" data-open-orca data-open-orca-target="browser_orca" data-open-orca-source-id="${esc(sourceId)}" data-open-orca-path="${esc(path)}" data-open-orca-url="${esc(browserUrl || '')}">Open in Browser Orca</a>`
+            : `<button class="filedesk-slice-link" type="button" data-open-orca data-open-orca-target="${esc(effectiveOpenMode)}" data-open-orca-source-id="${esc(sourceId)}" data-open-orca-path="${esc(path)}" data-open-orca-url="">Open in Desktop Orca</button>`;
+        if (manualHandoff && !headlessBlocked) {
+          try {
+            await triggerManualSlicerOpen(effectiveOpenMode, browserUrl);
+            errEl.hidden = false;
+            errEl.classList.add('filedesk-dialog-ok');
+            errEl.textContent = isBambuHandoff
+              ? 'Bambu Studio should be open. Slice there, export to Print Vault, then queue from Print Bay.'
+              : 'Slicer handoff sent. Export the printer-ready job back to Print Vault when slicing is done.';
+            actionsEl.hidden = false;
+            actionsEl.innerHTML = `
+              <div class="filedesk-slice-buttons">
+                ${sourceUrl ? `<a class="filedesk-slice-link" href="${esc(sourceUrl)}" download>${esc(sourceDownloadLabel)}</a>` : ''}
+                ${openRawButton}
+              </div>`;
+          } catch (openErr) {
+            errEl.hidden = false;
+            errEl.classList.remove('filedesk-dialog-ok');
+            errEl.textContent = openErr.message || 'Unable to open slicer';
+            actionsEl.hidden = false;
+            actionsEl.innerHTML = `
+              <div class="filedesk-slice-buttons">
+                ${sourceUrl ? `<a class="filedesk-slice-link" href="${esc(sourceUrl)}" download>${esc(sourceDownloadLabel)}</a>` : ''}
+                ${openRawButton}
+              </div>`;
+          }
+        } else {
+          actionsEl.hidden = false;
+          actionsEl.dataset.browserUrl = browserUrl || '';
+          actionsEl.dataset.bambuStudioUrl = bambuStudioUrl || '';
+          actionsEl.innerHTML = `
           <div class="filedesk-slice-steps">
-            <strong>Slice handoff</strong>
-            <span>Slice with the selected profile set, then queue the generated printer-ready file.</span>
+            <strong>${esc(handoffTitle)}</strong>
+            <span>${esc(handoffCopy)}</span>
           </div>
           <div class="filedesk-slice-profiles">${profileRows}${optionRows}</div>
           <div class="filedesk-slice-buttons">
-            ${canBackgroundSlice ? `<button class="filedesk-slice-link filedesk-slice-run" type="button" data-run-slice="${esc(outputName)}" data-printer-id="${esc(data.target?.id || selectedPrinterId)}">Slice in Flightdeck</button>` : ''}
-            ${sourceUrl ? `<a class="filedesk-slice-link" href="${esc(sourceUrl)}" download>Download model</a>` : ''}
-            ${browserUrl ? `<button class="filedesk-slice-link" type="button" data-open-orca data-open-orca-source-id="${esc(sourceId)}" data-open-orca-path="${esc(path)}" data-open-orca-url="${esc(browserUrl)}">Open model in Orca</button>` : ''}
+            ${showBackgroundSlice ? `<button class="filedesk-slice-link filedesk-slice-run" type="button" data-run-slice="${esc(outputName)}" data-printer-id="${esc(data.target?.id || selectedPrinterId)}">Slice in Flightdeck</button>` : ''}
+            ${headlessBlocked ? `<button class="filedesk-slice-link filedesk-slice-run" type="button" disabled title="${esc(data.message || 'Slicer API/worker is not ready')}">Slice in Flightdeck blocked</button>` : ''}
+            ${openRawButton}
+            ${sourceUrl ? `<a class="filedesk-slice-link" href="${esc(sourceUrl)}" download>${esc(sourceDownloadLabel)}</a>` : ''}
             <button class="filedesk-slice-link" type="button" data-copy-slice-name="${esc(outputName)}">Copy output name</button>
             <button class="filedesk-slice-link" type="button" data-check-slice-output="${esc(outputName)}">Check vault</button>
           </div>`;
+        // Async health probe — appends an offline warning if any configured slicer service is down.
+        if (data.worker_url || data.api_url) {
+          (async () => {
+            try {
+              const hr = await fetch('/api/slicer/health');
+              const hdata = await hr.json().catch(() => ({}));
+              if (hr.ok && hdata.any_configured && !hdata.all_ok) {
+                const warn = document.createElement('div');
+                warn.className = 'slicer-health-warning';
+                warn.innerHTML = `<strong>Windows slicers offline</strong><span>${esc(_slicerOfflineCopy(hdata))}</span>`;
+                actionsEl.appendChild(warn);
+              }
+            } catch { /* best-effort */ }
+          })();
+        }
+        }
       }
-      showToast(data.ready ? 'Slice plan ready' : 'Slicer not configured', data.message || '', data.ready ? 'success' : 'warning');
+      showToast(data.ready ? (manualHandoff ? 'Slicer handoff ready' : 'Slice plan ready') : 'Slicer not configured', data.message || '', data.ready ? 'success' : 'warning');
     } catch (err) {
       errEl.textContent = err.message || 'Unable to prepare slice';
       errEl.hidden = false;
@@ -12034,10 +17875,11 @@ async function _openSliceModelDialog({ sourceId, path, file, printers }) {
       overlay.querySelectorAll('.filedesk-printer-choice').forEach(b => { b.disabled = false; });
       if (prepareBtn) {
         prepareBtn.disabled = false;
-        prepareBtn.textContent = 'Prepare slice';
+        prepareBtn.textContent = primaryLabel;
       }
     }
   };
+  syncSliceOptionControls();
   setProfilesForPrinter(selectedPrinterId);
   _attachSlicerProfileDropdowns(overlay);
   overlay.querySelector('#slice-printer-profile')?.addEventListener('change', () => {
@@ -12052,6 +17894,36 @@ async function _openSliceModelDialog({ sourceId, path, file, printers }) {
     _slicerReplaceDatalist('slice-filament-profiles', filamentRows);
   });
   overlay.querySelector('#slice-prepare-plan')?.addEventListener('click', preparePlan);
+  overlay.querySelector('#slice-support-enabled')?.addEventListener('change', syncSliceOptionControls);
+  overlay.querySelector('#slice-brim-enabled')?.addEventListener('change', syncSliceOptionControls);
+  overlay.querySelector('#slice-workflow')?.addEventListener('change', async e => {
+    const value = e.currentTarget.value || 'same';
+    selectedWorkflow = value;
+    useSlicerApi = value === 'auto';
+    _serverSettings.slicer_use_api = useSlicerApi ? 'true' : 'false';
+    _serverSettings.slicer_open_mode = selectedManualOpenMode();
+    const actionsEl = overlay.querySelector('#slice-handoff-actions');
+    const errEl = overlay.querySelector('#slice-plan-result');
+    if (actionsEl) {
+      actionsEl.hidden = true;
+      actionsEl.innerHTML = '';
+    }
+    if (errEl) errEl.hidden = true;
+    syncSliceOptionControls();
+    try {
+      await Promise.all([
+        _saveSetting('slicer_use_api', _serverSettings.slicer_use_api),
+        _saveSetting('slicer_open_mode', _serverSettings.slicer_open_mode),
+      ]);
+      showToast(
+        'Slice workflow saved',
+        value === 'auto' ? 'Headless auto slice' : value === 'bambu_studio' ? 'Bambu Studio handoff' : value === 'browser_orca' ? 'Browser OrcaSlicer' : 'Desktop OrcaSlicer',
+        'success',
+      );
+    } catch (err) {
+      showToast('Setting save failed', err.message || '', 'error');
+    }
+  });
   overlay.addEventListener('click', e => {
     if (e.target === overlay || e.target.closest('[data-dialog-close]')) {
       close();
@@ -12076,7 +17948,17 @@ async function _openSliceModelDialog({ sourceId, path, file, printers }) {
     if (!openBtn) return;
     const old = openBtn.textContent;
     const browserUrl = openBtn.dataset.openOrcaUrl || '';
-    openBtn.disabled = true;
+    const openTarget = openBtn.dataset.openOrcaTarget || 'desktop_orca';
+    let browserOpened = false;
+    if (browserUrl && openTarget === 'browser_orca' && openBtn.tagName !== 'A') {
+      window.open(browserUrl, '_blank', 'noreferrer');
+      browserOpened = true;
+    }
+    if (openBtn.tagName === 'A' && browserUrl && openTarget === 'browser_orca') {
+      browserOpened = true;
+    }
+    if ('disabled' in openBtn) openBtn.disabled = true;
+    else openBtn.setAttribute('aria-disabled', 'true');
     openBtn.textContent = 'Opening...';
     try {
       const r = await fetch('/api/slicer/open', {
@@ -12086,16 +17968,24 @@ async function _openSliceModelDialog({ sourceId, path, file, printers }) {
           source_id: openBtn.dataset.openOrcaSourceId || 'library',
           path: openBtn.dataset.openOrcaPath || '',
           filename: openBtn.dataset.openOrcaFilename || '',
+          target: openTarget,
         }),
       });
       const data = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Unable to open Orca');
-      showToast('Opening in Orca', data.forwarded ? 'Sent to Windows Orca worker' : (data.filename || 'Model handed to Orca'), 'success');
-      if (browserUrl) window.open(browserUrl, '_blank', 'noreferrer');
+      if (!r.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Unable to open slicer');
+      const slicerLabel = openTarget === 'bambu_studio' ? 'Bambu Studio' : 'Orca';
+      const detail = data.forwarded
+        ? (openTarget === 'bambu_studio' ? 'Sent to Windows Bambu worker' : 'Sent to Windows Orca worker')
+        : ((data.mode === 'desktop-orca' || data.mode === 'desktop-bambu' || data.mode === 'desktop-file-association')
+          ? `Sent to desktop ${slicerLabel}`
+          : (data.filename || 'Model handed to slicer'));
+      showToast(`Opening in ${slicerLabel}`, detail, 'success');
+      if (browserUrl && !browserOpened) window.open(browserUrl, '_blank', 'noreferrer');
     } catch (err) {
-      showToast('Open Orca failed', err.message || '', 'error');
+      showToast(browserOpened ? 'Browser Orca opened' : 'Open Orca failed', browserOpened ? `Model handoff failed: ${err.message || err}` : (err.message || ''), browserOpened ? 'warning' : 'error');
     } finally {
-      openBtn.disabled = false;
+      if ('disabled' in openBtn) openBtn.disabled = false;
+      else openBtn.removeAttribute('aria-disabled');
       openBtn.textContent = old;
     }
   });
@@ -12136,6 +18026,16 @@ async function _openSliceModelDialog({ sourceId, path, file, printers }) {
     const actionsEl = overlay.querySelector('#slice-handoff-actions');
     const errEl = overlay.querySelector('#slice-plan-result');
     const browserUrl = actionsEl?.dataset.browserUrl || '';
+    const bambuStudioUrl = actionsEl?.dataset.bambuStudioUrl || '';
+    const openTarget = selectedEffectiveOpenMode();
+    const openUrl = openTarget === 'browser_orca' ? browserUrl : '';
+    const openLabel = openTarget === 'browser_orca' ? 'Open in Browser Orca' : 'Open in Desktop Orca';
+    const openSlicerButton = (source, modelPath, label = openLabel) => {
+      if (openTarget === 'bambu_studio') {
+        return `<button class="filedesk-slice-link" type="button" data-open-orca data-open-orca-target="bambu_studio" data-open-orca-source-id="${esc(source)}" data-open-orca-path="${esc(modelPath)}" data-open-orca-url="">Open in Bambu Studio</button>`;
+      }
+      return `<button class="filedesk-slice-link" type="button" data-open-orca data-open-orca-target="${esc(openTarget)}" data-open-orca-source-id="${esc(source)}" data-open-orca-path="${esc(modelPath)}" data-open-orca-url="${esc(openUrl)}">${esc(label)}</button>`;
+    };
     const started = Date.now();
     const stages = [
       [0, 'Preparing profiles', 'Checking printer, process, filament, support, brim, and plate settings.'],
@@ -12165,7 +18065,7 @@ async function _openSliceModelDialog({ sourceId, path, file, printers }) {
     }, 500);
     runBtn.disabled = true;
     runBtn.textContent = 'Slicing...';
-    overlay.querySelectorAll('.filedesk-printer-choice, #slice-prepare-plan, #slice-bed-type, #slice-support-mode, #slice-brim-mode, #slice-all-plates, .slicer-profile-input').forEach(el => {
+    overlay.querySelectorAll('.filedesk-printer-choice, #slice-prepare-plan, #slice-workflow, #slice-bed-type, #slice-support-enabled, #slice-support-mode, #slice-brim-enabled, #slice-brim-mode, #slice-all-plates, .slicer-profile-input').forEach(el => {
       el.disabled = true;
     });
     if (errEl) {
@@ -12187,7 +18087,7 @@ async function _openSliceModelDialog({ sourceId, path, file, printers }) {
           <div class="filedesk-slice-progress-bar"><span data-slice-progress-fill style="width:8%"></span></div>
           <div class="filedesk-slice-progress-foot">
             <span>Background slice running</span>
-            ${browserUrl ? `<a class="filedesk-slice-link" href="${esc(browserUrl)}" target="_blank" rel="noreferrer">Open Orca</a>` : ''}
+            ${browserUrl ? `<a class="filedesk-slice-link" href="${esc(browserUrl)}" target="_blank" rel="noreferrer">Open Browser Orca</a>` : ''}
           </div>
         </div>`;
     }
@@ -12202,9 +18102,7 @@ async function _openSliceModelDialog({ sourceId, path, file, printers }) {
           ...profilePayload(),
           output_filename: runBtn.dataset.runSlice || '',
           plate: '1',
-          bed_type: overlay.querySelector('#slice-bed-type')?.value || 'Textured PEI Plate',
-          support_mode: overlay.querySelector('#slice-support-mode')?.value || 'profile',
-          brim_mode: overlay.querySelector('#slice-brim-mode')?.value || 'profile',
+          ...sliceOptionPayload(),
           all_plates: !!overlay.querySelector('#slice-all-plates')?.checked,
         }),
       });
@@ -12222,11 +18120,18 @@ async function _openSliceModelDialog({ sourceId, path, file, printers }) {
           ? `/api/files/source/preview?${new URLSearchParams({ source_id: 'library', path: data.path, view: 'top' }).toString()}`
           : '');
         const previewLabel = data.filename ? `${data.filename} preview` : 'Sliced job preview';
+        const features = data.feature_counts || {};
+        const supportPaths = (features.Support || 0) + (features['Support interface'] || 0);
+        const brimPaths = features.Brim || 0;
+        const featureSummary = [
+          supportPaths ? `Support paths detected (${supportPaths})` : (sliceOptionPayload().support_mode === 'off' ? 'Supports off' : 'No support paths detected'),
+          brimPaths ? `Brim paths detected (${brimPaths})` : (sliceOptionPayload().brim_mode === 'off' ? 'Brim off' : 'No brim paths detected'),
+        ].join(' · ');
         actionsEl.hidden = false;
         actionsEl.innerHTML = `
           <div class="filedesk-slice-steps">
             <strong>Sliced job ready</strong>
-            <span>${esc(data.filename)} is now printer-ready. Preview uses the thumbnail embedded in the sliced output when available.</span>
+            <span>${esc(data.filename)} is now printer-ready. ${esc(featureSummary)}.</span>
           </div>
           ${previewUrl ? `<div class="filedesk-slice-preview">
             <img src="${esc(_mediaUrl(previewUrl, previewLabel))}" alt="${esc(previewLabel)}" loading="eager" data-slice-preview-img>
@@ -12234,7 +18139,7 @@ async function _openSliceModelDialog({ sourceId, path, file, printers }) {
           </div>` : `<div class="filedesk-slice-preview is-missing"><span>Preview unavailable</span></div>`}
           <div class="filedesk-slice-buttons">
             <button class="filedesk-slice-link filedesk-slice-queue" type="button" data-queue-sliced="${esc(data.path || data.filename)}" data-printer-id="${esc(data.printer_id || runBtn.dataset.printerId)}">Queue sliced job</button>
-            ${browserUrl && data.path ? `<button class="filedesk-slice-link" type="button" data-open-orca data-open-orca-source-id="library" data-open-orca-path="${esc(data.path)}" data-open-orca-url="${esc(browserUrl)}">Open sliced in Orca</button>` : ''}
+            ${data.path ? openSlicerButton('library', data.path) : ''}
             <button class="filedesk-slice-link" type="button" data-check-slice-output="${esc(data.filename)}">Check vault</button>
           </div>`;
         actionsEl.querySelector('[data-slice-preview-img]')?.addEventListener('error', event => {
@@ -12259,16 +18164,17 @@ async function _openSliceModelDialog({ sourceId, path, file, printers }) {
           </div>
           <div class="filedesk-slice-buttons">
             <button class="filedesk-slice-link filedesk-slice-run" type="button" data-run-slice="${esc(runBtn.dataset.runSlice || '')}" data-printer-id="${esc(runBtn.dataset.printerId || selectedPrinterId)}">Try again</button>
-            ${browserUrl ? `<button class="filedesk-slice-link" type="button" data-open-orca data-open-orca-source-id="${esc(sourceId)}" data-open-orca-path="${esc(path)}" data-open-orca-url="${esc(browserUrl)}">Open model in Orca</button>` : ''}
+            ${openSlicerButton(sourceId, path)}
           </div>`;
       }
     } finally {
       clearInterval(progressTimer);
       runBtn.disabled = false;
       runBtn.textContent = old;
-      overlay.querySelectorAll('.filedesk-printer-choice, #slice-prepare-plan, #slice-bed-type, #slice-support-mode, #slice-brim-mode, #slice-all-plates, .slicer-profile-input').forEach(el => {
+      overlay.querySelectorAll('.filedesk-printer-choice, #slice-prepare-plan, #slice-workflow, #slice-bed-type, #slice-support-enabled, #slice-support-mode, #slice-brim-enabled, #slice-brim-mode, #slice-all-plates, .slicer-profile-input').forEach(el => {
         el.disabled = false;
       });
+      syncSliceOptionControls();
     }
   });
   overlay.addEventListener('click', async e => {
@@ -12289,7 +18195,7 @@ function _setupVersionHtml(version) {
   const current = [version?.version ? `v${version.version}` : 'version unknown', version?.commit || ''].filter(Boolean).join(' · ');
   const updateHint = version?.dirty
     ? esc(_setupUpdateDirtyMessage(version))
-    : 'Updates use <code>git pull --ff-only</code>. Restart Flightdeck after a successful update. Download logs creates a redacted diagnostic zip for support.';
+    : 'Updates pull Flightdeck app code from GitHub only. Live printers, spools, history, and settings stay in this host data directory and do not sync from the Pi or GitHub. Restart Flightdeck after a successful update.';
   let updateText = 'Check GitHub';
   let updateClass = 'info';
   if (version?.behind) {
@@ -12554,7 +18460,7 @@ function _attachSetupEvents(el) {
       else setUpdateButton('done', 'Current');
       setMessage(data.dirty
         ? _setupUpdateDirtyMessage(data)
-        : data.behind ? 'A newer GitHub build is available.' : (data.fetch_detail || 'Flightdeck is up to date.'),
+        : data.behind ? 'A newer GitHub build is available. This updates app code only; inventory and printer data stay local to this host.' : (data.fetch_detail || 'Flightdeck app code is up to date. Live data is stored separately on this host.'),
         (data.dirty || data.behind) ? 'warn' : 'ok');
     } catch (err) {
       setUpdateButton('blocked', 'Check failed');
@@ -12572,7 +18478,7 @@ function _attachSetupEvents(el) {
       if (!r.ok) throw new Error(data.detail || 'Update failed');
       if (state) state.textContent = 'Updated';
       setUpdateButton('done', 'Updated');
-      setMessage(`${data.message || 'Update complete.'} Restart Flightdeck to load the new code.`, 'ok');
+      setMessage(`${data.message || 'Update complete.'} Restart Flightdeck to load the new code. Live data was not changed.`, 'ok');
       showToast('Flightdeck updated', 'Restart Flightdeck to load the new build.', 'success');
     } catch (err) {
       btn.disabled = false;
@@ -12594,12 +18500,129 @@ async function _saveSetting(key, value) {
     throw new Error(body.detail || 'Setting save failed');
   }
   const body = await r.json().catch(() => ({}));
+  if (key === 'bambu_cloud_token') {
+    _serverSettings.bambu_cloud_token = '';
+    _serverSettings.bambu_cloud_token_configured = body.configured ? 'true' : 'false';
+    _serverSettings.bambu_cloud_token_hint = body.hint || '';
+    return body.hint || '';
+  }
+  if (key === 'orcaslicer_browser_password') {
+    _serverSettings.orcaslicer_browser_password = '';
+    _serverSettings.orcaslicer_browser_password_configured = body.configured ? 'true' : 'false';
+    return '';
+  }
   _serverSettings[key] = String(body.value ?? value);
   return _serverSettings[key];
 }
 
 function _prefBool(key, fallback = 'false') {
   return (_serverSettings[key] ?? fallback) === 'true';
+}
+
+function _dateInputValue(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return raw.slice(0, 10);
+  return d.toISOString().slice(0, 10);
+}
+
+function _bambuCloudHealth(settings = _serverSettings) {
+  const lastValue = _dateInputValue(settings.bambu_cloud_last_auth_at || '');
+  const tokenDays = Math.max(1, Number(settings.bambu_cloud_token_days || 90) || 90);
+  const warnDays = Math.max(1, Number(settings.bambu_cloud_warn_days || 75) || 75);
+  const urgentDays = Math.max(warnDays, Number(settings.bambu_cloud_urgent_days || 85) || 85);
+  if (!lastValue) {
+    return {
+      tone: 'muted',
+      label: 'Not tracked',
+      detail: 'Record a Bambu Cloud sign-in date before using future MakerWorld import features.',
+      lastValue: '',
+      expiresText: '—',
+      daysText: '—',
+    };
+  }
+  const last = new Date(`${lastValue}T00:00:00`);
+  if (Number.isNaN(last.getTime())) {
+    return {
+      tone: 'warn',
+      label: 'Check date',
+      detail: 'The saved Bambu Cloud sign-in date is not readable.',
+      lastValue,
+      expiresText: '—',
+      daysText: '—',
+    };
+  }
+  const now = new Date();
+  const ageDays = Math.max(0, Math.floor((now.getTime() - last.getTime()) / 86400000));
+  const remaining = tokenDays - ageDays;
+  const expiry = new Date(last.getTime() + tokenDays * 86400000);
+  let tone = 'ok';
+  let label = 'Healthy';
+  let detail = 'Bambu Cloud login should still be inside the expected token window.';
+  if (remaining <= 0) {
+    tone = 'bad';
+    label = 'Expired';
+    detail = 'Re-authenticate Bambu Cloud before relying on MakerWorld/profile import.';
+  } else if (ageDays >= urgentDays) {
+    tone = 'bad';
+    label = 'Expires soon';
+    detail = 'Re-authenticate soon so imports do not fail mid-workflow.';
+  } else if (ageDays >= warnDays) {
+    tone = 'warn';
+    label = 'Watch';
+    detail = 'Plan a Bambu Cloud re-authentication before the token window closes.';
+  }
+  return {
+    tone,
+    label,
+    detail,
+    lastValue,
+    expiresText: expiry.toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' }),
+    daysText: remaining <= 0 ? `${Math.abs(remaining)}d overdue` : `${remaining}d left`,
+  };
+}
+
+function _bambuCloudHealthHtml() {
+  const h = _bambuCloudHealth();
+  const tokenDays = _serverSettings.bambu_cloud_token_days ?? '90';
+  const warnDays = _serverSettings.bambu_cloud_warn_days ?? '75';
+  const urgentDays = _serverSettings.bambu_cloud_urgent_days ?? '85';
+  return `
+    <div class="settings-section bambu-cloud-section">
+      <div class="settings-section-title">Bambu Cloud</div>
+      <div class="bambu-cloud-health bambu-cloud-health-${esc(h.tone)}">
+        <div>
+          <span class="bambu-cloud-status">${esc(h.label)}</span>
+          <strong>${esc(h.daysText)}</strong>
+        </div>
+        <p>${esc(h.detail)}</p>
+      </div>
+      <div class="settings-form-row bambu-cloud-token-row">
+        <label class="settings-label">Cloud token</label>
+        ${_bambuTokenFieldHtml({ inputId: 'settings-bambu-token-input', rowClass: 'bambu-cloud-token-field', configured: _makerWorldTokenConfigured(), hint: _bambuTokenHint('') })}
+      </div>
+      <div class="settings-hint">After signing in to MakerWorld, copy the browser <code>token</code> cookie value here. Flightdeck uses it only for MakerWorld downloads against <code>api.bambulab.com</code>.</div>
+      <div class="settings-form-row">
+        <label class="settings-label">Last sign-in</label>
+        <input class="settings-input pref-input" data-pref-key="bambu_cloud_last_auth_at" type="date" value="${esc(h.lastValue)}">
+        <a class="settings-save-btn bambu-cloud-link" href="https://makerworld.com/" target="_blank" rel="noopener noreferrer">Open MakerWorld</a>
+        <button type="button" class="settings-save-btn" data-bambu-cloud-mark-now>Mark today</button>
+      </div>
+      <div class="settings-hint">Open MakerWorld to refresh Bambu Cloud login, then mark today. Local printer control keeps working without Bambu Cloud.</div>
+      <div class="settings-form-row">
+        <label class="settings-label">Estimated expiry</label>
+        <span class="settings-readonly-pill">${esc(h.expiresText)}</span>
+      </div>
+      <div class="settings-form-row bambu-cloud-thresholds">
+        <label class="settings-label">Token window</label>
+        <input class="settings-input pref-input" data-pref-key="bambu_cloud_token_days" type="number" min="1" value="${esc(tokenDays)}"> days
+        <span class="settings-hint">Warn</span>
+        <input class="settings-input pref-input" data-pref-key="bambu_cloud_warn_days" type="number" min="1" value="${esc(warnDays)}"> days
+        <span class="settings-hint">Urgent</span>
+        <input class="settings-input pref-input" data-pref-key="bambu_cloud_urgent_days" type="number" min="1" value="${esc(urgentDays)}"> days
+      </div>
+    </div>`;
 }
 
 function _preferencesCategoryHtml() {
@@ -12623,6 +18646,7 @@ function _preferencesCategoryHtml() {
       </div>
       <div class="settings-hint">Optional Pi, USB, or HDD-backed archive path for Print Bay. Leave blank to use the service default.</div>
     </div>
+    ${_bambuCloudHealthHtml()}
     <div class="settings-section">
       <div class="settings-section-title">Spool Thresholds</div>
       <div class="settings-form-row">
@@ -12661,13 +18685,32 @@ function _preferencesCategoryHtml() {
           ${_settingToggle('queue_strict_colour', [{ value: 'true', label: 'Strict' }, { value: 'false', label: 'Advisory' }], _prefBool('queue_strict_colour', 'true') ? 'true' : 'false')}
         </div>
       </div>
+    </div>
+    <div class="settings-section">
+      <div class="settings-section-title">AMS Inventory</div>
+      <div class="settings-form-row">
+        <label class="settings-label">Auto-claim on load</label>
+        <div class="setting-toggle-group">
+          ${_settingToggle('ams_auto_claim_enabled', [{ value: 'true', label: 'On' }, { value: 'false', label: 'Off' }], _prefBool('ams_auto_claim_enabled', 'true') ? 'true' : 'false')}
+        </div>
+        <p class="settings-help">When a spool is physically inserted, move a unique high-confidence shelf match into that AMS slot. Ignores stale tray reports until the printer report actually changes.</p>
+      </div>
     </div>`;
+}
+
+function _refreshPreferencesPanel(el) {
+  el.innerHTML = _preferencesCategoryHtml();
+  _attachPreferencesEvents(el);
+  const refresh = () => _refreshPreferencesPanel(el);
+  _attachBambuCloudMarkEvents(el, refresh);
+  _attachBambuTokenFieldEvents(el, refresh);
 }
 
 function _attachPreferencesEvents(el) {
   el.querySelectorAll('.pref-input').forEach(input => {
     input.addEventListener('change', async () => {
       const key = input.dataset.prefKey;
+      if (key === 'bambu_cloud_token') return;
       let value = input.value.trim();
       if (input.type === 'url' && value) value = value.replace(/\/+$/, '');
       if (input.type === 'number') {
@@ -12684,6 +18727,10 @@ function _attachPreferencesEvents(el) {
         const saved = await _saveSetting(key, value);
         input.value = saved;
         if (key === 'print_vault_path') showToast('Print Vault path saved', saved || 'Using service default', 'success');
+        if (key.startsWith('bambu_cloud_')) {
+          _serverSettings[key] = saved;
+          _refreshPreferencesPanel(el);
+        }
       } catch (err) {
         showToast('Setting save failed', err.message || '', 'error');
         input.value = input.defaultValue;
@@ -12976,7 +19023,10 @@ function _hardwareStatusPill(ok, text) {
 
 function _scaleFriendlyMessage(message) {
   const text = message || 'Scale read failed';
-  if (/not detected|not found|unavailable|stabilis/i.test(text)) {
+  if (/no non-zero|zero scale|non-zero scale/i.test(text)) {
+    return `${text}. Put the spool on the scale, wake/tare it, then retry.`;
+  }
+  if (/not detected|not found|unavailable|stabilis|timed out/i.test(text)) {
     return `${text}. Wake the scale and retry.`;
   }
   return text;
@@ -13087,12 +19137,13 @@ function _attachHardwareEvents(el) {
 
 // ── Spool state ───────────────────────────────────────────────────────────
 let _allSpools = [];
-let _spoolsViewMode = 'cards';
+let _spoolsViewMode = 'swatch';
 let _spoolsSortKey = 'material';
 let _spoolsSortDir = 1;
-let _spoolsFilter = { search: '', status: 'active', slotFilter: 'all', material: '', brand: '', printer: '' };
+let _spoolsFilter = { search: '', status: 'active', slotFilter: 'all', material: '', brand: '', printer: '', location: '' };
 let _spoolsFilamentSummary = {};
 let _spoolsFilamentCosts = [];
+let _emptySpoolProfiles = [];
 let _spoolLocations = [];
 let _latestSpoolsByPrinter = {};   // printer_id → [spool, ...]
 let _latestLowStockPct = 20;
@@ -13104,6 +19155,848 @@ const _COLOR_SCHEMES = [
   { value: 'gradient', label: 'Gradient' },
   { value: 'mixed', label: 'Mixed' },
 ];
+
+function _normaliseSpoolViewMode(view) {
+  const mode = String(view || '').trim().toLowerCase();
+  if (mode === 'cards') return 'detail';
+  if (mode === 'color' || mode === 'colour-match' || mode === 'colormatch') return 'colour';
+  return ['swatch', 'detail', 'table', 'cabinet', 'rack', 'incoming', 'catalogue', 'colour'].includes(mode) ? mode : 'swatch';
+}
+
+let _colourMatchState = {
+  hex: '#C4A574',
+  h: 34,
+  s: 42,
+  v: 77,
+  material: 'low',
+  brand: '',
+  targets: [],
+  activeTargetId: null,
+  lastResult: null,
+  matchTimer: null,
+  dropObjectUrl: null,
+  dropImage: null,
+  dropZoom: 1,
+  dropRotate: 0,
+  dropPanX: 0,
+  dropPanY: 0,
+  dropDragging: false,
+  dropDragMoved: false,
+  dropDragLast: null,
+  dropMode: 'move', // 'move' = drag to pan, 'pick' = click to eyedrop
+  livePicking: false,
+  preferInventoryPct: 2,
+};
+
+function _cmClamp(n, lo, hi) {
+  return Math.min(hi, Math.max(lo, n));
+}
+
+function _cmNormHex(value) {
+  const h = String(value || '').trim().replace(/^#/, '').toUpperCase();
+  if (/^[0-9A-F]{6}$/.test(h)) return `#${h}`;
+  if (/^[0-9A-F]{3}$/.test(h)) return `#${h[0]}${h[0]}${h[1]}${h[1]}${h[2]}${h[2]}`;
+  return '';
+}
+
+function _cmRgbToHsv(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const d = max - min;
+  let h = 0;
+  if (d) {
+    if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) / 6;
+    else if (max === g) h = ((b - r) / d + 2) / 6;
+    else h = ((r - g) / d + 4) / 6;
+  }
+  const s = max === 0 ? 0 : d / max;
+  return { h: Math.round(h * 360), s: Math.round(s * 100), v: Math.round(max * 100) };
+}
+
+function _cmHsvToRgb(h, s, v) {
+  h = _cmClamp(Number(h) || 0, 0, 360) / 60;
+  s = _cmClamp(Number(s) || 0, 0, 100) / 100;
+  v = _cmClamp(Number(v) || 0, 0, 100) / 100;
+  const c = v * s;
+  const x = c * (1 - Math.abs((h % 2) - 1));
+  const m = v - c;
+  let r = 0, g = 0, b = 0;
+  if (h >= 0 && h < 1) [r, g, b] = [c, x, 0];
+  else if (h < 2) [r, g, b] = [x, c, 0];
+  else if (h < 3) [r, g, b] = [0, c, x];
+  else if (h < 4) [r, g, b] = [0, x, c];
+  else if (h < 5) [r, g, b] = [x, 0, c];
+  else [r, g, b] = [c, 0, x];
+  return {
+    r: Math.round((r + m) * 255),
+    g: Math.round((g + m) * 255),
+    b: Math.round((b + m) * 255),
+  };
+}
+
+function _cmRgbToHex(r, g, b) {
+  return `#${[r, g, b].map(n => _cmClamp(n, 0, 255).toString(16).padStart(2, '0')).join('').toUpperCase()}`;
+}
+
+function _cmSetHex(hex, { fromHsv = false } = {}) {
+  const norm = _cmNormHex(hex);
+  if (!norm) return false;
+  _colourMatchState.hex = norm;
+  if (!fromHsv) {
+    const r = parseInt(norm.slice(1, 3), 16);
+    const g = parseInt(norm.slice(3, 5), 16);
+    const b = parseInt(norm.slice(5, 7), 16);
+    const hsv = _cmRgbToHsv(r, g, b);
+    _colourMatchState.h = hsv.h;
+    _colourMatchState.s = hsv.s;
+    _colourMatchState.v = hsv.v;
+  }
+  return true;
+}
+
+function _cmSetHsv(h, s, v) {
+  _colourMatchState.h = _cmClamp(h, 0, 360);
+  _colourMatchState.s = _cmClamp(s, 0, 100);
+  _colourMatchState.v = _cmClamp(v, 0, 100);
+  const rgb = _cmHsvToRgb(_colourMatchState.h, _colourMatchState.s, _colourMatchState.v);
+  _colourMatchState.hex = _cmRgbToHex(rgb.r, rgb.g, rgb.b);
+}
+
+function _cmSourceLabel(source) {
+  if (source === 'siddament') return 'Siddament';
+  if (source === 'open_filament_database') return 'Open Filament DB';
+  return source ? String(source).replaceAll('_', ' ') : 'Catalogue';
+}
+
+function _cmPriceLabel(price) {
+  if (price == null || price === '') return '';
+  const n = Number(price);
+  if (Number.isNaN(n)) return '';
+  return `A$${n.toFixed(2)}`;
+}
+
+function _cmMatchRowsHtml(rows, kind) {
+  if (!rows?.length) {
+    return `<div class="cm-empty">${kind === 'inventory' ? 'No close matches in your inventory.' : 'No catalogue matches. Sync the catalogue if it is empty.'}</div>`;
+  }
+  return rows.map((item, idx) => {
+    const title = item.color_name || item.product || 'Colour';
+    const meta = [item.brand, item.material, item.subtype].filter(Boolean).join(' · ');
+    const price = _cmPriceLabel(item.price_aud);
+    const where = item.location_printer_id
+      ? `In printer ${item.location_printer_id}${item.location_slot != null ? ` · slot ${item.location_slot}` : ''}`
+      : (item.storage_location_name || 'Shelved');
+    const remain = item.remaining_g != null ? `${Math.round(Number(item.remaining_g))}g left` : '';
+    const actions = kind === 'inventory'
+      ? `<a class="cm-link" href="#/spool/${item.id}">Open spool #${item.display_id ?? item.id}</a>
+         <button type="button" class="cm-btn" data-cm-copy="${esc(title)} ${esc(item.color_hex || '')}">Copy</button>`
+      : `${item.product_url ? `<a class="cm-link" href="${esc(item.product_url)}" target="_blank" rel="noopener">Order</a>` : ''}
+         <button type="button" class="cm-btn" data-cm-copy="${esc(title)} · ${esc(item.brand || '')} · ${esc(item.color_hex || '')}">Copy</button>
+         <button type="button" class="cm-btn cm-btn-primary" data-cm-add="${idx}">Add spool</button>`;
+    return `<div class="cm-row" data-kind="${kind}" data-idx="${idx}">
+      <span class="cm-swatch" style="background:${esc(item.color_hex || '#808080')}"></span>
+      <div class="cm-row-main">
+        <strong>${esc(title)}</strong>
+        <small>${esc(meta)}${price ? ` · ${esc(price)}` : ''}${kind === 'catalogue' ? ` · ${esc(_cmSourceLabel(item.source))}` : ''}</small>
+        ${kind === 'inventory' ? `<small>${esc([where, remain].filter(Boolean).join(' · '))}</small>` : ''}
+      </div>
+      <div class="cm-row-match">
+        <b>${esc(String(item.match_pct ?? 0))}%</b>
+        <span>${esc(item.color_hex || '')}</span>
+      </div>
+      <div class="cm-row-actions">${actions}</div>
+    </div>`;
+  }).join('');
+}
+
+function _cmTargetsHtml() {
+  const targets = _colourMatchState.targets || [];
+  if (!targets.length) return '<div class="cm-empty">Eyedrop colours from a screenshot to build a palette (e.g. your strongest 5).</div>';
+  return targets.map(t => `
+    <button type="button" class="cm-target${_colourMatchState.activeTargetId === t.id ? ' active' : ''}" data-cm-target="${t.id}">
+      <span class="cm-swatch" style="background:${esc(t.hex)}"></span>
+      <span><b>${esc(t.label || t.hex)}</b><small>${esc(t.hex)}</small></span>
+      <span class="cm-target-x" data-cm-remove-target="${t.id}" title="Remove">✕</span>
+    </button>
+  `).join('');
+}
+
+function _cmRecTitle(item) {
+  if (!item) return '—';
+  return item.color_name || item.product || item.color_hex || 'Colour';
+}
+
+function _cmRecMeta(item) {
+  if (!item) return '';
+  return [item.brand, item.material, item.subtype].filter(Boolean).join(' · ');
+}
+
+function _cmRecommendationHtml(rec, preferPct) {
+  if (!rec || rec.action === 'none') {
+    return `<div class="cm-rec cm-rec-none"><strong>No match yet</strong><span>Sync the catalogue or widen filters.</span></div>`;
+  }
+  const useShelf = rec.action === 'use_inventory';
+  const chosen = useShelf ? rec.inventory : rec.catalog;
+  const alt = useShelf ? rec.catalog : rec.inventory;
+  const badge = useShelf ? 'Use shelf' : 'Order';
+  const altLine = alt
+    ? (useShelf
+      ? `Closest buy: ${_cmRecTitle(alt)} (${alt.match_pct ?? 0}%)`
+      : `Closest shelf: ${_cmRecTitle(alt)} (${alt.match_pct ?? 0}%)`)
+    : '';
+  return `<div class="cm-rec ${useShelf ? 'cm-rec-use' : 'cm-rec-order'}">
+    <div class="cm-rec-badge">${badge}</div>
+    <div class="cm-rec-main">
+      <strong>${esc(_cmRecTitle(chosen))} · ${esc(String(chosen?.match_pct ?? 0))}%</strong>
+      <small>${esc(_cmRecMeta(chosen))}${chosen?.color_hex ? ` · ${esc(chosen.color_hex)}` : ''}</small>
+      <small>${esc(rec.reason || '')}${altLine ? ` · ${esc(altLine)}` : ''}</small>
+      <small class="cm-rec-rule">Rule: prefer shelf when ≤${esc(String(preferPct ?? 2))}% under best buy</small>
+    </div>
+  </div>`;
+}
+
+function _cmPaletteHtml(data) {
+  const palette = data?.palette || [];
+  if (!palette.length) return '';
+  const summary = data.palette_summary || {};
+  const prefer = data.prefer_inventory_pct ?? _colourMatchState.preferInventoryPct ?? 2;
+  const rows = palette.map((p, idx) => {
+    const rec = p.recommendation || {};
+    const useShelf = rec.action === 'use_inventory';
+    const chosen = useShelf ? (rec.inventory || p.inventory_best) : (rec.catalog || p.catalog_best);
+    const actions = useShelf
+      ? (chosen?.id != null
+        ? `<a class="cm-link" href="#/spool/${chosen.id}">Open spool #${esc(String(chosen.display_id ?? chosen.id))}</a>
+           <button type="button" class="cm-btn" data-cm-copy="${esc(_cmRecTitle(chosen))} ${esc(chosen.color_hex || '')}">Copy</button>`
+        : '')
+      : `${chosen?.product_url ? `<a class="cm-link" href="${esc(chosen.product_url)}" target="_blank" rel="noopener">Order</a>` : ''}
+         <button type="button" class="cm-btn" data-cm-copy="${esc(_cmRecTitle(chosen))} · ${esc(chosen?.brand || '')} · ${esc(chosen?.color_hex || '')}">Copy</button>
+         <button type="button" class="cm-btn cm-btn-primary" data-cm-palette-add="${idx}">Add spool</button>`;
+    return `<div class="cm-palette-row ${useShelf ? 'is-use' : 'is-order'}" data-cm-palette-target="${esc(p.id)}">
+      <span class="cm-swatch" style="background:${esc(p.hex)}"></span>
+      <div class="cm-row-main">
+        <strong>${esc(p.label || p.hex)} <small>${esc(p.hex)}</small></strong>
+        <small>${useShelf ? 'Use shelf' : 'Order'}: ${esc(_cmRecTitle(chosen))} · ${esc(String(chosen?.match_pct ?? 0))}%</small>
+        <small>${esc(rec.reason || '')}</small>
+      </div>
+      <div class="cm-row-actions">${actions}</div>
+    </div>`;
+  }).join('');
+  return `<section class="cm-section cm-palette">
+    <div class="cm-palette-head">
+      <h3>Palette plan</h3>
+      <span>Use ${esc(String(summary.use_inventory || 0))} from shelf · Order ${esc(String(summary.order || 0))} · ≤${esc(String(prefer))}% shelf rule</span>
+      <div class="cm-palette-actions">
+        <button type="button" class="cm-btn" id="cm-copy-palette">Copy plan</button>
+        <button type="button" class="cm-btn" id="cm-copy-orders">Copy order list</button>
+      </div>
+    </div>
+    ${rows}
+  </section>`;
+}
+
+function _cmResultsHtml(data) {
+  const prefer = data?.prefer_inventory_pct ?? _colourMatchState.preferInventoryPct ?? 2;
+  return `${_cmPaletteHtml(data)}
+    <section class="cm-section">
+      <h3>Recommendation</h3>
+      ${_cmRecommendationHtml(data?.recommendation, prefer)}
+    </section>
+    <section class="cm-section">
+      <h3>In your inventory</h3>
+      ${_cmMatchRowsHtml(data?.inventory_matches, 'inventory')}
+    </section>
+    <section class="cm-section">
+      <h3>Buy / catalogue</h3>
+      ${_cmMatchRowsHtml(data?.catalog_matches, 'catalogue')}
+    </section>`;
+}
+
+function _colourMatchHtml() {
+  const st = _colourMatchState;
+  const result = st.lastResult;
+  const catalogCount = result?.catalog_count ?? '—';
+  const hueFill = `linear-gradient(90deg,#f00,#ff0,#0f0,#0ff,#00f,#f0f,#f00)`;
+  const satFill = `linear-gradient(90deg,#fff,hsl(${st.h} 100% 50%))`;
+  const valFill = `linear-gradient(90deg,#000,hsl(${st.h} ${st.s}% 50%))`;
+  return `
+    <div class="cm-page">
+      <div class="cm-hero">
+        <div class="cm-target-panel">
+          <div class="cm-swatch-xl" id="cm-swatch" style="background:${esc(st.hex)}"></div>
+          <div class="cm-target-meta">
+            <div class="cm-hex-row">
+              <input id="cm-hex" class="cm-hex-input" type="text" value="${esc(st.hex)}" spellcheck="false" maxlength="7">
+              <button type="button" class="cm-btn" id="cm-copy-hex">Copy hex</button>
+            </div>
+            <div class="cm-label" id="cm-label">${esc(result?.label || 'Target colour')}</div>
+            <div class="cm-sliders">
+              <label>Hue <input id="cm-h" type="range" min="0" max="360" value="${st.h}" style="background:${hueFill}"></label>
+              <label>Sat <input id="cm-s" type="range" min="0" max="100" value="${st.s}" style="background:${satFill}"></label>
+              <label>Val <input id="cm-v" type="range" min="0" max="100" value="${st.v}" style="background:${valFill}"></label>
+            </div>
+          </div>
+        </div>
+        <div class="cm-filters">
+          <div class="cm-chip-row" id="cm-mat-chips">
+            ${[['low','Low temp'],['high','High temp']].map(([v, label]) =>
+              `<button type="button" class="cm-chip${(st.material || 'low') === v ? ' active' : ''}" data-cm-mat="${v}">${label}</button>`
+            ).join('')}
+          </div>
+          <div class="cm-mat-hint" id="cm-mat-hint">Low temp = PLA / PETG (can mix). High temp = ABS / ASA. Never mix high with low.</div>
+          <div class="cm-chip-row" id="cm-brand-chips">
+            ${[['','All brands'],['Siddament','Siddament'],['Bambu Lab','Bambu Lab']].map(([v, label]) =>
+              `<button type="button" class="cm-chip${(st.brand || '') === v ? ' active' : ''}" data-cm-brand="${esc(v)}">${label}</button>`
+            ).join('')}
+          </div>
+          <div class="cm-sync-row">
+            <span id="cm-status">Catalogue: ${esc(String(catalogCount))} colours</span>
+            <button type="button" class="cm-btn" id="cm-sync">Sync catalogue</button>
+            <button type="button" class="cm-btn cm-btn-primary" id="cm-match">Match</button>
+          </div>
+        </div>
+      </div>
+      <div class="cm-drop-zone" id="cm-drop">
+        <div class="cm-drop-help">
+          <strong>Eyedrop colours</strong>
+          <span>Best: <b>Live screen</b> picks from Bambu/Orca on your desktop (rotate the dog there). Or drop a screenshot.</span>
+          <div class="cm-drop-actions">
+            <button type="button" class="cm-btn cm-btn-primary" id="cm-live-screen" title="Pick colours from anywhere on your desktop">Live screen</button>
+            <label class="cm-btn cm-file-btn" for="cm-file">Choose image</label>
+            <input id="cm-file" type="file" accept="image/*" hidden>
+          </div>
+          <span class="cm-live-hint" id="cm-live-hint">Chrome/Edge: click Live screen, then click the dog in the slicer. Esc to stop.</span>
+        </div>
+        <div class="cm-drop-stage hidden" id="cm-stage">
+          <div class="cm-view-toolbar">
+            <button type="button" class="cm-btn cm-btn-primary" id="cm-live-screen-2" title="Pick from live desktop / slicer">Live screen</button>
+            <button type="button" class="cm-btn${(_colourMatchState.dropMode || 'move') === 'move' ? ' cm-btn-primary' : ''}" id="cm-mode-move" title="Drag to move around">Move</button>
+            <button type="button" class="cm-btn${(_colourMatchState.dropMode || 'move') === 'pick' ? ' cm-btn-primary' : ''}" id="cm-mode-pick" title="Click a pixel on the screenshot">Pick image</button>
+            <button type="button" class="cm-btn" id="cm-zoom-out" title="Zoom out">−</button>
+            <span id="cm-zoom-label">100%</span>
+            <button type="button" class="cm-btn" id="cm-zoom-in" title="Zoom in">+</button>
+            <button type="button" class="cm-btn" id="cm-rot-ccw" title="Rotate left 90°">↶ 90°</button>
+            <button type="button" class="cm-btn" id="cm-rot-cw" title="Rotate right 90°">↷ 90°</button>
+            <button type="button" class="cm-btn" id="cm-view-reset" title="Reset view">Reset</button>
+            <span class="cm-view-hint" id="cm-view-hint">Drag to move around · scroll to zoom</span>
+          </div>
+          <canvas id="cm-canvas"></canvas>
+        </div>
+      </div>
+      <div class="cm-targets" id="cm-targets">${_cmTargetsHtml()}</div>
+      <div class="cm-results" id="cm-results">${_cmResultsHtml(result)}</div>
+    </div>`;
+}
+
+function _cmPaintControls(root) {
+  if (!root) return;
+  const st = _colourMatchState;
+  const swatch = root.querySelector('#cm-swatch');
+  const hexInput = root.querySelector('#cm-hex');
+  const label = root.querySelector('#cm-label');
+  if (swatch) swatch.style.background = st.hex;
+  if (hexInput && document.activeElement !== hexInput) hexInput.value = st.hex;
+  const h = root.querySelector('#cm-h');
+  const s = root.querySelector('#cm-s');
+  const v = root.querySelector('#cm-v');
+  if (h) { h.value = st.h; h.style.background = 'linear-gradient(90deg,#f00,#ff0,#0f0,#0ff,#00f,#f0f,#f00)'; }
+  if (s) { s.value = st.s; s.style.background = `linear-gradient(90deg,#fff,hsl(${st.h} 100% 50%))`; }
+  if (v) { v.value = st.v; v.style.background = `linear-gradient(90deg,#000,hsl(${st.h} ${st.s}% 50%))`; }
+  if (label && !_colourMatchState.lastResult) label.textContent = 'Target colour';
+}
+
+function _cmPalettePlainText(data, { ordersOnly = false } = {}) {
+  const palette = data?.palette || [];
+  const lines = [];
+  for (const p of palette) {
+    const rec = p.recommendation || {};
+    if (ordersOnly && rec.action !== 'order') continue;
+    const useShelf = rec.action === 'use_inventory';
+    const chosen = useShelf ? (rec.inventory || p.inventory_best) : (rec.catalog || p.catalog_best);
+    const verb = useShelf ? 'USE' : (rec.action === 'order' ? 'ORDER' : '—');
+    lines.push([
+      `${p.label || 'Pick'} ${p.hex}`,
+      `${verb} ${_cmRecTitle(chosen)} (${chosen?.match_pct ?? 0}% · ${chosen?.color_hex || ''})`,
+      _cmRecMeta(chosen),
+      chosen?.product_url || '',
+      rec.reason || '',
+    ].filter(Boolean).join(' — '));
+  }
+  return lines.join('\n');
+}
+
+async function _cmRunMatch(root) {
+  const st = _colourMatchState;
+  const status = root?.querySelector('#cm-status');
+  const results = root?.querySelector('#cm-results');
+  if (status) status.textContent = 'Matching…';
+  try {
+    const body = {
+      hex: st.hex,
+      material: st.material || 'low',
+      brand: st.brand || '',
+      limit: 12,
+      include_inventory: true,
+      prefer_inventory_pct: st.preferInventoryPct ?? 2,
+      targets: (st.targets || []).map(t => ({ id: t.id, hex: t.hex, label: t.label })),
+    };
+    const r = await fetch('/api/filament/colour-match', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.detail || 'Colour match failed');
+    st.lastResult = data;
+    const pal = data.palette_summary || {};
+    const palBit = pal.total
+      ? ` · palette ${pal.use_inventory || 0} shelf / ${pal.order || 0} order`
+      : '';
+    if (status) {
+      status.textContent = `Catalogue: ${data.catalog_count ?? 0} colours · ${data.catalog_matches?.length || 0} buy matches${palBit}`;
+    }
+    const label = root?.querySelector('#cm-label');
+    if (label) label.textContent = data.label || 'Target colour';
+    if (results) {
+      results.innerHTML = _cmResultsHtml(data);
+      _cmBindResultActions(root);
+    }
+  } catch (err) {
+    if (status) status.textContent = err.message || 'Match failed';
+    showToast('Colour match failed', err.message || '', 'error');
+  }
+}
+
+function _cmScheduleMatch(root) {
+  clearTimeout(_colourMatchState.matchTimer);
+  _colourMatchState.matchTimer = setTimeout(() => _cmRunMatch(root), 220);
+}
+
+async function _cmOpenAddSpool(item) {
+  if (!item) return;
+  const costs = await fetch('/api/filament/costs').then(r => r.json()).catch(() => []);
+  _openSpoolModal(costs, _refreshSpoolsSurface, {
+    id: null,
+    material: item.material,
+    brand: item.brand,
+    subtype: item.subtype || item.product || '',
+    color_hex: item.color_hex,
+    color_name: item.color_name,
+    label_weight_g: item.filament_weight_g || _serverSettings.default_label_weight_g || 1000,
+    remaining_g: item.filament_weight_g || _serverSettings.default_label_weight_g || 1000,
+    empty_spool_weight_g: item.empty_spool_weight_g,
+  });
+}
+
+function _cmBindResultActions(root) {
+  root.querySelectorAll('[data-cm-copy]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(btn.dataset.cmCopy || '');
+        showToast('Copied', btn.dataset.cmCopy || '', 'success');
+      } catch {
+        showToast('Copy failed', '', 'error');
+      }
+    });
+  });
+  root.querySelectorAll('[data-cm-add]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const idx = Number(btn.dataset.cmAdd);
+      await _cmOpenAddSpool(_colourMatchState.lastResult?.catalog_matches?.[idx]);
+    });
+  });
+  root.querySelectorAll('[data-cm-palette-add]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const idx = Number(btn.dataset.cmPaletteAdd);
+      const row = _colourMatchState.lastResult?.palette?.[idx];
+      const item = row?.recommendation?.catalog || row?.catalog_best;
+      await _cmOpenAddSpool(item);
+    });
+  });
+  root.querySelectorAll('[data-cm-palette-target]').forEach(row => {
+    row.addEventListener('click', e => {
+      if (e.target.closest('a, button')) return;
+      const id = row.dataset.cmPaletteTarget;
+      const t = _colourMatchState.targets.find(x => x.id === id);
+      if (!t) return;
+      _colourMatchState.activeTargetId = t.id;
+      _cmSetHex(t.hex);
+      _cmPaintControls(root);
+      const targets = root.querySelector('#cm-targets');
+      if (targets) targets.innerHTML = _cmTargetsHtml();
+      _cmScheduleMatch(root);
+    });
+  });
+  root.querySelector('#cm-copy-palette')?.addEventListener('click', async () => {
+    const text = _cmPalettePlainText(_colourMatchState.lastResult);
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      showToast('Copied palette plan', '', 'success');
+    } catch {
+      showToast('Copy failed', '', 'error');
+    }
+  });
+  root.querySelector('#cm-copy-orders')?.addEventListener('click', async () => {
+    const text = _cmPalettePlainText(_colourMatchState.lastResult, { ordersOnly: true });
+    if (!text) {
+      showToast('Nothing to order', 'Every pick can use shelf stock', 'success');
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      showToast('Copied order list', '', 'success');
+    } catch {
+      showToast('Copy failed', '', 'error');
+    }
+  });
+}
+
+function _cmNormRotate(deg) {
+  const n = Number(deg);
+  if (!Number.isFinite(n)) return 0;
+  // Snap to 0/90/180/270 for upright screenshot navigation.
+  const wrapped = ((n % 360) + 360) % 360;
+  return Math.round(wrapped / 90) * 90 % 360;
+}
+
+function _cmUpdateViewLabels(root) {
+  const zoom = root?.querySelector('#cm-zoom-label');
+  if (zoom) zoom.textContent = `${Math.round((_colourMatchState.dropZoom || 1) * 100)}%`;
+  const mode = _colourMatchState.dropMode || 'move';
+  root?.querySelector('#cm-mode-move')?.classList.toggle('cm-btn-primary', mode === 'move');
+  root?.querySelector('#cm-mode-pick')?.classList.toggle('cm-btn-primary', mode === 'pick');
+  const hint = root?.querySelector('#cm-view-hint');
+  if (hint) {
+    hint.textContent = mode === 'pick'
+      ? 'Click a pixel to pick · switch to Move to drag around'
+      : 'Drag to move around · scroll to zoom · switch to Pick for eyedrop';
+  }
+  const canvas = root?.querySelector('#cm-canvas');
+  if (canvas) {
+    canvas.classList.toggle('is-move', mode === 'move');
+    canvas.classList.toggle('is-pick', mode === 'pick');
+  }
+}
+
+function _cmRedrawDropCanvas(root) {
+  const st = _colourMatchState;
+  const img = st.dropImage;
+  const stage = root?.querySelector('#cm-stage');
+  const canvas = root?.querySelector('#cm-canvas');
+  if (!img || !stage || !canvas) return;
+  const maxW = Math.min(720, stage.clientWidth || 720);
+  const maxH = 520;
+  const rot = _cmNormRotate(st.dropRotate);
+  const swapped = rot % 180 !== 0;
+  const srcW = swapped ? img.height : img.width;
+  const srcH = swapped ? img.width : img.height;
+  const fit = Math.min(1, maxW / Math.max(1, srcW), maxH / Math.max(1, srcH));
+  const viewW = Math.max(1, Math.round(Math.min(maxW, srcW * fit)));
+  const viewH = Math.max(1, Math.round(Math.min(maxH, srcH * fit)));
+  canvas.width = viewW;
+  canvas.height = viewH;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  ctx.fillStyle = '#0f1419';
+  ctx.fillRect(0, 0, viewW, viewH);
+  ctx.save();
+  ctx.translate(viewW / 2 + (st.dropPanX || 0), viewH / 2 + (st.dropPanY || 0));
+  ctx.rotate((rot * Math.PI) / 180);
+  const scale = fit * (st.dropZoom || 1);
+  ctx.scale(scale, scale);
+  ctx.drawImage(img, -img.width / 2, -img.height / 2);
+  ctx.restore();
+  _cmUpdateViewLabels(root);
+}
+
+function _cmResetDropView(root, { keepImage = true } = {}) {
+  const st = _colourMatchState;
+  st.dropZoom = 1;
+  st.dropRotate = 0;
+  st.dropPanX = 0;
+  st.dropPanY = 0;
+  st.dropDragging = false;
+  st.dropDragMoved = false;
+  st.dropDragLast = null;
+  st.dropMode = st.dropMode || 'move';
+  if (!keepImage) st.dropImage = null;
+  if (keepImage && st.dropImage) _cmRedrawDropCanvas(root);
+  else _cmUpdateViewLabels(root);
+}
+
+function _cmLoadImageFile(root, file) {
+  if (!file || !String(file.type || '').startsWith('image/')) return;
+  if (_colourMatchState.dropObjectUrl) URL.revokeObjectURL(_colourMatchState.dropObjectUrl);
+  const url = URL.createObjectURL(file);
+  _colourMatchState.dropObjectUrl = url;
+  const img = new Image();
+  img.onload = () => {
+    _colourMatchState.dropImage = img;
+    _cmResetDropView(root, { keepImage: true });
+    const stage = root.querySelector('#cm-stage');
+    stage?.classList.remove('hidden');
+    root.querySelector('.cm-drop-help')?.classList.add('hidden');
+    _cmRedrawDropCanvas(root);
+  };
+  img.src = url;
+}
+
+function _cmAddTargetHex(root, hex, { labelPrefix = 'Pick' } = {}) {
+  const norm = _cmNormHex(hex);
+  if (!norm) return null;
+  _cmSetHex(norm);
+  _cmPaintControls(root);
+  const id = `t-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  const label = `${labelPrefix} ${_colourMatchState.targets.length + 1}`;
+  _colourMatchState.targets.push({ id, hex: norm, label });
+  _colourMatchState.activeTargetId = id;
+  const targets = root.querySelector('#cm-targets');
+  if (targets) targets.innerHTML = _cmTargetsHtml();
+  _cmScheduleMatch(root);
+  return norm;
+}
+
+function _cmPickFromCanvas(root, evt) {
+  if (_colourMatchState.dropDragMoved) return;
+  if ((_colourMatchState.dropMode || 'move') !== 'pick') return;
+  const canvas = root.querySelector('#cm-canvas');
+  if (!canvas) return;
+  const rect = canvas.getBoundingClientRect();
+  const x = _cmClamp(Math.floor((evt.clientX - rect.left) * (canvas.width / rect.width)), 0, canvas.width - 1);
+  const y = _cmClamp(Math.floor((evt.clientY - rect.top) * (canvas.height / rect.height)), 0, canvas.height - 1);
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  const [r, g, b, a] = ctx.getImageData(x, y, 1, 1).data;
+  if (a < 8) return;
+  _cmAddTargetHex(root, _cmRgbToHex(r, g, b));
+}
+
+async function _cmLiveScreenPick(root) {
+  const hint = root?.querySelector('#cm-live-hint');
+  if (!window.isSecureContext) {
+    const msg = 'Live screen needs HTTPS (or localhost). Screenshot drop still works.';
+    if (hint) hint.textContent = msg;
+    showToast('Live screen unavailable', msg, 'error');
+    return;
+  }
+  if (typeof window.EyeDropper !== 'function') {
+    const msg = 'Live screen needs Chrome or Edge on desktop.';
+    if (hint) hint.textContent = msg;
+    showToast('Live screen unavailable', msg, 'error');
+    return;
+  }
+  if (_colourMatchState.livePicking) return;
+  _colourMatchState.livePicking = true;
+  if (hint) hint.textContent = 'Click anywhere on screen (slicer, desktop…). Esc cancels.';
+  showToast('Live screen', 'Click colours on the dog in Bambu/Orca. Esc when done.', 'success');
+  try {
+    // Keep reopening so you can rotate the model and grab the next pick.
+    while (_colourMatchState.livePicking) {
+      try {
+        const result = await new window.EyeDropper().open();
+        const hex = _cmAddTargetHex(root, result?.sRGBHex, { labelPrefix: 'Live' });
+        if (hex && hint) hint.textContent = `Picked ${hex} — click again for another, Esc to stop.`;
+      } catch (err) {
+        // AbortError = user pressed Esc / cancelled.
+        break;
+      }
+    }
+  } finally {
+    _colourMatchState.livePicking = false;
+    if (hint) {
+      hint.textContent = 'Chrome/Edge: click Live screen, then click the dog in the slicer. Esc to stop.';
+    }
+  }
+}
+
+function _cmBindDropViewControls(root) {
+  const canvas = root.querySelector('#cm-canvas');
+  if (!canvas || canvas.dataset.cmViewBound === '1') return;
+  canvas.dataset.cmViewBound = '1';
+  _colourMatchState.dropMode = _colourMatchState.dropMode || 'move';
+  _cmUpdateViewLabels(root);
+
+  const setMode = (mode) => {
+    _colourMatchState.dropMode = mode;
+    _cmUpdateViewLabels(root);
+  };
+  root.querySelector('#cm-mode-move')?.addEventListener('click', () => setMode('move'));
+  root.querySelector('#cm-mode-pick')?.addEventListener('click', () => setMode('pick'));
+
+  root.querySelector('#cm-zoom-in')?.addEventListener('click', () => {
+    _colourMatchState.dropZoom = _cmClamp((_colourMatchState.dropZoom || 1) * 1.25, 0.5, 8);
+    _cmRedrawDropCanvas(root);
+  });
+  root.querySelector('#cm-zoom-out')?.addEventListener('click', () => {
+    _colourMatchState.dropZoom = _cmClamp((_colourMatchState.dropZoom || 1) / 1.25, 0.5, 8);
+    _cmRedrawDropCanvas(root);
+  });
+  root.querySelector('#cm-rot-cw')?.addEventListener('click', () => {
+    _colourMatchState.dropRotate = _cmNormRotate((_colourMatchState.dropRotate || 0) + 90);
+    _cmRedrawDropCanvas(root);
+  });
+  root.querySelector('#cm-rot-ccw')?.addEventListener('click', () => {
+    _colourMatchState.dropRotate = _cmNormRotate((_colourMatchState.dropRotate || 0) - 90);
+    _cmRedrawDropCanvas(root);
+  });
+  root.querySelector('#cm-view-reset')?.addEventListener('click', () => {
+    _cmResetDropView(root, { keepImage: true });
+  });
+
+  canvas.addEventListener('wheel', e => {
+    if (!_colourMatchState.dropImage) return;
+    e.preventDefault();
+    const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+    _colourMatchState.dropZoom = _cmClamp((_colourMatchState.dropZoom || 1) * factor, 0.5, 8);
+    _cmRedrawDropCanvas(root);
+  }, { passive: false });
+
+  canvas.addEventListener('pointerdown', e => {
+    if (!_colourMatchState.dropImage || e.button !== 0) return;
+    const pan = (_colourMatchState.dropMode || 'move') === 'move';
+    _colourMatchState.dropDragging = pan;
+    _colourMatchState.dropDragMoved = false;
+    _colourMatchState.dropDragLast = { x: e.clientX, y: e.clientY };
+    if (pan) {
+      canvas.setPointerCapture?.(e.pointerId);
+      canvas.classList.add('is-panning');
+    }
+  });
+  canvas.addEventListener('pointermove', e => {
+    if (!_colourMatchState.dropDragging || !_colourMatchState.dropDragLast) return;
+    const dx = e.clientX - _colourMatchState.dropDragLast.x;
+    const dy = e.clientY - _colourMatchState.dropDragLast.y;
+    if (Math.abs(dx) + Math.abs(dy) > 2) _colourMatchState.dropDragMoved = true;
+    _colourMatchState.dropPanX += dx;
+    _colourMatchState.dropPanY += dy;
+    _colourMatchState.dropDragLast = { x: e.clientX, y: e.clientY };
+    _cmRedrawDropCanvas(root);
+  });
+  const endDrag = () => {
+    _colourMatchState.dropDragging = false;
+    _colourMatchState.dropDragLast = null;
+    canvas.classList.remove('is-panning');
+  };
+  canvas.addEventListener('pointerup', endDrag);
+  canvas.addEventListener('pointercancel', endDrag);
+  canvas.addEventListener('click', e => _cmPickFromCanvas(root, e));
+}
+
+function _attachColourMatchEvents(root) {
+  if (!root) return;
+  _cmPaintControls(root);
+  root.querySelector('#cm-h')?.addEventListener('input', e => {
+    _cmSetHsv(Number(e.target.value), _colourMatchState.s, _colourMatchState.v);
+    _cmPaintControls(root);
+    _cmScheduleMatch(root);
+  });
+  root.querySelector('#cm-s')?.addEventListener('input', e => {
+    _cmSetHsv(_colourMatchState.h, Number(e.target.value), _colourMatchState.v);
+    _cmPaintControls(root);
+    _cmScheduleMatch(root);
+  });
+  root.querySelector('#cm-v')?.addEventListener('input', e => {
+    _cmSetHsv(_colourMatchState.h, _colourMatchState.s, Number(e.target.value));
+    _cmPaintControls(root);
+    _cmScheduleMatch(root);
+  });
+  root.querySelector('#cm-hex')?.addEventListener('change', e => {
+    if (_cmSetHex(e.target.value)) {
+      _cmPaintControls(root);
+      _cmScheduleMatch(root);
+    } else {
+      e.target.value = _colourMatchState.hex;
+    }
+  });
+  root.querySelector('#cm-copy-hex')?.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(_colourMatchState.hex);
+      showToast('Copied', _colourMatchState.hex, 'success');
+    } catch {
+      showToast('Copy failed', '', 'error');
+    }
+  });
+  root.querySelectorAll('[data-cm-mat]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      _colourMatchState.material = btn.dataset.cmMat || 'low';
+      root.querySelectorAll('[data-cm-mat]').forEach(b => b.classList.toggle('active', b === btn));
+      const hint = root.querySelector('#cm-mat-hint');
+      if (hint) {
+        hint.textContent = _colourMatchState.material === 'high'
+          ? 'High temp = ABS / ASA only. Not mixed with PLA or PETG.'
+          : 'Low temp = PLA / PETG (can mix). High temp filaments stay out.';
+      }
+      _cmScheduleMatch(root);
+    });
+  });
+  root.querySelectorAll('[data-cm-brand]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      _colourMatchState.brand = btn.dataset.cmBrand || '';
+      root.querySelectorAll('[data-cm-brand]').forEach(b => b.classList.toggle('active', b === btn));
+      _cmScheduleMatch(root);
+    });
+  });
+  root.querySelector('#cm-match')?.addEventListener('click', () => _cmRunMatch(root));
+  root.querySelector('#cm-sync')?.addEventListener('click', async () => {
+    const status = root.querySelector('#cm-status');
+    if (status) status.textContent = 'Syncing catalogue…';
+    try {
+      const r = await fetch('/api/filament/catalog/sync', { method: 'POST' });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.detail || 'Sync failed');
+      showToast('Catalogue synced', `${data.imported || 0} rows`, 'success');
+      await _cmRunMatch(root);
+    } catch (err) {
+      showToast('Catalogue sync failed', err.message || '', 'error');
+      if (status) status.textContent = err.message || 'Sync failed';
+    }
+  });
+  const drop = root.querySelector('#cm-drop');
+  drop?.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('drag'); });
+  drop?.addEventListener('dragleave', () => drop.classList.remove('drag'));
+  drop?.addEventListener('drop', e => {
+    e.preventDefault();
+    drop.classList.remove('drag');
+    const file = e.dataTransfer?.files?.[0];
+    if (file) _cmLoadImageFile(root, file);
+  });
+  root.querySelector('#cm-file')?.addEventListener('change', e => {
+    const file = e.target.files?.[0];
+    if (file) _cmLoadImageFile(root, file);
+  });
+  const startLive = () => _cmLiveScreenPick(root);
+  root.querySelector('#cm-live-screen')?.addEventListener('click', startLive);
+  root.querySelector('#cm-live-screen-2')?.addEventListener('click', startLive);
+  _cmBindDropViewControls(root);
+  root.querySelector('#cm-targets')?.addEventListener('click', e => {
+    const remove = e.target.closest('[data-cm-remove-target]');
+    if (remove) {
+      const id = remove.dataset.cmRemoveTarget;
+      _colourMatchState.targets = _colourMatchState.targets.filter(t => t.id !== id);
+      if (_colourMatchState.activeTargetId === id) {
+        const next = _colourMatchState.targets[0];
+        _colourMatchState.activeTargetId = next?.id || null;
+        if (next) _cmSetHex(next.hex);
+      }
+      root.querySelector('#cm-targets').innerHTML = _cmTargetsHtml();
+      _cmPaintControls(root);
+      _cmScheduleMatch(root);
+      return;
+    }
+    const btn = e.target.closest('[data-cm-target]');
+    if (!btn) return;
+    const t = _colourMatchState.targets.find(x => x.id === btn.dataset.cmTarget);
+    if (!t) return;
+    _colourMatchState.activeTargetId = t.id;
+    _cmSetHex(t.hex);
+    _cmPaintControls(root);
+    root.querySelector('#cm-targets').innerHTML = _cmTargetsHtml();
+    _cmScheduleMatch(root);
+  });
+  _cmBindResultActions(root);
+  _cmScheduleMatch(root);
+}
+
 const _BRAND_TARE_ESTIMATES = [
   { brand: 'Bambu Lab', grams: 256, aliases: ['bambu'] },
   { brand: '3D Fuel', grams: 264 },
@@ -13169,8 +20062,40 @@ function _brandTareEstimate(brand, subtype = '') {
   return matches[0] || null;
 }
 
+function _normaliseEmptySpoolProfiles(profiles) {
+  return (Array.isArray(profiles) ? profiles : []).map(p => ({
+    ...p,
+    brand: p.brand || '',
+    material: p.material || '',
+    empty_spool_weight_g: p.empty_spool_weight_g == null ? null : Number(p.empty_spool_weight_g),
+    is_default: !!p.is_default,
+  })).filter(p => p.empty_spool_weight_g != null && !Number.isNaN(p.empty_spool_weight_g));
+}
+
+function _matchingEmptySpoolProfiles(material, brand) {
+  const matKey = String(material || '').trim().toUpperCase();
+  const brandKey = _tareKey(brand);
+  if (!brandKey) return [];
+  return _normaliseEmptySpoolProfiles(_emptySpoolProfiles).filter(p => {
+    const pBrand = _tareKey(p.brand);
+    const pMat = String(p.material || '').trim().toUpperCase();
+    return pBrand === brandKey && (!pMat || !matKey || pMat === matKey);
+  }).sort((a, b) => {
+    const aExact = String(a.material || '').trim().toUpperCase() === matKey ? 1 : 0;
+    const bExact = String(b.material || '').trim().toUpperCase() === matKey ? 1 : 0;
+    if (aExact !== bExact) return bExact - aExact;
+    if (a.is_default !== b.is_default) return b.is_default ? 1 : -1;
+    return String(a.profile_name || '').localeCompare(String(b.profile_name || ''));
+  });
+}
+
+function _bestEmptySpoolProfile(material, brand) {
+  return _matchingEmptySpoolProfiles(material, brand)[0] || null;
+}
+
 function _tareHintText(source) {
   if (!source) return 'tare weight';
+  if (source.kind === 'profile') return `${source.profile_name || source.brand || 'profile'} tare`;
   if (source.kind === 'saved') return `saved ${source.brand || 'brand'} tare`;
   if (source.kind === 'catalogue') return 'catalogue tare';
   if (source.kind === 'estimate') return `estimated ${source.brand} tare`;
@@ -13178,7 +20103,10 @@ function _tareHintText(source) {
 }
 const _SPOOL_ACTIONS = [
   { key: 'detail', label: 'Info', title: 'Details', kind: 'link', cls: 'spool-action-detail' },
-  { key: 'label', label: 'Label', title: 'Print label', cls: 'spool-action-label' },
+  { key: 'restock', label: 'Restock', title: 'Restock this reserved spool number', cls: 'spool-action-label' },
+  { key: 'assign', label: 'Assign', title: 'Assign to printer or shelf', cls: 'spool-action-assign' },
+  { key: 'label', label: 'Label', title: 'Print spool label', cls: 'spool-action-label' },
+  { key: 'rack-label', label: 'Rack', title: 'Print rack slot label', cls: 'spool-action-label' },
   { key: 'weigh', label: 'Weigh', title: 'Weigh from scale', cls: 'spool-action-weigh' },
   { key: 'edit', label: 'Edit', title: 'Edit', cls: 'spool-action-edit' },
   { key: 'duplicate', label: 'Copy', title: 'Duplicate', cls: 'spool-action-utility' },
@@ -13187,19 +20115,39 @@ const _SPOOL_ACTIONS = [
   { key: 'delete', label: 'Del', title: 'Delete', cls: 'spool-action-utility spool-action-danger' },
 ];
 
+function _spoolHasRackLabel(spool) {
+  const locId = spool?.storage_location_id ?? spool?.home_storage_location_id;
+  const loc = _spoolLocations.find(l => String(l.id) === String(locId));
+  if (loc && _rackLocationRange(loc)) return true;
+  return (_spoolDisplayId(spool) || 0) > 0;
+}
+
+function _spoolActionsFor(spool) {
+  const archived = !!spool?.archived_at;
+  return _SPOOL_ACTIONS.filter(action => {
+    if (action.key === 'rack-label') return !archived && _spoolHasRackLabel(spool);
+    if (action.key === 'restock') return archived;
+    if (archived && ['assign', 'label', 'weigh', 'edit', 'reset', 'archive', 'duplicate', 'rack-label'].includes(action.key)) return false;
+    if (!archived && action.key === 'restock') return false;
+    return true;
+  });
+}
+
 async function _refreshSpoolsByPrinter() {
   try {
-    const spools = await fetch('/api/spools').then(r => r.json()).catch(() => []);
+    const spools = await fetch(`/api/spools/all?_=${Date.now()}`, { cache: 'no-store' }).then(r => r.json()).catch(() => []);
     const summary = await fetch('/api/spools/summary').then(r => r.json()).catch(() => ({}));
+    _allSpools = spools;
     _latestLowStockPct = summary.low_stock_pct ?? 20;
     const byPrinter = {};
     for (const s of spools) {
-      if (s.location_printer_id) {
+      if (!s.archived_at && s.location_printer_id) {
         if (!byPrinter[s.location_printer_id]) byPrinter[s.location_printer_id] = [];
         byPrinter[s.location_printer_id].push(s);
       }
     }
     _latestSpoolsByPrinter = byPrinter;
+    if (parseRoute().view === 'filament') renderFleetFilament();
   } catch {}
 }
 
@@ -13207,6 +20155,12 @@ function _normMat(value) {
   return String(value || '')
     .toUpperCase()
     .replace(/[^A-Z0-9+]/g, '');
+}
+
+// Bambu's own profile names say "Bambu" (e.g. "Bambu PLA Pure") while Flightdeck stores
+// brand "Bambu Lab" — collapse so profile comparison isn't tripped by the stray "Lab".
+function _canonProfile(value) {
+  return _normMat(String(value || '').replace(/\bbambu\s+lab\b/ig, 'bambu'));
 }
 
 function _normHex(value) {
@@ -13250,6 +20204,11 @@ function _reportedProfileText(report) {
     .filter(Boolean).join(' ');
 }
 
+function _canonBrand(value) {
+  const normalised = _normMat(value);
+  return normalised === 'BAMBU' || normalised === 'BAMBULAB' ? 'BAMBULAB' : normalised;
+}
+
 function _spoolProfileText(spool) {
   return [spool?.brand, spool?.material, spool?.subtype].filter(Boolean).join(' ');
 }
@@ -13262,8 +20221,8 @@ function _genericProfileRejectsSpool(report, spool) {
 }
 
 function _reportedBrandMatchesSpool(reportedBrand, spool) {
-  const reported = _normMat(reportedBrand);
-  const spoolBrand = _normMat(spool?.brand || '');
+  const reported = _canonBrand(reportedBrand);
+  const spoolBrand = _canonBrand(spool?.brand || '');
   if (!reported || reported === 'GENERIC' || reported === spoolBrand) return true;
   const spoolProfile = _normMat([spool?.brand, spool?.material, spool?.subtype].filter(Boolean).join(' '));
   if (spoolProfile && (spoolProfile.includes(reported) || reported.includes(spoolProfile))) return true;
@@ -13274,8 +20233,13 @@ function _reportedBrandMatchesSpool(reportedBrand, spool) {
 
 function _slotMismatch(spool, report) {
   const printerLoaded = report && !report.empty;
-  if (!spool && printerLoaded) return 'Printer reports filament but no Flightdeck spool is assigned';
-  if (spool && report?.empty) return `Flightdeck has spool #${spool.id} assigned but printer reports empty`;
+  if (!spool && printerLoaded) {
+    if (_slotReportIsGeneric(report)) {
+      return 'Printer reports generic/stale filament — assign the physical shelf spool; Bambu colour is often wrong until you Trust Flightdeck';
+    }
+    return 'Printer reports filament but no Flightdeck spool is assigned';
+  }
+  if (spool && report?.empty) return `Flightdeck has spool ${_spoolDisplayLabel(spool)} assigned but printer reports empty`;
   if (!spool || !printerLoaded) return '';
 
   const reportedMat = _normMat(_slotReportedMaterial(report));
@@ -13289,13 +20253,13 @@ function _slotMismatch(spool, report) {
   if (_hexDistance(report.color, spool.color_hex) > 95) {
     return `Colour mismatch: printer ${report.color}, Flightdeck ${spool.color_hex}`;
   }
-  const reportedBrand = _normMat(report.brand || '');
-  const spoolBrand = _normMat(spool.brand || '');
+  const reportedBrand = _canonBrand(report.brand || '');
+  const spoolBrand = _canonBrand(spool.brand || '');
   if (reportedBrand && spoolBrand && !_reportedBrandMatchesSpool(report.brand || '', spool)) {
     return `Brand mismatch: printer ${report.brand}, Flightdeck ${spool.brand}`;
   }
-  const reportedProfile = _normMat(report.profile_name || '');
-  const spoolProfile = _normMat([spool.brand, spool.material, spool.subtype].filter(Boolean).join(' '));
+  const reportedProfile = _canonProfile(report.profile_name || '');
+  const spoolProfile = _canonProfile([spool.brand, spool.material, spool.subtype].filter(Boolean).join(' '));
   if (_looksLikeBambuProfileCode(report.profile_name)) {
     return '';
   }
@@ -13508,6 +20472,219 @@ function _slotAmsProfilePayload(container, current) {
   };
 }
 
+async function _findSpoolByEnteredNumber(raw) {
+  let spools = _allSpools;
+  if (!spools?.length) {
+    spools = await fetch('/api/spools').then(r => r.json()).catch(() => []);
+    _allSpools = spools;
+  }
+  return _findSpoolByEnteredNumberSync(raw, spools);
+}
+
+async function _assignSpoolToAmsSlot(printerId, slotIndex, spoolId, { syncAms = true, replaceExisting = true } = {}) {
+  const r = await fetch(`/api/spools/${spoolId}/move`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      printer_id: printerId,
+      slot: Number(slotIndex),
+      replace_existing: replaceExisting,
+      sync_ams: syncAms,
+    }),
+  });
+  if (!r.ok) throw new Error(await _spoolSaveErrorMessage(r, 'Assign failed'));
+  return r.json();
+}
+
+async function _openSlotQuickAssign(printerId, slotIndex, slotLabel, anchorEl = null) {
+  document.querySelector('.slot-quick-popover-overlay')?.remove();
+
+  const printer = _latestPrinters.find(p => p.id === printerId);
+  const anchor = anchorEl?.closest?.('.ams-slot-wrap, .ams-loadout-slot, [data-slot-edit]') || anchorEl;
+  const overlay = document.createElement('div');
+  overlay.className = 'slot-quick-popover-overlay';
+  overlay.innerHTML = `
+    <div class="slot-quick-popover" role="dialog" aria-label="Load spool into ${esc(slotLabel)}">
+      <div class="slot-quick-popover-head">
+        <strong>${esc(slotLabel)}</strong>
+        <button type="button" class="slot-quick-popover-close" aria-label="Close">✕</button>
+      </div>
+      <div class="slot-quick-popover-row">
+        <label class="slot-quick-label" for="slot-quick-number">#</label>
+        <input id="slot-quick-number" class="spool-form-input slot-quick-input" type="number" min="1" step="1" inputmode="numeric" placeholder="93" autofocus>
+        <button type="button" class="slot-quick-go" data-slot-quick-go>Load</button>
+      </div>
+      <div class="slot-quick-preview" data-slot-quick-preview>…</div>
+      <div class="slot-quick-memory" data-slot-quick-memory hidden></div>
+      <button type="button" class="slot-quick-doctor-link" data-slot-quick-doctor>Profile doctor</button>
+    </div>`;
+  document.body.appendChild(overlay);
+
+  const popover = overlay.querySelector('.slot-quick-popover');
+  const reposition = () => _positionSlotQuickPopover(popover, anchor);
+  reposition();
+  const onViewportChange = () => reposition();
+  window.addEventListener('resize', onViewportChange);
+  window.addEventListener('scroll', onViewportChange, true);
+
+  const close = () => {
+    window.removeEventListener('resize', onViewportChange);
+    window.removeEventListener('scroll', onViewportChange, true);
+    document.removeEventListener('keydown', onKeydown, true);
+    overlay.remove();
+  };
+  const onKeydown = e => {
+    if (e.key === 'Escape') close();
+  };
+  document.addEventListener('keydown', onKeydown, true);
+  overlay.querySelector('.slot-quick-popover-close')?.addEventListener('click', close);
+  overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+  popover.addEventListener('click', e => e.stopPropagation());
+
+  const input = overlay.querySelector('#slot-quick-number');
+  const preview = overlay.querySelector('[data-slot-quick-preview]');
+  const memoryEl = overlay.querySelector('[data-slot-quick-memory]');
+  // Popover is interactive (autofocus) before the awaits below resolve -- if the
+  // user types a new spool number while those are in flight, don't let the
+  // current-spool prefill further down stomp their typed value back to the old one.
+  let userEdited = false;
+  input.addEventListener('input', () => { userEdited = true; });
+  let spools = _allSpools;
+  if (!spools?.length) {
+    spools = await fetch('/api/spools').then(r => r.json()).catch(() => []);
+    _allSpools = spools;
+  }
+  const current = spools.find(s =>
+    s.location_printer_id === printerId && Number(s.location_slot) === Number(slotIndex) && !s.archived_at
+  );
+  const slotMemory = await fetch(`/api/printers/${encodeURIComponent(printerId)}/slots/${encodeURIComponent(slotIndex)}/memory`)
+    .then(r => r.json()).catch(() => null);
+  const memorySpool = slotMemory?.spool && !slotMemory.spool.archived_at ? slotMemory.spool : null;
+
+  const renderPreview = () => {
+    const spool = _findSpoolByEnteredNumberSync(input.value, spools);
+    if (!input.value.trim()) {
+      preview.innerHTML = current
+        ? `Current: ${_spoolDisplayLabel(current)} ${esc(current.color_name || current.material || '')}`
+        : 'Rack label spool #';
+      return;
+    }
+    if (!spool) {
+      preview.innerHTML = `<span class="slot-quick-miss">No spool #${esc(input.value.trim())}</span>`;
+      return;
+    }
+    preview.textContent = `${_spoolDisplayLabel(spool)} ${spool.color_name || spool.material || ''} · ${Math.round(spool.remaining_g || 0)}g`;
+  };
+
+  if (memorySpool && (!current || String(current.id) !== String(memorySpool.id))) {
+    memoryEl.hidden = false;
+    memoryEl.innerHTML = `<button type="button" class="slot-quick-memory-btn" data-slot-quick-memory="${memorySpool.id}">Last: ${_spoolDisplayLabel(memorySpool)}</button>`;
+    memoryEl.querySelector('[data-slot-quick-memory]')?.addEventListener('click', () => {
+      input.value = String(_spoolDisplayId(memorySpool));
+      renderPreview();
+      input.focus();
+    });
+  }
+
+  if (current && !userEdited) input.value = String(_spoolDisplayId(current));
+  renderPreview();
+  input.addEventListener('input', renderPreview);
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') overlay.querySelector('[data-slot-quick-go]')?.click();
+  });
+
+  const runLoad = async btn => {
+    const spool = await _findSpoolByEnteredNumber(input.value);
+    if (!spool) {
+      showToast('Spool not found', `No active spool matches #${input.value.trim() || '?'}.`, 'error');
+      input.focus();
+      return;
+    }
+    if (current && String(current.id) === String(spool.id)) {
+      const old = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = '…';
+      try {
+        const data = await _assignSpoolToAmsSlot(printerId, slotIndex, spool.id, { syncAms: true, replaceExisting: false });
+        _spoolMoveSyncToast(data, printer?.custom_name || printerId, slotLabel);
+        await refreshPrinters();
+        await _refreshSpoolsByPrinter();
+        close();
+      } catch (err) {
+        showToast('AMS sync failed', err.message || '', 'error');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = old;
+      }
+      return;
+    }
+    const old = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '…';
+    try {
+      const data = await _assignSpoolToAmsSlot(printerId, slotIndex, spool.id, { syncAms: true, replaceExisting: true });
+      _spoolMoveSyncToast(data, printer?.custom_name || printerId, slotLabel);
+      if (data.replaced_spool_id) {
+        showToast('AMS slot swapped', `Returned spool #${_spoolDisplayNumberById(data.replaced_spool_id)} and loaded ${_spoolDisplayLabel(spool)}.`, 'success');
+      }
+      await refreshPrinters();
+      await _refreshSpoolsByPrinter();
+      close();
+    } catch (err) {
+      showToast('Load failed', err.message || '', 'error');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = old;
+    }
+  };
+
+  overlay.querySelector('[data-slot-quick-go]')?.addEventListener('click', e => runLoad(e.currentTarget));
+  overlay.querySelector('[data-slot-quick-doctor]')?.addEventListener('click', () => {
+    close();
+    _openSlotEditor(printerId, slotIndex, slotLabel);
+  });
+  requestAnimationFrame(() => {
+    reposition();
+    input.focus();
+    input.select();
+  });
+}
+
+function _positionSlotQuickPopover(popover, anchorEl) {
+  if (!popover) return;
+  const anchor = anchorEl?.closest?.('.ams-slot-wrap, .ams-loadout-slot, [data-slot-edit]') || anchorEl;
+  const margin = 6;
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  if (!anchor?.getBoundingClientRect) {
+    popover.style.top = `${Math.round(vh * 0.4)}px`;
+    popover.style.left = `${Math.round(vw / 2 - popover.offsetWidth / 2)}px`;
+    return;
+  }
+  const rect = anchor.getBoundingClientRect();
+  const pw = popover.offsetWidth || 220;
+  const ph = popover.offsetHeight || 120;
+  let top = rect.bottom + margin;
+  let left = rect.left + rect.width / 2 - pw / 2;
+  if (top + ph > vh - margin) top = rect.top - ph - margin;
+  left = Math.max(margin, Math.min(left, vw - pw - margin));
+  top = Math.max(margin, Math.min(top, vh - ph - margin));
+  popover.style.top = `${Math.round(top)}px`;
+  popover.style.left = `${Math.round(left)}px`;
+}
+
+function _findSpoolByEnteredNumberSync(raw, spools = _allSpools || []) {
+  const n = parseInt(String(raw || '').replace(/^#/, '').trim(), 10);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  // display_id is what the user actually types/sees ("spool #103") and is always
+  // populated (backfilled from id for legacy rows, assigned fresh for new ones).
+  // Matching raw internal `id` too was a bug: if some other spool's *internal* id
+  // happens to equal the number typed, it wins over the real display-number match
+  // whenever it sorts earlier in the list -- e.g. typing 103 could resolve to
+  // spool #102 if #102's own row id happens to be 103.
+  return spools.find(s => !s.archived_at && Number(s.display_id) === n) || null;
+}
+
 async function _openSlotEditor(printerId, slotIndex, slotLabel) {
   const printer = _latestPrinters.find(p => p.id === printerId);
   const title = `${printer?.custom_name || printerId} · ${slotLabel}`;
@@ -13535,10 +20712,11 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
   overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
 
   async function load() {
-    const [spools, locations, profileData] = await Promise.all([
+    const [spools, locations, profileData, slotMemory] = await Promise.all([
       fetch('/api/spools').then(r => r.json()).catch(() => []),
       fetch('/api/spool-locations').then(r => r.json()).catch(() => []),
       fetch('/api/slicer/profiles').then(r => r.json()).catch(() => null),
+      fetch(`/api/printers/${encodeURIComponent(printerId)}/slots/${encodeURIComponent(slotIndex)}/memory`).then(r => r.json()).catch(() => null),
     ]);
     if (profileData) _slicerProfileData = profileData;
     _allSpools = spools;
@@ -13558,7 +20736,23 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
         (a.material || '').localeCompare(b.material || '') ||
         (a.color_name || '').localeCompare(b.color_name || '')
       );
-    const bestCandidate = report && !report.empty && !lowConfidenceReport ? candidates.find(s => _slotCandidateScore(s, report) < 320) : null;
+    const memorySpool = slotMemory?.spool && !slotMemory.spool.archived_at ? slotMemory.spool : null;
+    let bestCandidate = null;
+    if (report && !report.empty && !lowConfidenceReport) {
+      bestCandidate = candidates.find(s => _slotCandidateScore(s, report) < 320) || null;
+    }
+    if (!bestCandidate && memorySpool && candidates.some(s => String(s.id) === String(memorySpool.id))) {
+      bestCandidate = candidates.find(s => String(s.id) === String(memorySpool.id)) || null;
+    }
+    const memorySuggestionHtml = memorySpool && !current && candidates.some(s => String(s.id) === String(memorySpool.id)) ? `
+      <div class="slot-suggestion">
+        <div>
+          <span>Last spool in this slot</span>
+          <strong>${esc(memorySpool.color_name || memorySpool.color_hex || 'Colour')} · ${esc(memorySpool.material)}${memorySpool.subtype ? ` ${esc(memorySpool.subtype)}` : ''}</strong>
+          <p>${esc(memorySpool.brand || 'Unknown brand')} · ${_spoolDisplayLabel(memorySpool)} · ${Math.round(memorySpool.remaining_g || 0)}g · ${esc(_spoolStorageLocationName(memorySpool.storage_location_id))}</p>
+        </div>
+        <button type="button" class="spool-action-btn spool-action-label" data-slot-spool-id="${memorySpool.id}">Assign #${memorySpool.id}</button>
+      </div>` : '';
     const reportProfile = report ? (_slotProfileLabel(report) || 'Loaded filament') : 'No report';
     const reportColour = report?.empty ? 'Empty' : (report?.color || 'Unknown');
     const reportMaterial = report?.empty ? 'Empty' : (_slotReportedMaterial(report) || 'Unknown');
@@ -13577,7 +20771,7 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
         <span class="location-spool-swatch" style="${_spoolColorStyle(current)}"></span>
         <div class="location-spool-main">
           <div class="location-spool-title">${esc(current.color_name || current.color_hex || 'Colour')} · ${esc(current.material)}${current.subtype ? ` ${esc(current.subtype)}` : ''}</div>
-          <div class="location-spool-sub">${esc(current.brand || 'Unknown brand')} · #${current.id} · ${Math.round(current.remaining_g || 0)}g</div>
+          <div class="location-spool-sub">${esc(current.brand || 'Unknown brand')} · ${_spoolDisplayLabel(current)} · ${Math.round(current.remaining_g || 0)}g</div>
         </div>
       </div>`
       : '<div class="slot-empty-state">No Flightdeck spool assigned to this slot.</div>';
@@ -13586,7 +20780,7 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
         <div>
           <span>Best stored match</span>
           <strong>${esc(bestCandidate.color_name || bestCandidate.color_hex || 'Colour')} · ${esc(bestCandidate.material)}${bestCandidate.subtype ? ` ${esc(bestCandidate.subtype)}` : ''}</strong>
-          <p>${esc(bestCandidate.brand || 'Unknown brand')} · #${bestCandidate.id} · ${Math.round(bestCandidate.remaining_g || 0)}g · ${esc(_spoolStorageLocationName(bestCandidate.storage_location_id))}</p>
+          <p>${esc(bestCandidate.brand || 'Unknown brand')} · ${_spoolDisplayLabel(bestCandidate)} · ${Math.round(bestCandidate.remaining_g || 0)}g · ${esc(_spoolStorageLocationName(bestCandidate.storage_location_id))}</p>
         </div>
         <button type="button" class="spool-action-btn spool-action-label" data-slot-spool-id="${bestCandidate.id}">Assign suggested spool</button>
       </div>`
@@ -13627,13 +20821,13 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
         homeShelf ? 'Home shelf' : '',
         staleEmptySource ? 'Empty source slot' : '',
       ].filter(Boolean);
-      const searchable = `${loc} ${s.material || ''} ${s.subtype || ''} ${s.brand || ''} ${s.color_name || ''} ${s.color_hex || ''} #${s.id}`.toLowerCase();
+      const searchable = `${loc} ${s.material || ''} ${s.subtype || ''} ${s.brand || ''} ${s.color_name || ''} ${s.color_hex || ''} ${_spoolDisplayLabel(s)}`.toLowerCase();
       const filterKey = staleEmptySource ? `empty:${s.location_printer_id}:${s.location_slot}` : `loc:${s.storage_location_id || ''}`;
       return `<button type="button" class="slot-spool-option" data-slot-spool-id="${s.id}" data-search="${esc(searchable)}" data-score="${score}" data-location-id="${esc(filterKey)}">
         <span class="location-spool-swatch" style="${_spoolColorStyle(s)}"></span>
         <span class="slot-spool-option-main">
           <strong>${esc(s.color_name || s.color_hex || 'Colour')} · ${esc(s.material)}${s.subtype ? ` ${esc(s.subtype)}` : ''}</strong>
-          <small>${esc(s.brand || 'Unknown brand')} · #${s.id} · ${Math.round(s.remaining_g || 0)}g (${pct}%)</small>
+          <small>${esc(s.brand || 'Unknown brand')} · ${_spoolDisplayLabel(s)} · ${Math.round(s.remaining_g || 0)}g (${pct}%)</small>
           ${badges.length ? `<span class="slot-spool-badges">${badges.map(b => `<em>${esc(b)}</em>`).join('')}</span>` : ''}
         </span>
         <span class="slot-spool-location">${esc(loc)}</span>
@@ -13674,6 +20868,7 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
         </div>
         ${mismatch ? `<div class="slot-warning">${esc(mismatch)}</div>` : ''}
         ${genericWarningHtml}
+        ${memorySuggestionHtml}
         ${suggestionHtml}
         ${current ? `
           <div class="slot-actions slot-actions-primary">
@@ -13685,10 +20880,16 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
           </div>
           <div class="slot-actions slot-actions-secondary">
             <button class="spool-action-btn spool-action-label" data-slot-trust-flightdeck="${current.id}">Trust Flightdeck</button>
-            ${report ? `<button class="spool-action-btn spool-action-edit" data-slot-trust-printer="${current.id}">Trust Printer</button>` : ''}
             <select class="slot-clear-location" data-slot-clear-location>${locationOptions}</select>
             <button class="spool-action-btn spool-action-danger" data-slot-clear="${current.id}">Return spool</button>
           </div>
+          ${report ? `<details class="slot-advanced-actions">
+            <summary>Advanced repair</summary>
+            <div>
+              <p>Use only when the printer screen is definitely right. This replaces the assigned spool's stored material, colour, and brand with the printer's AMS report for this slot.</p>
+              <button class="spool-action-btn spool-action-danger" data-slot-trust-printer="${current.id}">Use printer report</button>
+            </div>
+          </details>` : ''}
           ${returnHelp ? `<div class="slot-return-memory">${esc(returnHelp)}</div>` : ''}
           ${_amsProfilePanelHtml(current, report, profileData, printer)}` : ''}
       </div>
@@ -13742,22 +20943,19 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
         const id = btn.dataset.slotSpoolId;
         btn.disabled = true;
         btn.classList.add('assigning');
-        const r = await fetch(`/api/spools/${id}/move`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ printer_id: printerId, slot: Number(slotIndex), replace_existing: true }),
-        });
-        if (!r.ok) {
-          btn.classList.remove('assigning');
+        try {
+          const data = await _assignSpoolToAmsSlot(printerId, slotIndex, id, {
+            syncAms: _slotReportIsGeneric(report) || _slotReportIsUnknownLoaded(report),
+            replaceExisting: true,
+          });
+          _spoolMoveSyncToast(data, printer?.custom_name || printerId, slotLabel);
+          if (data.replaced_spool_id) {
+            showToast('AMS slot swapped', `Returned spool #${_spoolDisplayNumberById(data.replaced_spool_id)} home and assigned spool #${_spoolDisplayNumberById(id)}.`, 'success');
+          }
+        } catch {
           btn.classList.add('slot-spool-error');
-          setTimeout(load, 1200);
-          return;
         }
-        const data = await r.json().catch(() => ({}));
-        _spoolMoveSyncToast(data, printer?.custom_name || printerId, slotLabel);
-        if (data.replaced_spool_id) {
-          showToast('AMS slot swapped', `Returned spool #${data.replaced_spool_id} home and assigned spool #${id}.`, 'success');
-        }
+        btn.classList.remove('assigning');
         await _refreshSpoolsByPrinter();
         load();
       });
@@ -13787,6 +20985,8 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
     body.querySelector('[data-slot-trust-printer]')?.addEventListener('click', async e => {
       const btn = e.currentTarget;
       const id = btn.dataset.slotTrustPrinter;
+      const confirmed = await _confirmModal(`Replace the assigned spool details from the printer AMS report? Use this only if the printer screen is definitely correct. Flightdeck's stored material, colour, and brand may change.`);
+      if (!confirmed) return;
       const old = btn.textContent;
       const rawStorageId = body.querySelector('[data-slot-clear-location]')?.value || '';
       const storageId = rawStorageId ? Number(rawStorageId) : null;
@@ -13813,19 +21013,30 @@ async function _openSlotEditor(printerId, slotIndex, slotLabel) {
     });
 
     const applySlotPickerFilters = () => {
-      const q = body.querySelector('#slot-spool-filter')?.value.trim().toLowerCase() || '';
+      const raw = body.querySelector('#slot-spool-filter')?.value.trim() || '';
+      const parsed = _parseSpoolSearchQuery(raw);
       const activeFilter = body.querySelector('.slot-filter-chip.active')?.dataset.slotFilter || 'all';
-      const terms = q.split(/\s+/).filter(Boolean);
       body.querySelectorAll('[data-slot-spool-id]').forEach(row => {
-        const search = row.dataset.search || '';
-        if (!search) return;
-        const matchesSearch = !terms.length || terms.every(term => search.includes(term));
+        const spoolId = row.dataset.slotSpoolId;
+        const spool = candidates.find(c => String(c.id) === String(spoolId));
+        if (!spool) return;
+        const matchesSearch = _spoolMatchesSearch(spool, parsed, raw);
         const matchesFilter =
           activeFilter === 'all'
           || (activeFilter === 'match' && Number(row.dataset.score || 9999) < 320)
           || ((activeFilter.startsWith('loc:') || activeFilter.startsWith('empty:')) && String(row.dataset.locationId || '') === activeFilter);
         row.hidden = !(matchesSearch && matchesFilter);
       });
+      if (parsed.minRemainingG != null && !parsed.spoolNumberOnly) {
+        const list = body.querySelector('.slot-spool-picker');
+        if (list) {
+          [...list.querySelectorAll('[data-slot-spool-id]:not([hidden])')].sort((a, b) => {
+            const sa = candidates.find(c => String(c.id) === a.dataset.slotSpoolId);
+            const sb = candidates.find(c => String(c.id) === b.dataset.slotSpoolId);
+            return Number(sa?.remaining_g || 0) - Number(sb?.remaining_g || 0);
+          }).forEach(el => list.appendChild(el));
+        }
+      }
     };
 
     body.querySelector('#slot-spool-filter')?.addEventListener('input', applySlotPickerFilters);
@@ -14028,13 +21239,154 @@ function _spoolActionControl(action, spoolId, compact = false) {
   return `<button class="${cls}" data-action="${action.key}" data-id="${spoolId}" title="${action.title}">${label}</button>`;
 }
 
+function _spoolAssignSlotTargets(printer) {
+  const targets = [];
+  const printerName = _printerPrimaryLabel(printer);
+  for (const unit of printer.ams || []) {
+    for (const slot of unit.slots || []) {
+      const flat = _amsFlatSlot(unit, slot);
+      targets.push({
+        value: `${printer.id}|${flat}`,
+        label: `${printerName} · ${_amsSlotLabel(printer, flat)}`,
+        meta: unit.label || 'AMS',
+      });
+    }
+  }
+  for (const unit of printer.mmu || []) {
+    for (const gate of unit.gates || []) {
+      const idx = Number(gate.idx);
+      if (!Number.isFinite(idx)) continue;
+      targets.push({
+        value: `${printer.id}|${idx}`,
+        label: `${printerName} · ${_amsSlotLabel(printer, idx)}`,
+        meta: unit.label || 'MMU',
+      });
+    }
+  }
+  if (_isSnapmakerU1(printer)) {
+    for (const tool of printer.toolheads || []) {
+      const idx = Number(tool.index ?? tool.tool ?? tool.id);
+      if (!Number.isFinite(idx)) continue;
+      targets.push({
+        value: `${printer.id}|${idx}`,
+        label: `${printerName} · ${tool.label || `T${idx}`}`,
+        meta: 'Toolhead',
+      });
+    }
+  }
+  return targets;
+}
+
+function _spoolAssignTargetOptions(spool) {
+  const currentPrinterId = spool?.location_printer_id || '';
+  const currentSlot = spool?.location_slot;
+  const currentStorageId = spool?.storage_location_id;
+  const selectedValue = currentPrinterId
+    ? `${currentPrinterId}|${currentSlot === null || currentSlot === undefined ? '' : currentSlot}`
+    : `shelf|${currentStorageId || ''}`;
+  const shelfOptions = [
+    `<option value="shelf|"${selectedValue === 'shelf|' ? ' selected' : ''}>Home shelf / unassigned shelf</option>`,
+    ...(_spoolLocations || []).map(loc => {
+      const value = `shelf|${loc.id}`;
+      return `<option value="${esc(value)}"${selectedValue === value ? ' selected' : ''}>Shelf · ${esc(loc.name)}</option>`;
+    }),
+  ].join('');
+  const printerOptions = (_latestPrinters || []).map(printer => {
+    const printerName = _printerPrimaryLabel(printer);
+    const printerOnlyValue = `${printer.id}|`;
+    const slotTargets = _spoolAssignSlotTargets(printer);
+    const options = [
+      `<option value="${esc(printerOnlyValue)}"${selectedValue === printerOnlyValue ? ' selected' : ''}>${esc(printerName)} · Printer only</option>`,
+      ...slotTargets.map(target =>
+        `<option value="${esc(target.value)}"${selectedValue === target.value ? ' selected' : ''}>${esc(target.label)}${target.meta ? ` (${esc(target.meta)})` : ''}</option>`
+      ),
+    ].join('');
+    return `<optgroup label="${esc(printerName)}">${options}</optgroup>`;
+  }).join('');
+  return `<optgroup label="Storage">${shelfOptions}</optgroup>${printerOptions}`;
+}
+
+async function _openSpoolAssignModal(spoolId, refresh = _refreshSpoolsSurface) {
+  if (!_latestPrinters?.length) {
+    try { _latestPrinters = await fetch('/api/printers').then(r => r.ok ? r.json() : []); } catch {}
+  }
+  if (!_spoolLocations?.length) {
+    try { _spoolLocations = await fetch('/api/spool-locations').then(r => r.ok ? r.json() : []); } catch {}
+  }
+  const spool = _allSpools.find(s => String(s.id) === String(spoolId));
+  if (!spool) {
+    showToast('Spool not found', `Spool #${spoolId} is no longer in the list.`, 'error');
+    return;
+  }
+  const title = `Assign spool ${_spoolDisplayLabel(spool)}`;
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal-box spool-assign-modal">
+      <div class="modal-header">
+        <span class="modal-title">${esc(title)}</span>
+        <button class="modal-close-btn">✕</button>
+      </div>
+      <div class="spool-assign-card">
+        <span class="location-spool-swatch" style="${_spoolColorStyle(spool)}"></span>
+        <div>
+          <strong>${esc(spool.color_name || spool.color_hex || 'Colour')} · ${esc(spool.material)}${spool.subtype ? ` ${esc(spool.subtype)}` : ''}</strong>
+          <small>${esc(spool.brand || 'Unknown brand')} · ${Math.round(spool.remaining_g || 0)}g remaining</small>
+        </div>
+      </div>
+      <label class="spool-form-label" for="spool-assign-target">Assign to</label>
+      <select id="spool-assign-target" class="spool-form-input spool-assign-select">
+        ${_spoolAssignTargetOptions(spool)}
+      </select>
+      <div class="slot-return-memory">Choose a printer by itself for manually loaded filament, or choose a specific AMS/MMU slot when the roll is physically loaded there.</div>
+      <div class="modal-actions">
+        <button class="modal-btn" data-spool-assign-cancel>Cancel</button>
+        <button class="modal-btn primary" data-spool-assign-save>Assign</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  overlay.querySelector('.modal-close-btn')?.addEventListener('click', close);
+  overlay.querySelector('[data-spool-assign-cancel]')?.addEventListener('click', close);
+  overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+  overlay.querySelector('[data-spool-assign-save]')?.addEventListener('click', async e => {
+    const btn = e.currentTarget;
+    const value = overlay.querySelector('#spool-assign-target')?.value || 'shelf|';
+    const [kind, raw] = value.split('|');
+    const body = kind === 'shelf'
+      ? { printer_id: null, slot: null, storage_location_id: raw ? Number(raw) : null }
+      : { printer_id: kind, slot: raw === '' ? null : Number(raw), replace_existing: true };
+    btn.disabled = true;
+    btn.textContent = 'Assigning';
+    const response = await fetch(`/api/spools/${spool.id}/move`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      const message = err.detail?.message || err.detail || 'Flightdeck could not assign that spool.';
+      showToast('Assign failed', String(message), 'error');
+      btn.disabled = false;
+      btn.textContent = 'Assign';
+      return;
+    }
+    const data = await response.json().catch(() => ({}));
+    if (data.replaced_spool_id) {
+      showToast('Slot swapped', `Returned spool #${_spoolDisplayNumberById(data.replaced_spool_id)} home and assigned ${_spoolDisplayLabel(spool)}.`, 'success');
+    } else {
+      showToast('Spool assigned', `${_spoolDisplayLabel(spool)} location updated.`, 'success');
+    }
+    await _refreshSpoolsByPrinter();
+    close();
+    await refresh();
+  });
+}
+
 function _spoolCardActionsHtml(spoolId) {
-  const quick = _SPOOL_ACTIONS
-    .filter(a => a.key === 'label' || a.key === 'edit')
-    .map(a => _spoolActionControl(a, spoolId)).join('');
-  const menu = _SPOOL_ACTIONS.map(a => _spoolActionControl(a, spoolId, true)).join('');
+  const spool = _allSpools.find(s => String(s.id) === String(spoolId));
+  const menu = _spoolActionsFor(spool).map(a => _spoolActionControl(a, spoolId, true)).join('');
   return `<div class="spool-card-actions">
-    ${quick}
     <details class="spool-action-menu">
       <summary class="spool-action-btn spool-action-more" title="More actions">Actions</summary>
       <div class="spool-action-menu-panel">${menu}</div>
@@ -14045,11 +21397,11 @@ function _spoolCardActionsHtml(spoolId) {
 function _openSpoolActionModal(spoolId, el, refresh = _refreshSpoolsSurface) {
   const spool = _allSpools.find(s => String(s.id) === String(spoolId));
   const title = spool
-    ? `Spool #${spool.id} · ${[spool.color_name, spool.material, spool.subtype].filter(Boolean).join(' ')}`
+    ? `Spool ${_spoolDisplayLabel(spool)} · ${[spool.color_name, spool.material, spool.subtype].filter(Boolean).join(' ')}`
     : `Spool #${spoolId}`;
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
-  const actions = _SPOOL_ACTIONS.map(a => _spoolActionControl(a, spoolId, true)).join('');
+  const actions = _spoolActionsFor(spool).map(a => _spoolActionControl(a, spoolId, true)).join('');
   overlay.innerHTML = `
     <div class="modal-box spool-action-modal">
       <div class="modal-header">
@@ -14101,10 +21453,10 @@ function _spoolGroupedCards(spools) {
     groups.get(key).push(s);
   }
   return [...groups.values()]
-    .map(group => group.sort((a, b) => Number(a.id || 0) - Number(b.id || 0)))
+    .map(group => group.sort((a, b) => _spoolDisplayId(a) - _spoolDisplayId(b) || Number(a.id || 0) - Number(b.id || 0)))
     .sort((a, b) => {
-      const aLatest = Math.max(...a.map(s => Number(s.id || 0)));
-      const bLatest = Math.max(...b.map(s => Number(s.id || 0)));
+      const aLatest = Math.max(...a.map(s => _spoolDisplayId(s)));
+      const bLatest = Math.max(...b.map(s => _spoolDisplayId(s)));
       return aLatest - bLatest;
     });
 }
@@ -14118,70 +21470,101 @@ function _spoolGroupCounts(spools) {
   return counts;
 }
 
+function _spoolSwatchCardHtml(group) {
+  const first = group[0];
+  const archived = !!first.archived_at;
+  const totalRemaining = group.reduce((sum, s) => sum + Number(s.remaining_g || 0), 0);
+  const totalLabel = group.reduce((sum, s) => sum + Number(s.label_weight_g || 0), 0);
+  const pct = totalLabel > 0 ? Math.round(totalRemaining * 100 / totalLabel) : 0;
+  const barColor = _spoolProgressColor(pct);
+  const latest = group.reduce((best, s) => _spoolDisplayId(s) > _spoolDisplayId(best) ? s : best, first);
+  const textColor = _spoolTextColor(first.color_hex || '#404040');
+  const material = [first.material, first.subtype].filter(Boolean).join(' ') || 'Unknown material';
+  const rollIds = group.map(s => _spoolDisplayLabel(s)).join(', ');
+  const loc = _spoolGroupLocationSummary(group);
+  const countLabel = group.length === 1 ? _spoolDisplayLabel(first) : `${group.length} rolls`;
+  const lowCls = pct < 20 ? ' spool-low' : pct < 50 ? ' spool-amber' : '';
+  return `<button type="button" class="spool-swatch-card${archived ? ' spool-swatch-archived' : ''}" data-spool-id="${latest.id}" title="${esc(`${material} · ${rollIds}`)}">
+    <span class="spool-swatch-band" style="${_spoolColorStyle(first)};color:${textColor}">
+      <span class="spool-swatch-color">${esc(first.color_name || '—')}</span>
+      <span class="spool-swatch-count">${esc(countLabel)}</span>
+      ${archived ? '<span class="spool-archived-stamp">Reserved</span>' : ''}
+    </span>
+    <span class="spool-swatch-body">
+      <span class="spool-swatch-material">${esc(material)}</span>
+      <span class="spool-swatch-brand">${esc(first.brand || 'Unknown brand')}</span>
+      <span class="spool-swatch-meta">
+        <span title="${esc(loc)}">${esc(loc)}</span>
+        <strong class="${lowCls}">${pct}%</strong>
+        <b>${Math.round(totalRemaining)}g</b>
+      </span>
+      <span class="spool-progress-bar">
+        <span class="spool-progress-fill" style="width:${pct}%;background:${barColor}"></span>
+      </span>
+    </span>
+  </button>`;
+}
+
+function _spoolSwatchHtml(spools) {
+  const groups = _spoolGroupedCards(spools);
+  return groups.length
+    ? groups.map(_spoolSwatchCardHtml).join('')
+    : '<p class="filament-empty">No spools match the current filters.</p>';
+}
+
 function _spoolGroupCardHtml(group) {
   if (group.length === 1) return _spoolCardHtml(group[0]);
   const first = group[0];
-  const latestId = Math.max(...group.map(s => Number(s.id || 0)));
-  const rollTitle = group.map(s => `#${s.id}`).join(', ');
-  const totalRemaining = group.reduce((sum, s) => sum + Number(s.remaining_g || 0), 0);
-  const totalLabel = group.reduce((sum, s) => sum + Number(s.label_weight_g || 0), 0);
-  const used = Math.max(0, totalLabel - totalRemaining);
-  const pct = totalLabel > 0 ? Math.round(totalRemaining * 100 / totalLabel) : 0;
-  const barColor = _spoolProgressColor(pct);
+  const archived = !!first.archived_at;
+  const latestId = Math.max(...group.map(s => _spoolDisplayId(s)));
+  const rollTitle = group.map(s => _spoolDisplayLabel(s)).join(', ');
   const bandColor = first.color_hex || '#404040';
   const textColor = _spoolTextColor(bandColor);
-  const locationSummary = _spoolGroupLocationSummary(group);
-  const confidenceScores = group.map(s => Number(s.confidence?.score ?? 0)).filter(n => !isNaN(n));
-  const confidenceAvg = confidenceScores.length
-    ? Math.round(confidenceScores.reduce((sum, n) => sum + n, 0) / confidenceScores.length)
-    : null;
-  const rollChips = group.map(s => {
+  const lightBand = textColor === '#1a1a1a';
+  const tabStyle = lightBand
+    ? '--spool-tab-bg:#08111f;--spool-tab-text:#f8fafc;--spool-tab-border:rgba(2,6,23,0.72);'
+    : '--spool-tab-bg:#f8fafc;--spool-tab-text:#0f172a;--spool-tab-border:rgba(248,250,252,0.86);';
+  const tabs = group.map((s, idx) => {
     const rollPct = s.label_weight_g > 0 ? Math.round(s.remaining_g * 100 / s.label_weight_g) : 0;
     const cls = rollPct < 20 ? ' spool-low' : rollPct < 50 ? ' spool-amber' : '';
-    return `<a class="spool-roll-chip${cls}" href="#/spool/${s.id}" title="#${s.id} · ${Math.round(s.remaining_g || 0)}g">#${s.id}</a>`;
+    return `<button type="button" class="spool-roll-tab${cls}${idx === 0 ? ' active' : ''}" data-spool-group-tab="${esc(_spoolGroupKey(first))}" data-spool-id="${s.id}" title="${_spoolDisplayLabel(s)} · ${Math.round(s.remaining_g || 0)}g">${_spoolDisplayLabel(s)}</button>`;
   }).join('');
-  const rows = group.map(s => {
+  const panels = group.map((s, idx) => {
     const rollPct = s.label_weight_g > 0 ? Math.round(s.remaining_g * 100 / s.label_weight_g) : 0;
+    const barColor = _spoolProgressColor(rollPct);
+    const used = Math.max(0, Number(s.label_weight_g || 0) - Number(s.remaining_g || 0));
     const cls = rollPct < 20 ? ' spool-low' : rollPct < 50 ? ' spool-amber' : '';
     const p = _latestPrinters.find(x => x.id === s.location_printer_id);
     const loc = s.location_printer_id
       ? `${p?.custom_name ?? s.location_printer_id} ${_amsSlotLabel(p, s.location_slot)}`
       : _spoolStorageLocationName(s.storage_location_id);
-    return `<div class="spool-group-roll">
-      <a class="spool-group-roll-id" href="#/spool/${s.id}">#${s.id}</a>
-      <span class="spool-group-roll-grams${cls}">${Math.round(s.remaining_g || 0)}g</span>
-      <span class="spool-group-roll-loc" title="${esc(loc)}">${esc(loc)}</span>
-      <button class="spool-group-manage spool-action-btn spool-action-more" data-action="manage" data-id="${s.id}" title="Spool actions">Manage</button>
-    </div>`;
-  }).join('');
-  return `<div class="spool-card spool-group-card" data-spool-group="${esc(_spoolGroupKey(first))}">
-    <div class="spool-card-band" style="${_spoolColorStyle(first)};color:${textColor}">
-      <span class="spool-color-name">${esc(first.color_name || '—')}</span>
-      <span class="spool-id-badge" title="${esc(`${group.length} rolls · latest #${latestId} · ${rollTitle}`)}">${group.length} rolls</span>
-    </div>
-    <div class="spool-card-body">
+    return `<div class="spool-group-panel${idx === 0 ? ' active' : ''}" data-spool-group-panel="${esc(_spoolGroupKey(first))}" data-spool-id="${s.id}">
       <div class="spool-card-row">
-        <span class="spool-material">${esc(first.material)}${first.subtype ? ' ' + esc(first.subtype) : ''}</span>
-        <span class="spool-location-badge" title="${esc(locationSummary)}">${esc(locationSummary)}</span>
+        <span class="spool-material">${esc(s.material)}${s.subtype ? ' ' + esc(s.subtype) : ''}</span>
+        <span class="spool-location-badge" title="${esc(loc)}">${esc(loc)}</span>
       </div>
-      <div class="spool-card-row spool-brand">${esc(first.brand || 'Unknown brand')}</div>
+      <div class="spool-card-row spool-confidence-row">${_spoolConfidenceHtml(s)}</div>
+      <div class="spool-card-row spool-brand">${esc(s.brand || 'Unknown brand')}</div>
       <div class="spool-remaining-row">
-        <span class="spool-remaining-label">Combined ${group.length} rolls</span>
-        <span class="spool-remaining-pct${pct < 20 ? ' spool-low' : pct < 50 ? ' spool-amber' : ''}">${pct}%</span>
-        <span class="spool-remaining-g">${Math.round(totalRemaining)}g</span>
+        <span class="spool-remaining-label">Remaining</span>
+        <span class="spool-remaining-pct${cls}">${rollPct}%</span>
+        <span class="spool-remaining-g">${Math.round(s.remaining_g || 0)}g</span>
       </div>
       <div class="spool-progress-bar">
-        <div class="spool-progress-fill" style="width:${pct}%;background:${barColor}"></div>
+        <div class="spool-progress-fill" style="width:${rollPct}%;background:${barColor}"></div>
       </div>
-      <div class="spool-meta-row">
-        <span class="spool-meta">${Math.round(totalLabel)}g total</span>
-        ${confidenceAvg != null ? `<span class="spool-meta">${confidenceAvg}% trust</span>` : ''}
-      </div>
-      <div class="spool-roll-chips">${rollChips}</div>
-      <details class="spool-group-details">
-        <summary class="spool-group-summary">Rolls <span>${group.length}</span></summary>
-        <div class="spool-group-rolls">${rows}</div>
-      </details>
+      <div class="spool-meta-row"><span class="spool-meta">${Math.round(s.label_weight_g || 0)}g label</span><span class="spool-meta">${Math.round(used)}g used</span></div>
+      ${_spoolCardActionsHtml(s.id)}
+    </div>`;
+  }).join('');
+  return `<div class="spool-card spool-group-card${archived ? ' spool-card-archived' : ''}" data-spool-group="${esc(_spoolGroupKey(first))}">
+    <div class="spool-card-band" style="${_spoolColorStyle(first)};color:${textColor};${tabStyle}">
+      <span class="spool-color-name">${esc(first.color_name || '—')}</span>
+      <div class="spool-roll-tabs" role="tablist" aria-label="${esc(first.color_name || 'Spool')} rolls" title="${esc(`${group.length} rolls · latest #${latestId} · ${rollTitle}`)}">${tabs}</div>
+      ${archived ? '<span class="spool-archived-stamp">Reserved</span>' : ''}
+    </div>
+    <div class="spool-card-body">
+      <div class="spool-group-panels">${panels}</div>
     </div>
   </div>`;
 }
@@ -14192,14 +21575,16 @@ function _spoolCardHtml(s) {
   const bandColor = s.color_hex || '#404040';
   const textColor = _spoolTextColor(bandColor);
   const used = Math.max(0, s.label_weight_g - s.remaining_g);
+  const archived = !!s.archived_at;
   const p = _latestPrinters.find(x => x.id === s.location_printer_id);
   const locBadge = s.location_printer_id
     ? `<span class="spool-location-badge" title="${(p?.custom_name ?? s.location_printer_id)} ${_amsSlotLabel(p, s.location_slot)}">${p?.custom_name ?? s.location_printer_id}</span>`
     : `<span class="spool-location-badge spool-location-storage" title="${esc(_spoolStorageLocationName(s.storage_location_id))}">${esc(_spoolStorageLocationName(s.storage_location_id))}</span>`;
-  return `<div class="spool-card" data-spool-id="${s.id}">
+  return `<div class="spool-card${archived ? ' spool-card-archived' : ''}" data-spool-id="${s.id}">
     <div class="spool-card-band" style="${_spoolColorStyle(s)};color:${textColor}">
       <span class="spool-color-name">${s.color_name || '—'}</span>
-      <span class="spool-id-badge">#${s.id}</span>
+      <span class="spool-id-badge">${_spoolDisplayLabel(s)}</span>
+      ${archived ? '<span class="spool-archived-stamp">Reserved</span>' : ''}
     </div>
     <div class="spool-card-body">
       <div class="spool-card-row">
@@ -14237,7 +21622,7 @@ function _spoolTableHtml(spools) {
       ? `${p?.custom_name ?? s.location_printer_id} ${_amsSlotLabel(p, s.location_slot)}`
       : _spoolStorageLocationName(s.storage_location_id);
     return `<tr class="spool-tr" data-spool-id="${s.id}">
-      <td class="spool-td">#${s.id}</td>
+      <td class="spool-td">${_spoolDisplayLabel(s)}</td>
       <td class="spool-td">${added}</td>
       <td class="spool-td"><span class="spool-table-swatch" style="${_spoolColorStyle(s)}"></span></td>
       <td class="spool-td">${s.material}</td>
@@ -14279,9 +21664,9 @@ function _spoolCabinetTileHtml(s) {
   const textColor = _spoolTextColor(bandColor);
   const pctCls = pct < 20 ? ' spool-low' : pct < 50 ? ' spool-amber' : '';
   return `<div class="spool-cabinet-tile" data-spool-id="${s.id}">
-    <a class="spool-cabinet-swatch" href="#/spool/${s.id}" style="${_spoolColorStyle(s)};color:${textColor}" title="#${s.id} ${esc(s.color_name || '')}">
+    <a class="spool-cabinet-swatch" href="#/spool/${s.id}" style="${_spoolColorStyle(s)};color:${textColor}" title="${_spoolDisplayLabel(s)} ${esc(s.color_name || '')}">
       <span>${esc(s.color_name || bandColor)}</span>
-      <b>#${s.id}</b>
+      <b>${_spoolDisplayLabel(s)}</b>
     </a>
     <div class="spool-cabinet-info">
       <strong>${esc(s.material)}${s.subtype ? ` ${esc(s.subtype)}` : ''}</strong>
@@ -14334,13 +21719,266 @@ function _spoolCabinetHtml(spools) {
   return `<div class="spool-cabinet-view">${laneHtml}${loadedHtml}</div>`;
 }
 
+function _spoolVisibleNumberSort(a, b) {
+  return (_spoolDisplayId(a) || Number.MAX_SAFE_INTEGER) - (_spoolDisplayId(b) || Number.MAX_SAFE_INTEGER);
+}
+
+function _rackRowCount(spools = [], minRows = 9, cols = 10) {
+  const maxId = Math.max(0, ...spools.map(s => _spoolDisplayId(s) || 0));
+  return Math.max(minRows, Math.ceil(maxId / cols));
+}
+
+function _rackSlotNumbers(rows = 9, cols = 10) {
+  const slots = [];
+  for (let row = 0; row < rows; row += 1) {
+    const start = row * cols + 1;
+    const values = Array.from({ length: cols }, (_, i) => start + i);
+    slots.push(row % 2 === 0 ? values : values.reverse());
+  }
+  return slots;
+}
+
+function _rackRowLocationName(rowIndex) {
+  const start = rowIndex * 10 + 1;
+  const end = start + 9;
+  return `Rack Row ${rowIndex + 1} · ${start}-${end}`;
+}
+
+function _rackRowLocationNote(rowIndex) {
+  const start = rowIndex * 10 + 1;
+  const end = start + 9;
+  const direction = rowIndex % 2 === 0 ? 'left to right' : 'right to left';
+  return `Main cupboard snake rack · slots ${start}-${end} · ${direction}`;
+}
+
+function _rackLocationRange(loc) {
+  const name = String(loc?.name || '');
+  const notes = String(loc?.notes || '');
+  const text = `${name} ${notes}`;
+  if (!/(rack row|snake rack|slots?)/i.test(text)) return null;
+  const validRange = (match) => {
+    if (!match) return null;
+    const start = Number(match[1]);
+    const end = Number(match[2]);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || start < 1 || end < start) return null;
+    return { start, end };
+  };
+  const slotRange = validRange(text.match(/slots?\s*(\d+)\s*[-–—]\s*(\d+)/i));
+  if (slotRange) return slotRange;
+  const namedRange = validRange(name.match(/[·:]\s*(\d+)\s*[-–—]\s*(\d+)/i));
+  if (namedRange) return namedRange;
+  const allRanges = [...text.matchAll(/(\d+)\s*[-–—]\s*(\d+)/g)].map(validRange).filter(Boolean);
+  if (allRanges.length) return allRanges[allRanges.length - 1];
+  const rowMatch = name.match(/rack\s*row\s*(\d+)/i);
+  const rowNum = rowMatch ? Number(rowMatch[1]) : 0;
+  if (rowNum > 0) {
+    const start = (rowNum - 1) * 10 + 1;
+    return { start, end: start + 9 };
+  }
+  return null;
+}
+
+function _rackLocationSpools(spools, loc) {
+  const range = _rackLocationRange(loc);
+  if (!range) {
+    return spools
+      .filter(s => String(_spoolHomeLocationId(s) || '') === String(loc.id))
+      .sort(_spoolVisibleNumberSort);
+  }
+  return spools
+    .filter(s => {
+      const num = _spoolDisplayId(s);
+      return num >= range.start && num <= range.end;
+    })
+    .sort(_spoolVisibleNumberSort);
+}
+
+function _rackSlotClass(spool) {
+  if (!spool) return 'empty';
+  if (spool.archived_at) return 'reserved';
+  if (spool.location_printer_id) return 'loaded';
+  const pct = spool.label_weight_g > 0 ? spool.remaining_g * 100 / spool.label_weight_g : 100;
+  if (pct < _latestLowStockPct) return 'low';
+  return 'stored';
+}
+
+function _spoolRackHtml(spools) {
+  const byNumber = new Map();
+  spools.forEach(s => {
+    const n = _spoolDisplayId(s);
+    if (n > 0 && !byNumber.has(n)) byNumber.set(n, s);
+  });
+  const rows = _rackSlotNumbers(_rackRowCount(spools));
+  const rackSlots = rows.flat();
+  const rackStats = rackSlots.reduce((acc, num) => {
+    const spool = byNumber.get(num);
+    const state = _rackSlotClass(spool);
+    acc[state] = (acc[state] || 0) + 1;
+    if (spool) acc.held += 1;
+    return acc;
+  }, { stored: 0, loaded: 0, low: 0, reserved: 0, empty: 0, held: 0 });
+  const firstEmpty = rackSlots.find(num => !byNumber.has(num));
+  const firstLoaded = rackSlots.find(num => _rackSlotClass(byNumber.get(num)) === 'loaded');
+  const firstReserved = rackSlots.find(num => _rackSlotClass(byNumber.get(num)) === 'reserved');
+  const overviewRows = rows.map((row, rowIndex) => {
+    const start = rowIndex * 10 + 1;
+    const end = start + 9;
+    const rowStates = row.map(num => {
+      const spool = byNumber.get(num);
+      const state = _rackSlotClass(spool);
+      const label = spool
+        ? `${_spoolDisplayLabel(spool)} ${spool.color_name || ''} ${spool.material || ''}`
+        : `Empty rack slot ${num}`;
+      return `<span class="spool-rack-overview-cell spool-rack-overview-${state}" title="${esc(label)}"></span>`;
+    }).join('');
+    return `<button type="button" class="spool-rack-overview-row" data-rack-jump="${rowIndex + 1}" aria-label="Jump to rack row ${rowIndex + 1}">
+      <span class="spool-rack-overview-label">R${rowIndex + 1}</span>
+      <span class="spool-rack-overview-strip">${rowStates}</span>
+      <small>${start}-${end}</small>
+    </button>`;
+  }).join('');
+  const cells = rows.map((row, rowIndex) => {
+    const direction = rowIndex % 2 === 0 ? 'Left to right' : 'Right to left';
+    const arrow = rowIndex % 2 === 0 ? '&rarr;' : '&larr;';
+    const rowHeld = row.filter(num => byNumber.has(num)).length;
+    const rowLoaded = row.filter(num => _rackSlotClass(byNumber.get(num)) === 'loaded').length;
+    const rowCells = row.map(num => {
+      const spool = byNumber.get(num);
+      const state = _rackSlotClass(spool);
+      const label = spool
+        ? `${_spoolDisplayLabel(spool)} ${spool.color_name || ''} ${spool.material || ''} ${spool.brand || ''}`
+        : `Empty rack slot ${num}`;
+      const pct = spool?.label_weight_g > 0 ? Math.round(spool.remaining_g * 100 / spool.label_weight_g) : null;
+      const style = spool ? _spoolColorStyle(spool) : '';
+      const textColor = spool ? _spoolTextColor(spool.color_hex || '#1f2937') : '';
+      const stateLabel = state === 'stored' ? 'Stored' : state[0].toUpperCase() + state.slice(1);
+      const body = `<span class="spool-rack-num">#${num}</span>
+        ${spool ? `<span class="spool-rack-name">${esc(spool.color_name || spool.material || 'Spool')}</span>` : '<span class="spool-rack-empty">Empty</span>'}
+        ${spool ? `<span class="spool-rack-meta">${esc(spool.material || '')}${pct != null ? ` · ${pct}%` : ''}</span><span class="spool-rack-state">${stateLabel}</span>` : ''}`;
+      if (spool) {
+        return `<a class="spool-rack-cell spool-rack-${state}" href="#/spool/${spool.id}" style="${style};color:${textColor}" title="${esc(label)}">${body}</a>`;
+      }
+      return `<div class="spool-rack-cell spool-rack-empty-slot" title="${esc(label)}">${body}</div>`;
+    }).join('');
+    return `<section class="spool-rack-row" id="rack-row-${rowIndex + 1}">
+      <div class="spool-rack-row-head">
+        <span class="spool-rack-row-kicker">Row ${rowIndex + 1}</span>
+        <strong>${rowIndex * 10 + 1}-${rowIndex * 10 + 10}</strong>
+        <span>${arrow} ${direction}</span>
+        <small>${rowHeld}/10 held${rowLoaded ? ` · ${rowLoaded} loaded` : ''}</small>
+      </div>
+      <div class="spool-rack-row-grid">${rowCells}</div>
+    </section>`;
+  }).join('');
+  return `<div class="spool-rack-view">
+    <div class="spool-rack-map-head">
+      <div>
+        <span class="eyebrow">Main cupboard</span>
+        <strong>Snake rack map</strong>
+        <p>Matches the physical rack numbers: odd rows read left to right, even rows read right to left.</p>
+      </div>
+      <div class="spool-rack-map-stats">
+        <span><b>${rackStats.held}</b><small>held</small></span>
+        <span><b>${rackStats.empty}</b><small>empty</small></span>
+        <span><b>${rackStats.loaded}</b><small>loaded</small></span>
+        <span><b>${rackStats.reserved}</b><small>reserved</small></span>
+      </div>
+    </div>
+    <div class="spool-rack-overview">
+      <div class="spool-rack-overview-grid">${overviewRows}</div>
+      <div class="spool-rack-overview-notes">
+        <span><b>${rows.length}</b> rows</span>
+        <span><b>${rackSlots.length}</b> rack slots</span>
+        <span><b>${firstEmpty ? `#${firstEmpty}` : 'Full'}</b> first empty</span>
+        <span><b>${firstLoaded ? `#${firstLoaded}` : 'None'}</b> loaded</span>
+        <span><b>${firstReserved ? `#${firstReserved}` : 'None'}</b> reserved</span>
+      </div>
+    </div>
+    <div class="spool-rack-legend">
+      <span><i class="spool-rack-dot stored"></i>Stored</span>
+      <span><i class="spool-rack-dot loaded"></i>Loaded</span>
+      <span><i class="spool-rack-dot low"></i>Low</span>
+      <span><i class="spool-rack-dot reserved"></i>Reserved</span>
+      <span><i class="spool-rack-dot empty"></i>Empty</span>
+    </div>
+    ${cells}
+  </div>`;
+}
+
+/** Parse spool search — e.g. "146 black" → ≥136g remaining + colour tokens; "#146" → spool number. */
+function _parseSpoolSearchQuery(raw) {
+  const trimmed = String(raw || '').trim();
+  if (!trimmed) return { minRemainingG: null, textTokens: [], toleranceG: 10, spoolNumberOnly: false };
+  if (/^#\d+$/.test(trimmed)) {
+    return { minRemainingG: null, textTokens: [], toleranceG: 10, spoolNumberOnly: true };
+  }
+  const tokens = trimmed.split(/\s+/).filter(Boolean);
+  let minRemainingG = null;
+  const textTokens = [];
+  let loneGramToken = null;
+  for (const t of tokens) {
+    const gt = t.match(/^>(\d+(?:\.\d+)?)\s*g?$/i);
+    const gPlus = t.match(/^(\d+(?:\.\d+)?)\s*g?\+$/i);
+    const plainG = t.match(/^(\d+(?:\.\d+)?)\s*g?$/i);
+    if (gt) minRemainingG = Number(gt[1]);
+    else if (gPlus) minRemainingG = Number(gPlus[1]);
+    else if (plainG && tokens.length > 1) minRemainingG = Number(plainG[1]);
+    else if (plainG && tokens.length === 1) loneGramToken = Number(plainG[1]);
+    else textTokens.push(t.toLowerCase());
+  }
+  const spoolNumberOnly = tokens.length === 1 && /^\d+$/.test(tokens[0]) && minRemainingG == null && loneGramToken == null;
+  if (spoolNumberOnly) minRemainingG = null;
+  else if (minRemainingG == null && loneGramToken != null) minRemainingG = loneGramToken;
+  return { minRemainingG, textTokens, toleranceG: 10, spoolNumberOnly };
+}
+
+function _spoolTextHaystack(s) {
+  return [
+    _spoolDisplayLabel(s),
+    String(_spoolDisplayId(s) || ''),
+    `db:${s.id}`,
+    String(s.id || ''),
+    s.material,
+    s.brand,
+    s.subtype,
+    s.color_name,
+    s.color_hex,
+    s.notes,
+    s.storage_location_name,
+    s.location_printer_id,
+    String(Math.round(s.remaining_g || 0)),
+  ].filter(Boolean).join(' ').toLowerCase();
+}
+
+function _spoolMatchesSearch(s, parsed, rawQ) {
+  if (!rawQ) return true;
+  if (parsed.spoolNumberOnly) {
+    // Exact spool number (display #, DB id) — not a loose substring that also hits
+    // remaining_g "1000" or a location like "Rack Row 1-100".
+    const n = String(rawQ).replace(/^#/, '').trim();
+    return String(_spoolDisplayId(s) || '') === n || String(s.id || '') === n;
+  }
+  if (parsed.minRemainingG != null) {
+    const floor = parsed.minRemainingG - (parsed.toleranceG ?? 10);
+    if (Number(s.remaining_g || 0) < floor) return false;
+  }
+  if (!parsed.textTokens.length) {
+    if (parsed.minRemainingG != null) return true;
+    return _spoolTextHaystack(s).includes(String(rawQ).toLowerCase());
+  }
+  const hay = _spoolTextHaystack(s);
+  return parsed.textTokens.every(tok => hay.includes(tok));
+}
+
 function _applySpoolFilters(spools) {
   const f = _spoolsFilter;
   const thresh = _latestLowStockPct;
+  const parsedSearch = f.search ? _parseSpoolSearchQuery(f.search) : null;
   const filtered = spools.filter(s => {
     if (f.status === 'active'   && s.archived_at)  return false;
     if (f.status === 'archived' && !s.archived_at) return false;
     if (f.printer && s.location_printer_id !== f.printer) return false;
+    if (f.location && String(s.storage_location_id || '') !== String(f.location)) return false;
     if (f.slotFilter === 'loaded'  && !s.location_printer_id) return false;
     if (f.slotFilter === 'storage' &&  s.location_printer_id) return false;
     if (f.slotFilter === 'low') {
@@ -14350,20 +21988,7 @@ function _applySpoolFilters(spools) {
     if (f.material && s.material !== f.material) return false;
     if (f.brand    && s.brand    !== f.brand)    return false;
     if (f.search) {
-      const q = f.search.toLowerCase();
-      const haystack = [
-        `#${s.id}`,
-        String(s.id || ''),
-        s.material,
-        s.brand,
-        s.subtype,
-        s.color_name,
-        s.color_hex,
-        s.notes,
-        s.storage_location_name,
-        s.location_printer_id,
-      ].filter(Boolean).join(' ').toLowerCase();
-      if (!haystack.includes(q)) return false;
+      if (!_spoolMatchesSearch(s, parsedSearch, f.search)) return false;
     }
     return true;
   });
@@ -14371,11 +21996,54 @@ function _applySpoolFilters(spools) {
   const multiples = groupCounts
     ? filtered.filter(s => (groupCounts.get(_spoolGroupKey(s)) || 0) > 1)
     : filtered;
+  const weightSort = parsedSearch?.minRemainingG != null && !parsedSearch.spoolNumberOnly;
   return multiples.sort((a, b) => {
-    const va = a[_spoolsSortKey], vb = b[_spoolsSortKey];
+    if (weightSort) {
+      const ra = Number(a.remaining_g || 0);
+      const rb = Number(b.remaining_g || 0);
+      if (ra !== rb) return ra - rb;
+    }
+    const va = _spoolsSortKey === 'id' ? _spoolDisplayId(a) : a[_spoolsSortKey];
+    const vb = _spoolsSortKey === 'id' ? _spoolDisplayId(b) : b[_spoolsSortKey];
     if (typeof va === 'string') return _spoolsSortDir * (va || '').localeCompare(vb || '');
     return _spoolsSortDir * ((va ?? 0) - (vb ?? 0));
   });
+}
+
+async function _spoolExactSearchFallback() {
+  const raw = String(_spoolsFilter.search || '').trim();
+  const match = raw.match(/^#?(\d+)$/);
+  if (!match) return null;
+  try {
+    let r = await fetch(`/api/spools/by-number/${encodeURIComponent(match[1])}`, { cache: 'no-store' });
+    if (r.status === 404) {
+      r = await fetch(`/api/spools/${encodeURIComponent(match[1])}`, { cache: 'no-store' });
+    }
+    if (!r.ok) return null;
+    const spool = await r.json();
+    const filtered = _applySpoolFilters([spool]);
+    if (filtered.length) return { spools: filtered };
+    if (_spoolsFilter.status === 'archived' && !spool.archived_at) {
+      return { message: `Spool ${_spoolDisplayLabel(spool)} exists, but it is active. Switch to Any status or Active.` };
+    }
+    if (_spoolsFilter.status === 'active' && spool.archived_at) {
+      return { message: `Spool ${_spoolDisplayLabel(spool)} is reserved. Switch to Any status or Reserved.` };
+    }
+  } catch {}
+  return null;
+}
+
+async function _ensureArchivedSpoolsLoaded() {
+  if (_allSpools.some(s => s.archived_at)) return false;
+  try {
+    const r = await fetch(`/api/spools/all?_=${Date.now()}`, { cache: 'no-store' });
+    if (!r.ok) return false;
+    const spools = await r.json();
+    if (!Array.isArray(spools) || !spools.some(s => s.archived_at)) return false;
+    _allSpools = spools;
+    return true;
+  } catch {}
+  return false;
 }
 
 function _stockInLocationOptions(selected = '', opts = {}) {
@@ -14479,6 +22147,7 @@ async function _renderStockInView(listEl) {
       <div class="stock-in-received">Already received as <a href="#/spool/${scanRoll.spool_id}">Spool #${scanRoll.spool_id}</a></div>
     ` : `
       <form class="stock-in-receive-form" data-token="${esc(scanRoll.token)}">
+        <label>Restock spool # <input name="restock_display_id" type="number" min="1" step="1" placeholder="Blank = new number"></label>
         <label>Location <select name="storage_location_id">${_stockInLocationOptions(scanRoll.storage_location_id || '', { defaultFirst: true })}</select></label>
         <label>Remaining <input name="remaining_g" type="number" min="0" step="1" value="${Math.round(Number(scanRoll.label_weight_g || defaultWeight))}"></label>
         <label>Label weight <input name="label_weight_g" type="number" min="0" step="1" value="${Math.round(Number(scanRoll.label_weight_g || defaultWeight))}"></label>
@@ -14586,6 +22255,7 @@ async function _renderStockInView(listEl) {
       return v === '' ? null : Number(v);
     };
     const body = {
+      restock_display_id: num('restock_display_id'),
       storage_location_id: num('storage_location_id'),
       remaining_g: num('remaining_g'),
       label_weight_g: num('label_weight_g'),
@@ -14599,7 +22269,8 @@ async function _renderStockInView(listEl) {
     if (!r.ok) return showToast('Receive failed', (await r.json()).detail || 'Could not receive roll', 'error');
     const result = await r.json();
     const spoolId = result.spool?.id;
-    showToast(`Spool #${spoolId} created`, result.label_printed ? 'Label printed' : (result.label_error || 'Label not printed'), result.label_error ? 'warn' : 'success');
+    const spoolDisplayId = result.spool?.display_id || spoolId;
+    showToast(`Spool #${spoolDisplayId} created`, result.label_printed ? 'Label printed' : (result.label_error || 'Label not printed'), result.label_error ? 'warn' : 'success');
     location.hash = `#/spool/${spoolId}`;
   });
 
@@ -14814,9 +22485,11 @@ function _printStockInSheet(order) {
   win.document.close();
 }
 
-function _renderSpoolList(el) {
+async function _renderSpoolList(el) {
   const listEl = el.querySelector('#spool-list');
   if (!listEl) return;
+  const colourMode = _spoolsViewMode === 'colour';
+  el.classList.toggle('spool-page-colour-mode', colourMode);
   if (_spoolsViewMode === 'incoming') {
     listEl.className = 'stock-in-view';
     listEl.innerHTML = `<div class="detail-placeholder" style="min-height:8rem">Loading stock-in…</div>`;
@@ -14829,30 +22502,32 @@ function _renderSpoolList(el) {
     _attachFilamentEvents(listEl, () => _renderSpoolsContent(el));
     return;
   }
+  if (colourMode || _spoolsViewMode === 'colour') {
+    listEl.className = 'spool-colour-match';
+    listEl.innerHTML = _colourMatchHtml();
+    _attachColourMatchEvents(listEl);
+    return;
+  }
   const filtered = _applySpoolFilters(_allSpools);
   if (filtered.length === 0) {
     listEl.className = '';
-    listEl.innerHTML = `<p class="filament-empty">No spools match the current filters.</p>`;
+    listEl.innerHTML = `<p class="filament-empty">Searching reserved records...</p>`;
+    if (_spoolsFilter.status === 'archived' && await _ensureArchivedSpoolsLoaded()) {
+      const reloaded = _applySpoolFilters(_allSpools);
+      if (reloaded.length) {
+        _paintSpoolList(el, listEl, reloaded);
+        return;
+      }
+    }
+    const fallback = await _spoolExactSearchFallback();
+    if (fallback?.spools?.length) {
+      _paintSpoolList(el, listEl, fallback.spools);
+      return;
+    }
+    listEl.innerHTML = `<p class="filament-empty">${esc(fallback?.message || 'No spools match the current filters.')}</p>`;
     return;
   }
-  if (_spoolsViewMode === 'table') {
-    listEl.className = '';
-    listEl.innerHTML = _spoolTableHtml(filtered);
-    listEl.querySelectorAll('.spool-th[data-sort]').forEach(th => {
-      th.addEventListener('click', () => {
-        if (_spoolsSortKey === th.dataset.sort) _spoolsSortDir *= -1;
-        else { _spoolsSortKey = th.dataset.sort; _spoolsSortDir = 1; }
-        _renderSpoolList(el);
-      });
-    });
-  } else if (_spoolsViewMode === 'cabinet') {
-    listEl.className = '';
-    listEl.innerHTML = _spoolCabinetHtml(filtered);
-  } else {
-    listEl.className = 'spool-card-grid';
-    listEl.innerHTML = _spoolGroupedCards(filtered).map(_spoolGroupCardHtml).join('');
-  }
-  _attachSpoolListEvents(el, listEl);
+  _paintSpoolList(el, listEl, filtered);
 }
 
 function _spoolIntelligenceHtml(intel = {}) {
@@ -14913,6 +22588,9 @@ function _spoolsCategoryHtml(spools, summary, costs, intelligence = {}) {
   const brandSet = [...new Set(spools.map(s => s.brand))].sort();
   const matOpts = `<option value="">All materials</option>` + matSet.map(m => `<option value="${m}"${_spoolsFilter.material===m?' selected':''}>${m}</option>`).join('');
   const brandOpts = `<option value="">All brands</option>` + brandSet.map(b => `<option value="${b}"${_spoolsFilter.brand===b?' selected':''}>${b}</option>`).join('');
+  const activeLocation = _spoolsFilter.location
+    ? _spoolLocations.find(loc => String(loc.id) === String(_spoolsFilter.location))
+    : null;
 
   const fc = (key, val, label) => `<button class="spool-chip${_spoolsFilter[key]===val?' spool-chip-active':''}" data-fkey="${key}" data-fval="${val}">${label}</button>`;
 
@@ -14920,23 +22598,27 @@ function _spoolsCategoryHtml(spools, summary, costs, intelligence = {}) {
     <div class="spool-page-header">
       <div class="settings-section-title">Spool Inventory</div>
       <div class="spool-header-actions">
-        <input class="spool-search" type="search" placeholder="Search spools…" value="${_spoolsFilter.search}">
+        <input class="spool-search" type="search" placeholder="Search spools… e.g. 146 black" value="${_spoolsFilter.search}">
         <button class="spool-add-btn">+ Add Spool</button>
       </div>
     </div>
     ${_spoolIntelligenceHtml(intelligence)}
     <div class="spool-filter-bar">
         <div class="spool-view-toggle">
-          <button class="spool-view-btn${_spoolsViewMode==='cards'?' active':''}" data-view="cards">Cards</button>
+          <button class="spool-view-btn${_spoolsViewMode==='swatch'?' active':''}" data-view="swatch">Swatch</button>
+          <button class="spool-view-btn${_spoolsViewMode==='detail'?' active':''}" data-view="detail">Detail</button>
           <button class="spool-view-btn${_spoolsViewMode==='table'?' active':''}" data-view="table">Table</button>
           <button class="spool-view-btn${_spoolsViewMode==='cabinet'?' active':''}" data-view="cabinet">Cabinet</button>
+          <button class="spool-view-btn${_spoolsViewMode==='rack'?' active':''}" data-view="rack">Rack</button>
           <button class="spool-view-btn${_spoolsViewMode==='incoming'?' active':''}" data-view="incoming">Stock In</button>
           <button class="spool-view-btn${_spoolsViewMode==='catalogue'?' active':''}" data-view="catalogue">Filament catalogue</button>
+          <button class="spool-view-btn${_spoolsViewMode==='colour'?' active':''}" data-view="colour">Colour match</button>
         </div>
         <div class="spool-chips spool-toolbar-chips">
-          ${fc('status','active','Active')}${fc('status','archived','Archived')}
+          ${fc('status','all','Any status')}${fc('status','active','Active')}${fc('status','archived','Reserved')}
           <span class="spool-chip-sep"></span>
           ${fc('slotFilter','all','All')}${fc('slotFilter','multiples','Multiples')}${fc('slotFilter','loaded','Loaded')}${fc('slotFilter','storage','Shelved')}${fc('slotFilter','low','Low stock')}
+          ${activeLocation ? `${fc('location', _spoolsFilter.location, `Rack: ${activeLocation.name}`)}${fc('location', '', 'Clear rack')}` : ''}
         </div>
         <select class="spool-filter-sel" data-fkey="material">${matOpts}</select>
         <select class="spool-filter-sel" data-fkey="brand">${brandOpts}</select>
@@ -14972,8 +22654,61 @@ function _refreshSpoolsSurface() {
   return location.hash.startsWith('#/spools') ? renderSpoolsView() : _renderSettingsContent('spools');
 }
 
+function _paintSpoolList(el, listEl, spools) {
+  if (_spoolsViewMode === 'table') {
+    listEl.className = '';
+    listEl.innerHTML = _spoolTableHtml(spools);
+    listEl.querySelectorAll('.spool-th[data-sort]').forEach(th => {
+      th.addEventListener('click', () => {
+        if (_spoolsSortKey === th.dataset.sort) _spoolsSortDir *= -1;
+        else { _spoolsSortKey = th.dataset.sort; _spoolsSortDir = 1; }
+        _renderSpoolList(el);
+      });
+    });
+  } else if (_spoolsViewMode === 'cabinet' && _spoolsFilter.status !== 'archived') {
+    listEl.className = '';
+    listEl.innerHTML = _spoolCabinetHtml(spools);
+  } else if (_spoolsViewMode === 'rack') {
+    listEl.className = '';
+    listEl.innerHTML = _spoolRackHtml(spools);
+  } else if (_spoolsViewMode === 'swatch') {
+    listEl.className = 'spool-swatch-grid';
+    listEl.innerHTML = _spoolSwatchHtml(spools);
+  } else {
+    listEl.className = 'spool-card-grid';
+    listEl.innerHTML = _spoolGroupedCards(spools).map(_spoolGroupCardHtml).join('');
+  }
+  _attachSpoolListEvents(el, listEl);
+}
+
 function _attachSpoolListEvents(el, listEl, refresh = _refreshSpoolsSurface) {
   listEl.addEventListener('click', e => {
+    const rackJump = e.target.closest('[data-rack-jump]');
+    if (rackJump && listEl.contains(rackJump)) {
+      e.preventDefault();
+      const row = listEl.querySelector(`#rack-row-${CSS.escape(String(rackJump.dataset.rackJump || ''))}`);
+      row?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      row?.classList.add('spool-rack-row-focus');
+      setTimeout(() => row?.classList.remove('spool-rack-row-focus'), 1100);
+      return;
+    }
+    const tab = e.target.closest('[data-spool-group-tab]');
+    if (tab && listEl.contains(tab)) {
+      e.preventDefault();
+      e.stopPropagation();
+      const card = tab.closest('.spool-group-card');
+      const spoolId = String(tab.dataset.spoolId || '');
+      card?.querySelectorAll('[data-spool-group-tab]').forEach(btn => btn.classList.toggle('active', btn === tab));
+      card?.querySelectorAll('[data-spool-group-panel]').forEach(panel => {
+        panel.classList.toggle('active', String(panel.dataset.spoolId || '') === spoolId);
+      });
+      return;
+    }
+    const swatch = e.target.closest('.spool-swatch-card[data-spool-id]');
+    if (swatch && listEl.contains(swatch)) {
+      location.hash = `#/spool/${swatch.dataset.spoolId}`;
+      return;
+    }
     if (e.target.closest('button, a, input, select, textarea, summary, details, .spool-action-menu')) return;
     const card = e.target.closest('.spool-card[data-spool-id]');
     if (!card || !listEl.contains(card)) return;
@@ -14986,15 +22721,20 @@ function _attachSpoolListEvents(el, listEl, refresh = _refreshSpoolsSurface) {
       const costs = await fetch('/api/filament/costs').then(r => r.json()).catch(() => []);
       if (action === 'manage') {
         _openSpoolActionModal(id, el, refresh);
+      } else if (action === 'assign') {
+        _openSpoolAssignModal(id, refresh);
       } else if (action === 'edit') {
         const spool = _allSpools.find(s => s.id == id);
         if (spool) _openSpoolModal(costs, refresh, spool);
-      } else if (action === 'label') {
+      } else if (action === 'label' || action === 'rack-label') {
         btn.disabled = true;
         const old = btn.textContent;
         btn.textContent = '...';
         try {
-          const r = await fetch(`/api/label_printer/print/${id}`, { method: 'POST' });
+          const url = action === 'rack-label'
+            ? `/api/label_printer/print/${id}/compact`
+            : `/api/label_printer/print/${id}`;
+          const r = await fetch(url, { method: 'POST' });
           if (!r.ok) throw new Error((await r.json()).detail || 'Print failed');
           btn.textContent = 'Done';
         } catch (err) {
@@ -15036,6 +22776,17 @@ function _attachSpoolListEvents(el, listEl, refresh = _refreshSpoolsSurface) {
       } else if (action === 'duplicate') {
         const spool = _allSpools.find(s => s.id == id);
         if (spool) _openSpoolModal(costs, refresh, {...spool, id: null, location_printer_id: null, location_slot: null});
+      } else if (action === 'restock') {
+        const spool = _allSpools.find(s => s.id == id);
+        if (spool) _openSpoolModal(costs, refresh, {
+          ...spool,
+          id: null,
+          restock_spool_id: spool.id,
+          archived_at: null,
+          location_printer_id: null,
+          location_slot: null,
+          remaining_g: spool.label_weight_g || _serverSettings.default_label_weight_g || 1000,
+        });
       } else if (action === 'archive') {
         if (!await _confirmModal('Archive this spool?')) return;
         await fetch(`/api/spools/${id}/archive`, { method: 'POST' });
@@ -15062,6 +22813,18 @@ function _attachSpoolsEvents(el, costs) {
   el.querySelectorAll('.spool-chip[data-fkey]').forEach(chip => {
     chip.addEventListener('click', () => {
       _spoolsFilter[chip.dataset.fkey] = chip.dataset.fval;
+      if (chip.dataset.fkey === 'location') {
+        if (location.hash.startsWith('#/spools')) {
+          const params = _routeParams('#/spools');
+          if (chip.dataset.fval) params.set('location', chip.dataset.fval);
+          else params.delete('location');
+          if (_spoolsViewMode !== 'swatch') params.set('view', _spoolsViewMode);
+          const q = params.toString();
+          history.replaceState(null, '', q ? `#/spools?${q}` : '#/spools');
+        }
+        _renderSpoolsContent(el);
+        return;
+      }
       el.querySelectorAll(`.spool-chip[data-fkey="${chip.dataset.fkey}"]`).forEach(c =>
         c.classList.toggle('spool-chip-active', c === chip)
       );
@@ -15090,8 +22853,8 @@ function _attachSpoolsEvents(el, costs) {
   // View toggle
   el.querySelectorAll('.spool-view-btn[data-view]').forEach(btn => {
     btn.addEventListener('click', async () => {
-      _spoolsViewMode = btn.dataset.view;
-      const targetHash = _spoolsViewMode === 'cards'
+      _spoolsViewMode = _normaliseSpoolViewMode(btn.dataset.view);
+      const targetHash = _spoolsViewMode === 'swatch'
         ? '#/spools'
         : `#/spools?view=${encodeURIComponent(_spoolsViewMode)}`;
       if (location.hash.startsWith('#/spools') && location.hash !== targetHash) {
@@ -15103,6 +22866,7 @@ function _attachSpoolsEvents(el, costs) {
         method: 'PUT', headers: {'Content-Type':'application/json'},
         body: JSON.stringify({value: _spoolsViewMode}),
       }).catch(() => {});
+      _serverSettings.spool_view_mode = _spoolsViewMode;
       _renderSpoolList(el);
     });
   });
@@ -15111,10 +22875,11 @@ function _attachSpoolsEvents(el, costs) {
 }
 
 function _openSpoolModal(costs, onSaved, prefill = null) {
-  const isEdit = prefill?.id != null;
+  const isRestock = prefill?.restock_spool_id != null;
+  const isEdit = prefill?.id != null && !isRestock;
   const p0 = prefill || {};
-  const title = isEdit ? `Edit Spool #${p0.id}` : 'Add Spool';
-  const submitLabel = isEdit ? 'Save' : 'Add Spool';
+  const title = isRestock ? `Restock Spool ${_spoolDisplayLabel(p0)}` : (isEdit ? `Edit Spool ${_spoolDisplayLabel(p0)}` : 'Add Spool');
+  const submitLabel = isRestock ? 'Restock Spool' : (isEdit ? 'Save' : 'Add Spool');
 
   // Build material → brands map
   const matBrands = {};
@@ -15256,10 +23021,7 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
         </div>
         <div class="spool-form-row">
           <label class="spool-form-label">Colour name</label>
-          <input id="sm-color-name" class="spool-form-input" type="text" placeholder="e.g. Jade White" value="${p0.color_name||''}" list="sm-colour-name-options">
-          <datalist id="sm-colour-name-options">
-            ${['Black','White','Silver','Grey','Red','Orange','Yellow','Green','Cyan','Blue','Purple','Pink','Magenta','Brown','Rainbow'].map(v => `<option value="${v}"></option>`).join('')}
-          </datalist>
+          <input id="sm-color-name" class="spool-form-input" type="text" placeholder="e.g. Jade White" value="${p0.color_name||''}" autocomplete="off" autocapitalize="off" spellcheck="false">
         </div>
         <div class="spool-form-row">
           <label class="spool-form-label">Colour scheme</label>
@@ -15286,6 +23048,10 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
             <input id="sm-empty-g" class="spool-form-input spool-weight-input" type="number" min="0" value="${p0.empty_spool_weight_g??''}" placeholder="0"> g
             <span class="spool-form-hint" id="sm-empty-hint">tare weight</span>
           </div>
+        </div>
+        <div class="spool-form-row">
+          <label class="spool-form-label">Tare profile</label>
+          <select id="sm-empty-profile" class="spool-form-input"><option value="">Auto match</option></select>
         </div>
         <div class="spool-form-section">Where it lives</div>
         <div class="spool-form-row">
@@ -15341,6 +23107,7 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
   const remainG   = overlay.querySelector('#sm-remaining-g');
   const emptyG    = overlay.querySelector('#sm-empty-g');
   const emptyHint = overlay.querySelector('#sm-empty-hint');
+  const emptyProfileSel = overlay.querySelector('#sm-empty-profile');
   const weighBtn  = overlay.querySelector('#sm-weigh-btn');
   const locSels   = overlay.querySelector('#sm-location-selects');
   const storageSels = overlay.querySelector('#sm-storage-selects');
@@ -15491,6 +23258,13 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
   }
 
   function tareFallbackFor(material, brand, subtype = '') {
+    const profile = _bestEmptySpoolProfile(material, brand);
+    if (profile) {
+      return {
+        value: profile.empty_spool_weight_g,
+        source: { kind: 'profile', brand: profile.brand, profile_name: profile.profile_name },
+      };
+    }
     const saved = costLookup[`${material}|||${brand || ''}`]?.empty_spool_weight_g;
     if (saved != null) return { value: saved, source: { kind: 'saved', brand } };
     const estimate = _brandTareEstimate(brand, subtype);
@@ -15984,6 +23758,15 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
     return { mat, brand };
   }
 
+  function refreshEmptyProfileOptions(selectedId = '') {
+    const { mat, brand } = selectedMaterialBrand();
+    const matches = _matchingEmptySpoolProfiles(mat, brand);
+    emptyProfileSel.innerHTML = `<option value="">Auto match</option>` + matches.map(p =>
+      `<option value="${p.id}"${String(selectedId) === String(p.id) ? ' selected' : ''}>${esc(p.profile_name || 'Standard spool')} · ${Math.round(p.empty_spool_weight_g)}g${p.material ? ` · ${esc(p.material)}` : ''}</option>`
+    ).join('');
+    emptyProfileSel.disabled = matches.length === 0;
+  }
+
   function updateDraftPreview(note = '') {
     const { mat, brand } = selectedMaterialBrand();
     const subtype = overlay.querySelector('#sm-subtype')?.value.trim();
@@ -16001,7 +23784,7 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
       : `${storageSel.options[storageSel.selectedIndex]?.textContent || 'Storage'}`;
     const titleLine = [colorName || 'Colour', mat || 'Material', subtype].filter(Boolean).join(' · ');
     const brandLine = [brand || 'Brand', locText].filter(Boolean).join(' · ');
-    const spoolIdLine = isEdit && p0.id ? `<span class="spool-draft-id">Spool #${esc(p0.id)}</span>` : '';
+    const spoolIdLine = isEdit && p0.id ? `<span class="spool-draft-id">Spool ${esc(_spoolDisplayLabel(p0))}</span>` : '';
     spoolPreview.innerHTML = `
       <div class="spool-draft-swatch" style="${_spoolColorStyle(hex, scheme, hex2, hex3)}"></div>
       <div class="spool-draft-main">
@@ -16020,6 +23803,7 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
     if (isEdit && !force) return;
     if (emptyG.dataset.touched && !force) return;
     const { mat, brand } = selectedMaterialBrand();
+    refreshEmptyProfileOptions();
     const subtype = overlay.querySelector('#sm-subtype')?.value.trim();
     const tareFallback = tareFallbackFor(mat, brand, subtype);
     if (tareFallback) {
@@ -16034,6 +23818,14 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
   brandSel.addEventListener('change', () => { applyDefaultTare(); updatePrevPicks(); updateDraftPreview(); });
   matNewIn.addEventListener('input', () => { applyDefaultTare(); updatePrevPicks(); updateDraftPreview(); });
   brandNewIn.addEventListener('input', () => { applyDefaultTare(); updatePrevPicks(); updateDraftPreview(); });
+  emptyProfileSel.addEventListener('change', () => {
+    const profile = _normaliseEmptySpoolProfiles(_emptySpoolProfiles).find(p => String(p.id) === String(emptyProfileSel.value));
+    if (profile) {
+      setEmptySpoolValue(profile.empty_spool_weight_g, { kind: 'profile', brand: profile.brand, profile_name: profile.profile_name }, true);
+      emptyG.dataset.touched = '1';
+      updateDraftPreview('Tare profile applied');
+    }
+  });
 
   // New material toggle
   matToggle.addEventListener('click', () => {
@@ -16072,48 +23864,6 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
     '#06b6d4':'Cyan','#3b82f6':'Blue','#a855f7':'Purple','#ec4899':'Pink',
   };
   const _knownSwatchNames = new Set(Object.values(_swatchNames));
-  const _colourAliases = [
-    { name: 'Black', hex: '#1a1a1a', keys: ['black', 'blk'] },
-    { name: 'White', hex: '#ffffff', keys: ['white', 'wht'] },
-    { name: 'Silver', hex: '#c0c0c0', keys: ['silver', 'sil'] },
-    { name: 'Grey', hex: '#808080', keys: ['grey', 'gray', 'gry'] },
-    { name: 'Red', hex: '#ef4444', keys: ['red'] },
-    { name: 'Orange', hex: '#f97316', keys: ['orange', 'org'] },
-    { name: 'Yellow', hex: '#eab308', keys: ['yellow', 'yel'] },
-    { name: 'Green', hex: '#22c55e', keys: ['green', 'grn'] },
-    { name: 'Cyan', hex: '#06b6d4', keys: ['cyan', 'aqua'] },
-    { name: 'Blue', hex: '#3b82f6', keys: ['blue', 'blu'] },
-    { name: 'Purple', hex: '#a855f7', keys: ['purple', 'purp', 'violet'] },
-    { name: 'Pink', hex: '#ec4899', keys: ['pink', 'pnk'] },
-    { name: 'Magenta', hex: '#ec4899', keys: ['magenta', 'mag'] },
-    { name: 'Brown', hex: '#7c3f20', keys: ['brown', 'brn'] },
-    { name: 'Rainbow', hex: '#ec4899', keys: ['rainbow', 'multi'] },
-  ];
-
-  function colourAliasMatch(value) {
-    const needle = String(value || '').trim().toLowerCase();
-    if (!needle) return null;
-    const exact = _colourAliases.find(c => c.name.toLowerCase() === needle || c.keys.includes(needle));
-    if (exact) return exact;
-    const matches = _colourAliases.filter(c =>
-      c.name.toLowerCase().startsWith(needle) || c.keys.some(k => k.startsWith(needle))
-    );
-    return matches.length === 1 ? matches[0] : null;
-  }
-
-  function applyColourNameAlias(value) {
-    const match = colourAliasMatch(value);
-    if (!match) return false;
-    const nameEl = overlay.querySelector('#sm-color-name');
-    nameEl.value = match.name;
-    syncColor(match.hex);
-    if (match.name === 'Rainbow') {
-      schemeSel.value = 'mixed';
-      updateSchemeColourRows();
-    }
-    updateDraftPreview('Colour matched');
-    return true;
-  }
 
   overlay.querySelectorAll('.spool-swatch').forEach(sw => {
     sw.addEventListener('click', () => {
@@ -16145,12 +23895,7 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
     updateDraftPreview();
   });
   const colorNameInput = overlay.querySelector('#sm-color-name');
-  colorNameInput?.addEventListener('input', () => {
-    if (!applyColourNameAlias(colorNameInput.value)) updateDraftPreview();
-  });
-  colorNameInput?.addEventListener('change', () => {
-    applyColourNameAlias(colorNameInput.value);
-  });
+  colorNameInput?.addEventListener('input', updateDraftPreview);
   weighBtn.addEventListener('click', async () => {
     const old = weighBtn.textContent;
     weighBtn.disabled = true;
@@ -16222,7 +23967,15 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
   slotSel.addEventListener('change', () => updateDraftPreview());
   storageSel.addEventListener('change', () => updateDraftPreview());
   updateSlots();
+  refreshEmptyProfileOptions();
   updateDraftPreview();
+  if (!_emptySpoolProfiles.length) {
+    fetch('/api/empty-spool-profiles').then(r => r.json()).then(rows => {
+      _emptySpoolProfiles = rows;
+      refreshEmptyProfileOptions();
+      applyDefaultTare();
+    }).catch(() => {});
+  }
   setScanExpanded(scanExpanded);
 
   function closeSpoolModal() {
@@ -16293,11 +24046,12 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
         // Always update location on edit — handles loaded→storage clearing too
         const mr = await fetch(`/api/spools/${prefill.id}/move`, {
           method: 'POST', headers: {'Content-Type':'application/json'},
-          body: JSON.stringify({
-            printer_id: locMode === 'loaded' ? printerSel.value : null,
-            slot:       locMode === 'loaded' ? parseInt(slotSel.value) : null,
-            storage_location_id: locMode === 'storage' && storageSel.value ? parseInt(storageSel.value, 10) : null,
-          }),
+          body: JSON.stringify(_spoolMovePayload(
+            locMode,
+            printerSel.value,
+            slotSel.value,
+            storageSel.value,
+          )),
         });
         if (mr.status === 409) {
           const err = await mr.json();
@@ -16307,19 +24061,64 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
         }
         if (!mr.ok) throw new Error(await _spoolSaveErrorMessage(mr, 'Unable to move spool'));
         savedData = await mr.json().catch(() => ({}));
-      } else {
-        const r = await fetch('/api/spools', {
+      } else if (isRestock) {
+        const r = await fetch(`/api/spools/${prefill.restock_spool_id}/restock`, {
           method: 'POST', headers: {'Content-Type':'application/json'},
           body: JSON.stringify(body),
         });
-        if (r.status === 409) {
-          const err = await r.json();
-          btn.textContent = _spoolConflictMessage(err);
-          setTimeout(() => { btn.textContent = submitLabel; btn.disabled = false; }, 3000);
-          return;
+        if (!r.ok) throw new Error(await _spoolSaveErrorMessage(r, 'Unable to restock spool'));
+        savedData = await r.json().catch(() => ({}));
+        if (locMode === 'loaded') {
+          const mr = await fetch(`/api/spools/${prefill.restock_spool_id}/move`, {
+            method: 'POST', headers: {'Content-Type':'application/json'},
+            body: JSON.stringify(_spoolMovePayload(
+              locMode,
+              printerSel.value,
+              slotSel.value,
+              null,
+            )),
+          });
+          if (mr.status === 409) {
+            const err = await mr.json();
+            btn.textContent = _spoolConflictMessage(err);
+            setTimeout(() => { btn.textContent = submitLabel; btn.disabled = false; }, 3000);
+            return;
+          }
+          if (!mr.ok) throw new Error(await _spoolSaveErrorMessage(mr, 'Unable to move spool'));
+          savedData = await mr.json().catch(() => savedData);
         }
+      } else {
+        const createBody = { ...body };
+        if (locMode === 'loaded') {
+          createBody.location_printer_id = null;
+          createBody.location_slot = null;
+          createBody.storage_location_id = null;
+        }
+        const r = await fetch('/api/spools', {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify(createBody),
+        });
         if (!r.ok) throw new Error(await _spoolSaveErrorMessage(r, 'Unable to add spool'));
         savedData = await r.json().catch(() => ({}));
+        if (locMode === 'loaded' && savedData?.id) {
+          const mr = await fetch(`/api/spools/${savedData.id}/move`, {
+            method: 'POST', headers: {'Content-Type':'application/json'},
+            body: JSON.stringify(_spoolMovePayload(
+              locMode,
+              printerSel.value,
+              slotSel.value,
+              null,
+            )),
+          });
+          if (mr.status === 409) {
+            const err = await mr.json();
+            btn.textContent = _spoolConflictMessage(err);
+            setTimeout(() => { btn.textContent = submitLabel; btn.disabled = false; }, 3000);
+            return;
+          }
+          if (!mr.ok) throw new Error(await _spoolSaveErrorMessage(mr, 'Unable to move spool'));
+          savedData = await mr.json().catch(() => savedData);
+        }
       }
       closeSpoolModal();
       if (locMode === 'loaded') {
@@ -16339,7 +24138,14 @@ function _openSpoolModal(costs, onSaved, prefill = null) {
 
 function _spoolConflictMessage(err) {
   const detail = err?.detail;
-  if (detail && typeof detail === 'object') return detail.message || `Slot occupied (#${detail.conflict_spool_id ?? '?'})`;
+  if (detail && typeof detail === 'object') {
+    if (detail.message) return detail.message;
+    const conflict = detail.conflict_spool;
+    const label = conflict
+      ? _spoolDisplayLabel(conflict)
+      : (detail.conflict_spool_id != null ? `#${_spoolDisplayNumberById(detail.conflict_spool_id)}` : '#?');
+    return `Slot occupied (${label})`;
+  }
   return typeof detail === 'string' ? detail : 'Slot occupied';
 }
 
@@ -16367,24 +24173,31 @@ async function _spoolSaveErrorMessage(response, fallback = 'Unable to save spool
 }
 
 function _locationsCategoryHtml(locations) {
-  const storedSpools = _allSpools.filter(s => !s.archived_at && !s.location_printer_id);
+  const rackVisibleSpools = _allSpools.filter(s => !s.archived_at);
+  const rackRanges = locations.map(_rackLocationRange).filter(Boolean);
+  const isInRackRange = (spool) => {
+    const num = _spoolDisplayId(spool);
+    return rackRanges.some(range => num >= range.start && num <= range.end);
+  };
   const locationCards = locations.length ? locations.map(loc => {
-    const spools = storedSpools.filter(s => String(s.storage_location_id || '') === String(loc.id));
+    const spools = _rackLocationSpools(rackVisibleSpools, loc);
     const grams = spools.reduce((sum, s) => sum + Number(s.remaining_g || 0), 0);
     const spoolRows = spools.length ? spools.map(s => {
       const pct = s.label_weight_g > 0 ? Math.round(s.remaining_g * 100 / s.label_weight_g) : 0;
       const pctCls = pct < 20 ? ' spool-low' : pct < 50 ? ' spool-amber' : '';
       const color = s.color_hex || '#808080';
-      return `<div class="location-spool-row" data-spool-id="${s.id}">
+      const loadedText = s.location_printer_id ? _spoolLocationText(s) : '';
+      return `<div class="location-spool-row${loadedText ? ' is-loaded' : ''}" data-spool-id="${s.id}">
         <span class="location-spool-swatch" style="${_spoolColorStyle(s)}"></span>
         <div class="location-spool-main">
           <div class="location-spool-title">${esc(s.color_name || color)} · ${esc(s.material)}${s.subtype ? ` ${esc(s.subtype)}` : ''}</div>
-          <div class="location-spool-sub">${esc(s.brand || 'Unknown brand')} · #${s.id}</div>
+          <div class="location-spool-sub">${esc(s.brand || 'Unknown brand')} · ${_spoolDisplayLabel(s)}${loadedText ? ` · Loaded: ${esc(loadedText)}` : ''}</div>
         </div>
         <div class="location-spool-weight${pctCls}">${Math.round(s.remaining_g || 0)}g</div>
         <div class="location-spool-actions">
           <a class="spool-action-btn spool-action-detail" href="#/spool/${s.id}">Details</a>
-          <button class="spool-action-btn spool-action-label" data-action="label" data-id="${s.id}">Label</button>
+          <button class="spool-action-btn spool-action-label" data-action="label" data-id="${s.id}" title="Print spool label">Spool label</button>
+          ${_rackLocationRange(loc) ? `<button class="spool-action-btn spool-action-label" data-action="rack-label" data-id="${s.id}" title="Print rack slot label">Rack label</button>` : ''}
           <button class="spool-action-btn spool-action-edit" data-action="edit" data-id="${s.id}">Edit</button>
         </div>
       </div>`;
@@ -16399,13 +24212,16 @@ function _locationsCategoryHtml(locations) {
           <strong>${spools.length}</strong>
           <span>${spools.length === 1 ? 'spool' : 'spools'}</span>
           <small>${(grams / 1000).toFixed(2)}kg</small>
+          <button class="spool-action-btn spool-action-label" data-location-action="label" data-id="${loc.id}" title="Print rack row marker">Row label</button>
         </div>
       </div>
       <div class="location-spool-list">${spoolRows}</div>
     </section>`;
   }).join('') : `<div class="settings-empty">Add a location to start organising stored spools.</div>`;
 
-  const unassigned = storedSpools.filter(s => !s.storage_location_id);
+  const unassigned = rackVisibleSpools
+    .filter(s => !s.location_printer_id && !s.storage_location_id && !isInRackRange(s))
+    .sort(_spoolVisibleNumberSort);
   const unassignedCard = unassigned.length ? `<section class="location-card location-card-unassigned">
     <div class="location-card-head">
       <div>
@@ -16422,7 +24238,7 @@ function _locationsCategoryHtml(locations) {
         <span class="location-spool-swatch" style="${_spoolColorStyle(s)}"></span>
         <div class="location-spool-main">
           <div class="location-spool-title">${esc(s.color_name || s.color_hex || 'Colour')} · ${esc(s.material)}</div>
-          <div class="location-spool-sub">${esc(s.brand || 'Unknown brand')} · #${s.id}</div>
+          <div class="location-spool-sub">${esc(s.brand || 'Unknown brand')} · ${_spoolDisplayLabel(s)}</div>
         </div>
         <div class="location-spool-weight">${Math.round(s.remaining_g || 0)}g</div>
         <div class="location-spool-actions">
@@ -16441,6 +24257,7 @@ function _locationsCategoryHtml(locations) {
         <div class="spool-location-notes">${esc(loc.notes || 'No notes')}</div>
       </div>
       <div class="spool-location-actions">
+        <button class="spool-action-btn spool-action-label" data-location-action="label" data-id="${loc.id}">Label</button>
         <button class="spool-action-btn spool-action-edit" data-location-action="edit" data-id="${loc.id}">Edit</button>
         <button class="spool-action-btn spool-action-danger" data-location-action="delete" data-id="${loc.id}">Archive</button>
       </div>
@@ -16454,7 +24271,14 @@ function _locationsCategoryHtml(locations) {
     </div>
     <div class="settings-section">
       <div class="settings-section-title">Shelf Locations</div>
-      <div class="settings-subtitle">Create the shelves, dry boxes, tubs, or bays where spools live when they are not loaded in a printer.</div>
+      <div class="settings-subtitle">Create the shelves, racks, dry boxes, tubs, or bays where spools live when they are not loaded in a printer. Archiving a location hides it; Flightdeck will ask before archiving any stored spools inside it.</div>
+      <div class="rack-builder-panel">
+        <div>
+          <strong>Main cupboard snake rack</strong>
+          <span>Build the visible rack range, then sync shelved spools into the row that matches their number.</span>
+        </div>
+        <button type="button" class="settings-save-btn rack-builder-btn" data-rack-action="build-main">Build rack rows</button>
+      </div>
       <form id="spool-location-form" class="settings-form spool-location-form" novalidate>
         <input id="loc-id" type="hidden" value="">
         <div class="settings-form-row">
@@ -16494,6 +24318,80 @@ function _attachLocationsEvents(el, locations) {
     cancel.classList.add('hidden');
   }
 
+  async function buildMainRackRows(btn) {
+    const old = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Building...';
+    try {
+      const freshSpools = await fetch('/api/spools').then(r => r.ok ? r.json() : _allSpools).catch(() => _allSpools);
+      _allSpools = Array.isArray(freshSpools) ? freshSpools : _allSpools;
+      const rackRows = _rackRowCount(_allSpools || []);
+      const rackLimit = rackRows * 10;
+      const active = [...locations];
+      const rowLocationIds = new Map();
+      for (let i = 0; i < rackRows; i += 1) {
+        const rowNum = i + 1;
+        const name = _rackRowLocationName(i);
+        const notes = _rackRowLocationNote(i);
+        const existing = active.find(loc => String(loc.name || '') === name)
+          || active.find(loc => String(loc.name || '').trim().toLowerCase() === `shelf #${rowNum}`)
+          || active.find(loc => String(loc.name || '').trim().toLowerCase().startsWith(`rack row ${rowNum} `));
+        if (existing) {
+          await fetch(`/api/spool-locations/${existing.id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, notes }),
+          });
+          existing.name = name;
+          existing.notes = notes;
+          rowLocationIds.set(rowNum, existing.id);
+        } else {
+          const r = await fetch('/api/spool-locations', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, notes }),
+          });
+          if (r.ok) {
+            const created = await r.json().catch(() => null);
+            active.push({ id: created?.id, name, notes });
+            if (created?.id) rowLocationIds.set(rowNum, created.id);
+          }
+        }
+      }
+      let synced = 0;
+      let failed = 0;
+      const shelved = (_allSpools || []).filter(s => !s.archived_at && !s.location_printer_id);
+      for (const spool of shelved) {
+        const num = _spoolDisplayId(spool);
+        if (num < 1 || num > rackLimit) continue;
+        const rowNum = Math.ceil(num / 10);
+        const targetId = rowLocationIds.get(rowNum);
+        if (!targetId || String(spool.storage_location_id || '') === String(targetId)) continue;
+        const r = await fetch(`/api/spools/${spool.id}/move`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ printer_id: null, slot: null, storage_location_id: Number(targetId) }),
+        });
+        if (r.ok) synced += 1;
+        else failed += 1;
+      }
+      const detail = failed
+        ? `${synced} shelved ${synced === 1 ? 'spool was' : 'spools were'} synced; ${failed} move ${failed === 1 ? 'failed' : 'moves failed'}.`
+        : `${synced} shelved ${synced === 1 ? 'spool was' : 'spools were'} synced to rack rows.`;
+      showToast('Rack rows ready', `Main cupboard rows 1-${rackLimit} are ready. ${detail}`, failed ? 'warn' : 'success');
+      await _renderSettingsContent('locations');
+    } catch (err) {
+      showToast('Rack setup failed', err?.message || 'Could not create rack rows', 'error');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = old;
+    }
+  }
+
+  el.querySelectorAll('[data-rack-action="build-main"]').forEach(btn => {
+    btn.addEventListener('click', () => buildMainRackRows(btn));
+  });
+
   form?.addEventListener('submit', async e => {
     e.preventDefault();
     const name = nameIn.value.trim();
@@ -16526,6 +24424,22 @@ function _attachLocationsEvents(el, locations) {
       const id = btn.dataset.id;
       const loc = locations.find(l => String(l.id) === String(id));
       if (!loc) return;
+      if (btn.dataset.locationAction === 'label') {
+        const old = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = 'Printing...';
+        try {
+          const r = await fetch(`/api/label_printer/location/${id}`, { method: 'POST' });
+          if (!r.ok) throw new Error((await r.json()).detail || 'Print failed');
+          showToast('Rack label printed', loc.name || `Location #${id}`, 'success');
+        } catch (err) {
+          showToast('Rack label failed', err.message || loc.name || '', 'error');
+        } finally {
+          btn.disabled = false;
+          btn.textContent = old;
+        }
+        return;
+      }
       if (btn.dataset.locationAction === 'edit') {
         idIn.value = loc.id;
         nameIn.value = loc.name || '';
@@ -16536,9 +24450,779 @@ function _attachLocationsEvents(el, locations) {
         return;
       }
       _modal.show(`Archive ${loc.name}?`, async () => {
-        await fetch(`/api/spool-locations/${id}`, { method: 'DELETE' });
+        const archiveLocation = async (archiveSpools = false) => {
+          const suffix = archiveSpools ? '?archive_spools=true' : '';
+          return fetch(`/api/spool-locations/${id}${suffix}`, { method: 'DELETE' });
+        };
+        const r = await archiveLocation(false);
+        if (r.status === 409) {
+          let detail = {};
+          try { detail = (await r.json())?.detail || {}; } catch {}
+          const count = Number(detail.active_stored_count || 0);
+          const label = count === 1 ? 'spool' : 'spools';
+          _modal.show(`${loc.name} still has ${count || 'active'} stored ${label}. Archive those ${label} too and remove the location?`, async () => {
+            const rr = await archiveLocation(true);
+            if (!rr.ok) {
+              showToast('Location archive failed', 'Could not archive stored spools', 'error');
+              return;
+            }
+            showToast('Location archived', count ? `${count} ${label} archived too` : loc.name, 'success');
+            await _renderSettingsContent('locations');
+          });
+          return;
+        }
+        if (!r.ok) {
+          showToast('Location archive failed', loc.name, 'error');
+          return;
+        }
+        showToast('Location archived', loc.name, 'success');
         await _renderSettingsContent('locations');
       });
+    });
+  });
+
+  _attachBambuCloudMarkEvents(el, () => {
+    el.innerHTML = _preferencesCategoryHtml();
+    _attachPreferencesEvents(el);
+  });
+}
+
+function _costingDefaults() {
+  return {
+    overheads: [
+      { id: 'bambu', name: 'Bambu / subscriptions', amount: 0 },
+      { id: 'electricity', name: 'Electricity', amount: 0 },
+      { id: 'other', name: 'Other', amount: 0 },
+    ],
+    expected_hours: 40,
+    markup_pct: 35,
+    labour_per_hour: 0,
+    electricity_rate_per_kwh: 0.30,
+    power_watts: {},
+    pricing_strategy: 'shop',
+    fail_pct: 8,
+    batch_multiplier: 5,
+    machine_hour_rate: 0,
+    value_multiplier: 10,
+    design_per_hour: 50,
+    monthly_total: 0,
+    shop_rate: 0,
+    recent_hours_30d: 0,
+  };
+}
+
+function _costingRates(cfg) {
+  const overheads = cfg.overheads || [];
+  const monthly = overheads.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+  const hours = Number(cfg.expected_hours || 0);
+  const shop = hours > 0 ? monthly / hours : 0;
+  const labour = Number(cfg.labour_per_hour || 0);
+  return {
+    ...cfg,
+    monthly_total: monthly,
+    shop_rate: shop,
+    labour_per_hour: labour,
+    markup_pct: Number(cfg.markup_pct || 0),
+    electricity_rate_per_kwh: Number(cfg.electricity_rate_per_kwh ?? 0.30),
+    power_watts: cfg.power_watts || {},
+  };
+}
+
+function _costingCollect(el) {
+  const overheads = [...el.querySelectorAll('.costing-overhead-row')].map(row => ({
+    id: row.dataset.id || '',
+    name: row.querySelector('[data-costing="name"]')?.value || '',
+    amount: Number(row.querySelector('[data-costing="amount"]')?.value || 0) || 0,
+  }));
+  const powerWatts = { ...(el._powerWatts || {}) };
+  el.querySelectorAll('[data-power-watts]').forEach(input => {
+    const pid = input.getAttribute('data-power-watts');
+    if (!pid) return;
+    const watts = Number(input.value || 0);
+    const def = Number(input.getAttribute('data-default-watts') || 0);
+    if (watts > 0 && Math.abs(watts - def) > 0.51) powerWatts[pid] = watts;
+    else delete powerWatts[pid];
+  });
+  el._powerWatts = powerWatts;
+  return {
+    overheads,
+    expected_hours: Number(el.querySelector('[data-costing="expected_hours"]')?.value || 0) || 0,
+    markup_pct: Number(el.querySelector('[data-costing="markup_pct"]')?.value || 0) || 0,
+    labour_per_hour: Number(el.querySelector('[data-costing="labour_per_hour"]')?.value || 0) || 0,
+    electricity_rate_per_kwh: Number(el.querySelector('[data-costing="electricity_rate_per_kwh"]')?.value || 0) || 0,
+    power_watts: powerWatts,
+    pricing_strategy: el.querySelector('[data-costing="pricing_strategy"]:checked')?.value || 'shop',
+    fail_pct: Number(el.querySelector('[data-costing="fail_pct"]')?.value || 0) || 0,
+    batch_multiplier: Number(el.querySelector('[data-costing="batch_multiplier"]')?.value || 0) || 0,
+    machine_hour_rate: Number(el.querySelector('[data-costing="machine_hour_rate"]')?.value || 0) || 0,
+    value_multiplier: Number(el.querySelector('[data-costing="value_multiplier"]')?.value || 0) || 0,
+    design_per_hour: Number(el.querySelector('[data-costing="design_per_hour"]')?.value || 0) || 0,
+  };
+}
+
+function _costingMonthDefault() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function _costingPowerRowsHtml(power) {
+  const rows = power?.printers || [];
+  if (!rows.length) {
+    return '<div class="settings-empty">No printers or print hours for this month yet.</div>';
+  }
+  return `
+    <div class="costing-power-table">
+      <div class="costing-power-head">
+        <span>Printer</span><span>Hours</span><span>Avg W</span><span>kWh</span><span>$</span>
+      </div>
+      ${rows.map(row => `
+        <div class="costing-power-row" data-printer-id="${esc(row.printer_id || '')}">
+          <div class="costing-power-printer">
+            <strong>${esc(row.label || row.printer_id || '')}</strong>
+            <span>${esc(row.model_name || '')}</span>
+          </div>
+          <span>${Number(row.hours || 0).toFixed(1)}</span>
+          <label class="costing-power-watts">
+            <input class="settings-input" data-power-watts="${esc(row.printer_id || '')}" data-default-watts="${esc(String(row.watts_default || row.watts || 0))}" type="number" min="0" max="2000" step="1" value="${esc(String(row.watts_override || row.watts || 0))}" title="Override average watts (leave at wiki default to clear override on save)">
+          </label>
+          <span>${Number(row.kwh || 0).toFixed(2)}</span>
+          <span>${_printCostMoney(row.cost || 0)}</span>
+        </div>`).join('')}
+    </div>
+    <div class="costing-power-totals">
+      <span>${Number(power.total_hours || 0).toFixed(1)} h</span>
+      <span>${Number(power.total_kwh || 0).toFixed(2)} kWh</span>
+      <strong>${_printCostMoney(power.total_cost || 0)}</strong>
+    </div>`;
+}
+
+function _costingMaterialOptions(costs) {
+  const seen = new Set();
+  const mats = [];
+  for (const row of costs || []) {
+    const mat = String(row.material || '').trim();
+    if (!mat) continue;
+    const key = mat.toUpperCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    mats.push(mat);
+  }
+  mats.sort((a, b) => a.localeCompare(b));
+  return mats;
+}
+
+function _pricingStrategyLabel(strategy) {
+  return {
+    shop: 'Shop markup',
+    batch: 'Batch',
+    machine: 'Machine-hour',
+    value: 'Value',
+  }[String(strategy || 'shop')] || 'Shop markup';
+}
+
+function _costingSellPrices(rates, filament, hours, floor) {
+  const fail = Number(rates.fail_pct || 0);
+  const batchMult = Number(rates.batch_multiplier || 5);
+  let machineRate = Number(rates.machine_hour_rate || 0);
+  if (!(machineRate > 0)) machineRate = Number(rates.shop_rate || 0);
+  const valueMult = Number(rates.value_multiplier || 10);
+  const markup = Number(rates.markup_pct || 0);
+  const strategy = String(rates.pricing_strategy || 'shop');
+  const fil = Number(filament || 0);
+  const hrs = Number(hours || 0);
+  const fl = Number(floor || 0);
+  const buffered = fil * (1 + fail / 100);
+  const shop = fl > 0 ? fl * (1 + markup / 100) : 0;
+  const batch = buffered > 0 ? buffered * batchMult : 0;
+  const machine = (buffered > 0 || (hrs > 0 && machineRate > 0)) ? buffered + hrs * machineRate : 0;
+  const value = buffered > 0 ? buffered * valueMult : 0;
+  const suggested = { shop, batch, machine, value }[strategy] ?? shop;
+  return { shop, batch, machine, value, suggested, buffered, fail, strategy, machineRate };
+}
+
+function _costingQuoteLocal(cfg, costs, grams, hours, material, filamentOverride) {
+  const rates = _costingRates(cfg);
+  let filament = null;
+  if (filamentOverride !== '' && filamentOverride != null && Number.isFinite(Number(filamentOverride))) {
+    filament = Number(filamentOverride);
+  } else if (grams > 0) {
+    const mat = String(material || '').toUpperCase();
+    const rows = (costs || []).filter(c => String(c.material || '').toUpperCase() === mat && Number(c.cost_per_gram) > 0);
+    const pool = rows.length ? rows : (costs || []).filter(c => Number(c.cost_per_gram) > 0);
+    if (pool.length) {
+      const cpg = pool.reduce((sum, c) => sum + Number(c.cost_per_gram), 0) / pool.length;
+      filament = grams * cpg;
+    }
+  }
+  const time = hours > 0 ? hours * rates.shop_rate : 0;
+  const labour = hours > 0 ? hours * Number(rates.labour_per_hour || 0) : 0;
+  const floor = Number(filament || 0) + time + labour;
+  const sell = _costingSellPrices(rates, filament || 0, hours, floor);
+  return {
+    filament,
+    time,
+    labour,
+    floor,
+    suggested: sell.suggested,
+    shop: sell.shop,
+    batch: sell.batch,
+    machine: sell.machine,
+    value: sell.value,
+    strategy: sell.strategy,
+    shop_rate: rates.shop_rate,
+    design_per_hour: Number(rates.design_per_hour || 0),
+  };
+}
+
+function _costingIsElectricityOverhead(row) {
+  const id = String(row?.id || row?.dataset?.id || '').toLowerCase();
+  const name = String(row?.name || '').trim().toLowerCase();
+  // Only the dedicated Electricity line — not “Daily Network Electricity Access” etc.
+  return id === 'electricity' || name === 'electricity';
+}
+
+function _costingElectricityFromPower(state) {
+  const n = Number(state?.power?.total_cost);
+  return Number.isFinite(n) ? Math.round(n * 100) / 100 : null;
+}
+
+function _costingFindElectricityRow(el) {
+  const rows = [...el.querySelectorAll('.costing-overhead-row')];
+  return rows.find(row => String(row.dataset.id || '').toLowerCase() === 'electricity')
+    || rows.find(row => String(row.querySelector('[data-costing="name"]')?.value || '').trim().toLowerCase() === 'electricity')
+    || null;
+}
+
+function _costingElectricityRowHtml(amount) {
+  return `
+    <div class="costing-overhead-row" data-id="electricity" data-power-driven="1">
+      <input class="settings-input" data-costing="name" type="text" maxlength="80" value="Electricity" placeholder="Name">
+      <span class="costing-amount-wrap"><span>$</span>
+        <input class="settings-input" data-costing="amount" type="number" min="0" step="0.01" value="${esc(Number(amount || 0).toFixed(2))}" readonly title="Filled from Power this month">
+      </span>
+    </div>`;
+}
+
+function _costingApplyPowerToElectricity(el, state) {
+  const amount = _costingElectricityFromPower(state);
+  if (amount == null) return;
+  let row = _costingFindElectricityRow(el);
+  const list = el.querySelector('.costing-overhead-list');
+  if (!row && list) {
+    list.querySelector('.settings-empty')?.remove();
+    list.insertAdjacentHTML('afterbegin', _costingElectricityRowHtml(amount));
+    row = _costingFindElectricityRow(el);
+  }
+  if (!row) return;
+  row.dataset.powerDriven = '1';
+  const input = row.querySelector('[data-costing="amount"]');
+  if (input) {
+    input.value = amount.toFixed(2);
+    input.readOnly = true;
+    input.title = 'Filled from Power this month';
+  }
+}
+
+function _costingCategoryHtml(state) {
+  const cfgIn = state.cfg || _costingDefaults();
+  const powerElec = _costingElectricityFromPower(state);
+  let overheads = [...(cfgIn.overheads || [])];
+  if (powerElec != null) {
+    let found = false;
+    overheads = overheads.map(row => {
+      if (!_costingIsElectricityOverhead(row)) return row;
+      found = true;
+      return { ...row, amount: powerElec };
+    });
+    if (!found) overheads = [{ id: 'electricity', name: 'Electricity', amount: powerElec }, ...overheads];
+  }
+  const cfg = _costingRates({ ...cfgIn, overheads });
+  const costs = state.costs || [];
+  const recent = Number(cfg.recent_hours_30d || 0);
+  const overheadRows = (cfg.overheads || []).map(row => {
+    const fromPower = powerElec != null && _costingIsElectricityOverhead(row);
+    return `
+    <div class="costing-overhead-row" data-id="${esc(row.id || '')}"${fromPower ? ' data-power-driven="1"' : ''}>
+      <input class="settings-input" data-costing="name" type="text" maxlength="80" value="${esc(row.name || '')}" placeholder="Name">
+      <span class="costing-amount-wrap"><span>$</span>
+        <input class="settings-input" data-costing="amount" type="number" min="0" step="0.01" value="${esc(fromPower ? powerElec.toFixed(2) : String(row.amount ?? 0))}"${fromPower ? ' readonly title="Filled from Power this month"' : ''}>
+      </span>
+      ${fromPower ? '' : '<button type="button" class="settings-delete-btn costing-remove-overhead">Remove</button>'}
+    </div>`;
+  }).join('');
+  const materialOpts = _costingMaterialOptions(costs).map(mat =>
+    `<option value="${esc(mat)}">${esc(mat)}</option>`
+  ).join('');
+  const rateText = cfg.shop_rate > 0 ? _printCostMoney(cfg.shop_rate) : '$0.00';
+  return `
+    <div class="settings-section">
+      <div class="settings-section-title">Shop rate</div>
+      <p class="settings-hint">Cover monthly costs across the hours you actually print. Leave “my time” at $0 so local quotes stay friendly.</p>
+      <div class="costing-rate-hero">
+        <span>Shop rate</span>
+        <strong data-costing-rate>${rateText}</strong>
+        <em>/ print hour</em>
+      </div>
+      <div class="costing-rate-meta">
+        <span data-costing-monthly>${_printCostMoney(cfg.monthly_total)} / month</span>
+        <span data-costing-hours-label>${Number(cfg.expected_hours || 0).toFixed(0)} expected hours</span>
+      </div>
+    </div>
+    <div class="settings-section">
+      <div class="settings-section-title">Monthly overheads</div>
+      <p class="settings-hint">Bambu, consumables, and the rest — whatever you pay whether a job sells or not. <em>Electricity</em> is filled from Power this month (print hours × wiki watts × tariff), not the whole house bill.</p>
+      <div class="costing-overhead-list">${overheadRows || '<div class="settings-empty">No overhead lines yet.</div>'}</div>
+      <button type="button" class="costing-ghost-btn" data-costing-add>Add line</button>
+    </div>
+    <div class="settings-section">
+      <div class="settings-section-title">Hours &amp; markup</div>
+      <div class="settings-form-row">
+        <label class="settings-label">Expected hours / month</label>
+        <input class="settings-input" data-costing="expected_hours" type="number" min="0" max="1000" step="1" value="${esc(String(cfg.expected_hours ?? 40))}">
+        <button type="button" class="costing-ghost-btn" data-costing-use-recent${recent > 0 ? '' : ' disabled'}>Use last 30 days${recent > 0 ? ` (${recent.toFixed(1)} h)` : ''}</button>
+      </div>
+      <div class="settings-hint">Last 30 days of finished, failed, and cancelled prints: ${recent.toFixed(1)} h. The shop rate only works if this estimate is honest.</div>
+      <div class="settings-form-row">
+        <label class="settings-label">Markup</label>
+        <input class="settings-input" data-costing="markup_pct" type="number" min="0" max="500" step="1" value="${esc(String(cfg.markup_pct ?? 35))}"> %
+      </div>
+      <div class="settings-hint">Used when Suggested is Shop markup. Floor × (1 + markup). 30–40% is a modest local-ad profit.</div>
+      <div class="settings-form-row">
+        <label class="settings-label">My time ($/hr)</label>
+        <input class="settings-input" data-costing="labour_per_hour" type="number" min="0" max="1000" step="0.5" value="${esc(String(cfg.labour_per_hour ?? 0))}">
+      </div>
+      <div class="settings-hint">Optional and small. A full wage will price you out of local work — $0 is the default. CAD / mesh repair is a separate design fee below, not this.</div>
+    </div>
+    <div class="settings-section">
+      <div class="settings-section-title">Sell strategies</div>
+      <p class="settings-hint">Floor is what it costs you. Pick which sell price becomes Suggested on passports and projects. Quote helper always shows all three. Fail buffer sits in the sell prices only — not the floor.</p>
+      <div class="costing-strategy-picks" role="radiogroup" aria-label="Default suggested strategy">
+        <label class="costing-strategy-pick${(cfg.pricing_strategy || 'shop') === 'shop' ? ' is-active' : ''}">
+          <input type="radio" name="pricing_strategy" data-costing="pricing_strategy" value="shop"${(cfg.pricing_strategy || 'shop') === 'shop' ? ' checked' : ''}>
+          <strong>Shop markup</strong>
+          <span>Floor × markup. Local ads, what you use now.</span>
+        </label>
+        <label class="costing-strategy-pick${cfg.pricing_strategy === 'batch' ? ' is-active' : ''}">
+          <input type="radio" name="pricing_strategy" data-costing="pricing_strategy" value="batch"${cfg.pricing_strategy === 'batch' ? ' checked' : ''}>
+          <strong>Batch</strong>
+          <span>Filament × ${esc(String(cfg.batch_multiplier ?? 5))}. Fast for bulk / trays of the same part.</span>
+        </label>
+        <label class="costing-strategy-pick${cfg.pricing_strategy === 'machine' ? ' is-active' : ''}">
+          <input type="radio" name="pricing_strategy" data-costing="pricing_strategy" value="machine"${cfg.pricing_strategy === 'machine' ? ' checked' : ''}>
+          <strong>Machine-hour</strong>
+          <span>Filament + print hours × rate. Bills for tying up a bay.</span>
+        </label>
+        <label class="costing-strategy-pick${cfg.pricing_strategy === 'value' ? ' is-active' : ''}">
+          <input type="radio" name="pricing_strategy" data-costing="pricing_strategy" value="value"${cfg.pricing_strategy === 'value' ? ' checked' : ''}>
+          <strong>Value</strong>
+          <span>Starting art price (filament × ${esc(String(cfg.value_multiplier ?? 10))}). Charge what the piece is worth.</span>
+        </label>
+      </div>
+      <div class="settings-form-row">
+        <label class="settings-label">Fail buffer</label>
+        <input class="settings-input" data-costing="fail_pct" type="number" min="0" max="25" step="1" value="${esc(String(cfg.fail_pct ?? 8))}"> %
+      </div>
+      <div class="settings-hint">5–10% of prints fail. This bumps filament inside Batch / Machine / Value, not the shop floor.</div>
+      <div class="settings-form-row">
+        <label class="settings-label">Batch multiplier</label>
+        <input class="settings-input" data-costing="batch_multiplier" type="number" min="1" max="12" step="0.5" value="${esc(String(cfg.batch_multiplier ?? 5))}"> ×
+      </div>
+      <div class="settings-form-row">
+        <label class="settings-label">Machine-hour ($/hr)</label>
+        <input class="settings-input" data-costing="machine_hour_rate" type="number" min="0" max="100" step="0.25" value="${esc(Number(cfg.machine_hour_rate || 0) > 0 ? String(cfg.machine_hour_rate) : '')}" placeholder="${esc(cfg.shop_rate > 0 ? _printCostMoney(cfg.shop_rate) : 'shop rate')}">
+      </div>
+      <div class="settings-hint">Leave blank to use the shop rate (${cfg.shop_rate > 0 ? _printCostMoney(cfg.shop_rate) : '$0'}/h). $2–$5 is a typical capacity premium.</div>
+      <div class="settings-form-row">
+        <label class="settings-label">Value multiplier</label>
+        <input class="settings-input" data-costing="value_multiplier" type="number" min="1" max="50" step="0.5" value="${esc(String(cfg.value_multiplier ?? 10))}"> ×
+      </div>
+      <div class="settings-hint">A $15 filament helmet at ×10 starts at $150. Raise it if the artistry is the product.</div>
+      <div class="settings-form-row">
+        <label class="settings-label">Design ($/hr)</label>
+        <input class="settings-input" data-costing="design_per_hour" type="number" min="0" max="500" step="5" value="${esc(String(cfg.design_per_hour ?? 50))}">
+      </div>
+      <div class="settings-hint">CAD, mesh repair, file prep — add hours in the quote helper. Typical $30–$75/h, billed separately from print time. If you are selling someone else’s model, you still need their commercial licence.</div>
+      <button type="button" class="settings-save-btn" data-costing-save>Save costing</button>
+      <span class="costing-save-status" data-costing-status></span>
+    </div>
+    <div class="settings-section">
+      <div class="settings-section-title">Quote helper</div>
+      <p class="settings-hint">Someone asks “how much for a goose?” — grams + hours in, all three sell prices out. Uses the numbers on this page, even before you save.</p>
+      <div class="costing-quote-grid">
+        <label>Grams
+          <input class="settings-input" data-quote="grams" type="number" min="0" step="0.1" value="">
+        </label>
+        <label>Hours
+          <input class="settings-input" data-quote="hours" type="number" min="0" step="0.1" value="">
+        </label>
+        <label>Material
+          <select class="settings-input" data-quote="material">
+            <option value="">Catalogue average</option>
+            ${materialOpts}
+          </select>
+        </label>
+        <label>Filament $ <span class="settings-hint">(optional override)</span>
+          <input class="settings-input" data-quote="filament" type="number" min="0" step="0.01" placeholder="auto">
+        </label>
+        <label>Design hours
+          <input class="settings-input" data-quote="design_hours" type="number" min="0" step="0.25" value="" placeholder="0">
+        </label>
+      </div>
+      <div class="costing-quote-result">
+        <div><span>Filament</span><strong data-quote-out="filament">—</strong></div>
+        <div><span>Time</span><strong data-quote-out="time">—</strong></div>
+        <div data-quote-labour-row hidden><span>My time</span><strong data-quote-out="labour">—</strong></div>
+        <div><span>Floor</span><strong data-quote-out="floor">—</strong></div>
+        <div data-quote-strategy="shop"><span>Shop</span><strong data-quote-out="shop">—</strong></div>
+        <div data-quote-strategy="batch"><span>Batch</span><strong data-quote-out="batch">—</strong></div>
+        <div data-quote-strategy="machine"><span>Machine</span><strong data-quote-out="machine">—</strong></div>
+        <div data-quote-strategy="value"><span>Value</span><strong data-quote-out="value">—</strong></div>
+        <div data-quote-design-row hidden><span>Design</span><strong data-quote-out="design">—</strong></div>
+      </div>
+    </div>
+    <div class="settings-section costing-power-section">
+      <div class="settings-section-title">Power this month</div>
+      <p class="settings-hint">History print hours × Bambu wiki average watts × your tariff. Peaks (heaters) are ignored — this is print-time draw only, not the whole house bill. <a href="https://wiki.bambulab.com/en/general/power-consumption" target="_blank" rel="noopener">Wiki source</a></p>
+      <div class="settings-form-row costing-power-controls">
+        <label class="settings-label">Month
+          <input class="settings-input" data-power-month type="month" value="${esc((state.power && state.power.month) || _costingMonthDefault())}">
+        </label>
+        <label class="settings-label">Tariff ($/kWh)
+          <input class="settings-input" data-costing="electricity_rate_per_kwh" type="number" min="0" max="10" step="0.01" value="${esc(String(cfg.electricity_rate_per_kwh ?? 0.30))}">
+        </label>
+        <button type="button" class="costing-ghost-btn" data-power-refresh>Refresh</button>
+      </div>
+      <div class="costing-power-body" data-power-body>
+        ${state.power ? _costingPowerRowsHtml(state.power) : '<div class="settings-empty">Loading power…</div>'}
+      </div>
+      <div class="settings-hint">${esc((state.power && state.power.note) || 'Edit Avg W per printer if your setup differs, then Save costing.')}</div>
+    </div>`;
+}
+
+function _paintCosting(el, state) {
+  const quoteSnap = {
+    grams: el.querySelector('[data-quote="grams"]')?.value || state.quote?.grams || '',
+    hours: el.querySelector('[data-quote="hours"]')?.value || state.quote?.hours || '',
+    material: el.querySelector('[data-quote="material"]')?.value || state.quote?.material || '',
+    filament: el.querySelector('[data-quote="filament"]')?.value || state.quote?.filament || '',
+    design_hours: el.querySelector('[data-quote="design_hours"]')?.value || state.quote?.design_hours || '',
+  };
+  state.quote = quoteSnap;
+  el._powerWatts = { ...(state.cfg?.power_watts || {}), ...(el._powerWatts || {}) };
+  el.innerHTML = _costingCategoryHtml(state);
+  const setVal = (sel, value) => {
+    const node = el.querySelector(sel);
+    if (node && value !== undefined && value !== '') node.value = value;
+  };
+  setVal('[data-quote="grams"]', quoteSnap.grams);
+  setVal('[data-quote="hours"]', quoteSnap.hours);
+  setVal('[data-quote="material"]', quoteSnap.material);
+  setVal('[data-quote="filament"]', quoteSnap.filament);
+  setVal('[data-quote="design_hours"]', quoteSnap.design_hours);
+  _attachCostingEvents(el, state);
+}
+
+function _costingRefreshPowerLocal(el, state) {
+  const rate = Number(el.querySelector('[data-costing="electricity_rate_per_kwh"]')?.value || 0) || 0;
+  let totalHours = 0;
+  let totalKwh = 0;
+  el.querySelectorAll('.costing-power-row').forEach(row => {
+    const hours = Number(row.children[1]?.textContent || 0) || 0;
+    const watts = Number(row.querySelector('[data-power-watts]')?.value || 0) || 0;
+    const kwh = hours * (watts / 1000);
+    const cost = kwh * rate;
+    totalHours += hours;
+    totalKwh += kwh;
+    if (row.children[3]) row.children[3].textContent = kwh.toFixed(2);
+    if (row.children[4]) row.children[4].textContent = _printCostMoney(cost);
+  });
+  const totals = el.querySelector('.costing-power-totals');
+  if (totals) {
+    totals.innerHTML = `
+      <span>${totalHours.toFixed(1)} h</span>
+      <span>${totalKwh.toFixed(2)} kWh</span>
+      <strong>${_printCostMoney(totalKwh * rate)}</strong>`;
+  }
+  if (state.power) {
+    state.power.rate_per_kwh = rate;
+    state.power.total_hours = Math.round(totalHours * 100) / 100;
+    state.power.total_kwh = Math.round(totalKwh * 1000) / 1000;
+    state.power.total_cost = Math.round(totalKwh * rate * 100) / 100;
+  }
+  _costingApplyPowerToElectricity(el, state);
+}
+
+async function _costingLoadPower(el, state, month) {
+  const body = el.querySelector('[data-power-body]');
+  const ym = month || el.querySelector('[data-power-month]')?.value || _costingMonthDefault();
+  if (body) body.innerHTML = '<div class="settings-empty">Loading power…</div>';
+  try {
+    const collected = _costingCollect(el);
+    state.cfg = { ...state.cfg, ...collected, recent_hours_30d: state.cfg.recent_hours_30d };
+    const r = await fetch(`/api/costing/power?month=${encodeURIComponent(ym)}`);
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.detail || 'Power load failed');
+    const overrides = collected.power_watts || {};
+    const rate = Number(collected.electricity_rate_per_kwh ?? data.rate_per_kwh ?? 0.3);
+    (data.printers || []).forEach(row => {
+      const ov = Number(overrides[row.printer_id] || 0);
+      if (ov > 0) {
+        row.watts_override = ov;
+        row.watts = ov;
+        row.kwh = Math.round(Number(row.hours || 0) * (ov / 1000) * 1000) / 1000;
+        row.cost = Math.round(row.kwh * rate * 100) / 100;
+      } else {
+        row.cost = Math.round(Number(row.kwh || 0) * rate * 100) / 100;
+      }
+    });
+    data.rate_per_kwh = rate;
+    data.total_kwh = Math.round((data.printers || []).reduce((s, p) => s + Number(p.kwh || 0), 0) * 1000) / 1000;
+    data.total_hours = Math.round((data.printers || []).reduce((s, p) => s + Number(p.hours || 0), 0) * 100) / 100;
+    data.total_cost = Math.round(data.total_kwh * rate * 100) / 100;
+    state.power = data;
+    if (body) body.innerHTML = _costingPowerRowsHtml(data);
+    el.querySelectorAll('[data-power-watts]').forEach(input => {
+      input.addEventListener('input', () => _costingRefreshDerived(el, state));
+    });
+    _costingRefreshDerived(el, state);
+  } catch (err) {
+    if (body) body.innerHTML = `<div class="settings-empty">${esc(err.message || 'Power load failed')}</div>`;
+  }
+}
+
+function _costingRefreshDerived(el, state) {
+  _costingRefreshPowerLocal(el, state);
+  const cfg = _costingCollect(el);
+  cfg.recent_hours_30d = state.cfg.recent_hours_30d;
+  state.cfg = { ...state.cfg, ...cfg };
+  const rates = _costingRates(cfg);
+  const rateEl = el.querySelector('[data-costing-rate]');
+  const monthlyEl = el.querySelector('[data-costing-monthly]');
+  const hoursEl = el.querySelector('[data-costing-hours-label]');
+  if (rateEl) rateEl.textContent = rates.shop_rate > 0 ? _printCostMoney(rates.shop_rate) : '$0.00';
+  if (monthlyEl) monthlyEl.textContent = `${_printCostMoney(rates.monthly_total)} / month`;
+  if (hoursEl) hoursEl.textContent = `${Number(rates.expected_hours || 0).toFixed(0)} expected hours`;
+  const grams = Number(el.querySelector('[data-quote="grams"]')?.value || 0);
+  const hours = Number(el.querySelector('[data-quote="hours"]')?.value || 0);
+  const material = el.querySelector('[data-quote="material"]')?.value || '';
+  const filInput = el.querySelector('[data-quote="filament"]')?.value ?? '';
+  const designHours = Number(el.querySelector('[data-quote="design_hours"]')?.value || 0);
+  const quote = _costingQuoteLocal(rates, state.costs, grams, hours, material, filInput);
+  const design = designHours > 0 ? designHours * Number(quote.design_per_hour || 0) : 0;
+  const setOut = (key, value, show) => {
+    const node = el.querySelector(`[data-quote-out="${key}"]`);
+    if (!node) return;
+    node.textContent = show ? _printCostMoney(value) : '—';
+  };
+  const hasInput = grams > 0 || hours > 0 || filInput !== '';
+  setOut('filament', quote.filament, hasInput && quote.filament != null);
+  setOut('time', quote.time, hasInput && quote.time > 0);
+  const labourRow = el.querySelector('[data-quote-labour-row]');
+  if (labourRow) labourRow.hidden = !(hasInput && quote.labour > 0);
+  setOut('labour', quote.labour, hasInput && quote.labour > 0);
+  setOut('floor', quote.floor, hasInput && quote.floor > 0);
+  setOut('shop', quote.shop, hasInput && quote.shop > 0);
+  setOut('batch', quote.batch, hasInput && quote.batch > 0);
+  setOut('machine', quote.machine, hasInput && quote.machine > 0);
+  setOut('value', quote.value, hasInput && quote.value > 0);
+  const designRow = el.querySelector('[data-quote-design-row]');
+  if (designRow) designRow.hidden = !(design > 0);
+  setOut('design', design, design > 0);
+  const strategy = quote.strategy || rates.pricing_strategy || 'shop';
+  el.querySelectorAll('.costing-strategy-pick').forEach(label => {
+    const input = label.querySelector('input');
+    label.classList.toggle('is-active', !!(input && input.checked));
+  });
+  el.querySelectorAll('[data-quote-strategy]').forEach(tile => {
+    tile.classList.toggle('costing-quote-suggested', tile.dataset.quoteStrategy === strategy);
+  });
+}
+
+function _attachCostingEvents(el, state) {
+  const refresh = () => _costingRefreshDerived(el, state);
+  el.querySelectorAll('[data-costing], [data-quote]').forEach(input => {
+    input.addEventListener('input', refresh);
+    input.addEventListener('change', refresh);
+  });
+  el.querySelectorAll('[data-power-watts]').forEach(input => {
+    input.addEventListener('input', refresh);
+  });
+  el.querySelector('[data-costing-add]')?.addEventListener('click', () => {
+    const cfg = _costingCollect(el);
+    cfg.overheads.push({ id: '', name: 'Other', amount: 0 });
+    cfg.recent_hours_30d = state.cfg.recent_hours_30d;
+    _paintCosting(el, { cfg, costs: state.costs, power: state.power, quote: state.quote });
+  });
+  el.querySelectorAll('.costing-remove-overhead').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const row = btn.closest('.costing-overhead-row');
+      row?.remove();
+      const cfg = _costingCollect(el);
+      cfg.recent_hours_30d = state.cfg.recent_hours_30d;
+      _paintCosting(el, { cfg, costs: state.costs, power: state.power, quote: state.quote });
+    });
+  });
+  el.querySelector('[data-costing-use-recent]')?.addEventListener('click', () => {
+    const hoursInput = el.querySelector('[data-costing="expected_hours"]');
+    const recent = Number(state.cfg.recent_hours_30d || 0);
+    if (!hoursInput || !(recent > 0)) return;
+    hoursInput.value = String(Math.round(recent));
+    refresh();
+  });
+  el.querySelector('[data-power-refresh]')?.addEventListener('click', () => {
+    _costingLoadPower(el, state);
+  });
+  el.querySelector('[data-power-month]')?.addEventListener('change', () => {
+    _costingLoadPower(el, state);
+  });
+  el.querySelector('[data-costing-save]')?.addEventListener('click', async () => {
+    const btn = el.querySelector('[data-costing-save]');
+    const status = el.querySelector('[data-costing-status]');
+    const payload = _costingCollect(el);
+    if (btn) btn.disabled = true;
+    if (status) status.textContent = 'Saving…';
+    try {
+      const r = await fetch('/api/costing', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.detail || 'Save failed');
+      state.cfg = data;
+      el._powerWatts = { ...(data.power_watts || {}) };
+      _paintCosting(el, state);
+      await _costingLoadPower(el, state);
+      showToast('Costing saved', `Shop rate ${_printCostMoney(data.shop_rate || 0)}/h`, 'success');
+    } catch (err) {
+      if (status) status.textContent = err.message || 'Save failed';
+      showToast('Costing save failed', err.message || 'Could not save', 'error');
+      if (btn) btn.disabled = false;
+    }
+  });
+  refresh();
+}
+
+function _toolsJobRow({ job, printer, note, noteCls = '', action, label }) {
+  const printerName = printer ? _printerNavLabel(printer) : job.printer_id;
+  const printerState = printer ? (_printerDisplayStateLabel(printer) || printer.state || 'unknown') : 'unknown';
+  return `<div class="settings-tools-job">
+    <div class="settings-tools-job-body">
+      <div class="settings-tools-job-name">${esc(job.filename || `Job #${job.id}`)}</div>
+      <div class="settings-tools-job-meta">${esc(printerName)} · ${esc(job.status)} · printer ${esc(printerState)}</div>
+      <div class="settings-tools-job-note${noteCls ? ` ${noteCls}` : ''}">${esc(note)}</div>
+    </div>
+    <button type="button" class="settings-save-btn" data-tools-${action}="${job.id}">${esc(label)}</button>
+  </div>`;
+}
+
+function _toolsCategoryHtml(jobs, printers) {
+  const byId = Object.fromEntries((printers || []).map(p => [p.id, p]));
+  const active = (jobs || []).filter(j => j.status === 'printing' || j.status === 'uploading');
+  const leftovers = (jobs || []).filter(j => j.status === 'failed' || j.status === 'cancelled');
+  const stuckRows = active.length
+    ? active.map(job => {
+        const printer = byId[job.printer_id];
+        const mismatch = !_queueJobLooksLive(job, printer);
+        return _toolsJobRow({
+          job, printer,
+          note: mismatch
+            ? 'Not on the machine — safe to release'
+            : 'Printer still looks like it is running this file',
+          noteCls: mismatch ? 'settings-tools-mismatch' : '',
+          action: 'release',
+          label: 'Release',
+        });
+      }).join('')
+    : '<div class="settings-empty">No printing or uploading queue jobs.</div>';
+  const leftoverHead = leftovers.length > 1
+    ? `<div class="settings-tools-job-actions"><button type="button" class="settings-save-btn" data-tools-dismiss-all="1">Dismiss all</button></div>`
+    : '';
+  const leftoverRows = leftovers.length
+    ? leftoverHead + leftovers.map(job => {
+        const printer = byId[job.printer_id];
+        const reprinting = active.some(a => a.printer_id === job.printer_id && a.filename === job.filename);
+        return _toolsJobRow({
+          job, printer,
+          note: reprinting
+            ? 'Leftover from an earlier try — a reprint of this file is already on the machine'
+            : job.status === 'failed'
+              ? 'Failed leftover — remove it from Flightdeck only'
+              : 'Cancelled leftover — remove it from Flightdeck only',
+          noteCls: 'settings-tools-failed',
+          action: 'dismiss',
+          label: 'Dismiss',
+        });
+      }).join('')
+    : '<div class="settings-empty">No failed or cancelled queue leftovers.</div>';
+  return `
+    <div class="settings-section">
+      <div class="settings-section-title">Flightdeck tools</div>
+      <div class="settings-hint">These actions only change Flightdeck. Nothing here stops or cancels a printer.</div>
+    </div>
+    <div class="settings-section">
+      <div class="settings-section-title">Stuck queue jobs</div>
+      <div class="settings-hint">Use this when a job still says Printing but it is not actually on the machine. Same as Release on the Queue page.</div>
+      ${stuckRows}
+    </div>
+    <div class="settings-section">
+      <div class="settings-section-title">Failed queue leftovers</div>
+      <div class="settings-hint">Dismiss a failed or cancelled row after you have already retried it, or when you just want it off the board. Same as ✕ on the Queue page.</div>
+      ${leftoverRows}
+    </div>`;
+}
+
+async function _toolsDismissQueueJob(id) {
+  await _queueFetchJson(`/api/queue/${id}`, { method: 'DELETE' });
+}
+
+function _attachToolsEvents(el) {
+  el.querySelectorAll('[data-tools-release]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = btn.dataset.toolsRelease;
+      const job = _queueLatestJobs.find(j => String(j.id) === String(id));
+      const printer = _latestPrinters.find(p => p.id === job?.printer_id);
+      _modal.show(_queueReleaseConfirmMessage(job, printer), async () => {
+        btn.disabled = true;
+        try {
+          await _queueFetchJson(`/api/queue/${id}/release`, { method: 'POST' });
+          showToast('Queue released', job?.filename || `Job #${id}`, 'ok');
+          await _renderSettingsContent('tools');
+        } catch (err) {
+          showToast('Release failed', err.message || '', 'error');
+          btn.disabled = false;
+        }
+      });
+    });
+  });
+  el.querySelectorAll('[data-tools-dismiss]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = btn.dataset.toolsDismiss;
+      const job = _queueLatestJobs.find(j => String(j.id) === String(id));
+      _modal.show('Remove this leftover from Flightdeck? The printer is not touched.', async () => {
+        btn.disabled = true;
+        try {
+          await _toolsDismissQueueJob(id);
+          showToast('Queue leftover dismissed', job?.filename || `Job #${id}`, 'ok');
+          await _renderSettingsContent('tools');
+        } catch (err) {
+          showToast('Dismiss failed', err.message || '', 'error');
+          btn.disabled = false;
+        }
+      });
+    });
+  });
+  el.querySelector('[data-tools-dismiss-all]')?.addEventListener('click', () => {
+    const leftovers = (_queueLatestJobs || []).filter(j => j.status === 'failed' || j.status === 'cancelled');
+    if (!leftovers.length) return;
+    _modal.show(`Dismiss ${leftovers.length} leftover queue rows? The printer is not touched.`, async () => {
+      try {
+        for (const job of leftovers) await _toolsDismissQueueJob(job.id);
+        showToast('Queue leftovers dismissed', `${leftovers.length} row${leftovers.length === 1 ? '' : 's'}`, 'ok');
+        await _renderSettingsContent('tools');
+      } catch (err) {
+        showToast('Dismiss failed', err.message || '', 'error');
+      }
     });
   });
 }
@@ -16565,8 +25249,23 @@ async function _renderSettingsContent(category) {
     el.innerHTML = `<div class="detail-placeholder" style="min-height:10rem">Loading…</div>`;
     let printers = [];
     try {
-      const r = await fetch('/api/config/printers');
-      if (r.ok) printers = await r.json();
+      const [configRes, liveRes] = await Promise.all([
+        fetch('/api/config/printers'),
+        fetch('/api/printers'),
+      ]);
+      if (configRes.ok) printers = await configRes.json();
+      if (liveRes.ok) {
+        const liveById = Object.fromEntries((await liveRes.json()).map(p => [p.id, p]));
+        printers = printers.map(p => {
+          const live = liveById[p.id];
+          if (!live) return p;
+          return {
+            ...p,
+            print_enabled: live.print_enabled,
+            print_enabled_note: live.print_enabled_note,
+          };
+        });
+      }
     } catch {}
     _settingsPrinterEntries = printers;
     el.innerHTML = _printersCategoryHtml(printers);
@@ -16581,7 +25280,7 @@ async function _renderSettingsContent(category) {
     _attachHardwareEvents(el);
   } else if (category === 'preferences') {
     el.innerHTML = _preferencesCategoryHtml();
-    _attachPreferencesEvents(el);
+    _refreshPreferencesPanel(el);
   } else if (category === 'appearance') {
     el.innerHTML = _appearanceCategoryHtml();
     _attachAppearanceEvents(el);
@@ -16595,11 +25294,13 @@ async function _renderSettingsContent(category) {
     _attachSlicerEvents(el);
   } else if (category === 'filament') {
     el.innerHTML = `<div class="detail-placeholder" style="min-height:10rem">Loading…</div>`;
-    const [summary, costs] = await Promise.all([
+    const [summary, costs, emptyProfiles] = await Promise.all([
       fetch('/api/filament/summary').then(r => r.json()).catch(() => ({})),
       fetch('/api/filament/costs').then(r => r.json()).catch(() => []),
+      fetch('/api/empty-spool-profiles').then(r => r.json()).catch(() => []),
     ]);
-    el.innerHTML = _filamentCategoryHtml(summary, costs);
+    _emptySpoolProfiles = emptyProfiles;
+    el.innerHTML = _filamentCategoryHtml(summary, costs, emptyProfiles);
     _attachFilamentEvents(el);
   } else if (category === 'locations') {
     el.classList.add('settings-content-locations');
@@ -16612,6 +25313,32 @@ async function _renderSettingsContent(category) {
     _allSpools = spools;
     el.innerHTML = _locationsCategoryHtml(locations);
     _attachLocationsEvents(el, locations);
+  } else if (category === 'costing') {
+    el.innerHTML = `<div class="detail-placeholder" style="min-height:10rem">Loading…</div>`;
+    const [costing, costs, power] = await Promise.all([
+      fetch('/api/costing').then(r => r.json()).catch(() => null),
+      fetch('/api/filament/costs').then(r => r.json()).catch(() => []),
+      fetch(`/api/costing/power?month=${encodeURIComponent(_costingMonthDefault())}`).then(r => r.json()).catch(() => null),
+    ]);
+    const state = {
+      cfg: costing && typeof costing === 'object' ? costing : _costingDefaults(),
+      costs: Array.isArray(costs) ? costs : [],
+      power: power && typeof power === 'object' ? power : null,
+    };
+    el._powerWatts = { ...(state.cfg.power_watts || {}) };
+    _paintCosting(el, state);
+  } else if (category === 'tools') {
+    el.innerHTML = `<div class="detail-placeholder" style="min-height:10rem">Loading…</div>`;
+    const [jobsRaw, printersRaw] = await Promise.all([
+      fetch('/api/queue').then(r => r.ok ? r.json() : []).catch(() => []),
+      fetch('/api/printers').then(r => r.ok ? r.json() : (_latestPrinters || [])).catch(() => (_latestPrinters || [])),
+    ]);
+    const jobs = Array.isArray(jobsRaw) ? jobsRaw : [];
+    const printers = Array.isArray(printersRaw) ? printersRaw : [];
+    _queueLatestJobs = jobs;
+    _latestPrinters = printers;
+    el.innerHTML = _toolsCategoryHtml(jobs, printers);
+    _attachToolsEvents(el);
   }
 }
 
@@ -16619,6 +25346,7 @@ async function _renderSpoolsContent(el) {
   if (!el) return;
   el.classList.add('settings-content-spools');
   el.innerHTML = `<div class="detail-placeholder" style="min-height:10rem">Loading…</div>`;
+  _spoolsViewMode = _normaliseSpoolViewMode(_spoolsViewMode || _serverSettings.spool_view_mode);
   const params = _routeParams('#/spools');
   if (params.has('filter')) {
     const filter = params.get('filter');
@@ -16626,20 +25354,23 @@ async function _renderSpoolsContent(el) {
   }
   if (params.has('view')) {
     const view = params.get('view');
-    if (['cards', 'table', 'cabinet', 'incoming', 'catalogue'].includes(view)) _spoolsViewMode = view;
+    _spoolsViewMode = _normaliseSpoolViewMode(view);
   }
   _spoolsFilter.printer = params.get('printer') || '';
-  const [spools, summary, costs, filamentSummary, locations, intelligence] = await Promise.all([
-    fetch('/api/spools').then(r => r.json()).catch(() => []),
+  _spoolsFilter.location = params.get('location') || '';
+  const [spools, summary, costs, filamentSummary, locations, intelligence, emptyProfiles] = await Promise.all([
+    fetch(`/api/spools/all?_=${Date.now()}`, { cache: 'no-store' }).then(r => r.json()).catch(() => []),
     fetch('/api/spools/summary').then(r => r.json()).catch(() => ({})),
     fetch('/api/filament/costs').then(r => r.json()).catch(() => []),
     fetch('/api/filament/summary').then(r => r.json()).catch(() => ({})),
     fetch('/api/spool-locations').then(r => r.json()).catch(() => []),
     fetch('/api/spools/intelligence').then(r => r.json()).catch(() => ({})),
+    fetch('/api/empty-spool-profiles').then(r => r.json()).catch(() => []),
   ]);
   _spoolLocations = locations;
   _spoolsFilamentSummary = filamentSummary;
   _spoolsFilamentCosts = costs;
+  _emptySpoolProfiles = emptyProfiles;
   el.innerHTML = _spoolsCategoryHtml(spools, summary, costs, intelligence);
   _attachSpoolsEvents(el, costs);
 }

@@ -10,7 +10,7 @@
   <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
   <link rel="manifest" href="/static/manifest.json">
   <meta name="theme-color" content="#0a0a0f">
-  <link rel="stylesheet" href="/static/style.css?v=368">
+  <link rel="stylesheet" href="/static/style.css?v=518">
 </head>
 <body>
   <script>
@@ -142,13 +142,24 @@
         <div id="demo-page"></div>
       </section>
 
-      <section id="view-manual" class="view" hidden>
+      <section id="view-makerworld" class="view" hidden>
+        <div id="makerworld-page"></div>
+      </section>
+
+      <section id="view-filament" class="view" hidden><div class="fleet-filament-page" id="fleet-filament-page"><div class="detail-placeholder">Loading…</div></div></section>
+<section id="view-projects" class="view" hidden><div class="projects-page" id="projects-page"><div class="detail-placeholder">Loading…</div></div></section>
+<section id="view-makerdeck" class="view" hidden><div class="makerdeck-page"><iframe id="makerdeck-frame" title="MakerDeck — container generator" loading="lazy"></iframe></div></section>
+<section id="view-meshprep" class="view" hidden><div class="makerdeck-page meshprep-page"><iframe id="meshprep-frame" title="Mesh Prep — inspect and repair STL meshes" loading="lazy"></iframe></div></section>
+<section id="view-painter" class="view" hidden><div class="painter-page"><iframe id="painter-frame" title="STL Painter — paint and export coloured 3MF" loading="lazy"></iframe></div></section>
+<section id="view-chop" class="view" hidden><div class="chop-page"><iframe id="chop-frame" title="Chop — slice STLs into printable pieces" loading="lazy"></iframe></div></section>
+<section id="view-about" class="view" hidden><div id="about-page"></div></section>
+<section id="view-manual" class="view" hidden>
         <div id="manual-page"></div>
       </section>
     </div>
   </div>
 
-  <script src="/static/demo-runtime.js?v=7"></script>
-  <script type="module" src="/static/app.js?v=456"></script>
+  <script src="/static/demo-runtime.js?v=10"></script>
+<script type="module" src="/static/app.js?v=746"></script>
 </body>
 </html>

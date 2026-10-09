@@ -1,0 +1,1507 @@
+<!DOCTYPE html>
+
+<html lang="en">
+
+<head>
+
+  <meta charset="UTF-8">
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+
+  <meta name="theme-color" content="#070b12">
+
+  <title>MakerDeck — Container Generator</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Anton&family=Bebas+Neue&family=Oswald:wght@700&family=Roboto+Mono:wght@700&family=Roboto:wght@700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css?v=588">
+
+  <script type="importmap">
+
+  {
+
+    "imports": {
+
+      "three": "https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js",
+
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.164.1/examples/jsm/"
+
+    }
+
+  }
+
+  </script>
+
+</head>
+
+<body>
+
+  <div class="app">
+
+    <header class="topbar">
+
+      <div class="topbar-head">
+
+        <div class="topbar-brand">
+
+          <div class="eyebrow">MakerDeck <span id="makerdeck-build" class="build-tag">b614</span></div>
+
+          <h1>Container Generator</h1>
+
+          <p class="subtitle">Pick a shape, tune options in the tabs, preview live, export when ready.</p>
+
+        </div>
+
+        <div class="topbar-tools" role="toolbar" aria-label="Editor tools">
+
+          <button type="button" id="btn-undo" class="btn btn-secondary btn-icon" disabled title="Undo (Ctrl+Z)" aria-label="Undo">↶</button>
+
+          <button type="button" id="btn-redo" class="btn btn-secondary btn-icon" disabled title="Redo (Ctrl+Y)" aria-label="Redo">↷</button>
+
+          <button type="button" id="btn-clear-box" class="btn btn-secondary" disabled title="Remove traced art, text, and SVG from the box">Clear from box</button>
+
+          <button type="button" id="btn-reset-view" class="btn btn-ghost" title="Reset camera">Reset view</button>
+
+          <select id="display-unit" class="display-unit-select" aria-label="Display units" title="Size display units">
+            <option value="mm" selected>mm</option>
+            <option value="cm">cm</option>
+            <option value="in">in</option>
+          </select>
+
+          <a href="painter.html?v=629" class="btn btn-secondary" style="text-decoration:none;display:inline-flex;align-items:center;gap:4px" title="Open STL Painter">STL Painter</a>
+          <a href="paper3d.html" class="btn btn-secondary" style="text-decoration:none;display:inline-flex;align-items:center;gap:4px" title="Open Paper3D">Paper3D</a>
+          <a href="meshprep.html" class="btn btn-secondary" style="text-decoration:none;display:inline-flex;align-items:center;gap:4px" title="Open Mesh Prep">Mesh Prep</a>
+          <a href="chop.html" class="btn btn-secondary" style="text-decoration:none;display:inline-flex;align-items:center;gap:4px" title="Open Chop">Chop</a>
+          <button type="button" id="btn-reset-defaults" class="btn btn-reset-defaults" title="Reset all settings to defaults">Reset defaults</button>
+
+        </div>
+
+      </div>
+
+      <div class="topbar-export-dock" aria-label="Export">
+
+        <div class="topbar-export-row">
+
+          <select id="export-format" class="export-format-select" aria-label="Download format">
+
+            <option value="3mf" selected>3MF project</option>
+
+            <option value="stl">STL body</option>
+
+            <option value="lid-3mf" data-export-opt="lid">3MF lid</option>
+
+            <option value="lid-stl" data-export-opt="lid">STL lid</option>
+
+            <option value="accent" data-export-opt="accent">STL accent</option>
+
+            <option value="insert" data-export-opt="insert">STL insert</option>
+
+            <option value="deboss" data-export-opt="deboss">STL deboss cutter</option>
+
+            <option value="saucer" data-export-opt="saucer">STL saucer</option>
+
+          </select>
+
+          <label class="field field-toggle export-watermark-toggle" title="Shallow bottom deboss: MD monogram, date, and print number">
+            <span class="field-label">Watermark</span>
+            <input type="checkbox" id="watermark-enabled" checked>
+          </label>
+
+          <div id="export-plan" class="export-plan hidden" aria-live="polite"></div>
+
+          <button type="button" id="btn-export-go" class="btn btn-primary">Download</button>
+
+        </div>
+
+        <p id="export-status" class="export-status-bar" aria-live="polite"></p>
+
+      </div>
+
+    </header>
+
+
+
+    <main class="workspace">
+
+      <aside class="panel controls" id="controls">
+
+        <nav class="tab-bar" role="tablist" aria-label="Settings">
+
+          <button type="button" class="tab active" data-tab="design" role="tab" aria-selected="true">Design</button>
+
+          <button type="button" class="tab" data-tab="lid" role="tab">Lid</button>
+
+          <button type="button" class="tab" data-tab="link" role="tab">Link</button>
+
+          <button type="button" class="tab" data-tab="accent" role="tab">Accent</button>
+
+          <button type="button" class="tab" data-tab="insert" role="tab">Insert</button>
+
+          <button type="button" class="tab" data-tab="art" role="tab">Art</button>
+
+          <button type="button" class="tab" data-tab="stack" role="tab">Stack</button>
+
+          <button type="button" class="tab" data-tab="library" role="tab">Library</button>
+
+        </nav>
+
+
+
+        <div class="tab-panels">
+
+          <div class="tab-panel active" id="tab-design" role="tabpanel">
+
+            <section class="section section-library-save" id="section-library-save">
+
+              <div class="library-save-header">
+                <h2>Library</h2>
+                <button type="button" class="btn btn-primary btn-sm" id="btn-save-to-library">Save to library</button>
+              </div>
+
+              <div class="library-save-row">
+                <label class="field">
+                  <span class="field-label">Name</span>
+                  <input type="text" id="library-save-name" class="text-input" placeholder="Coffee canister 250g" autocomplete="off" spellcheck="false">
+                </label>
+
+                <label class="field">
+                  <span class="field-label">Folder</span>
+                  <input type="text" id="library-save-folder" class="text-input" list="library-folder-options" placeholder="Kitchen (optional)" autocomplete="off" spellcheck="false">
+                  <datalist id="library-folder-options"></datalist>
+                </label>
+              </div>
+
+              <p id="library-save-status" class="field-hint library-save-status"></p>
+
+              <button type="button" class="btn btn-secondary btn-sm hidden" id="btn-view-library-save">View in Library</button>
+
+            </section>
+
+
+
+            <section class="section">
+
+              <h2>Shape</h2>
+
+              <div class="shape-grid" role="group" aria-label="Container shape">
+
+                <button type="button" class="shape-btn active" data-shape="rect">Box</button>
+
+                <button type="button" class="shape-btn" data-shape="rounded">Rounded</button>
+
+                <button type="button" class="shape-btn" data-shape="hex">Hex</button>
+
+                <button type="button" class="shape-btn" data-shape="circle">Circle</button>
+
+                <button type="button" class="shape-btn" data-shape="oval">Oval</button>
+
+              </div>
+
+              <h2 class="section-sub">Quick presets</h2>
+
+              <div class="preset-grid">
+
+                <button type="button" class="shape-btn shape-btn--preset" data-shape="pencil">Pencil tube</button>
+
+                <button type="button" class="shape-btn shape-btn--preset" data-shape="pencilBox">Pencil box</button>
+
+                <button type="button" class="shape-btn shape-btn--preset" data-shape="teardrop">Teardrop</button>
+
+                <button type="button" class="shape-btn shape-btn--preset" data-shape="star">Star</button>
+
+                <button type="button" class="shape-btn shape-btn--preset" data-shape="heart">Heart</button>
+
+                <button type="button" class="shape-btn shape-btn--preset" data-shape="vase">Vase / pot</button>
+
+                <button type="button" class="shape-btn shape-btn--preset" data-shape="stubbyHolder">Hoodie container</button>
+
+              </div>
+
+              <section class="section hidden" id="section-stubby">
+                <h2 class="section-sub">Hoodie container</h2>
+                <p class="hint">Panthers hoodie — 150 mm tall, 65 mm can well. Drop a PNG on the Art tab to stamp the logo on the chest. Export is Body + Art, same as other MakerDeck boxes.</p>
+              </section>
+
+              <h2 class="section-sub">Signs</h2>
+
+              <div class="preset-grid">
+                <button type="button" class="shape-btn shape-btn--preset" data-shape="sign">Sign / plaque</button>
+              </div>
+
+              <section class="section section-sign hidden" id="section-sign">
+                <label class="field field-select" id="field-sign-shape">
+                  <span class="field-label">Shape</span>
+                  <select id="sign-shape">
+                    <option value="rounded">Rounded rectangle</option>
+                    <option value="rectangle">Rectangle</option>
+                    <option value="pill">Pill / stadium</option>
+                    <option value="oval">Oval</option>
+                    <option value="hexagon">Hexagon</option>
+                    <option value="arch">Arch top</option>
+                    <option value="shield">Shield</option>
+                    <option value="banner">Banner / ribbon</option>
+                  </select>
+                </label>
+                <label class="field field-select" id="field-sign-type">
+                  <span class="field-label">Sign type</span>
+                  <select id="sign-type">
+                    <option value="plaque">Door / name plaque</option>
+                    <option value="desk">Desk name plate</option>
+                    <option value="shelf">Shelf display</option>
+                    <option value="number">House number</option>
+                    <option value="hanging">Hanging sign</option>
+                  </select>
+                </label>
+                <div class="chip-row hidden" id="sign-shelf-edit-row" role="group" aria-label="Edit shelf part">
+                  <button type="button" class="chip-btn active" data-sign-edit="back">Edit back</button>
+                  <button type="button" class="chip-btn" data-sign-edit="shelf">Edit shelf</button>
+                </div>
+                <label class="field field-slider"><span class="field-label">Width</span><input type="range" id="sign-width" min="40" max="300" step="1"><output id="sign-width-out"></output></label>
+                <label class="field field-slider"><span class="field-label">Height</span><input type="range" id="sign-height" min="25" max="300" step="1"><output id="sign-height-out"></output></label>
+                <label class="field field-slider"><span class="field-label">Thickness</span><input type="range" id="sign-thickness" min="2" max="10" step="0.2"><output id="sign-thickness-out"></output></label>
+                <label class="field field-slider"><span class="field-label">Corner radius</span><input type="range" id="sign-corner" min="0" max="30" step="1"><output id="sign-corner-out"></output></label>
+                <label class="field field-slider hidden" id="field-sign-shelf-width"><span class="field-label">Shelf width</span><input type="range" id="sign-shelf-width" min="40" max="300" step="1"><output id="sign-shelf-width-out"></output></label>
+                <label class="field field-slider hidden" id="field-sign-shelf-length"><span class="field-label">Shelf length</span><input type="range" id="sign-shelf-length" min="20" max="200" step="1"><output id="sign-shelf-length-out"></output></label>
+                <label class="field field-slider hidden" id="field-sign-shelf-thickness"><span class="field-label">Shelf thickness</span><input type="range" id="sign-shelf-thickness" min="2" max="8" step="0.2"><output id="sign-shelf-thickness-out"></output></label>
+                <label class="field field-slider hidden" id="field-sign-shelf-corner"><span class="field-label">Shelf corner</span><input type="range" id="sign-shelf-corner" min="0" max="40" step="1"><output id="sign-shelf-corner-out"></output></label>
+                <label class="field field-slider hidden" id="field-sign-shelf-slot-base"><span class="field-label">Slot base</span><input type="range" id="sign-shelf-slot-base" min="0.2" max="8" step="0.1"><output id="sign-shelf-slot-base-out"></output></label>
+                <label class="field field-slider hidden" id="field-sign-shelf-slot-depth"><span class="field-label">Slot fit</span><input type="range" id="sign-shelf-slot-depth" min="3" max="8" step="0.05"><output id="sign-shelf-slot-depth-out"></output></label>
+                <label class="field field-select" id="field-sign-mount">
+                  <span class="field-label">Wall mount</span>
+                  <select id="sign-mount">
+                    <option value="keyhole">Keyhole slots</option>
+                    <option value="screw">Screw holes (4)</option>
+                    <option value="hanging">Hanging holes (2)</option>
+                    <option value="stake">Garden stakes</option>
+                    <option value="none">None</option>
+                  </select>
+                </label>
+                <label class="field field-toggle"><span class="field-label">Raised border</span><input type="checkbox" id="sign-border"></label>
+                <p class="hint" id="sign-hint-plaque">Flat plate, prints face-up with no supports. Type your text on the <strong>Art</strong> tab — it sits on the top face. Print two-tone by giving the text its own colour.</p>
+    <p class="hint hidden" id="sign-hint-shelf">Use <strong>Edit back</strong> / <strong>Edit shelf</strong> to size each part on its own. <strong>Download</strong> exports only the part you’re editing (<code>-back</code> / <code>-shelf</code>). Print both flat — the shelf has a rear press-fit pocket 5mm in from the edges. <strong>Slot base</strong> goes from a 0.2&nbsp;mm floor up to shelf thickness (solid / no slot). Set <strong>Slot fit</strong> to the measured printed sign thickness plus a small press-fit clearance.</p>
+              </section>
+
+              <h2 class="section-sub">Kitchen canisters</h2>
+
+              <div class="preset-grid canister-preset-grid">
+                <button type="button" class="shape-btn shape-btn--preset" data-shape="canisterSquareSet">Square stack set</button>
+                <button type="button" class="shape-btn shape-btn--preset" data-shape="canisterSquare">Square canister</button>
+                <button type="button" class="shape-btn shape-btn--preset" data-shape="canisterJar">Round jar</button>
+                <button type="button" class="shape-btn shape-btn--preset" data-shape="canisterStack">Stack set</button>
+              </div>
+
+              <section class="section section-canister hidden" id="section-canister">
+                <label class="field field-select" id="field-canister-content">
+                  <span class="field-label">Contents</span>
+                  <select id="canister-content">
+                    <option value="coffee">Coffee</option>
+                    <option value="sugar">Sugar</option>
+                    <option value="milo">Milo</option>
+                    <option value="tea">Tea</option>
+                    <option value="biscuits">Biscuits</option>
+                    <option value="custom">Custom label</option>
+                  </select>
+                </label>
+
+                <div class="canister-size-row" id="canister-size-row" role="group" aria-label="Canister size">
+                  <span class="field-label">Size</span>
+                  <div class="chip-row">
+                    <button type="button" class="chip-btn" data-canister-size="sm" title="250 ml tin · ~83×95 mm outer">125g</button>
+                    <button type="button" class="chip-btn active" data-canister-size="md" title="500 ml tin · ~99×130 mm outer">250g</button>
+                    <button type="button" class="chip-btn" data-canister-size="lg" title="1 L tin · ~120×180 mm outer">500g</button>
+                    <button type="button" class="chip-btn" data-canister-size="xl" title="Biscuit tin · ~155×240 mm outer · 1–1.5 kg">1.5kg</button>
+                  </div>
+                </div>
+
+                <div class="canister-size-row hidden" id="canister-stack-row" role="group" aria-label="Stack set member">
+                  <span class="field-label">Stack trio</span>
+                  <div class="chip-row">
+                    <button type="button" class="chip-btn active" data-stack-member="coffee" title="Coffee · letter C · sage body">C · Coffee</button>
+                    <button type="button" class="chip-btn" data-stack-member="sugar" title="Sugar · letter S · blue-grey body">S · Sugar</button>
+                    <button type="button" class="chip-btn" data-stack-member="milo" title="Milo · letter M · chocolate body">M · Milo</button>
+                  </div>
+                </div>
+
+                <p class="hint canister-food-hint">Coffee/sugar/milo use standard tin footprints; biscuits default to the wide <strong>1.5kg</strong> tin. Use food-contact filament. Flat lids include an optional gasket groove — print the <strong>Gasket</strong> part in TPU (or use 2&nbsp;mm cord).</p>
+                <p class="hint hidden" id="canister-square-set-hint">Uniform <strong>250g</strong> square canisters — flat lids with a <strong>1&nbsp;mm</strong> stack lip so jars tower without sliding off. Front-face labels (<strong>COFFEE · SUGAR · MILO</strong>). Enable <strong>Food-safe liner</strong> for a thin PLA Pure insert.</p>
+
+                <label class="field hidden" id="field-canister-filament">
+                  <span class="field-label">Canister filament preset</span>
+                  <input type="text" id="canister-filament-preset" list="liner-filament-presets" placeholder="Generic PLA @BBL H2D" spellcheck="false">
+                </label>
+                <p class="hint hidden" id="canister-filament-hint">Written into the container + lid + accent 3MF slots so Bambu maps the AMS automatically. Leave blank for Generic PLA.</p>
+                <label class="field field-toggle hidden" id="field-liner-enabled">
+                  <span class="field-label">Food-safe liner</span>
+                  <input type="checkbox" id="liner-enabled">
+                </label>
+                <label class="field hidden" id="field-liner-filament">
+                  <span class="field-label">Liner filament preset</span>
+                  <input type="text" id="liner-filament-preset" list="liner-filament-presets" placeholder="Bambu PLA Pure @BBL H2D" spellcheck="false">
+                  <datalist id="liner-filament-presets">
+                    <option value="Bambu PLA Pure @BBL H2D"></option>
+                    <option value="Bambu PLA Basic @BBL H2D"></option>
+                    <option value="Generic PLA @BBL H2D"></option>
+                  </datalist>
+                </label>
+                <p class="hint hidden" id="liner-hint">Written into the liner 3MF so Bambu maps the AMS slot automatically (PLA Pure lives in the AMS HT). Thin PLA Pure cup with a top flange — sits below the lid lip so the lid still seats on the outer shell. Exported as a separate <strong>Liner</strong> part with a peel-off top membrane (~0.18&nbsp;mm) — remove after print.</p>
+                <p class="hint hidden" id="canister-stack-hint">Uniform <strong>250g</strong> round jars — flat lids with a <strong>1&nbsp;mm</strong> stack lip. Export body + lid 3MF per letter (<strong>C · S · M</strong>).</p>
+              </section>
+
+            </section>
+
+
+
+            <details class="section section-collapse" id="section-edges" data-collapse="edges">
+
+              <summary class="collapse-summary">Edges <span class="unit unit-len">mm</span></summary>
+
+              <div class="collapse-body">
+
+              <label class="field" id="field-sides">
+
+                <span class="field-label">Sides</span>
+
+                <input type="range" id="sides" min="3" max="12" step="1" value="6">
+
+                <button type="button" class="value-edit" id="out-sides" data-slider="sides" data-key="sides" aria-label="Edit polygon side count">6</button>
+
+              </label>
+
+              <label class="field" id="field-corner">
+
+                <span class="field-label">Corner radius</span>
+
+                <input type="range" id="corner-radius" min="1" max="24" step="0.5" value="6">
+
+                <button type="button" class="value-edit" id="out-corner" data-slider="corner-radius" data-key="cornerRadius" data-parse="float" aria-label="Edit corner radius in mm">6</button>
+
+              </label>
+
+              <label class="field" id="field-vertex-fillet">
+
+                <span class="field-label" id="label-vertex-fillet">Edge fillet</span>
+
+                <input type="range" id="vertex-fillet" min="0" max="12" step="0.5" value="2">
+
+                <button type="button" class="value-edit" id="out-vertex" data-slider="vertex-fillet" data-key="vertexFillet" data-parse="float" aria-label="Edit edge fillet in mm">2</button>
+
+              </label>
+
+              </div>
+
+            </details>
+
+
+
+            <details class="section section-collapse hidden" id="section-vase" data-collapse="vase">
+
+              <summary class="collapse-summary">Vase style</summary>
+
+              <div class="collapse-body">
+
+              <p class="field-hint">Print in <strong>Vase mode</strong> (spiral outer wall) for the smoothest finish. Walls thinner than 1.6 mm need the printer's vase / spiralize option.</p>
+
+              <label class="field">
+
+                <span class="field-label">Style</span>
+
+                <select id="vase-style"></select>
+
+              </label>
+
+              <label class="field">
+
+                <span class="field-label">Diameter <span class="unit unit-len">mm</span></span>
+
+                <input type="range" id="vase-diameter" min="30" max="220" step="1" value="80" tabindex="-1">
+
+                <button type="button" class="value-edit" data-slider="vase-diameter" data-key="vaseDiameter" data-parse="float">80</button>
+
+              </label>
+
+              <label class="field">
+
+                <span class="field-label">Height <span class="unit unit-len">mm</span></span>
+
+                <input type="range" id="vase-height" min="20" max="280" step="1" value="110" tabindex="-1">
+
+                <button type="button" class="value-edit" data-slider="vase-height" data-key="vaseHeight" data-parse="float">110</button>
+
+              </label>
+
+              <label class="field">
+
+                <span class="field-label">Wall <span class="unit unit-len">mm</span></span>
+
+                <input type="range" id="vase-wall" min="1.0" max="3" step="0.1" value="1.6" tabindex="-1">
+
+                <button type="button" class="value-edit" data-slider="vase-wall" data-key="vaseWall" data-parse="float">1.6</button>
+
+              </label>
+
+              <label class="field">
+
+                <span class="field-label">Floor <span class="unit unit-len">mm</span></span>
+
+                <input type="range" id="vase-floor" min="1.4" max="6" step="0.2" value="2.4" tabindex="-1">
+
+                <button type="button" class="value-edit" data-slider="vase-floor" data-key="vaseFloor" data-parse="float">2.4</button>
+
+              </label>
+
+              <label class="field field-toggle">
+
+                <span class="field-label">Drainage hole</span>
+
+                <input type="checkbox" id="vase-drainage" checked>
+
+              </label>
+
+              <label class="field hidden" id="field-vase-drainage-size">
+
+                <span class="field-label">Drain diameter <span class="unit unit-len">mm</span></span>
+
+                <input type="range" id="vase-drainage-size" min="4" max="30" step="1" value="8" tabindex="-1">
+
+                <button type="button" class="value-edit" data-slider="vase-drainage-size" data-key="vaseDrainageSize" data-parse="float">8</button>
+
+              </label>
+
+              <label class="field">
+
+                <span class="field-label">Flutes (ribs)</span>
+
+                <input type="range" id="vase-flutes" min="0" max="24" step="1" value="0" tabindex="-1">
+
+                <button type="button" class="value-edit" data-slider="vase-flutes" data-key="vaseFlutes" data-parse="int">0</button>
+
+              </label>
+
+              <label class="field hidden" id="field-vase-flute-depth">
+
+                <span class="field-label">Flute depth <span class="unit unit-len">mm</span></span>
+
+                <input type="range" id="vase-flute-depth" min="0.5" max="6" step="0.5" value="2" tabindex="-1">
+
+                <button type="button" class="value-edit" data-slider="vase-flute-depth" data-key="vaseFluteDepth" data-parse="float">2</button>
+
+              </label>
+
+              <label class="field hidden" id="field-vase-twist">
+
+                <span class="field-label">Twist <span class="unit">°</span></span>
+
+                <input type="range" id="vase-twist" min="-180" max="180" step="5" value="0" tabindex="-1">
+
+                <button type="button" class="value-edit" data-slider="vase-twist" data-key="vaseTwist" data-parse="float">0</button>
+
+              </label>
+
+              <label class="field field-toggle">
+
+                <span class="field-label">Surface texture</span>
+
+                <input type="checkbox" id="vase-texture-enabled">
+
+              </label>
+
+              <label class="field hidden" id="field-vase-texture-style">
+
+                <span class="field-label">Texture style</span>
+
+                <select id="vase-texture-style">
+                  <option value="ripple">Ripple (horizontal waves)</option>
+                  <option value="scales">Scales</option>
+                  <option value="bark">Bark (vertical ridges)</option>
+                  <option value="weave">Basket weave</option>
+                  <option value="knit">Knitted</option>
+                </select>
+
+              </label>
+
+              <label class="field hidden" id="field-vase-texture-depth">
+
+                <span class="field-label">Texture depth <span class="unit unit-len">mm</span></span>
+
+                <input type="range" id="vase-texture-depth" min="0.3" max="3" step="0.1" value="1.2" tabindex="-1">
+
+                <button type="button" class="value-edit" data-slider="vase-texture-depth" data-key="vaseTextureDepth" data-parse="float">1.2</button>
+
+              </label>
+
+              <label class="field hidden" id="field-vase-texture-scale">
+
+                <span class="field-label">Texture scale <span class="unit unit-len">mm</span></span>
+
+                <input type="range" id="vase-texture-scale" min="6" max="40" step="1" value="14" tabindex="-1">
+
+                <button type="button" class="value-edit" data-slider="vase-texture-scale" data-key="vaseTextureScale" data-parse="float">14</button>
+
+              </label>
+
+              <label class="field">
+
+                <span class="field-label">Rim finish</span>
+
+                <select id="vase-rim">
+                  <option value="square">Square (flat)</option>
+                  <option value="bevel">Bevelled</option>
+                  <option value="round">Rounded (bullnose)</option>
+                  <option value="rolled">Rolled lip</option>
+                </select>
+
+              </label>
+
+              <label class="field field-toggle">
+
+                <span class="field-label">Include saucer STL</span>
+
+                <input type="checkbox" id="vase-saucer">
+
+              </label>
+
+              </div>
+
+            </details>
+
+
+
+            <details class="section section-collapse" id="section-classic-size" data-collapse="size">
+
+              <summary class="collapse-summary"><span id="label-inner-size">Inner size <span class="unit unit-len">mm</span></span></summary>
+
+              <div class="collapse-body">
+
+              <label class="field">
+
+                <span class="field-label" id="label-width">Width</span>
+
+                <input type="range" id="inner-width" min="20" max="300" step="1" value="80" tabindex="-1">
+
+                <button type="button" class="value-edit" id="out-width" data-slider="inner-width" data-key="innerWidth" aria-label="Edit width in mm">80</button>
+
+              </label>
+
+              <label class="field" id="field-depth">
+
+                <span class="field-label" id="label-depth">Depth</span>
+
+                <input type="range" id="inner-depth" min="20" max="300" step="1" value="60" tabindex="-1">
+
+                <button type="button" class="value-edit" id="out-depth" data-slider="inner-depth" data-key="innerDepth" aria-label="Edit depth in mm">60</button>
+
+              </label>
+
+              <label class="field">
+
+                <span class="field-label" id="label-height">Height</span>
+
+                <input type="range" id="inner-height" min="10" max="250" step="1" value="40" tabindex="-1">
+
+                <button type="button" class="value-edit" id="out-height" data-slider="inner-height" data-key="innerHeight" aria-label="Edit height in mm">40</button>
+
+              </label>
+
+              </div>
+
+            </details>
+
+
+
+            <details class="section section-collapse" id="section-walls" data-collapse="walls">
+
+              <summary class="collapse-summary">Walls <span class="unit unit-len">mm</span></summary>
+
+              <div class="collapse-body">
+
+              <label class="field">
+
+                <span class="field-label">Wall</span>
+
+                <input type="range" id="wall" min="1.2" max="6" step="0.2" value="2.4">
+
+                <button type="button" class="value-edit" id="out-wall" data-slider="wall" data-key="wall" data-parse="float" aria-label="Edit wall thickness in mm">2.4</button>
+
+              </label>
+
+              <label class="field">
+
+                <span class="field-label">Floor</span>
+
+                <input type="range" id="floor" min="1.2" max="6" step="0.2" value="2.4">
+
+                <button type="button" class="value-edit" id="out-floor" data-slider="floor" data-key="floor" data-parse="float" aria-label="Edit floor thickness in mm">2.4</button>
+
+              </label>
+
+              <div id="section-profile-texture" class="hidden">
+                <h2 class="section-sub">Surface texture</h2>
+                <p class="field-hint">Relief on the outer wall — ripple, scales, bark, weave, or knit. Works on boxes, presets, and round shapes.</p>
+                <label class="field field-toggle">
+                  <span class="field-label">Surface texture</span>
+                  <input type="checkbox" id="profile-texture-enabled">
+                </label>
+                <label class="field hidden" id="field-profile-texture-style">
+                  <span class="field-label">Texture style</span>
+                  <select id="profile-texture-style">
+                    <option value="ripple">Ripple (horizontal waves)</option>
+                    <option value="scales">Scales</option>
+                    <option value="bark">Bark (vertical ridges)</option>
+                    <option value="weave">Basket weave</option>
+                    <option value="knit">Knitted</option>
+                  </select>
+                </label>
+                <label class="field hidden" id="field-profile-texture-depth">
+                  <span class="field-label">Texture depth <span class="unit unit-len">mm</span></span>
+                  <input type="range" id="profile-texture-depth" min="0.3" max="3" step="0.1" value="1.2" tabindex="-1">
+                  <button type="button" class="value-edit" data-slider="profile-texture-depth" data-key="vaseTextureDepth" data-parse="float">1.2</button>
+                </label>
+                <label class="field hidden" id="field-profile-texture-scale">
+                  <span class="field-label">Texture scale <span class="unit unit-len">mm</span></span>
+                  <input type="range" id="profile-texture-scale" min="6" max="40" step="1" value="14" tabindex="-1">
+                  <button type="button" class="value-edit" data-slider="profile-texture-scale" data-key="vaseTextureScale" data-parse="float">14</button>
+                </label>
+              </div>
+
+              </div>
+
+            </details>
+
+
+
+            <section class="section" id="section-preview-colour">
+
+              <h2>Box colour</h2>
+
+              <div class="field field-color">
+
+                <span class="field-label">Filament</span>
+
+                <div id="box-color-picker"></div>
+
+              </div>
+
+              <p class="field-hint">Body only — set lid colour on the <strong>Lid</strong> tab.</p>
+
+            </section>
+
+
+
+            <section class="section stats">
+
+              <h2>Estimate</h2>
+
+              <dl class="stat-grid">
+
+                <div><dt>Outer</dt><dd id="stat-outer">—</dd></div>
+
+                <div><dt>Cavity</dt><dd id="stat-cavity">—</dd></div>
+
+                <div><dt>Material</dt><dd id="stat-material">—</dd></div>
+
+                <div><dt>~PLA</dt><dd id="stat-grams">—</dd></div>
+
+              </dl>
+
+            </section>
+
+          </div>
+
+
+
+          <div class="tab-panel" id="tab-lid" role="tabpanel" hidden>
+
+            <section class="section" id="section-lid">
+
+              <h2 id="lid-section-title">Lid</h2>
+
+              <label class="field field-toggle">
+
+                <span class="field-label">Enable lid</span>
+
+                <input type="checkbox" id="lid-enabled">
+
+                <span class="toggle-hint">Preview + export</span>
+
+              </label>
+
+              <div class="field field-color" id="field-lid-color">
+
+                <span class="field-label">Lid colour</span>
+
+                <div id="lid-color-picker"></div>
+
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-lid-match-body">Match body</button>
+
+                <p class="field-hint">Preview and <strong>3MF lid</strong> export — can differ from body colour (e.g. wood-tone cap).</p>
+
+              </div>
+
+              <label class="field" id="field-lid-type">
+
+                <span class="field-label">Lid type</span>
+
+                <select id="lid-type"></select>
+
+              </label>
+
+              <label class="field" id="field-lid-skirt">
+
+                <span class="field-label">Skirt depth</span>
+
+                <input type="range" id="lid-skirt" min="4" max="25" step="1" value="10" tabindex="-1">
+
+                <button type="button" class="value-edit" id="out-lid-skirt" data-slider="lid-skirt" data-key="lidSkirt" aria-label="Edit lid skirt depth in mm">10</button>
+
+              </label>
+
+              <label class="field" id="field-lid-thickness">
+
+                <span class="field-label">Lid thickness</span>
+
+                <input type="range" id="lid-thickness" min="2" max="6" step="0.2" value="2.4" tabindex="-1">
+
+                <button type="button" class="value-edit" id="out-lid-thickness" data-slider="lid-thickness" data-key="lidThickness" data-parse="float" aria-label="Edit lid thickness in mm">2.4</button>
+
+              </label>
+
+              <label class="field" id="field-lid-clearance">
+
+                <span class="field-label">Fit clearance</span>
+
+                <input type="range" id="lid-clearance" min="0.15" max="0.8" step="0.05" value="0.35" tabindex="-1">
+
+                <button type="button" class="value-edit" id="out-lid-clearance" data-slider="lid-clearance" data-key="lidClearance" data-parse="float" aria-label="Edit lid fit clearance in mm">0.35</button>
+
+              </label>
+
+              <label class="field hidden" id="field-lid-lip">
+
+                <span class="field-label">Retention lip</span>
+
+                <input type="range" id="lid-lip" min="0" max="8" step="0.5" value="0" tabindex="-1">
+
+                <button type="button" class="value-edit" id="out-lid-lip" data-slider="lid-lip" data-key="lidLipDepth" data-parse="float" aria-label="Edit flat lid retention lip depth in mm">0</button>
+
+              </label>
+
+              <label class="field field-toggle hidden" id="field-lid-gasket">
+
+                <span class="field-label">Gasket groove</span>
+
+                <input type="checkbox" id="lid-gasket-enabled">
+
+              </label>
+
+              <label class="field hidden" id="field-lid-gasket-width">
+
+                <span class="field-label">Groove width</span>
+
+                <input type="range" id="lid-gasket-width" min="1.2" max="4" step="0.2" value="2" tabindex="-1">
+
+                <button type="button" class="value-edit" id="out-lid-gasket-width" data-slider="lid-gasket-width" data-key="lidGasketWidth" data-parse="float" aria-label="Edit gasket groove width in mm">2</button>
+
+              </label>
+
+              <label class="field hidden" id="field-lid-gasket-depth">
+
+                <span class="field-label">Groove depth</span>
+
+                <input type="range" id="lid-gasket-depth" min="0.6" max="2.5" step="0.1" value="1.2" tabindex="-1">
+
+                <button type="button" class="value-edit" id="out-lid-gasket-depth" data-slider="lid-gasket-depth" data-key="lidGasketDepth" data-parse="float" aria-label="Edit gasket groove depth in mm">1.2</button>
+
+              </label>
+
+              <label class="field field-toggle hidden" id="field-lid-gasket-export">
+
+                <span class="field-label">Include gasket in 3MF</span>
+
+                <input type="checkbox" id="lid-gasket-export-ring" checked>
+
+              </label>
+
+              <p class="field-hint hidden" id="lid-gasket-hint">Underside groove for a printed <strong>Gasket</strong> part or 2&nbsp;mm TPU cord. Improves dust seal — not fully airtight.</p>
+
+              <p class="field-hint hidden" id="lid-gasket-export-hint">Uncheck to keep the groove for TPU cord but export lid-only in the 3MF.</p>
+
+              <p class="field-hint" id="lid-type-hint">Exports plate-down on the bed. Skirt sits outside the box walls.</p>
+
+              <p class="field-hint hidden" id="lid-tray-hint">Storage trays: <strong>Flat cap</strong> with optional retention lip — dust cover and stacking. Enable <strong>Stack</strong> tab hex feet for nestable trays.</p>
+              <p class="field-hint hidden" id="lid-nest-hint">Stack lip: flat top + <strong>1&nbsp;mm</strong> outer fence — keeps the next jar from sliding sideways. Pre-oriented for print; don’t flip in Bambu.</p>
+
+              <label class="field field-toggle hidden" id="field-lid-print-supports">
+                <span class="field-label">Lid breakaway supports</span>
+                <input type="checkbox" id="lid-print-supports">
+              </label>
+              <p class="field-hint hidden" id="lid-print-supports-hint">Optional snap-out pins inside the nest groove if bridging fails. Off by default.</p>
+
+              <div class="trace-actions" id="lid-actions">
+                <button type="button" id="btn-lid-preview-fit" class="btn btn-secondary hidden">Preview fit</button>
+              </div>
+
+              <p class="field-hint hidden" id="lid-xray-hint">Preview fit uses a transparent X-ray view with coloured rim guides.</p>
+
+            </section>
+
+          </div>
+
+
+
+          <div class="tab-panel" id="tab-link" role="tabpanel" hidden>
+
+            <section class="section" id="section-joiner">
+
+              <h2>Dovetail joiner</h2>
+
+              <label class="field field-toggle">
+
+                <span class="field-label">Enable joiner</span>
+
+                <input type="checkbox" id="joiner-enabled">
+
+              </label>
+
+              <div class="joiner-hand hidden" id="field-joiner-hand" role="group" aria-label="Joiner hand">
+
+                <button type="button" class="chip active" data-hand="left">Left</button>
+
+                <button type="button" class="chip" data-hand="right">Right</button>
+
+              </div>
+
+              <p class="field-hint hidden" id="joiner-hint">Left = male tab · Right = socket.</p>
+
+              <label class="field hidden" id="field-joiner-width">
+
+                <span class="field-label">Tab width</span>
+
+                <input type="range" id="joiner-width" min="5" max="22" step="0.5" value="9" tabindex="-1">
+
+                <button type="button" class="value-edit" id="out-joiner-width" data-slider="joiner-width" data-key="joinerWidth" data-parse="float">9</button>
+
+              </label>
+
+              <label class="field hidden" id="field-joiner-neck">
+
+                <span class="field-label">Tab neck</span>
+
+                <input type="range" id="joiner-neck" min="3" max="16" step="0.5" value="6" tabindex="-1">
+
+                <button type="button" class="value-edit" id="out-joiner-neck" data-slider="joiner-neck" data-key="joinerNeck" data-parse="float">6</button>
+
+              </label>
+
+              <label class="field hidden" id="field-joiner-protrusion">
+
+                <span class="field-label">Tab depth</span>
+
+                <input type="range" id="joiner-protrusion" min="2" max="10" step="0.2" value="4" tabindex="-1">
+
+                <button type="button" class="value-edit" id="out-joiner-protrusion" data-slider="joiner-protrusion" data-key="joinerProtrusion" data-parse="float">4</button>
+
+              </label>
+
+              <label class="field field-toggle hidden" id="field-joiner-autoscale">
+
+                <span class="field-label">Auto-scale to box size</span>
+
+                <input type="checkbox" id="joiner-autoscale" checked>
+
+              </label>
+
+            </section>
+
+          </div>
+
+
+
+          <div class="tab-panel" id="tab-accent" role="tabpanel" hidden>
+
+            <section class="section" id="section-accent">
+
+              <h2>Accent colours</h2>
+
+              <p class="field-hint">Each band gets its own filament in <strong>Download 3MF</strong> — or use Download accent for a merged STL. Bands follow the box outline (rounded corners included) — on vases they wrap the profile, flutes and twist too.</p>
+
+              <label class="field field-toggle">
+
+                <span class="field-label">Accent bands</span>
+
+                <input type="checkbox" id="accent-enabled">
+
+              </label>
+
+              <label class="field field-toggle hidden" id="field-accent-fast">
+                <span class="field-label">Weld band into wall (faster print)</span>
+                <input type="checkbox" id="accent-fast-band">
+              </label>
+              <p class="hint hidden" id="accent-fast-hint">Paints the band colour through the full wall so those layers print as one colour (far fewer filament changes). It becomes part of the Body object — untick if you need the band as a separate part in the slicer.</p>
+
+              <div id="accent-bands-wrap" class="hidden">
+
+                <div id="accent-bands"></div>
+
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-accent-add-band">+ Add second band</button>
+
+                <p class="field-hint" id="accent-band-limit-hint">One standard band is always there. Add a second for another filament colour in the 3MF (max 2).</p>
+
+              </div>
+
+            </section>
+
+          </div>
+
+
+
+          <div class="tab-panel" id="tab-insert" role="tabpanel" hidden>
+
+            <section class="section" id="section-insert">
+
+              <h2>Divider insert</h2>
+
+              <p class="field-hint">Flat removable panels split the cavity into equal bays. Exported as one <strong>Insert</strong> part in the 3MF (same box filament by default).</p>
+
+              <label class="field field-toggle">
+
+                <span class="field-label">Divider inserts</span>
+
+                <input type="checkbox" id="insert-enabled">
+
+              </label>
+
+              <label class="field hidden" id="field-insert-count">
+
+                <span class="field-label">Divider count</span>
+
+                <input type="range" id="insert-count" min="1" max="4" step="1" value="1" tabindex="-1">
+
+                <button type="button" class="value-edit" id="out-insert-count" data-slider="insert-count" data-key="insertCount" data-parse="int">1</button>
+
+                <p class="field-hint" id="insert-count-hint">1 divider → 2 compartments</p>
+
+              </label>
+
+              <label class="field hidden" id="field-insert-axis">
+
+                <span class="field-label">Split direction</span>
+
+                <select id="insert-axis">
+
+                  <option value="length">Length — vertical panels</option>
+
+                  <option value="depth">Depth — vertical panels</option>
+
+                  <option value="height">Height — horizontal shelves</option>
+
+                </select>
+
+              </label>
+
+              <label class="field hidden" id="field-insert-mount">
+
+                <span class="field-label">Mount</span>
+
+                <select id="insert-mount">
+
+                  <option value="snap">Snap fit — clearance gap</option>
+
+                  <option value="slot">Slide-in slots — side walls</option>
+
+                  <option value="fixed">Fixed — welded to body</option>
+
+                </select>
+
+                <p class="field-hint hidden" id="insert-mount-hint">Slide-in slots need <strong>Height — horizontal shelves</strong>.</p>
+
+                <p class="field-hint hidden" id="insert-fixed-hint">Welded dividers print as one piece with the box — no clearance, can't shift mid-print.</p>
+
+              </label>
+
+              <label class="field hidden" id="field-insert-slot-depth">
+
+                <span class="field-label">Slot depth</span>
+
+                <input type="range" id="insert-slot-depth" min="1" max="4" step="0.2" value="2" tabindex="-1">
+
+                <button type="button" class="value-edit" id="out-insert-slot-depth" data-slider="insert-slot-depth" data-key="insertSlotDepth" data-parse="float">2</button>
+
+                <p class="field-hint">Grooves on left/right walls — slide shelf in from the front.</p>
+
+              </label>
+
+              <label class="field hidden" id="field-insert-thickness">
+
+                <span class="field-label">Panel thickness</span>
+
+                <input type="range" id="insert-thickness" min="1.2" max="4" step="0.2" value="2.4" tabindex="-1">
+
+                <button type="button" class="value-edit" id="out-insert-thickness" data-slider="insert-thickness" data-key="insertThickness" data-parse="float">2.4</button>
+
+              </label>
+
+              <label class="field hidden" id="field-insert-clearance">
+
+                <span class="field-label">Wall clearance</span>
+
+                <input type="range" id="insert-clearance" min="0.15" max="1" step="0.05" value="0.35" tabindex="-1">
+
+                <button type="button" class="value-edit" id="out-insert-clearance" data-slider="insert-clearance" data-key="insertClearance" data-parse="float">0.35</button>
+
+              </label>
+
+              <label class="field field-toggle hidden" id="field-insert-top-auto">
+
+                <span class="field-label">Match lid clearance</span>
+
+                <input type="checkbox" id="insert-top-auto" checked>
+
+                <p class="field-hint" id="insert-top-auto-hint">Shortens dividers when an inset plug skirt or flat-cap lip hangs inside the cavity.</p>
+
+              </label>
+
+              <label class="field hidden" id="field-insert-top-clearance">
+
+                <span class="field-label">Top clearance</span>
+
+                <input type="range" id="insert-top-clearance" min="0" max="30" step="0.5" value="0.6" tabindex="-1">
+
+                <button type="button" class="value-edit" id="out-insert-top-clearance" data-slider="insert-top-clearance" data-key="insertTopClearance" data-parse="float">0.6</button>
+
+                <p class="field-hint" id="insert-top-clearance-hint">Gap below the lid — lowers divider height.</p>
+
+              </label>
+
+            </section>
+
+          </div>
+
+
+
+          <div class="tab-panel" id="tab-art" role="tabpanel" hidden>
+
+            <section class="section" id="section-art">
+
+              <h2>Art on box</h2>
+
+              <div class="art-shared" id="art-shared">
+                <label class="field" id="field-emboss-face">
+                  <span class="field-label">Face</span>
+                  <select id="emboss-face">
+                    <option value="wrap" id="emboss-face-wrap">Wrap (around wall)</option>
+                    <option value="front">Front</option>
+                    <option value="back">Back</option>
+                    <option value="left">Left side</option>
+                    <option value="right">Right side</option>
+                    <option value="top">Top (box body — not the lid)</option>
+                    <option value="lid">Lid top</option>
+                  </select>
+                  <p class="field-hint hidden" id="emboss-face-hint"></p>
+                </label>
+                <div class="art-shared-row">
+                  <label class="field" id="field-emboss-depth">
+                    <span class="field-label">Emboss depth</span>
+                    <input type="range" id="emboss-depth" min="0.3" max="4" step="0.1" value="0.7" tabindex="-1">
+                    <button type="button" class="value-edit" id="out-emboss-depth" data-slider="emboss-depth" data-key="embossDepth" data-parse="float">0.7</button>
+                  </label>
+                  <label class="field field-toggle" id="field-emboss-deboss">
+                    <span class="field-label">Deboss</span>
+                    <input type="checkbox" id="emboss-deboss">
+                  </label>
+                  <button type="button" id="btn-art-clear" class="btn btn-secondary btn-compact">Clear all</button>
+                </div>
+                <p class="field-hint hidden" id="emboss-deboss-hint"><strong>3MF project</strong> carves a shallow pocket into the body and fills it with separate coloured text/art geometry. The inlay finishes flush with the surface, so no manual painting is required. <em>STL deboss cutter</em> remains available for manual workflows.</p>
+              </div>
+
+              <nav class="art-subnav" role="tablist" aria-label="Art editor">
+                <button type="button" class="art-subnav-btn active" data-art-pane="graphic" role="tab" aria-selected="true">Graphic</button>
+                <button type="button" class="art-subnav-btn" data-art-pane="text" role="tab" aria-selected="false">Text</button>
+              </nav>
+
+              <input type="checkbox" id="emboss-svg-enabled" hidden>
+              <p class="trace-meta hidden" id="svg-import-meta"></p>
+
+              <div class="art-pane" id="art-pane-graphic" role="tabpanel">
+
+                <div class="trace-drop trace-drop--compact" id="trace-drop" tabindex="0" role="button" aria-label="Drop logo image or SVG">
+                  <input type="file" id="trace-file" accept="image/png,image/jpeg,image/webp,image/gif,.svg,image/svg+xml" hidden>
+                  <p class="trace-drop-label">Drop logo, SVG, or paste · Ctrl+V</p>
+                  <p class="trace-drop-hint">PNG · JPG · SVG · team logos → Multi-colour trace</p>
+                </div>
+                <p class="art-import-meta hidden" id="art-import-meta"></p>
+
+                <div class="art-sample-row">
+                  <button type="button" id="btn-load-badge-sample" class="btn btn-secondary btn-compact">Mechanic badge sample</button>
+                </div>
+
+                <label class="field" id="field-trace-mode">
+                  <span class="field-label">Trace mode</span>
+                  <select id="trace-mode">
+                    <option value="auto">Auto — logo / line art</option>
+                    <option value="outline">Outline — line art</option>
+                    <option value="silhouette">Silhouette — solid logo</option>
+                    <option value="multi-colour">Multi-colour — team logo (AMS)</option>
+                    <option value="black-white">Black + white (2 AMS)</option>
+                  </select>
+                </label>
+
+                <label class="field" id="field-trace-threshold">
+                  <span class="field-label">Threshold</span>
+                  <input type="range" id="trace-threshold" min="20" max="254" step="1" value="128" tabindex="-1">
+                  <button type="button" class="value-edit" id="out-trace-threshold" data-slider="trace-threshold" data-key="traceThreshold" data-parse="int">128</button>
+                </label>
+
+                <label class="field field-toggle">
+                  <span class="field-label">Invert (light logo on dark)</span>
+                  <input type="checkbox" id="trace-invert">
+                </label>
+
+                <div class="trace-preview-wrap hidden" id="trace-preview-wrap">
+                  <canvas id="trace-preview" class="trace-preview trace-preview--compact" width="320" height="160"></canvas>
+                  <p class="trace-meta" id="trace-meta"></p>
+                </div>
+
+                <div class="trace-actions">
+                  <button type="button" id="btn-trace" class="btn btn-secondary" disabled>Trace</button>
+                  <button type="button" id="btn-trace-apply" class="btn btn-secondary" disabled>Apply</button>
+                  <button type="button" id="btn-trace-clear" class="btn btn-secondary" disabled>Clear</button>
+                  <button type="button" id="btn-trace-svg" class="btn btn-secondary hidden" disabled>SVG</button>
+                </div>
+
+                <label class="field field-color hidden" id="field-art-color">
+                  <span class="field-label">Art colour</span>
+                  <p class="field-hint" id="art-color-hint">Single-colour art — pick a contrast filament.</p>
+                  <div id="art-color-picker"></div>
+                </label>
+
+                <label class="field hidden" id="field-trace-size">
+                  <span class="field-label">Graphic size <span class="unit unit-len">mm</span></span>
+                  <input type="range" id="trace-size" min="6" max="56" step="0.5" value="16" tabindex="-1">
+                  <button type="button" class="value-edit" id="out-trace-size" data-slider="trace-size" data-key="embossTraceSize" data-parse="float">16</button>
+                </label>
+
+                <label class="field hidden" id="field-art-rotation">
+                  <span class="field-label">Graphic rotation <span class="unit">°</span></span>
+                  <input type="range" id="art-rotation" min="-180" max="180" step="0.5" value="0" tabindex="-1">
+                  <button type="button" class="value-edit" id="out-art-rotation" data-slider="art-rotation" data-key="decorRotation" data-parse="float">0</button>
+                </label>
+
+                <label class="field hidden" id="field-art-offset-x">
+                  <span class="field-label">Graphic left / right <span class="unit unit-len">mm</span></span>
+                  <input type="range" id="art-offset-x" min="-80" max="80" step="0.5" value="0" tabindex="-1">
+                  <button type="button" class="value-edit" id="out-art-offset-x" data-slider="art-offset-x" data-key="decorOffsetX" data-parse="float">0</button>
+                </label>
+
+                <label class="field hidden" id="field-art-offset-y">
+                  <span class="field-label">Graphic up / down <span class="unit unit-len">mm</span></span>
+                  <input type="range" id="art-offset-y" min="-80" max="80" step="0.5" value="0" tabindex="-1">
+                  <button type="button" class="value-edit" id="out-art-offset-y" data-slider="art-offset-y" data-key="decorOffsetY" data-parse="float">0</button>
+                </label>
+
+              </div>
+
+              <div class="art-pane hidden" id="art-pane-text" role="tabpanel" hidden>
+
+                <p class="field-hint">Each line has its own size. Flat stacks lines; <strong>Arc</strong> uses the first line only (e.g. COFFEE around beans).</p>
+
+                <div class="field" id="field-emboss-lines">
+                  <span class="field-label">Lines</span>
+                  <div id="emboss-text-lines" class="emboss-lines-list" role="list"></div>
+                </div>
+
+                <label class="field field-textarea hidden" id="field-emboss-text">
+                  <span class="field-label">Plain text</span>
+                  <textarea id="emboss-text" rows="6" maxlength="240" placeholder="TEMORA&#10;VET CLINIC&#10;ABBIE, SIOBHAN…"></textarea>
+                  <p class="field-hint">One line per row. Sizes for existing rows are kept when the line count matches.</p>
+                </label>
+
+                <div class="art-actions-bar emboss-lines-actions" id="emboss-text-mode-actions">
+                  <button type="button" id="btn-add-text-line" class="btn btn-secondary btn-compact">+ Add line</button>
+                  <button type="button" id="btn-plain-text-edit" class="btn btn-ghost btn-compact">Edit as plain text</button>
+                </div>
+
+                <label class="field field-color" id="field-text-color">
+                  <span class="field-label">Text colour</span>
+                  <div id="text-color-picker"></div>
+                </label>
+
+                <label class="field" id="field-emboss-font">
+                  <span class="field-label">Font</span>
+                  <select id="emboss-font"></select>
+                </label>
+
+                <label class="field" id="field-emboss-weight">
+                  <span class="field-label">Font weight</span>
+                  <select id="emboss-font-weight">
+                    <option value="auto" selected>Auto (font default)</option>
+                    <option value="300">Light</option>
+                    <option value="400">Regular</option>
+                    <option value="500">Medium</option>
+                    <option value="600">Semi-bold</option>
+                    <option value="700">Bold</option>
+                    <option value="800">Extra-bold</option>
+                    <option value="900">Black</option>
+                  </select>
+                </label>
+                <p class="field-hint" id="font-weight-hint">Lighter weight often reads cleaner on plaques. Not every font has every weight.</p>
+
+                <label class="field" id="field-emboss-height">
+                  <span class="field-label">Default size <span class="unit unit-len">mm</span></span>
+                  <input type="range" id="emboss-height" min="3" max="220" step="0.5" value="7" tabindex="-1">
+                  <button type="button" class="value-edit" id="out-emboss-height" data-slider="emboss-height" data-key="embossHeight" data-parse="float">7</button>
+                </label>
+                <p class="field-hint" id="default-size-hint">Used for new lines and when every line shares one size (whole block).</p>
+
+                <div class="field" id="field-text-align">
+                  <span class="field-label">Align</span>
+                  <div class="align-grid" role="group" aria-label="Text alignment">
+                    <button type="button" class="align-btn active" data-text-align="left">Left</button>
+                    <button type="button" class="align-btn" data-text-align="center">Centre</button>
+                    <button type="button" class="align-btn" data-text-align="right">Right</button>
+                  </div>
+                </div>
+
+                <label class="field" id="field-letter-spacing">
+                  <span class="field-label">Letter spacing</span>
+                  <input type="range" id="emboss-letter-spacing" min="0.7" max="1.8" step="0.05" value="1" tabindex="-1">
+                  <button type="button" class="value-edit" id="out-emboss-letter-spacing" data-slider="emboss-letter-spacing" data-key="embossLetterSpacing" data-parse="float">1</button>
+                </label>
+                <p class="field-hint" id="letter-spacing-hint">1 = natural. Bump up if heavy fonts run together.</p>
+
+                <label class="field" id="field-line-spacing">
+                  <span class="field-label">Line spacing</span>
+                  <input type="range" id="emboss-line-spacing" min="0.9" max="2" step="0.05" value="1.12" tabindex="-1">
+                  <button type="button" class="value-edit" id="out-emboss-line-spacing" data-slider="emboss-line-spacing" data-key="embossLineSpacing" data-parse="float">1.12</button>
+                </label>
+
+                <div class="field" id="field-text-layout">
+                  <span class="field-label">Text path</span>
+                  <div class="align-grid" role="group" aria-label="Text path">
+                    <button type="button" class="layout-btn active" data-text-layout="flat">Flat</button>
+                    <button type="button" class="layout-btn" data-text-layout="vertical">Vertical</button>
+                    <button type="button" class="layout-btn" data-text-layout="arc">Arc</button>
+                  </div>
+                </div>
+
+                <label class="field field-toggle hidden" id="field-uniform-size">
+                  <span class="field-label">Same letter size across cans</span>
+                  <input type="checkbox" id="text-uniform-size">
+                </label>
+                <p class="hint hidden" id="uniform-size-hint">Vertical text: every letter is the exact same size on each canister, so COFFEE / SUGAR / MILO match. Text size becomes the per-letter height; shorter words just take less room.</p>
+
+                <div class="field hidden" id="field-arc-style">
+                  <span class="field-label">Curve style</span>
+                  <div class="align-grid" role="group" aria-label="Curve style">
+                    <button type="button" class="align-btn arc-preset-btn active" data-arc-preset="arch-up">Arch up</button>
+                    <button type="button" class="align-btn arc-preset-btn" data-arc-preset="arch-down">Arch down</button>
+                    <button type="button" class="align-btn arc-preset-btn" data-arc-preset="banner">Banner arc</button>
+                  </div>
+                </div>
+
+                <label class="field hidden" id="field-arc-curve">
+                  <span class="field-label">Curve amount</span>
+                  <input type="range" id="emboss-arc-curve" min="0" max="100" step="1" value="60" tabindex="-1">
+                  <button type="button" class="value-edit" id="out-emboss-arc-curve" data-slider="emboss-arc-curve" data-key="embossArcCurve" data-parse="int">60</button>
+                </label>
+
+                <div class="art-actions-bar hidden" id="field-arc-advanced-toggle">
+                  <button type="button" id="btn-arc-advanced" class="btn btn-secondary btn-compact">Fine tune arc…</button>
+                </div>
+
+                <div id="field-arc-advanced" class="hidden">
+                  <label class="field hidden" id="field-arc-radius">
+                    <span class="field-label">Arc radius <span class="unit unit-len">mm</span> <span class="field-hint-inline">0 = auto</span></span>
+                    <input type="range" id="emboss-arc-radius" min="0" max="150" step="0.5" value="0" tabindex="-1">
+                    <button type="button" class="value-edit" id="out-emboss-arc-radius" data-slider="emboss-arc-radius" data-key="embossArcRadius" data-parse="float">Auto</button>
+                  </label>
+                  <label class="field hidden" id="field-arc-sweep">
+                    <span class="field-label">Arc span <span class="unit">°</span></span>
+                    <input type="range" id="emboss-arc-sweep" min="40" max="360" step="5" value="220" tabindex="-1">
+                    <button type="button" class="value-edit" id="out-emboss-arc-sweep" data-slider="emboss-arc-sweep" data-key="embossArcSweep" data-parse="float">220</button>
+                  </label>
+                  <label class="field hidden" id="field-arc-start">
+                    <span class="field-label">Arc start <span class="unit">°</span> <span class="field-hint-inline">−90 = top</span></span>
+                    <input type="range" id="emboss-arc-start" min="-180" max="180" step="5" value="-90" tabindex="-1">
+                    <button type="button" class="value-edit" id="out-emboss-arc-start" data-slider="emboss-arc-start" data-key="embossArcStartDeg" data-parse="float">-90</button>
+                  </label>
+                  <label class="field hidden" id="field-arc-tilt">
+                    <span class="field-label">Arc tilt <span class="unit">°</span></span>
+                    <input type="range" id="emboss-arc-tilt" min="-180" max="180" step="0.5" value="0" tabindex="-1">
+                    <button type="button" class="value-edit" id="out-emboss-arc-tilt" data-slider="emboss-arc-tilt" data-key="embossArcTilt" data-parse="float">0</button>
+                  </label>
+                  <label class="field hidden" id="field-arc-spacing">
+                    <span class="field-label">Letter spacing</span>
+                    <input type="range" id="emboss-arc-spacing" min="0.7" max="1.8" step="0.05" value="1" tabindex="-1">
+                    <button type="button" class="value-edit" id="out-emboss-arc-spacing" data-slider="emboss-arc-spacing" data-key="embossArcSpacing" data-parse="float">1</button>
+                  </label>
+                </div>
+
+                <div class="art-divider hidden" id="field-text-transform-div" aria-hidden="true"><span>move text</span></div>
+
+                <label class="field hidden" id="field-text-offset-x">
+                  <span class="field-label">Text left / right <span class="unit unit-len">mm</span></span>
+                  <input type="range" id="text-offset-x" min="-80" max="80" step="0.5" value="0" tabindex="-1">
+                  <button type="button" class="value-edit" id="out-text-offset-x" data-slider="text-offset-x" data-key="textOffsetX" data-parse="float">0</button>
+                </label>
+
+                <label class="field hidden" id="field-text-offset-y">
+                  <span class="field-label">Text up / down <span class="unit unit-len">mm</span></span>
+                  <input type="range" id="text-offset-y" min="-80" max="80" step="0.5" value="0" tabindex="-1">
+                  <button type="button" class="value-edit" id="out-text-offset-y" data-slider="text-offset-y" data-key="textOffsetY" data-parse="float">0</button>
+                </label>
+
+                <label class="field hidden" id="field-text-rotation">
+                  <span class="field-label">Text rotation <span class="unit">°</span></span>
+                  <input type="range" id="text-rotation" min="-180" max="180" step="0.5" value="0" tabindex="-1">
+                  <button type="button" class="value-edit" id="out-text-rotation" data-slider="text-rotation" data-key="textRotation" data-parse="float">0</button>
+                </label>
+
+              </div>
+
+            </section>
+
+          </div>
+
+
+
+          <div class="tab-panel" id="tab-stack" role="tabpanel" hidden>
+
+            <section class="section" id="section-stack">
+
+              <h2>Stack &amp; texture</h2>
+
+              <p class="field-hint">Honeycomb is decorative. Stack adds feet + rim pockets for nesting.</p>
+
+              <label class="field field-toggle">
+
+                <span class="field-label">Honeycomb stamp</span>
+
+                <input type="checkbox" id="honeycomb-enabled">
+
+              </label>
+
+              <label class="field hidden" id="field-honeycomb-face">
+
+                <span class="field-label">Honeycomb face</span>
+
+                <select id="honeycomb-face">
+
+                  <option value="back">Back wall</option>
+
+                  <option value="front">Front wall</option>
+
+                </select>
+
+              </label>
+
+              <label class="field field-toggle" id="field-stackable-hex">
+
+                <span class="field-label">Stackable hex</span>
+
+                <input type="checkbox" id="stackable-enabled">
+
+              </label>
+
+            </section>
+
+          </div>
+
+
+
+          <div class="tab-panel" id="tab-library" role="tabpanel" hidden>
+
+            <section class="section">
+
+              <h2>Design library</h2>
+
+              <p class="field-hint">Save from the Design tab, or tick “Save to library” when exporting STL/3MF. Load a design to restore all sliders and art.</p>
+
+              <div class="library-folder-bar">
+                <span class="library-folder-label">Folder</span>
+                <nav class="library-folders" id="library-folders" aria-label="Folders"></nav>
+                <button type="button" id="btn-library-export-folder" class="btn btn-primary btn-sm hidden" title="Export every design in this folder to Downloads">Export folder to Downloads</button>
+              </div>
+
+              <div class="library-layout">
+                <div class="library-main">
+                  <div id="library-grid" class="library-grid" aria-live="polite"></div>
+                  <p id="library-status" class="field-hint library-status"></p>
+                </div>
+              </div>
+
+            </section>
+
+          </div>
+
+        </div>
+
+      </aside>
+
+
+
+      <section class="panel viewport-wrap">
+
+        <div id="viewport" aria-label="3D preview"></div>
+
+        <div class="viewport-hud">
+
+          <span>Preview colours match 3MF · drag to orbit · scroll to zoom</span>
+
+        </div>
+
+        <div id="lid-fit-ok" class="lid-fit-ok hidden" aria-live="polite">
+          <span class="lid-fit-ok-icon" aria-hidden="true">👍</span>
+          <span class="lid-fit-ok-text">Good as gold!</span>
+        </div>
+
+      </section>
+
+    </main>
+
+  </div>
+
+  <dialog id="export-dialog" class="export-dialog" aria-labelledby="export-dialog-title">
+    <form id="export-dialog-form" class="export-dialog-panel" method="dialog">
+      <h2 id="export-dialog-title">Export</h2>
+      <p id="export-dialog-kind" class="field-hint"></p>
+      <div id="export-dialog-plates" class="export-dialog-plates hidden" aria-label="Print plates"></div>
+      <p id="export-dialog-parts" class="export-dialog-parts field-hint"></p>
+      <label class="field">
+        <span class="field-label">File name</span>
+        <input type="text" id="export-dialog-filename" class="text-input" autocomplete="off" spellcheck="false" required>
+      </label>
+      <label class="field field-toggle" id="export-dialog-library-wrap">
+        <span class="field-label">Save to design library</span>
+        <input type="checkbox" id="export-dialog-library">
+      </label>
+      <label class="field hidden" id="export-dialog-folder-wrap">
+        <span class="field-label">Library folder</span>
+        <input type="text" id="export-dialog-folder" class="text-input" list="export-folder-options" placeholder="Kitchen (optional)" autocomplete="off" spellcheck="false">
+        <datalist id="export-folder-options"></datalist>
+      </label>
+      <p id="export-dialog-hint" class="field-hint export-dialog-hint"></p>
+      <div class="export-dialog-actions">
+        <button type="button" class="btn btn-secondary" id="export-dialog-cancel">Cancel</button>
+        <button type="submit" class="btn btn-primary" value="confirm">Export</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="library-confirm-dialog" class="export-dialog" aria-labelledby="library-confirm-title">
+    <div class="export-dialog-panel">
+      <h2 id="library-confirm-title">Confirm</h2>
+      <p id="library-confirm-message" class="field-hint"></p>
+      <div class="export-dialog-actions">
+        <button type="button" class="btn btn-secondary" id="library-confirm-cancel">Cancel</button>
+        <button type="button" class="btn btn-primary" id="library-confirm-ok">OK</button>
+      </div>
+    </div>
+  </dialog>
+
+  <script type="module" src="js/app.js?v=628"></script>
+
+</body>
+
+</html>
+
+

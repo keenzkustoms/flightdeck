@@ -12,3 +12,8 @@ printers.yaml
 backup_metadata.json
 kprofiles/
 spools.db
+amy/config.json
+amy/amy-hands/config.json
+amy/desktop/build/
+amy/desktop/dist/
+amy/desktop/*.spec.bak

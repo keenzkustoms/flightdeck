@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "Amy Hands",
+  "version": "0.1.1",
+  "description": "Lets Amy list/focus/open Chrome tabs on this PC.",
+  "permissions": ["tabs", "storage", "alarms"],
+  "host_permissions": ["http://127.0.0.1:4701/*", "http://localhost:4701/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Amy Hands"
+  }
+}

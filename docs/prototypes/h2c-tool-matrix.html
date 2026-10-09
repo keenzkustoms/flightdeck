@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Flightdeck H2C Tool Matrix Prototype</title>
+  <style>
+    :root {
+      --bg: #070b12;
+      --panel: #0d1624;
+      --panel-2: #101c2d;
+      --border: #263852;
+      --text: #f8fafc;
+      --muted: #8ea4c1;
+      --blue: #60a5fa;
+      --green: #22c55e;
+      --amber: #f59e0b;
+      --red: #ef4444;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: radial-gradient(circle at 18% 0, rgba(37,99,235,0.18), transparent 36%), var(--bg);
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      padding: 24px;
+    }
+
+    .prototype {
+      max-width: 1240px;
+      margin: 0 auto;
+      display: grid;
+      gap: 14px;
+    }
+
+    .topbar,
+    .panel {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: rgba(13,22,36,0.88);
+      box-shadow: 0 20px 50px rgba(0,0,0,0.2);
+    }
+
+    .topbar {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 18px;
+      align-items: center;
+      padding: 14px 16px;
+    }
+
+    .eyebrow {
+      color: var(--blue);
+      font-size: 11px;
+      font-weight: 900;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+
+    h1, h2, h3, p {
+      margin: 0;
+    }
+
+    h1 {
+      margin-top: 4px;
+      font-size: 26px;
+      line-height: 1;
+    }
+
+    .subtitle {
+      margin-top: 7px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.4;
+      max-width: 760px;
+    }
+
+    .status-pills {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 7px;
+    }
+
+    .pill {
+      border: 1px solid rgba(96,165,250,0.34);
+      border-radius: 999px;
+      background: rgba(59,130,246,0.11);
+      color: #bfdbfe;
+      padding: 5px 9px;
+      font-size: 12px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .pill.good {
+      border-color: rgba(34,197,94,0.42);
+      background: rgba(34,197,94,0.11);
+      color: #86efac;
+    }
+
+    .pill.warn {
+      border-color: rgba(245,158,11,0.46);
+      background: rgba(245,158,11,0.1);
+      color: #fcd34d;
+    }
+
+    .matrix-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1.35fr) minmax(300px, 0.72fr);
+      gap: 14px;
+      align-items: start;
+    }
+
+    .panel {
+      padding: 14px;
+      display: grid;
+      gap: 12px;
+    }
+
+    .panel-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: baseline;
+    }
+
+    .panel-head h2 {
+      font-size: 14px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    .panel-head span {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .tool-grid {
+      display: grid;
+      grid-template-columns: repeat(7, minmax(92px, 1fr));
+      gap: 8px;
+    }
+
+    .tool-card {
+      min-width: 0;
+      border: 1px solid rgba(148,163,184,0.2);
+      border-radius: 9px;
+      background:
+        linear-gradient(180deg, color-mix(in srgb, var(--tool) 10%, transparent), transparent 55%),
+        rgba(5,10,19,0.62);
+      padding: 9px;
+      display: grid;
+      grid-template-rows: auto auto 1fr auto;
+      gap: 8px;
+      position: relative;
+    }
+
+    .tool-card.active {
+      border-color: rgba(34,197,94,0.7);
+      box-shadow: 0 0 0 1px rgba(34,197,94,0.22), 0 0 20px color-mix(in srgb, var(--tool) 20%, transparent);
+    }
+
+    .tool-card.review {
+      border-color: rgba(245,158,11,0.72);
+      box-shadow: 0 0 0 1px rgba(245,158,11,0.18);
+    }
+
+    .tool-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 6px;
+      align-items: center;
+    }
+
+    .tool-head strong {
+      font-size: 15px;
+    }
+
+    .tool-head small {
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 800;
+      text-transform: uppercase;
+    }
+
+    .nozzle-token {
+      justify-self: center;
+      width: 42px;
+      height: 44px;
+      border-radius: 10px 10px 18px 18px;
+      background:
+        radial-gradient(circle at 50% 28%, rgba(255,255,255,0.62), transparent 20%),
+        linear-gradient(180deg, color-mix(in srgb, var(--tool) 82%, #ffffff), color-mix(in srgb, var(--tool) 88%, #111827));
+      box-shadow: inset 0 -8px 18px rgba(0,0,0,0.34), 0 0 18px color-mix(in srgb, var(--tool) 26%, transparent);
+    }
+
+    .tool-detail {
+      display: grid;
+      gap: 3px;
+      min-width: 0;
+      text-align: center;
+    }
+
+    .tool-detail b,
+    .tool-detail span {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .tool-detail b {
+      color: var(--text);
+      font-size: 12px;
+    }
+
+    .tool-detail span {
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .tool-foot {
+      display: flex;
+      justify-content: center;
+      gap: 5px;
+      flex-wrap: wrap;
+    }
+
+    .state {
+      border: 1px solid rgba(148,163,184,0.24);
+      border-radius: 999px;
+      color: var(--muted);
+      padding: 2px 7px;
+      font-size: 10px;
+      font-weight: 900;
+      text-transform: uppercase;
+    }
+
+    .state.active {
+      border-color: rgba(34,197,94,0.45);
+      background: rgba(34,197,94,0.12);
+      color: #86efac;
+    }
+
+    .state.review {
+      border-color: rgba(245,158,11,0.52);
+      background: rgba(245,158,11,0.11);
+      color: #fcd34d;
+    }
+
+    .source-row {
+      display: grid;
+      grid-template-columns: minmax(150px, 0.55fr) minmax(0, 1fr);
+      gap: 10px;
+      align-items: stretch;
+      border: 1px solid rgba(148,163,184,0.18);
+      border-radius: 9px;
+      background: rgba(5,10,19,0.42);
+      padding: 10px;
+    }
+
+    .source-title {
+      display: grid;
+      align-content: center;
+      gap: 4px;
+    }
+
+    .source-title strong {
+      font-size: 14px;
+    }
+
+    .source-title span {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .spool-strip {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(58px, 1fr));
+      gap: 7px;
+    }
+
+    .spool-chip {
+      border: 1px solid rgba(148,163,184,0.2);
+      border-radius: 8px;
+      background: rgba(15,23,42,0.64);
+      padding: 7px;
+      display: grid;
+      gap: 5px;
+      text-align: center;
+      min-width: 0;
+    }
+
+    .spool-chip.feed {
+      border-color: rgba(34,197,94,0.56);
+      box-shadow: inset 0 -2px 0 rgba(34,197,94,0.82);
+    }
+
+    .swatch {
+      width: 26px;
+      height: 26px;
+      border-radius: 999px;
+      justify-self: center;
+      background: var(--spool);
+      box-shadow: 0 0 0 2px rgba(0,0,0,0.34), 0 0 10px color-mix(in srgb, var(--spool) 36%, transparent);
+    }
+
+    .spool-chip b,
+    .spool-chip span {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .spool-chip b {
+      font-size: 11px;
+    }
+
+    .spool-chip span {
+      color: var(--muted);
+      font-size: 10px;
+    }
+
+    .job-card {
+      display: grid;
+      gap: 10px;
+    }
+
+    .job-preview {
+      min-height: 190px;
+      border: 1px solid rgba(148,163,184,0.18);
+      border-radius: 9px;
+      background:
+        radial-gradient(circle at 50% 56%, rgba(148,163,184,0.18), transparent 20%),
+        linear-gradient(135deg, rgba(96,165,250,0.07), transparent 40%),
+        #05080e;
+      display: grid;
+      place-items: center;
+      color: var(--muted);
+      font-weight: 900;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    .job-list {
+      display: grid;
+      gap: 7px;
+    }
+
+    .job-row {
+      display: grid;
+      grid-template-columns: 54px minmax(0, 1fr) auto;
+      gap: 8px;
+      align-items: center;
+      border: 1px solid rgba(148,163,184,0.18);
+      border-radius: 8px;
+      background: rgba(5,10,19,0.42);
+      padding: 8px;
+    }
+
+    .job-row strong,
+    .job-row span {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .job-row strong {
+      font-size: 12px;
+    }
+
+    .job-row span {
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .tool-badge {
+      justify-self: start;
+      border: 1px solid rgba(96,165,250,0.34);
+      border-radius: 7px;
+      background: rgba(59,130,246,0.12);
+      color: #bfdbfe;
+      padding: 4px 7px;
+      font-size: 11px;
+      font-weight: 900;
+    }
+
+    .notes {
+      display: grid;
+      gap: 8px;
+    }
+
+    .note {
+      border-left: 3px solid var(--blue);
+      border-radius: 0 8px 8px 0;
+      background: rgba(96,165,250,0.07);
+      color: #cbd5e1;
+      padding: 9px 10px;
+      font-size: 12px;
+      line-height: 1.4;
+    }
+
+    .note.warn {
+      border-color: var(--amber);
+      background: rgba(245,158,11,0.07);
+    }
+
+    @media (max-width: 1100px) {
+      .matrix-layout { grid-template-columns: 1fr; }
+      .tool-grid { grid-template-columns: repeat(4, minmax(92px, 1fr)); }
+    }
+
+    @media (max-width: 720px) {
+      body { padding: 12px; }
+      .topbar { grid-template-columns: 1fr; }
+      .status-pills { justify-content: flex-start; }
+      .tool-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .source-row { grid-template-columns: 1fr; }
+      .spool-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+  </style>
+</head>
+<body>
+  <main class="prototype">
+    <section class="topbar">
+      <div>
+        <div class="eyebrow">Flightdeck prototype</div>
+        <h1>H2C Tool Matrix</h1>
+        <p class="subtitle">A draft live Environment layout for H2C-style nozzle changing. The idea is to attach warnings and print intent to tools, not draw seven long route lines.</p>
+      </div>
+      <div class="status-pills">
+        <span class="pill good">Developer mode</span>
+        <span class="pill">7 tools</span>
+        <span class="pill">AMS + HT sources</span>
+        <span class="pill warn">1 review</span>
+      </div>
+    </section>
+
+    <section class="matrix-layout">
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Tool Matrix</h2>
+          <span>Highlight only active or required tools</span>
+        </div>
+        <div class="tool-grid">
+          <article class="tool-card active" style="--tool:#787878">
+            <div class="tool-head"><strong>T1</strong><small>Active</small></div>
+            <div class="nozzle-token"></div>
+            <div class="tool-detail"><b>PLA Grey</b><span>AMS 1 · S1 · #88</span></div>
+            <div class="tool-foot"><span class="state active">Printing</span></div>
+          </article>
+          <article class="tool-card" style="--tool:#ef4444">
+            <div class="tool-head"><strong>T2</strong><small>Ready</small></div>
+            <div class="nozzle-token"></div>
+            <div class="tool-detail"><b>PETG Red</b><span>AMS 1 · S2 · #91</span></div>
+            <div class="tool-foot"><span class="state">Idle</span></div>
+          </article>
+          <article class="tool-card review" style="--tool:#f7d959">
+            <div class="tool-head"><strong>T3</strong><small>Review</small></div>
+            <div class="nozzle-token"></div>
+            <div class="tool-detail"><b>PLA Yellow</b><span>Printer says PLA Matte</span></div>
+            <div class="tool-foot"><span class="state review">Check</span></div>
+          </article>
+          <article class="tool-card" style="--tool:#1a1a1a">
+            <div class="tool-head"><strong>T4</strong><small>Ready</small></div>
+            <div class="nozzle-token"></div>
+            <div class="tool-detail"><b>ABS Black</b><span>AMS 2 · S1 · #68</span></div>
+            <div class="tool-foot"><span class="state">Idle</span></div>
+          </article>
+          <article class="tool-card" style="--tool:#d1c1a8">
+            <div class="tool-head"><strong>T5</strong><small>Parked</small></div>
+            <div class="nozzle-token"></div>
+            <div class="tool-detail"><b>PLA Bone</b><span>Tool loaded</span></div>
+            <div class="tool-foot"><span class="state">Ready</span></div>
+          </article>
+          <article class="tool-card" style="--tool:#d8b755">
+            <div class="tool-head"><strong>T6</strong><small>Standby</small></div>
+            <div class="nozzle-token"></div>
+            <div class="tool-detail"><b>PLA Gold</b><span>No job use</span></div>
+            <div class="tool-foot"><span class="state">Idle</span></div>
+          </article>
+          <article class="tool-card" style="--tool:#703838">
+            <div class="tool-head"><strong>T7</strong><small>Standby</small></div>
+            <div class="nozzle-token"></div>
+            <div class="tool-detail"><b>PLA Brown</b><span>No job use</span></div>
+            <div class="tool-foot"><span class="state">Idle</span></div>
+          </article>
+        </div>
+      </div>
+
+      <aside class="panel job-card">
+        <div class="panel-head">
+          <h2>Print Intent</h2>
+          <span>Job requires 3 tools</span>
+        </div>
+        <div class="job-preview">3MF preview</div>
+        <div class="job-list">
+          <div class="job-row"><span class="tool-badge">T1</span><div><strong>Body shell</strong><span>PLA Grey · 42.4g</span></div><span class="state active">Now</span></div>
+          <div class="job-row"><span class="tool-badge">T3</span><div><strong>Accent ring</strong><span>PLA Yellow · 8.1g</span></div><span class="state review">Review</span></div>
+          <div class="job-row"><span class="tool-badge">T4</span><div><strong>Heat insert jig</strong><span>ABS Black · 12.7g</span></div><span class="state">Ready</span></div>
+        </div>
+      </aside>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Sources</h2>
+        <span>Keep AMS/HT loadout visible, but do not draw route spaghetti</span>
+      </div>
+      <div class="source-row">
+        <div class="source-title"><strong>AMS 1</strong><span>4-slot loadout · feeds tool matrix</span></div>
+        <div class="spool-strip">
+          <div class="spool-chip feed" style="--spool:#787878"><i class="swatch"></i><b>#88 Grey</b><span>PLA · feeding T1</span></div>
+          <div class="spool-chip" style="--spool:#ef4444"><i class="swatch"></i><b>#91 Red</b><span>PETG · T2</span></div>
+          <div class="spool-chip" style="--spool:#f7d959"><i class="swatch"></i><b>#31 Yellow</b><span>PLA · review T3</span></div>
+          <div class="spool-chip" style="--spool:#703838"><i class="swatch"></i><b>#30 Brown</b><span>PLA · T7</span></div>
+        </div>
+      </div>
+      <div class="source-row">
+        <div class="source-title"><strong>AMS HT</strong><span>High-temp bay · source, not a route drawing</span></div>
+        <div class="spool-strip">
+          <div class="spool-chip" style="--spool:#1a1a1a"><i class="swatch"></i><b>#68 Black</b><span>ABS · T4 ready</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel notes">
+      <div class="note">Wire-up idea: build this from a future <code>toolheads</code> or H2C-specific map first. AMS slots remain inventory sources; the tool card owns status, warnings, active print use, and nozzle identity.</div>
+      <div class="note warn">Unknown until the printer arrives: whether Bambu reports the H2C as true tools, nozzles, a rack, virtual extruders, or a new mapping field in the 3MF/MQTT payload.</div>
+    </section>
+  </main>
+</body>
+</html>

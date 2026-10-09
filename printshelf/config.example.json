@@ -1,0 +1,111 @@
+{
+  "host": "0.0.0.0",
+  "port": 8100,
+  "data_dir": "data",
+  "slicer_worker_url": "http://100.112.171.88:8000",
+  "flightdeck_url": "http://127.0.0.1:8000",
+  "flightdeck_public_url": "https://flightdeck.tail7de73e.ts.net",
+  "extract_dir": "/mnt/koko-kidabah/PrintShelf Extracted",
+  "watched_folders": [
+    {
+      "id": "koko-3d-models",
+      "label": "Koko • 3D Models",
+      "path": "/mnt/koko-kidabah/3D Models",
+      "source_kind": "nas",
+      "windows_path": "\\\\192.168.4.34\\KIDABAH\\3D Models"
+    },
+    {
+      "id": "koko-3d-print",
+      "label": "Koko • 3D Print",
+      "path": "/mnt/koko-kidabah/3D Print",
+      "source_kind": "nas",
+      "windows_path": "\\\\192.168.4.34\\KIDABAH\\3D Print"
+    },
+    {
+      "id": "koko-3d-print-stuff",
+      "label": "Koko • 3D Print Stuff",
+      "path": "/mnt/koko-kidabah/3D Print Stuff",
+      "source_kind": "nas",
+      "windows_path": "\\\\192.168.4.34\\KIDABAH\\3D Print Stuff"
+    },
+    {
+      "id": "koko-printer-profiles",
+      "label": "Koko • Printer profiles",
+      "path": "/mnt/koko-kidabah/3D Printer profiles",
+      "source_kind": "nas",
+      "windows_path": "\\\\192.168.4.34\\KIDABAH\\3D Printer profiles"
+    },
+    {
+      "id": "koko-games-bu",
+      "label": "Koko • GAMES BU",
+      "path": "/mnt/koko-kidabah/GAMES BU",
+      "source_kind": "nas",
+      "windows_path": "\\\\192.168.4.34\\KIDABAH\\GAMES BU"
+    },
+    {
+      "id": "koko-kidabah-folder",
+      "label": "Koko • Kidabah",
+      "path": "/mnt/koko-kidabah/Kidabah",
+      "source_kind": "nas",
+      "windows_path": "\\\\192.168.4.34\\KIDABAH\\Kidabah"
+    },
+    {
+      "id": "koko-surface",
+      "label": "Koko • Kidabahs Surface",
+      "path": "/mnt/koko-kidabah/Kidabahs_Surface",
+      "source_kind": "nas",
+      "windows_path": "\\\\192.168.4.34\\KIDABAH\\Kidabahs_Surface"
+    },
+    {
+      "id": "koko-to-check",
+      "label": "Koko • To Check",
+      "path": "/mnt/koko-kidabah/KIDABAH TO CHECK",
+      "source_kind": "nas",
+      "windows_path": "\\\\192.168.4.34\\KIDABAH\\KIDABAH TO CHECK"
+    },
+    {
+      "id": "koko-trixie",
+      "label": "Koko • Trixie Kidabah",
+      "path": "/mnt/koko-kidabah/Trixie Kidabah",
+      "source_kind": "nas",
+      "windows_path": "\\\\192.168.4.34\\KIDABAH\\Trixie Kidabah"
+    },
+    {
+      "id": "koko-extracted",
+      "label": "Koko • PrintShelf Extracted",
+      "path": "/mnt/koko-kidabah/PrintShelf Extracted",
+      "source_kind": "nas",
+      "windows_path": "\\\\192.168.4.34\\KIDABAH\\PrintShelf Extracted"
+    },
+    {
+      "id": "kidabah-pc",
+      "label": "Kidabah PC",
+      "path": "/mnt/kidabah-pc",
+      "source_kind": "windows",
+      "windows_path": "\\\\192.168.4.237\\PrintShelfRoots"
+    }
+  ],
+  "ignore_globs": [
+    "**/node_modules/**",
+    "**/.git/**",
+    "**/__pycache__/**",
+    "**/__MACOSX/**",
+    "**/.Trash/**",
+    "**/._*",
+    "**/.DS_Store",
+    "**/Thumbs.db",
+    "**/*_temp.obj",
+    "**/*_temp.OBJ",
+    "**/temp.obj",
+    "**/American Truck Simulator/**",
+    "**/Euro Truck Simulator*/**",
+    "**/steam_profiles*/**",
+    "**/*.bak/**",
+    "**/Documents/**",
+    "**/AppData/**",
+    "**/Documents/My Games/**",
+    "**/.cache/**",
+    "**/Codex/**",
+    "**/OrcaSlicer/**"
+  ]
+}

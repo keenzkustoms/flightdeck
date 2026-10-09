@@ -1,0 +1,18 @@
+[Unit]
+Description=Amy workshop galaxy + Flightdeck tools
+After=network.target flightdeck.service
+Wants=flightdeck.service
+
+[Service]
+Type=simple
+User=flightdeck
+Group=flightdeck
+WorkingDirectory=/home/flightdeck/flightdeck/amy
+ExecStartPre=/usr/bin/python3 /home/flightdeck/flightdeck/amy/build.py
+ExecStart=/usr/bin/python3 /home/flightdeck/flightdeck/amy/server.py
+Restart=on-failure
+RestartSec=3
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

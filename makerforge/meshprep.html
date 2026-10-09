@@ -1,0 +1,1645 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mesh Prep · MakerDeck</title>
+<script type="importmap">
+{ "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.164.1/examples/jsm/",
+    "three-mesh-bvh": "https://cdn.jsdelivr.net/npm/three-mesh-bvh@0.9.7/build/index.module.js",
+    "three-bvh-csg": "https://cdn.jsdelivr.net/npm/three-bvh-csg@0.0.16/build/index.module.js"
+} }
+</script>
+<link rel="stylesheet" href="css/makerdeck.css">
+<style>
+:root{--sidebar-w:280px;--footer-h:32px}
+.app{display:grid;height:100vh;grid-template-rows:var(--nav-h) 1fr var(--footer-h);
+  grid-template-columns:var(--sidebar-w) 1fr;grid-template-areas:"nav nav" "sidebar viewport" "footer footer"}
+.sidebar{grid-area:sidebar;background:var(--panel);border-right:1px solid var(--border);
+  overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:14px}
+.viewport{grid-area:viewport;position:relative;background:var(--bg);overflow:hidden}
+.viewport canvas{display:block;width:100%!important;height:100%!important}
+.viewport.boundary-focus{box-shadow:inset 0 0 0 1px rgba(98,221,255,.12),inset 0 0 50px rgba(39,211,255,.035)}
+.drop-zone .icon{font-size:28px;margin-bottom:6px}
+.load-model-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:5px}.load-model-head .section-label{margin-bottom:0}.clear-model-btn{padding:3px 8px;font-size:10px;color:#d9bfff;border-color:rgba(184,117,255,.45)}.clear-model-btn:hover{border-color:#b875ff;background:rgba(184,117,255,.12)}
+.pill{display:inline-flex;align-items:center;min-height:24px;padding:3px 8px;border-radius:999px;
+  border:1px solid var(--border);background:var(--panel-2);font-size:11px;font-weight:700;color:var(--muted)}
+.pill.good{border-color:var(--green);color:var(--green);background:rgba(52,211,153,.08)}
+.pill.warn{border-color:var(--amber);color:var(--amber);background:rgba(251,191,36,.08)}
+.pill.bad{border-color:var(--red);color:var(--red);background:rgba(248,113,113,.08)}
+.recipe{display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--muted)}
+.recipe b{color:var(--text)}
+
+.scale-warning{border:1px solid var(--amber);border-radius:8px;padding:10px;background:rgba(251,191,36,.06)}
+.scale-warning-title{color:var(--amber);font-size:11px;font-weight:800;letter-spacing:.06em;margin-bottom:6px}
+.scale-warning-text,.scale-warning-size,.scale-preview{font-size:12px;color:var(--muted);line-height:1.45}
+.scale-warning-size{margin-top:7px}.scale-warning-actions{display:flex;gap:6px;margin-top:10px}.scale-warning-actions .btn{flex:1}
+.scale-editor{margin-top:10px;padding-top:10px;border-top:1px solid var(--border)}
+.scale-grid{display:grid;grid-template-columns:24px 1fr 28px;gap:6px;align-items:center;margin-top:8px}
+.scale-grid label{font-size:11px;color:var(--muted);font-weight:700}
+.scale-grid input{width:100%;box-sizing:border-box;background:var(--panel-2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px 7px;font:inherit;font-size:12px}
+.scale-unit{color:var(--muted);font-size:11px}
+.scale-lock-row{display:flex;align-items:center;gap:7px;margin-top:9px;color:var(--muted);font-size:11px}
+.scale-preview{margin-top:8px;font-size:11px}
+
+.repair-panel{border:1px solid var(--amber);border-radius:8px;padding:10px;background:rgba(251,191,36,.06)}
+.repair-panel.good{border-color:var(--green);background:rgba(52,211,153,.06)}
+.repair-title{color:var(--amber);font-size:11px;font-weight:800;letter-spacing:.06em;margin-bottom:6px}
+.repair-panel.good .repair-title{color:var(--green)}
+.repair-text{font-size:12px;color:var(--muted);line-height:1.45}
+.repair-stats{display:grid;grid-template-columns:1fr auto;gap:5px 10px;margin-top:8px;font-size:11px}
+.repair-stats .label{color:var(--muted)}
+.repair-stats .value{color:var(--text);font-weight:700;text-align:right}
+.repair-stats .value.file-value{max-width:154px;white-space:normal;overflow-wrap:anywhere;word-break:break-word;line-height:1.25}
+.repair-actions{display:flex;gap:6px;margin-top:10px}.repair-actions[hidden]{display:none!important}.repair-actions .btn{flex:1}
+
+.boundary-panel{border:1px solid #27d3ff;border-radius:8px;padding:10px;background:rgba(39,211,255,.055)}
+.boundary-title{color:#62ddff;font-size:11px;font-weight:800;letter-spacing:.06em;margin-bottom:6px}
+.boundary-text{font-size:12px;color:var(--muted);line-height:1.45}
+.boundary-summary{display:grid;grid-template-columns:1fr auto;gap:5px 10px;margin-top:8px;font-size:11px}
+.boundary-summary .label{color:var(--muted)}
+.boundary-summary .value{color:var(--text);font-weight:700;text-align:right}
+.boundary-summary .value.file-value{max-width:154px;white-space:normal;overflow-wrap:anywhere;word-break:break-word;line-height:1.25}
+.boundary-list{display:flex;flex-direction:column;gap:6px;margin-top:9px}
+.boundary-group{border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,.015);overflow:hidden}
+.boundary-group+.boundary-group{margin-top:6px}
+.boundary-group-header{width:100%;display:grid;grid-template-columns:1fr auto auto;gap:7px;align-items:center;border:0;background:var(--panel-2);color:var(--text);padding:9px;cursor:pointer;text-align:left}
+.boundary-group-header:hover{background:rgba(255,255,255,.035)}
+.boundary-group-title{font-size:11px;font-weight:800;letter-spacing:.04em}
+.boundary-group-count{font-size:10px;font-weight:800;color:var(--muted);white-space:nowrap}
+.boundary-group-chevron{font-size:11px;color:var(--muted);transition:transform .16s ease}
+.boundary-group.open .boundary-group-chevron{transform:rotate(90deg)}
+.boundary-group-body{display:none;padding:6px}
+.boundary-group.open .boundary-group-body{display:flex;flex-direction:column;gap:6px}
+.boundary-group-summary{font-size:10px;color:var(--muted);line-height:1.35;padding:0 3px 4px}
+.boundary-group[data-class="INTERSECTING SHELL"] .boundary-group-title{color:#d3a7ff}
+.boundary-group[data-class="HOLE"] .boundary-group-title{color:var(--green)}
+.boundary-group[data-class="SHELL OPENING"] .boundary-group-title{color:var(--amber)}
+.boundary-group[data-class="COMPLEX"] .boundary-group-title{color:var(--red)}
+.boundary-item{width:100%;display:grid;grid-template-columns:1fr auto;gap:3px 8px;text-align:left;
+  border:1px solid var(--border);border-radius:7px;background:var(--panel-2);padding:8px;color:var(--text);cursor:pointer}
+.boundary-item:hover{border-color:#27d3ff}
+.boundary-item.active{border-color:#62ddff;box-shadow:0 0 0 1px rgba(98,221,255,.25),0 0 18px rgba(39,211,255,.14)}
+.boundary-item .name{font-size:11px;font-weight:800}
+.boundary-item .class{font-size:10px;font-weight:800;letter-spacing:.04em}
+.boundary-item .meta{grid-column:1/-1;font-size:10px;color:var(--muted);line-height:1.35}
+.boundary-item[data-class="SMALL"] .class{color:var(--green)}
+.boundary-item[data-class="REVIEW"] .class{color:var(--amber)}
+.boundary-item[data-class="MAJOR"] .class{color:#ff9866}
+.boundary-item[data-class="COMPLEX"] .class{color:var(--red)}
+.boundary-item[data-class="HOLE"] .class{color:var(--green)}
+.boundary-item[data-class="SHELL OPENING"] .class{color:#ffbf3f}
+.boundary-item[data-class="INTERSECTING SHELL"] .class{color:#d3a7ff}
+.boundary-note{margin-top:8px;font-size:10px;color:var(--muted);line-height:1.4}
+.boundary-repair-actions{display:flex;gap:6px;margin-top:9px}
+.boundary-repair-actions[hidden]{display:none!important}
+.boundary-repair-actions .btn{flex:1}
+.boundary-repair-hint{margin-top:7px;font-size:10px;line-height:1.4;color:var(--muted)}
+.boundary-repair-complete{border:1px solid var(--green);border-radius:8px;padding:10px;background:rgba(52,211,153,.06)}
+.boundary-repair-complete[hidden]{display:none!important}
+.boundary-repair-complete .title{color:var(--green);font-size:11px;font-weight:800;letter-spacing:.06em;margin-bottom:6px}
+.boundary-repair-complete .text{font-size:11px;line-height:1.45;color:var(--muted)}
+
+
+.boundary-ping{position:absolute;z-index:8;width:1px;height:1px;pointer-events:none}
+.boundary-ping .ping-ring{position:absolute;left:-34px;top:-34px;width:68px;height:68px;border:2px solid #62ddff;
+  border-radius:50%;box-shadow:0 0 18px #27d3ff,0 0 34px rgba(39,211,255,.55);opacity:0}
+.boundary-ping .ping-core{position:absolute;left:-5px;top:-5px;width:10px;height:10px;border-radius:50%;
+  background:#fff;box-shadow:0 0 8px #fff,0 0 20px #27d3ff;opacity:0}
+.boundary-ping .boundary-bing{position:absolute;left:16px;top:-37px;color:#fff;font-size:12px;font-weight:900;
+  letter-spacing:.12em;text-shadow:0 0 8px #27d3ff,0 0 14px #27d3ff;opacity:0}
+.boundary-ping .spark{position:absolute;width:5px;height:2px;border-radius:2px;background:#ffbf3f;
+  box-shadow:0 0 7px #ffbf3f;transform-origin:0 50%;opacity:0}
+.boundary-ping.fire .ping-ring{animation:boundaryRing .72s ease-out}
+.boundary-ping.fire .ping-core{animation:boundaryCore .55s ease-out}
+.boundary-ping.fire .boundary-bing{animation:boundaryBing .8s ease-out}
+.boundary-ping.fire .spark{animation:boundarySpark .62s ease-out}
+@keyframes boundaryRing{0%{transform:scale(.18);opacity:1}70%{opacity:.75}100%{transform:scale(1.7);opacity:0}}
+@keyframes boundaryCore{0%{transform:scale(.4);opacity:1}45%{transform:scale(1.5);opacity:1}100%{transform:scale(.2);opacity:0}}
+@keyframes boundaryBing{0%{transform:translateY(8px) scale(.7);opacity:0}25%{opacity:1}70%{opacity:1}100%{transform:translateY(-10px) scale(1.05);opacity:0}}
+@keyframes boundarySpark{0%{transform:rotate(var(--r)) translateX(4px) scaleX(.3);opacity:1}
+  100%{transform:rotate(var(--r)) translateX(54px) scaleX(1.5);opacity:0}}
+
+.intersection-panel{border:1px solid #b875ff;border-radius:8px;padding:10px;background:rgba(184,117,255,.055)}
+.intersection-title{color:#d3a7ff;font-size:11px;font-weight:800;letter-spacing:.06em;margin-bottom:6px}.intersection-text{font-size:11px;color:var(--muted);line-height:1.45}.intersection-summary{display:grid;grid-template-columns:1fr auto;gap:5px 10px;margin-top:8px;font-size:11px}.intersection-summary .value{color:var(--text);font-weight:700;text-align:right}.intersection-list{margin-top:8px;display:flex;flex-direction:column;gap:5px}.intersection-item{border:1px solid var(--border);border-radius:6px;background:var(--panel-2);padding:7px;font-size:10px;color:var(--muted)}.intersection-item b{color:var(--text)}
+.intersection-actions{display:flex;gap:6px;margin-top:7px}.intersection-actions .btn{width:100%;font-size:10px;padding:6px}.intersection-item[data-type="STRAY FRAGMENT CONTACT"]{border-color:rgba(52,211,153,.38)}
+.intersection-batch{margin-top:8px}.intersection-batch .btn{width:100%;font-size:10px;padding:7px;border-color:rgba(52,211,153,.55)}
+.union-preflight{margin-top:7px;padding:6px 7px;border-radius:6px;border:1px solid var(--border);font-size:10px;line-height:1.35}.union-preflight.ready{border-color:rgba(52,211,153,.5);background:rgba(52,211,153,.06);color:#86efac}.union-preflight.blocked{border-color:rgba(251,191,36,.42);background:rgba(251,191,36,.05);color:#fcd34d}.union-preflight b{color:inherit}
+
+.stage3d-prep{margin-top:7px;border:1px solid rgba(52,211,153,.45);border-radius:6px;padding:7px;background:rgba(52,211,153,.055);font-size:10px;line-height:1.4;color:var(--muted)}
+.stage3d-prep b{color:#6ee7b7}.stage3d-prep.blocked{border-color:rgba(251,191,36,.42);background:rgba(251,191,36,.045)}.stage3d-prep.blocked b{color:#fbbf24}.stage3d-prep .btn{width:100%;margin-top:7px;font-size:10px;padding:6px}
+.union-preview{margin-top:7px;border:1px solid rgba(96,165,250,.5);border-radius:6px;padding:7px;background:rgba(59,130,246,.07);font-size:10px;line-height:1.4;color:var(--muted)}.union-preview b{color:#93c5fd}.union-preview.good{border-color:rgba(52,211,153,.55);background:rgba(52,211,153,.06)}.union-preview.good b{color:#86efac}.union-preview-actions{display:flex;gap:6px;margin-top:7px}.union-preview-actions .btn{flex:1;font-size:10px;padding:6px}
+</style>
+</head>
+<body>
+<div class="app">
+  <nav class="md-nav"></nav>
+
+  <div class="sidebar">
+    <div>
+      <div class="load-model-head">
+        <div class="section-label">Load Model</div>
+        <button class="btn clear-model-btn" id="clearModelBtn" type="button" disabled>CLEAR</button>
+      </div>
+      <div class="drop-zone" id="dropZone">
+        <div class="icon">&#x1F4E6;</div>
+        Drop STL here or click to browse
+        <input type="file" id="fileInput" accept=".stl" hidden>
+      </div>
+    </div>
+
+    <div>
+      <div class="section-label">Mesh Health</div>
+      <div class="stat-grid">
+        <span class="label">Faces</span><span class="val" id="statFaces">-</span>
+        <span class="label">Size</span><span class="val" id="statSize">-</span>
+        <span class="label">Avg edge</span><span class="val" id="statEdge">-</span>
+        <span class="label">Roughness</span><span class="val" id="statRough">-</span>
+        <span class="label">Open edges</span><span class="val" id="statOpen">-</span>
+        <span class="label">Non-manifold</span><span class="val" id="statBad">-</span>
+        <span class="label">Degenerate</span><span class="val" id="statDegenerate">-</span>
+        <span class="label">Shells</span><span class="val" id="statShells">-</span>
+        <span class="label">Watertight</span><span class="val" id="statWatertight">-</span>
+        <div style="grid-column:1/-1; margin-top:12px; color:#7f96ad; font-size:11px; font-weight:700; letter-spacing:.08em;">
+  PRINT BASE
+</div>
+
+<span class="label">Detected</span><span class="val" id="statBaseDetected">-</span>
+<span class="label">Contact</span><span class="val" id="statBaseArea">-</span>
+<span class="label">Base size</span><span class="val" id="statBaseSize">-</span>
+<span class="label">Coverage</span><span class="val" id="statBaseCoverage">-</span>
+<span class="label">Stability</span><span class="val" id="statBaseRating">-</span>
+      </div>
+    </div>
+
+    <div id="scaleWarning" class="scale-warning" hidden>
+      <div class="scale-warning-title">&#9888; UNUSUAL MODEL SIZE DETECTED</div>
+      <div class="scale-warning-text">This STL appears unusually small and may be an unscaled AI-generated model.</div>
+      <div class="scale-warning-size">Current size: <strong id="scaleWarningSize">-</strong></div>
+      <div id="scalePromptActions" class="scale-warning-actions">
+        <button class="btn" id="scaleSetSize" type="button">SET SIZE</button>
+        <button class="btn" id="scaleKeepOriginal" type="button">KEEP ORIGINAL</button>
+      </div>
+      <div id="scaleEditor" class="scale-editor" hidden>
+        <div class="section-label" style="margin-bottom:0">Size Settings</div>
+        <div class="scale-grid">
+          <label for="scaleX">X</label><input id="scaleX" type="number" min="0.001" step="0.1"><span class="scale-unit">mm</span>
+          <label for="scaleY">Y</label><input id="scaleY" type="number" min="0.001" step="0.1"><span class="scale-unit">mm</span>
+          <label for="scaleZ">Z</label><input id="scaleZ" type="number" min="0.001" step="0.1"><span class="scale-unit">mm</span>
+        </div>
+        <label class="scale-lock-row"><input id="scaleUniform" type="checkbox" checked>Keep proportions locked</label>
+        <div id="scalePreview" class="scale-preview">Enter the intended size.</div>
+        <div class="scale-warning-actions">
+          <button class="btn" id="scaleApply" type="button">APPLY SIZE</button>
+          <button class="btn" id="scaleCancel" type="button">CANCEL</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="repairPanel" class="repair-panel" hidden>
+      <div id="repairTitle" class="repair-title">&#9888; MESH REPAIR RECOMMENDED</div>
+      <div id="repairText" class="repair-text">Safe Stage 1 repairs are available.</div>
+      <div class="repair-stats">
+        <span class="label">File</span><span class="value file-value" id="repairFileName">-</span>
+        <span class="label">Degenerate faces</span><span class="value" id="repairDegenerate">0</span>
+        <span class="label">Duplicate faces</span><span class="value" id="repairDuplicates">0</span>
+        <span class="label">Safe repairs</span><span class="value" id="repairTotal">0</span>
+      </div>
+      <div id="repairResult" class="repair-text" style="margin-top:8px" hidden></div>
+      <div id="repairActions" class="repair-actions">
+        <button class="btn" id="repairAuto" type="button">AUTO REPAIR</button>
+        <button class="btn" id="repairKeepOriginal" type="button">KEEP ORIGINAL</button>
+      </div>
+    </div>
+
+    <div id="intersectionPanel" class="intersection-panel" hidden>
+      <div class="intersection-title">SHELL INTERSECTION INSPECTOR</div>
+      <div class="intersection-text">Stage 3A is diagnostic only. It detects overlapping shell bounds, then proves cross-shell triangle intersections.</div>
+      <div class="intersection-summary"><span>Shell AABB overlaps</span><span class="value" id="intersectionAabb">0</span><span>Intersecting shell pairs</span><span class="value" id="intersectionPairs">0</span><span>Triangle intersections</span><span class="value" id="intersectionHits">0</span><span>Triangle pairs tested</span><span class="value" id="intersectionTests">0</span></div>
+      <div id="intersectionNote" class="intersection-text" style="margin-top:7px"></div><div id="intersectionList" class="intersection-list"></div>
+    </div>
+
+    <div id="boundaryPanel" class="boundary-panel" hidden>
+      <div class="boundary-title">&#10022; BOUNDARY INSPECTOR</div>
+      <div class="boundary-text">
+        Open mesh boundaries detected. Stage 2A is diagnostic only: inspect first, repair later.
+      </div>
+      <div class="boundary-summary">
+        <span class="label">File</span><span class="value file-value" id="boundaryFileName">-</span>
+        <span class="label">Boundary groups</span><span class="value" id="boundaryLoopCount">0</span>
+        <span class="label">Open edges</span><span class="value" id="boundaryEdgeCount">0</span>
+      </div>
+      <div id="boundaryList" class="boundary-list"></div>
+      <div class="boundary-note">Click a boundary to frame it with surrounding model context, highlight the open edge loop, and locate it with BING.</div>
+      <div id="boundaryRepairActions" class="boundary-repair-actions" hidden>
+        <button class="btn" id="boundaryRepairSelected" type="button">REPAIR SELECTED</button>
+      </div>
+      <div id="boundaryRepairHint" class="boundary-repair-hint">
+        Stage 2B/2C repair only simple 3/4-edge holes with proven surrounding-shell support. Isolated sheets, shell perimeters, multi-shell joins, complex, concave, twisted, and larger openings remain inspection-only.
+      </div>
+    </div>
+
+    <div id="boundaryRepairComplete" class="boundary-repair-complete" hidden>
+      <div class="title">BOUNDARY REPAIR COMPLETE</div>
+      <div id="boundaryRepairCompleteText" class="text">-</div>
+    </div>
+
+    <div>
+      <div class="section-label">Next Stage</div>
+      <button class="btn" id="exportBtn" disabled style="width:100%">Prepared STL pending</button>
+    </div>
+  </div>
+
+  <div class="viewport" id="viewport">
+    <div id="boundaryPing" class="boundary-ping" hidden>
+      <div class="ping-ring"></div>
+      <div class="ping-core"></div>
+      <span class="boundary-bing">BING!</span>
+      <i class="spark" style="--r:0deg"></i>
+      <i class="spark" style="--r:45deg"></i>
+      <i class="spark" style="--r:90deg"></i>
+      <i class="spark" style="--r:135deg"></i>
+      <i class="spark" style="--r:180deg"></i>
+      <i class="spark" style="--r:225deg"></i>
+      <i class="spark" style="--r:270deg"></i>
+      <i class="spark" style="--r:315deg"></i>
+    </div>
+    <div class="viewport-toolbar">
+      <button id="tbFrame">Frame</button>
+      <button id="tbWire">Wire</button>
+    </div>
+    <div class="statusbar"><span id="status">Drop an STL to analyse</span></div>
+  </div>
+
+  <div class="md-footer">
+    <span id="fileName">No model loaded</span>
+    <span>Mesh Prep</span>
+  </div>
+</div>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { Brush, Evaluator, ADDITION } from 'three-bvh-csg';
+import './js/nav.js?v=552';
+import { analyseSanitiserMesh, repairSanitiserMeshStage1, repairSanitiserBoundaryStage2B, repairSanitiserBoundaryStage2C, repairSanitiserIntersectionStage3C, repairSanitiserIntersectionStage3CBatch, analyseSanitiserIntersectionStage3D, repairSanitiserIntersectionStage3D } from './js/sanitiser-core.js?v=14';
+const $ = id => document.getElementById(id);
+const fmt = n => Number.isFinite(n) ? n.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '-';
+const setStatus = msg => { $('status').textContent = msg; };
+
+let mesh = null;
+let wire = null;
+
+let sourceParsed = null;
+let sourceName = '';
+let currentParsed = null;
+let scaleWarningDismissed = false;
+let scaleReference = null;
+let scaleEditingAxis = null;
+let repairDismissed = false;
+let repairLastResult = null;
+let boundaryHighlight = null;
+let boundaryAnalysis = null;
+let selectedBoundaryIndex = -1;
+let boundaryRepairLastResult = null;
+let unionCandidate = null;
+let boundaryIdBySignature = new Map();
+let nextBoundaryId = 1;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x060a10);
+const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 10000);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+$('viewport').appendChild(renderer.domElement);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 1.6));
+const key = new THREE.DirectionalLight(0xffffff, 1.8);
+key.position.set(80, 120, 160);
+scene.add(key);
+
+function resize() {
+  const r = $('viewport').getBoundingClientRect();
+  renderer.setSize(r.width, r.height);
+  camera.aspect = r.width / Math.max(1, r.height);
+  camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', resize);
+resize();
+
+function animate() {
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+}
+animate();
+
+function parseSTL(buffer) {
+  const dv = new DataView(buffer);
+  const nTri = dv.getUint32(80, true);
+  if (84 + nTri * 50 > buffer.byteLength) throw new Error('Only binary STL is supported in Mesh Prep');
+  const positions = new Float32Array(nTri * 9);
+  let off = 84;
+  for (let i = 0; i < nTri; i++) {
+    off += 12;
+    for (let v = 0; v < 9; v++) {
+      positions[i * 9 + v] = dv.getFloat32(off, true);
+      off += 4;
+    }
+    off += 2;
+  }
+  return { positions, nTri };
+}
+
+function analyseMesh(positions, nTri) {
+  let minX = Infinity, minY = Infinity, minZ = Infinity;
+  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+  let area = 0, edgeSum = 0, edgeCount = 0;
+  const epsScale = [];
+  const normalsByVertex = new Map();
+  const edgeMap = new Map();
+
+  for (let i = 0; i < nTri; i++) {
+    const o = i * 9;
+    const pts = [];
+    for (let v = 0; v < 3; v++) {
+      const p = o + v * 3;
+      const x = positions[p], y = positions[p+1], z = positions[p+2];
+      pts.push({ x, y, z });
+      if (x < minX) minX = x; if (x > maxX) maxX = x;
+      if (y < minY) minY = y; if (y > maxY) maxY = y;
+      if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+    }
+    const ux = pts[1].x - pts[0].x, uy = pts[1].y - pts[0].y, uz = pts[1].z - pts[0].z;
+    const vx = pts[2].x - pts[0].x, vy = pts[2].y - pts[0].y, vz = pts[2].z - pts[0].z;
+    let nx = uy*vz - uz*vy, ny = uz*vx - ux*vz, nz = ux*vy - uy*vx;
+    const nLen = Math.hypot(nx, ny, nz);
+    if (nLen > 1e-10) { area += nLen * 0.5; nx /= nLen; ny /= nLen; nz /= nLen; }
+    for (let e = 0; e < 3; e++) {
+      const a = pts[e], b = pts[(e + 1) % 3];
+      edgeSum += Math.hypot(a.x-b.x, a.y-b.y, a.z-b.z);
+      edgeCount++;
+    }
+    epsScale.push(...pts);
+    for (const p of pts) {
+      const k = `${Math.round(p.x * 1000)},${Math.round(p.y * 1000)},${Math.round(p.z * 1000)}`;
+      const s = normalsByVertex.get(k) || { x: 0, y: 0, z: 0, n: 0 };
+      s.x += nx; s.y += ny; s.z += nz; s.n++;
+      normalsByVertex.set(k, s);
+    }
+  }
+
+  const maxDim = Math.max(maxX-minX, maxY-minY, maxZ-minZ);
+  const edgeEps = Math.max(maxDim * 1e-5, 1e-5);
+  const keyOf = p => `${Math.round(p.x / edgeEps)},${Math.round(p.y / edgeEps)},${Math.round(p.z / edgeEps)}`;
+  for (let i = 0; i < nTri; i++) {
+    const o = i * 9;
+    const keys = [
+      keyOf({ x: positions[o], y: positions[o+1], z: positions[o+2] }),
+      keyOf({ x: positions[o+3], y: positions[o+4], z: positions[o+5] }),
+      keyOf({ x: positions[o+6], y: positions[o+7], z: positions[o+8] })
+    ];
+    for (let e = 0; e < 3; e++) {
+      const a = keys[e], b = keys[(e + 1) % 3];
+      if (a === b) continue;
+      const k = a < b ? `${a}|${b}` : `${b}|${a}`;
+      edgeMap.set(k, (edgeMap.get(k) || 0) + 1);
+    }
+  }
+
+  let openEdges = 0, nonManifold = 0;
+  for (const c of edgeMap.values()) {
+    if (c === 1) openEdges++;
+    else if (c !== 2) nonManifold++;
+  }
+  let rough = 0, roughN = 0;
+  for (const s of normalsByVertex.values()) {
+    if (s.n < 2) continue;
+    rough += 1 - Math.min(1, Math.hypot(s.x, s.y, s.z) / s.n);
+    roughN++;
+  }
+  rough = roughN ? rough / roughN : 0;
+  return { nTri, maxDim, sizeX:maxX-minX, sizeY:maxY-minY, sizeZ:maxZ-minZ, area,
+    avgEdge: edgeSum / Math.max(1, edgeCount), openEdges, nonManifold, rough };
+}
+
+function showMesh(positions) {
+  clearBoundaryHighlight();
+  if (mesh) scene.remove(mesh);
+  if (wire) scene.remove(wire);
+  const geom = new THREE.BufferGeometry();
+  geom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+  geom.computeVertexNormals();
+  mesh = new THREE.Mesh(geom, new THREE.MeshStandardMaterial({ color: 0x3ecfff, roughness: 0.55, metalness: 0.1, side: THREE.DoubleSide, flatShading: true }));
+  scene.add(mesh);
+  wire = null;
+  frame(mesh);
+}
+
+function frame(obj) {
+  if (!obj) return;
+  const box = new THREE.Box3().setFromObject(obj);
+  const center = box.getCenter(new THREE.Vector3());
+  const size = box.getSize(new THREE.Vector3());
+  const maxDim = Math.max(size.x, size.y, size.z);
+  camera.position.set(center.x, center.y, center.z + maxDim * 1.9);
+  controls.target.copy(center);
+  controls.update();
+}
+
+
+function cloneParsed(parsed) {
+  return { positions: new Float32Array(parsed.positions), nTri: parsed.nTri };
+}
+
+function hideScaleWarning() {
+  $('scaleWarning').hidden = true;
+  $('scaleEditor').hidden = true;
+  $('scalePromptActions').hidden = false;
+}
+
+function setScaleInputs(x, y, z) {
+  $('scaleX').value = Number(x).toFixed(2);
+  $('scaleY').value = Number(y).toFixed(2);
+  $('scaleZ').value = Number(z).toFixed(2);
+  updateScalePreview();
+}
+
+function updateScalePreview() {
+  const x = Number($('scaleX').value), y = Number($('scaleY').value), z = Number($('scaleZ').value);
+  $('scalePreview').textContent =
+    [x,y,z].every(v => Number.isFinite(v) && v > 0)
+      ? `Result: ${x.toFixed(1)} x ${y.toFixed(1)} x ${z.toFixed(1)} mm`
+      : 'Enter valid positive dimensions.';
+}
+
+function syncUniformScale(axis) {
+  if (!$('scaleUniform').checked || !scaleReference) return updateScalePreview();
+  const target = Number($('scale' + axis.toUpperCase()).value);
+  const original = scaleReference[axis];
+  if (!Number.isFinite(target) || target <= 0 || original <= 0) return updateScalePreview();
+  const factor = target / original;
+  for (const a of ['x','y','z']) {
+    if (a !== axis) $('scale' + a.toUpperCase()).value = (scaleReference[a] * factor).toFixed(2);
+  }
+  updateScalePreview();
+}
+
+function showScaleWarning(san) {
+  if (!san.scale?.suspicious || scaleWarningDismissed) return hideScaleWarning();
+  $('scaleWarning').hidden = false;
+  $('scaleEditor').hidden = true;
+  $('scalePromptActions').hidden = false;
+  $('scaleWarningSize').textContent =
+    `${san.sizeX.toFixed(2)} x ${san.sizeY.toFixed(2)} x ${san.sizeZ.toFixed(2)} mm`;
+  scaleReference = { x: san.sizeX, y: san.sizeY, z: san.sizeZ };
+  setScaleInputs(san.sizeX, san.sizeY, san.sizeZ);
+}
+
+function applyRequestedScale() {
+  if (!sourceParsed || !scaleReference) return;
+  const tx = Number($('scaleX').value), ty = Number($('scaleY').value), tz = Number($('scaleZ').value);
+  if (![tx,ty,tz].every(v => Number.isFinite(v) && v > 0)) {
+    $('scalePreview').textContent = 'Enter valid positive dimensions first.';
+    return;
+  }
+  const sx = tx / scaleReference.x, sy = ty / scaleReference.y, sz = tz / scaleReference.z;
+  const positions = new Float32Array(sourceParsed.positions.length);
+  for (let i = 0; i < sourceParsed.positions.length; i += 3) {
+    positions[i] = sourceParsed.positions[i] * sx;
+    positions[i+1] = sourceParsed.positions[i+1] * sy;
+    positions[i+2] = sourceParsed.positions[i+2] * sz;
+  }
+  currentParsed = { positions, nTri: sourceParsed.nTri };
+  scaleWarningDismissed = true;
+  hideScaleWarning();
+  repairDismissed = false;
+  updateAnalysis(sourceName, currentParsed);
+  setStatus(`Scaled to ${tx.toFixed(1)} x ${ty.toFixed(1)} x ${tz.toFixed(1)} mm`);
+}
+
+
+
+function hideRepairPanel() {
+  $('repairPanel').hidden = true;
+}
+
+function showRepairPanel(san) {
+  if (repairLastResult) {
+    const r = repairLastResult;
+    $('repairPanel').hidden = false;
+    $('repairPanel').className = 'repair-panel good';
+    $('repairTitle').textContent = 'SAFE REPAIR COMPLETE';
+    $('repairFileName').textContent = sourceName || 'Unnamed STL';
+    $('repairText').textContent = 'Stage 1 changed only objectively invalid or duplicate faces.';
+    $('repairDegenerate').textContent = `${r.beforeDegenerate.toLocaleString()} → ${r.afterDegenerate.toLocaleString()}`;
+    $('repairDuplicates').textContent = `${r.beforeDuplicates.toLocaleString()} → ${r.afterDuplicates.toLocaleString()}`;
+    $('repairTotal').textContent = r.removedTotal.toLocaleString();
+    $('repairResult').hidden = false;
+    $('repairResult').textContent = `Faces ${r.beforeFaces.toLocaleString()} → ${r.afterFaces.toLocaleString()}. Repair is complete and ready to export. Open edges and shells were not filled or joined.`;
+    $('repairActions').hidden = true;
+    return;
+  }
+
+  const total = (san.degenerateTriangles || 0) + (san.duplicateTriangles || 0);
+  if (!total || repairDismissed) return hideRepairPanel();
+
+  $('repairPanel').hidden = false;
+  $('repairPanel').className = 'repair-panel';
+  $('repairTitle').textContent = '⚠ MESH REPAIR RECOMMENDED';
+  $('repairFileName').textContent = sourceName || 'Unnamed STL';
+  $('repairText').textContent = 'Safe Stage 1 repairs can remove invalid or duplicate faces without closing holes or joining shells.';
+  $('repairDegenerate').textContent = san.degenerateTriangles.toLocaleString();
+  $('repairDuplicates').textContent = san.duplicateTriangles.toLocaleString();
+  $('repairTotal').textContent = total.toLocaleString();
+  $('repairResult').hidden = true;
+  $('repairActions').hidden = false;
+}
+
+function applyStage1Repair() {
+  const parsed = currentParsed || sourceParsed;
+  if (!parsed) return;
+
+  try {
+    setStatus('Running safe Stage 1 mesh repair...');
+    const before = analyseSanitiserMesh(parsed.positions, parsed.nTri);
+    const repaired = repairSanitiserMeshStage1(parsed.positions, parsed.nTri);
+
+    if (!repaired.removedTotal) {
+      repairDismissed = true;
+      hideRepairPanel();
+      setStatus('No safe Stage 1 repairs were required');
+      return;
+    }
+
+    currentParsed = { positions: repaired.positions, nTri: repaired.nTri };
+    // The repaired mesh becomes the new baseline so a later scale operation cannot
+    // accidentally restore faces that Stage 1 deliberately removed.
+    sourceParsed = cloneParsed(currentParsed);
+
+    const after = analyseSanitiserMesh(currentParsed.positions, currentParsed.nTri);
+    repairLastResult = {
+      beforeFaces: repaired.beforeFaces,
+      afterFaces: repaired.afterFaces,
+      beforeDegenerate: before.degenerateTriangles,
+      afterDegenerate: after.degenerateTriangles,
+      beforeDuplicates: before.duplicateTriangles || 0,
+      afterDuplicates: after.duplicateTriangles || 0,
+      removedTotal: repaired.removedTotal,
+    };
+    repairDismissed = false;
+    scaleReference = null;
+    updateAnalysis(sourceName, currentParsed);
+    setStatus(`Safe repair complete — removed ${repaired.removedTotal.toLocaleString()} faces`);
+  } catch (err) {
+    console.error('Stage 1 repair failed:', err);
+    setStatus(`Repair failed: ${err.message || err}`);
+  }
+}
+
+
+
+function resetBoundaryIds() {
+  boundaryIdBySignature = new Map();
+  nextBoundaryId = 1;
+}
+
+function boundarySignature(loop, modelMaxDim = 1) {
+  const eps = Math.max(Math.abs(modelMaxDim) * 1e-7, 1e-7);
+
+  const pointKey = point =>
+    `${Math.round(point[0] / eps)},` +
+    `${Math.round(point[1] / eps)},` +
+    `${Math.round(point[2] / eps)}`;
+
+  const segmentKeys = (loop?.segments || []).map(([a, b]) => {
+    const ka = pointKey(a);
+    const kb = pointKey(b);
+    return ka < kb ? `${ka}>${kb}` : `${kb}>${ka}`;
+  });
+
+  segmentKeys.sort();
+
+  return [
+    loop?.topology || 'UNKNOWN',
+    loop?.edgeCount || 0,
+    ...segmentKeys,
+  ].join('|');
+}
+
+function assignPersistentBoundaryIds(san) {
+  for (const loop of san?.boundaryLoops || []) {
+    const signature = boundarySignature(loop, san.maxDim || 1);
+
+    if (!boundaryIdBySignature.has(signature)) {
+      boundaryIdBySignature.set(signature, nextBoundaryId++);
+    }
+
+    loop.persistentId = boundaryIdBySignature.get(signature);
+    loop.persistentSignature = signature;
+  }
+}
+
+function boundaryLabel(loop, fallbackIndex = 0) {
+  return `Boundary ${loop?.persistentId || (fallbackIndex + 1)}`;
+}
+
+function clearBoundaryHighlight() {
+  if (boundaryHighlight) {
+    scene.remove(boundaryHighlight);
+    boundaryHighlight.traverse(obj => {
+      obj.geometry?.dispose?.();
+      obj.material?.dispose?.();
+    });
+    boundaryHighlight = null;
+  }
+
+  selectedBoundaryIndex = -1;
+  $('viewport').classList.remove('boundary-focus');
+  $('boundaryRepairActions').hidden = true;
+  document.querySelectorAll('.boundary-item.active').forEach(el => el.classList.remove('active'));
+}
+
+function hideBoundaryInspector() {
+  $('boundaryPanel').hidden = true;
+  $('boundaryList').innerHTML = '';
+  boundaryAnalysis = null;
+  clearBoundaryHighlight();
+}
+
+
+function easeOutCubic(t) {
+  return 1 - Math.pow(1 - t, 3);
+}
+
+function animateCameraTo(targetPosition, targetLookAt, duration = 420, onDone = null) {
+  const startPosition = camera.position.clone();
+  const startTarget = controls.target.clone();
+  const started = performance.now();
+
+  const tick = now => {
+    const raw = Math.min(1, (now - started) / duration);
+    const t = easeOutCubic(raw);
+
+    camera.position.lerpVectors(startPosition, targetPosition, t);
+    controls.target.lerpVectors(startTarget, targetLookAt, t);
+    controls.update();
+
+    if (raw < 1) {
+      requestAnimationFrame(tick);
+    } else {
+      onDone?.();
+    }
+  };
+
+  requestAnimationFrame(tick);
+}
+
+function frameBoundary(loop, onDone = null) {
+  const min = loop?.bounds?.min;
+  const max = loop?.bounds?.max;
+
+  if (!min || !max) {
+    onDone?.();
+    return;
+  }
+
+  const box = new THREE.Box3(
+    new THREE.Vector3(...min),
+    new THREE.Vector3(...max)
+  );
+
+  const center = box.getCenter(new THREE.Vector3());
+  const size = box.getSize(new THREE.Vector3());
+
+  // Use the boundary span as the primary fit measure. The previous
+  // implementation tried to infer width/height directly from world axes,
+  // which could massively over-zoom when the boundary was tilted relative
+  // to the camera. Keep a generous safety floor instead.
+  const boundarySpan = Math.max(
+    loop.maxSpan || 0,
+    size.length(),
+    1
+  );
+
+  const direction = camera.position.clone().sub(controls.target);
+  if (direction.lengthSq() < 1e-9) direction.set(0, 0, 1);
+  direction.normalize();
+
+  // 20% visual padding plus a conservative camera-distance multiplier.
+  // This deliberately favours seeing context around the wound instead of
+  // filling the entire viewport with the selected loop.
+  const paddedSpan = boundarySpan * 1.20;
+  const vFov = THREE.MathUtils.degToRad(camera.fov);
+  const hFov = 2 * Math.atan(
+    Math.tan(vFov / 2) * Math.max(camera.aspect, 0.01)
+  );
+  const limitingFov = Math.min(vFov, hFov);
+
+  let distance =
+    paddedSpan / (2 * Math.tan(limitingFov / 2));
+
+  // Extra context multiplier so the surrounding mesh remains visible.
+  distance *= 1.65;
+
+  // Never zoom closer than roughly the current target distance's sensible
+  // diagnostic floor. This prevents the camera from diving through broad,
+  // flat or highly tilted boundary regions.
+  const currentDistance = camera.position.distanceTo(controls.target);
+  const minimumDistance = Math.max(
+    boundarySpan * 1.25,
+    currentDistance * 0.40
+  );
+
+  distance = Math.max(distance, minimumDistance);
+
+  const targetPosition =
+    center.clone().addScaledVector(direction, distance);
+
+  camera.near = Math.max(0.01, distance / 1000);
+  camera.far = Math.max(10000, distance * 80);
+  camera.updateProjectionMatrix();
+
+  $('viewport').classList.add('boundary-focus');
+
+  animateCameraTo(targetPosition, center, 420, () => {
+    controls.target.copy(center);
+    controls.update();
+    onDone?.();
+  });
+}
+
+function runBoundaryPing(loop) {
+  if (!loop?.centroid) return;
+
+  const viewport = $('viewport');
+  const rect = viewport.getBoundingClientRect();
+  const p = new THREE.Vector3(...loop.centroid).project(camera);
+
+  const x = (p.x * 0.5 + 0.5) * rect.width;
+  const y = (-p.y * 0.5 + 0.5) * rect.height;
+
+  const ping = $('boundaryPing');
+  ping.style.left = `${x}px`;
+  ping.style.top = `${y}px`;
+  ping.hidden = false;
+
+  ping.classList.remove('fire');
+  void ping.offsetWidth;
+  ping.classList.add('fire');
+
+  window.setTimeout(() => {
+    ping.classList.remove('fire');
+    ping.hidden = true;
+  }, 850);
+}
+
+function highlightBoundary(index) {
+  if (!boundaryAnalysis?.boundaryLoops?.length) return;
+
+  const loop = boundaryAnalysis.boundaryLoops[index];
+  if (!loop) return;
+
+  clearBoundaryHighlight();
+
+  const linePositions = [];
+  const pointPositions = [];
+
+  for (const [a, b] of loop.segments || []) {
+    linePositions.push(...a, ...b);
+    pointPositions.push(...a, ...b);
+  }
+
+  const group = new THREE.Group();
+
+  if (linePositions.length) {
+    const lineGeom = new THREE.BufferGeometry();
+    lineGeom.setAttribute('position', new THREE.Float32BufferAttribute(linePositions, 3));
+
+    const lineMat = new THREE.LineBasicMaterial({
+      color: 0x62ddff,
+      transparent: true,
+      opacity: 1,
+      depthTest: false,
+    });
+
+    const lines = new THREE.LineSegments(lineGeom, lineMat);
+    lines.renderOrder = 999;
+    group.add(lines);
+  }
+
+  if (pointPositions.length) {
+    const pointGeom = new THREE.BufferGeometry();
+    pointGeom.setAttribute('position', new THREE.Float32BufferAttribute(pointPositions, 3));
+
+    const pointMat = new THREE.PointsMaterial({
+      color: 0xffbf3f,
+      size: Math.max((boundaryAnalysis.maxDim || 1) * 0.012, 1.5),
+      sizeAttenuation: true,
+      depthTest: false,
+    });
+
+    const points = new THREE.Points(pointGeom, pointMat);
+    points.renderOrder = 1000;
+    group.add(points);
+  }
+
+  boundaryHighlight = group;
+  scene.add(boundaryHighlight);
+  selectedBoundaryIndex = index;
+
+  const canRepairSelected =
+    loop.closed &&
+    !loop.complex &&
+    loop.topology === 'CLOSED_LOOP' &&
+    loop.repairEligible === true &&
+    (loop.edgeCount === 3 || loop.edgeCount === 4);
+
+  $('boundaryRepairActions').hidden = !canRepairSelected;
+  $('boundaryRepairSelected').disabled = !canRepairSelected;
+
+  document.querySelectorAll('.boundary-item').forEach(el => {
+    el.classList.toggle('active', Number(el.dataset.boundaryIndex) === index);
+  });
+
+  const label = boundaryLabel(loop, index);
+
+  setStatus(
+    `${label}: ${loop.classification} — framing ${loop.edgeCount.toLocaleString()} open edges`
+  );
+
+  frameBoundary(loop, () => {
+    runBoundaryPing(loop);
+
+    setStatus(
+      `${label}: ${loop.classification} — ` +
+      `${loop.edgeCount.toLocaleString()} open edges, ${loop.maxSpan.toFixed(1)} mm span`
+    );
+  });
+}
+
+function showBoundaryInspector(san) {
+  assignPersistentBoundaryIds(san);
+  boundaryAnalysis = san;
+  clearBoundaryHighlight();
+  const loops = san.boundaryLoops || [];
+  if (!loops.length) {
+    $('boundaryPanel').hidden = true;
+    $('boundaryList').innerHTML = '';
+    return;
+  }
+  $('boundaryPanel').hidden = false;
+  $('boundaryFileName').textContent = sourceName || 'Unnamed STL';
+  $('boundaryLoopCount').textContent = loops.length.toLocaleString();
+  $('boundaryEdgeCount').textContent = san.openEdges.toLocaleString();
+  const list = $('boundaryList');
+  list.innerHTML = '';
+  const order = ['INTERSECTING SHELL', 'HOLE', 'SHELL OPENING', 'COMPLEX'];
+  const grouped = new Map(order.map(name => [name, []]));
+  for (let index = 0; index < loops.length; index++) {
+    const loop = loops[index];
+    const key = grouped.has(loop.classification) ? loop.classification : 'COMPLEX';
+    grouped.get(key).push({ loop, index });
+  }
+  const descriptions = {
+    'INTERSECTING SHELL': 'Boundaries on shells with proven cross-shell intersections. Resolve overlap first.',
+    'HOLE': 'Proven simple hole candidates. Stage 2 safety checks still apply before any cap.',
+    'SHELL OPENING': 'Closed boundaries not proven to be holes. Treat as open shell perimeters until reviewed.',
+    'COMPLEX': 'Branched or open-chain topology. Manual or advanced repair only.'
+  };
+  const defaultOpen = grouped.get('HOLE')?.length ? 'HOLE' : null;
+  for (const classification of order) {
+    const items = grouped.get(classification) || [];
+    if (!items.length) continue;
+    const group = document.createElement('div');
+    group.className = 'boundary-group';
+    group.dataset.class = classification;
+    if (classification === defaultOpen) group.classList.add('open');
+    const header = document.createElement('button');
+    header.type = 'button';
+    header.className = 'boundary-group-header';
+    header.innerHTML = `<span class="boundary-group-title">${classification}</span><span class="boundary-group-count">${items.length.toLocaleString()}</span><span class="boundary-group-chevron">▶</span>`;
+    const body = document.createElement('div');
+    body.className = 'boundary-group-body';
+    const summary = document.createElement('div');
+    summary.className = 'boundary-group-summary';
+    const edgeTotal = items.reduce((sum, item) => sum + (item.loop.edgeCount || 0), 0);
+    summary.textContent = `${descriptions[classification]} ${edgeTotal.toLocaleString()} open edges across this group.`;
+    body.appendChild(summary);
+    for (const { loop, index } of items) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'boundary-item';
+      button.dataset.class = loop.classification;
+      button.dataset.boundaryIndex = String(index);
+      const capLabel = (loop.edgeCount === 3 || loop.edgeCount === 4)
+        ? (loop.classification === 'INTERSECTING SHELL' ? ' · CAP BLOCKED' : (loop.repairEligible ? ' · CAP SAFE' : ' · CAP REFUSED'))
+        : '';
+      button.innerHTML = `<span class="name">${boundaryLabel(loop, index)}</span><span class="class">${loop.classification}</span><span class="meta">${loop.edgeCount.toLocaleString()} edges · ${loop.maxSpan.toFixed(1)} mm span · ${loop.perimeter.toFixed(1)} mm perimeter${capLabel}<br>${loop.recommendation}</span>`;
+      button.addEventListener('click', () => highlightBoundary(index));
+      body.appendChild(button);
+    }
+    header.addEventListener('click', () => group.classList.toggle('open'));
+    group.appendChild(header);
+    group.appendChild(body);
+    list.appendChild(group);
+  }
+}
+
+
+
+function buildUnionShellMap(parsed){const{positions,nTri}=parsed;let minX=Infinity,minY=Infinity,minZ=Infinity,maxX=-Infinity,maxY=-Infinity,maxZ=-Infinity;for(let i=0;i<positions.length;i+=3){const x=positions[i],y=positions[i+1],z=positions[i+2];minX=Math.min(minX,x);maxX=Math.max(maxX,x);minY=Math.min(minY,y);maxY=Math.max(maxY,y);minZ=Math.min(minZ,z);maxZ=Math.max(maxZ,z);}const eps=Math.max(Math.max(maxX-minX,maxY-minY,maxZ-minZ)*1e-7,1e-7),key=(x,y,z)=>`${Math.round(x/eps)},${Math.round(y/eps)},${Math.round(z/eps)}`;const vm=new Map(),fv=new Array(nTri),vf=[];for(let fi=0;fi<nTri;fi++){const ids=[],o=fi*9;for(let v=0;v<3;v++){const q=o+v*3,k=key(positions[q],positions[q+1],positions[q+2]);if(!vm.has(k)){const id=vm.size;vm.set(k,id);vf[id]=[];}const id=vm.get(k);ids.push(id);vf[id].push(fi);}fv[fi]=ids;}const seen=new Uint8Array(nTri),faceShellIds=new Int32Array(nTri);faceShellIds.fill(-1);const counts=[];let shell=0;for(let start=0;start<nTri;start++){if(seen[start])continue;const sid=shell++,stack=[start];seen[start]=1;faceShellIds[start]=sid;let c=0;while(stack.length){const fi=stack.pop();c++;for(const vi of fv[fi])for(const nb of vf[vi])if(!seen[nb]){seen[nb]=1;faceShellIds[nb]=sid;stack.push(nb);}}counts[sid]=c;}return{faceShellIds,counts};}
+function unionShellPositions(parsed,map,sid){const out=[];for(let fi=0;fi<parsed.nTri;fi++)if(map.faceShellIds[fi]===sid){const o=fi*9;for(let k=0;k<9;k++)out.push(parsed.positions[o+k]);}return new Float32Array(out);}
+function unionGeometryPositions(g){if(!g)throw new Error('Boolean union returned no geometry');const ng=g.index?g.toNonIndexed():g.clone(),a=ng.getAttribute('position');if(!a||!Number.isFinite(a.count)||a.count<3)throw new Error('Boolean union returned no position data');if(a.count%3!==0)throw new Error('Boolean union returned non-triangular position data');const out=new Float32Array(a.count*3);for(let i=0;i<a.count;i++){const o=i*3;out[o]=a.getX(i);out[o+1]=a.getY(i);out[o+2]=a.getZ(i);}ng.dispose();return out;}
+function rejectUnionCandidate(){unionCandidate=null;const parsed=currentParsed||sourceParsed;if(parsed){showMesh(parsed.positions);updateAnalysis(sourceName,parsed);}setStatus('Stage 3E preview rejected — original prepared mesh restored');}
+function acceptUnionCandidate(){if(!unionCandidate)return;const u=unionCandidate.summary;currentParsed={positions:unionCandidate.positions,nTri:unionCandidate.nTri};sourceParsed=cloneParsed(currentParsed);unionCandidate=null;repairDismissed=false;scaleReference=null;updateAnalysis(sourceName,currentParsed);setStatus(`Stage 3E union accepted — faces ${u.beforeFaces.toLocaleString()} → ${u.afterFaces.toLocaleString()}, shells ${u.beforeShells.toLocaleString()} → ${u.afterShells.toLocaleString()}, open edges ${u.beforeOpen.toLocaleString()} → ${u.afterOpen.toLocaleString()}`);}
+function sanitizeUnionPositions(input){
+  if(!input?.length||input.length%9)throw new Error('Boolean union returned invalid triangle data');
+  let minX=Infinity,minY=Infinity,minZ=Infinity,maxX=-Infinity,maxY=-Infinity,maxZ=-Infinity;
+  for(let i=0;i<input.length;i+=3){const x=input[i],y=input[i+1],z=input[i+2];minX=Math.min(minX,x);maxX=Math.max(maxX,x);minY=Math.min(minY,y);maxY=Math.max(maxY,y);minZ=Math.min(minZ,z);maxZ=Math.max(maxZ,z);}
+  const maxDim=Math.max(maxX-minX,maxY-minY,maxZ-minZ,1);
+  const keyEps=Math.max(maxDim*1e-8,1e-8);
+  const areaEps=Math.max(maxDim*maxDim*1e-12,1e-14);
+  const vk=(x,y,z)=>`${Math.round(x/keyEps)},${Math.round(y/keyEps)},${Math.round(z/keyEps)}`;
+  const seen=new Set(),out=[];let removedDegenerate=0,removedDuplicate=0;
+  for(let i=0;i<input.length;i+=9){
+    const ax=input[i],ay=input[i+1],az=input[i+2],bx=input[i+3],by=input[i+4],bz=input[i+5],cx=input[i+6],cy=input[i+7],cz=input[i+8];
+    const ux=bx-ax,uy=by-ay,uz=bz-az,vx=cx-ax,vy=cy-ay,vz=cz-az;
+    const nx=uy*vz-uz*vy,ny=uz*vx-ux*vz,nz=ux*vy-uy*vx;
+    const twiceArea=Math.hypot(nx,ny,nz);
+    const keys=[vk(ax,ay,az),vk(bx,by,bz),vk(cx,cy,cz)];
+    if(keys[0]===keys[1]||keys[1]===keys[2]||keys[2]===keys[0]||twiceArea<=areaEps){removedDegenerate++;continue;}
+    const faceKey=keys.slice().sort().join('|');
+    if(seen.has(faceKey)){removedDuplicate++;continue;}
+    seen.add(faceKey);
+    for(let k=0;k<9;k++)out.push(input[i+k]);
+  }
+  return{positions:new Float32Array(out),removedDegenerate,removedDuplicate};
+}
+
+function repairSingleNonManifoldEdge(input){
+  const first=analyseSanitiserMesh(input,input.length/9);
+  if(first.degenerateTriangles!==0||first.nonManifoldEdges!==1||first.openEdges!==0||first.shells!==1)return null;
+  let minX=Infinity,minY=Infinity,minZ=Infinity,maxX=-Infinity,maxY=-Infinity,maxZ=-Infinity;
+  for(let i=0;i<input.length;i+=3){const x=input[i],y=input[i+1],z=input[i+2];minX=Math.min(minX,x);maxX=Math.max(maxX,x);minY=Math.min(minY,y);maxY=Math.max(maxY,y);minZ=Math.min(minZ,z);maxZ=Math.max(maxZ,z);}
+  const eps=Math.max(Math.max(maxX-minX,maxY-minY,maxZ-minZ)*1e-5,1e-5);
+  const vk=(x,y,z)=>`${Math.round(x/eps)},${Math.round(y/eps)},${Math.round(z/eps)}`;
+  const edges=new Map();
+  for(let fi=0;fi<input.length/9;fi++){
+    const o=fi*9,ks=[vk(input[o],input[o+1],input[o+2]),vk(input[o+3],input[o+4],input[o+5]),vk(input[o+6],input[o+7],input[o+8])];
+    for(let e=0;e<3;e++){const a=ks[e],b=ks[(e+1)%3];if(a===b)continue;const k=a<b?`${a}|${b}`:`${b}|${a}`;let rec=edges.get(k);if(!rec){rec=[];edges.set(k,rec);}rec.push(fi);}
+  }
+  const bad=[...edges.entries()].filter(([,faces])=>faces.length!==2);
+  if(bad.length!==1||bad[0][1].length<3)return null;
+  const incident=[...new Set(bad[0][1])];
+  const winners=[];
+  for(const removeFi of incident){
+    const out=new Float32Array(input.length-9);let w=0;
+    for(let fi=0;fi<input.length/9;fi++){if(fi===removeFi)continue;const o=fi*9;for(let k=0;k<9;k++)out[w++]=input[o+k];}
+    const a=analyseSanitiserMesh(out,out.length/9);
+    if(a.degenerateTriangles===0&&a.nonManifoldEdges===0&&a.openEdges===0&&a.shells===1)winners.push({positions:out,removedFace:removeFi,analysis:a});
+  }
+  return winners.length===1?winners[0]:null;
+}
+
+function buildUnionOrder(posA,posB){
+  const ga=new THREE.BufferGeometry(),gb=new THREE.BufferGeometry();
+  ga.setAttribute('position',new THREE.BufferAttribute(posA,3));
+  gb.setAttribute('position',new THREE.BufferAttribute(posB,3));
+  const a=new Brush(ga),b=new Brush(gb);a.updateMatrixWorld();b.updateMatrixWorld();
+  const evaluator=new Evaluator();evaluator.attributes=['position'];evaluator.useGroups=false;
+  let result=null;
+  try{
+    result=evaluator.evaluate(a,b,ADDITION);
+    const raw=unionGeometryPositions(result.geometry);
+    return sanitizeUnionPositions(raw);
+  }finally{
+    ga.dispose();gb.dispose();if(result?.geometry)result.geometry.dispose();
+  }
+}
+
+function sanitizeUnionPositions(input){
+  if(!input?.length||input.length%9)throw new Error('Boolean union returned invalid triangle data');
+  let minX=Infinity,minY=Infinity,minZ=Infinity,maxX=-Infinity,maxY=-Infinity,maxZ=-Infinity;
+  for(let i=0;i<input.length;i+=3){const x=input[i],y=input[i+1],z=input[i+2];minX=Math.min(minX,x);maxX=Math.max(maxX,x);minY=Math.min(minY,y);maxY=Math.max(maxY,y);minZ=Math.min(minZ,z);maxZ=Math.max(maxZ,z);}
+  const maxDim=Math.max(maxX-minX,maxY-minY,maxZ-minZ,1);
+  const keyEps=Math.max(maxDim*1e-8,1e-8);
+  const areaEps=Math.max(maxDim*maxDim*1e-12,1e-14);
+  const vk=(x,y,z)=>`${Math.round(x/keyEps)},${Math.round(y/keyEps)},${Math.round(z/keyEps)}`;
+  const seen=new Set(),out=[];let removedDegenerate=0,removedDuplicate=0;
+  for(let i=0;i<input.length;i+=9){
+    const ax=input[i],ay=input[i+1],az=input[i+2],bx=input[i+3],by=input[i+4],bz=input[i+5],cx=input[i+6],cy=input[i+7],cz=input[i+8];
+    const ux=bx-ax,uy=by-ay,uz=bz-az,vx=cx-ax,vy=cy-ay,vz=cz-az;
+    const nx=uy*vz-uz*vy,ny=uz*vx-ux*vz,nz=ux*vy-uy*vx;
+    const twiceArea=Math.hypot(nx,ny,nz);
+    const keys=[vk(ax,ay,az),vk(bx,by,bz),vk(cx,cy,cz)];
+    if(keys[0]===keys[1]||keys[1]===keys[2]||keys[2]===keys[0]||twiceArea<=areaEps){removedDegenerate++;continue;}
+    const faceKey=keys.slice().sort().join('|');
+    if(seen.has(faceKey)){removedDuplicate++;continue;}
+    seen.add(faceKey);
+    for(let k=0;k<9;k++)out.push(input[i+k]);
+  }
+  return{positions:new Float32Array(out),removedDegenerate,removedDuplicate};
+}
+
+function buildUnionOrder(posA,posB){
+  const ga=new THREE.BufferGeometry(),gb=new THREE.BufferGeometry();
+  ga.setAttribute('position',new THREE.BufferAttribute(posA,3));
+  gb.setAttribute('position',new THREE.BufferAttribute(posB,3));
+  const a=new Brush(ga),b=new Brush(gb);a.updateMatrixWorld();b.updateMatrixWorld();
+  const evaluator=new Evaluator();evaluator.attributes=['position'];evaluator.useGroups=false;
+  let result=null;
+  try{
+    result=evaluator.evaluate(a,b,ADDITION);
+    const raw=unionGeometryPositions(result.geometry);
+    return sanitizeUnionPositions(raw);
+  }finally{
+    ga.dispose();gb.dispose();if(result?.geometry)result.geometry.dispose();
+  }
+}
+
+function buildUnionPreview(pairIndex){
+  const parsed=currentParsed||sourceParsed;if(!parsed)return;
+  try{
+    const before=analyseSanitiserMesh(parsed.positions,parsed.nTri),pair=before.intersections?.pairs?.[pairIndex];
+    if(!pair||!pair.unionReady)throw new Error('Selected pair is no longer UNION READY');
+    setStatus(`Stage 3E: building two guarded union candidates for Shell ${pair.shellA+1} / ${pair.shellB+1}...`);
+    const map=buildUnionShellMap(parsed);
+    if((map.counts[pair.shellA]||0)!==pair.shellAFaces||(map.counts[pair.shellB]||0)!==pair.shellBFaces)throw new Error('Shell identity changed');
+    const posA=unionShellPositions(parsed,map,pair.shellA),posB=unionShellPositions(parsed,map,pair.shellB);
+    const kept=[];for(let fi=0;fi<parsed.nTri;fi++){const sid=map.faceShellIds[fi];if(sid===pair.shellA||sid===pair.shellB)continue;const o=fi*9;for(let k=0;k<9;k++)kept.push(parsed.positions[o+k]);}
+    const attempts=[];
+    for(const [label,left,right] of [['A+B',posA,posB],['B+A',posB,posA]]){
+      try{
+        const cleaned=buildUnionOrder(left,right);
+        const positions=new Float32Array(kept.length+cleaned.positions.length);positions.set(kept);positions.set(cleaned.positions,kept.length);
+        const nTri=positions.length/9,after=analyseSanitiserMesh(positions,nTri);
+        const valid=after.degenerateTriangles<=before.degenerateTriangles&&after.nonManifoldEdges<=before.nonManifoldEdges&&after.openEdges<=before.openEdges&&after.shells<before.shells;
+        attempts.push({label,positions,nTri,after,valid,removedDegenerate:cleaned.removedDegenerate,removedDuplicate:cleaned.removedDuplicate});
+      }catch(error){attempts.push({label,error});}
+    }
+    const viable=attempts.filter(x=>x.valid).sort((a,b)=>a.after.nonManifoldEdges-b.after.nonManifoldEdges||a.after.degenerateTriangles-b.after.degenerateTriangles||a.after.openEdges-b.after.openEdges||a.after.shells-b.after.shells||a.after.nTri-b.after.nTri);
+    if(!viable.length){
+      const detail=attempts.map(x=>x.error?`${x.label}: ${x.error.message||x.error}`:`${x.label}: ${x.after.degenerateTriangles} degenerate / ${x.after.nonManifoldEdges} non-manifold / ${x.after.openEdges} open / ${x.after.shells} shells (cleanup −${x.removedDegenerate} degenerate, −${x.removedDuplicate} duplicate)`).join('; ');
+      throw new Error(`no safe union candidate after cleanup — ${detail}`);
+    }
+    const best=viable[0],after=best.after;
+    unionCandidate={positions:best.positions,nTri:best.nTri,summary:{shellA:pair.shellA,shellB:pair.shellB,beforeFaces:before.nTri,afterFaces:after.nTri,beforeOpen:before.openEdges,afterOpen:after.openEdges,beforeShells:before.shells,afterShells:after.shells,order:best.label,removedDegenerate:best.removedDegenerate,removedDuplicate:best.removedDuplicate}};
+    showMesh(best.positions);showIntersectionInspector(before);
+    setStatus(`Stage 3E preview ready — ${best.label}, cleanup removed ${best.removedDegenerate} degenerate / ${best.removedDuplicate} duplicate faces. ACCEPT or REJECT. Shells ${before.shells.toLocaleString()} → ${after.shells.toLocaleString()}, open edges ${before.openEdges.toLocaleString()} → ${after.openEdges.toLocaleString()}`);
+  }catch(err){
+    console.error('Stage 3E union preview refused:',err);unionCandidate=null;const parsed=currentParsed||sourceParsed;if(parsed)showMesh(parsed.positions);setStatus(`Stage 3E union preview refused: ${err.message||err}`);
+  }
+}
+
+function showIntersectionInspector(san) {
+  const x = san?.intersections;
+  if (!x || (!x.shellAabbPairs && !x.intersectingShellPairs)) {
+    $('intersectionPanel').hidden = true;
+    $('intersectionList').innerHTML = '';
+    return;
+  }
+  $('intersectionPanel').hidden = false;
+  $('intersectionAabb').textContent = (x.shellAabbPairs || 0).toLocaleString();
+  $('intersectionPairs').textContent = (x.intersectingShellPairs || 0).toLocaleString();
+  $('intersectionHits').textContent = (x.triangleIntersections || 0).toLocaleString();
+  $('intersectionTests').textContent = (x.testedTrianglePairs || 0).toLocaleString();
+  const types = x.typeCounts || {};
+  const typeSummary = Object.entries(types).sort((a,b)=>b[1]-a[1]).map(([name,count])=>`${name}: ${count}`).join(' · ');
+  $('intersectionNote').textContent =
+    (x.truncated ? 'Safety budget reached: proven lower bound only.' : 'Analysis completed within the Stage 3A safety budget.') +
+    (typeSummary ? ` Stage 3B: ${typeSummary}.` : '') +
+    ' Stage 3C removes proven tiny stray fragments and now runs pair-local union preflight on deeper overlaps.';
+  const list = $('intersectionList');
+  list.innerHTML = '';
+  const safeStrayPairs = (x.pairs || []).filter(p => p.overlapType === 'STRAY FRAGMENT CONTACT');
+  if (safeStrayPairs.length) {
+    const batch = document.createElement('div');
+    batch.className = 'intersection-batch';
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn';
+    btn.textContent = `REMOVE ALL SAFE STRAY FRAGMENTS (${safeStrayPairs.length})`;
+    btn.addEventListener('click', applyStage3CBatchFragmentRepair);
+    batch.appendChild(btn);
+    list.appendChild(batch);
+  }
+  (x.pairs || []).slice(0,12).forEach((p, pairIndex) => {
+    const el = document.createElement('div');
+    el.className = 'intersection-item';
+    el.dataset.type = p.overlapType || 'CROSSING SHELLS';
+    const density = Number.isFinite(p.crossingDensity) ? ` · density ${p.crossingDensity.toFixed(2)}` : '';
+    el.innerHTML = `<b>Shell ${p.shellA+1} / ${p.shellB+1}</b> · ${p.intersections.toLocaleString()} proven crossings<br>` +
+      `${p.shellAFaces.toLocaleString()} faces / ${p.shellBFaces.toLocaleString()} faces${density}<br>` +
+      `<b>${p.overlapType || 'CROSSING SHELLS'}</b> · ${p.reason || ''}<br>${p.recommendation || ''}`;
+    if (p.overlapType !== 'STRAY FRAGMENT CONTACT') {
+      const preflight = document.createElement('div');
+      preflight.className = `union-preflight ${p.unionReady ? 'ready' : 'blocked'}`;
+      preflight.innerHTML = p.unionReady
+        ? `<b>UNION READY</b> · Both source shells are closed and manifold at the pair-local topology gate.`
+        : `<b>UNION BLOCKED</b> · ${p.unionBlockReason || 'Pair-local topology is not safe for a solid boolean yet.'}`;
+      el.appendChild(preflight);
+      if (p.unionReady) {
+        const box=document.createElement('div');box.className='union-preview';
+        if(unionCandidate&&unionCandidate.summary.shellA===p.shellA&&unionCandidate.summary.shellB===p.shellB){const u=unionCandidate.summary;box.classList.add('good');box.innerHTML=`<b>UNION PREVIEW READY</b> · Faces ${u.beforeFaces.toLocaleString()} → ${u.afterFaces.toLocaleString()} · shells ${u.beforeShells.toLocaleString()} → ${u.afterShells.toLocaleString()} · open edges ${u.beforeOpen.toLocaleString()} → ${u.afterOpen.toLocaleString()}`;const actions=document.createElement('div');actions.className='union-preview-actions';const ok=document.createElement('button');ok.type='button';ok.className='btn';ok.textContent='ACCEPT UNION';ok.addEventListener('click',acceptUnionCandidate);const no=document.createElement('button');no.type='button';no.className='btn';no.textContent='REJECT';no.addEventListener('click',rejectUnionCandidate);actions.append(ok,no);box.appendChild(actions);}else{box.innerHTML='<b>TRANSACTIONAL UNION</b> · Build a candidate from only these two closed shells. The current prepared mesh stays untouched until ACCEPT.';const btn=document.createElement('button');btn.type='button';btn.className='btn';btn.textContent='BUILD UNION PREVIEW';btn.style.width='100%';btn.style.marginTop='7px';btn.addEventListener('click',()=>buildUnionPreview(pairIndex));box.appendChild(btn);}el.appendChild(box);
+      }
+    }
+    if (p.overlapType !== 'STRAY FRAGMENT CONTACT' && !p.unionReady) {
+      try {
+        const parsed = currentParsed || sourceParsed;
+        const prep = parsed ? analyseSanitiserIntersectionStage3D(parsed.positions, parsed.nTri, p) : null;
+        if (prep) {
+          const box = document.createElement('div');
+          box.className = `stage3d-prep ${prep.canPrepare ? '' : 'blocked'}`;
+          const a = prep.shellA, b = prep.shellB;
+          box.innerHTML = prep.canPrepare
+            ? `<b>PRE-UNION REPAIR AVAILABLE</b> · ${prep.repairableOpenings} safe opening${prep.repairableOpenings===1?'':'s'} / ${prep.repairableEdges} open edges can be closed.<br>Shell ${a.shellId+1}: ${a.openEdges} open · ${a.repairableOpenings} repairable. Shell ${b.shellId+1}: ${b.openEdges} open · ${b.repairableOpenings} repairable.`
+            : `<b>PRE-UNION REPAIR BLOCKED</b> · Shell ${a.shellId+1}: ${a.openEdges} open / ${a.blockedOpenings} ambiguous. Shell ${b.shellId+1}: ${b.openEdges} open / ${b.blockedOpenings} ambiguous.`;
+          if (prep.canPrepare) {
+            const btn = document.createElement('button'); btn.type='button'; btn.className='btn'; btn.textContent='PREPARE SHELLS';
+            btn.addEventListener('click', () => applyStage3DShellPreparation(pairIndex));
+            box.appendChild(btn);
+          }
+          el.appendChild(box);
+        }
+      } catch (err) { console.warn('Stage 3D preflight unavailable:', err); }
+    }
+    if (p.overlapType === 'STRAY FRAGMENT CONTACT') {
+      const actions = document.createElement('div');
+      actions.className = 'intersection-actions';
+      const btn = document.createElement('button');
+      btn.type = 'button'; btn.className = 'btn'; btn.textContent = 'REMOVE STRAY FRAGMENT';
+      btn.addEventListener('click', () => applyStage3CFragmentRepair(pairIndex));
+      actions.appendChild(btn); el.appendChild(actions);
+    }
+    list.appendChild(el);
+  });
+}
+
+
+
+function applyStage3DShellPreparation(pairIndex) {
+  const parsed=currentParsed||sourceParsed;
+  if(!parsed){setStatus('No prepared mesh available for Stage 3D');return;}
+  try{
+    const before=analyseSanitiserMesh(parsed.positions,parsed.nTri);
+    const pair=before.intersections?.pairs?.[pairIndex];
+    if(!pair)throw new Error('Selected shell pair is no longer available; re-run analysis.');
+    const pre=analyseSanitiserIntersectionStage3D(parsed.positions,parsed.nTri,pair);
+    if(!pre.canPrepare)throw new Error('Shell-local closure safety gate no longer passes.');
+    setStatus(`Stage 3D: closing ${pre.repairableOpenings} proven shell opening${pre.repairableOpenings===1?'':'s'}...`);
+    const repaired=repairSanitiserIntersectionStage3D(parsed.positions,parsed.nTri,pair);
+    const after=analyseSanitiserMesh(repaired.positions,repaired.nTri);
+    if(after.nTri!==before.nTri+repaired.addedFaces)throw new Error('face-count safety gate failed');
+    if(after.openEdges!==before.openEdges-repaired.repairedOpenEdges)throw new Error('open-edge closure count did not match the proven target');
+    if(after.nonManifoldEdges>before.nonManifoldEdges)throw new Error('non-manifold topology increased');
+    if(after.degenerateTriangles>before.degenerateTriangles)throw new Error('degenerate triangles increased');
+    const fresh=analyseSanitiserIntersectionStage3D(repaired.positions,repaired.nTri,pair);
+    if(!fresh.alreadyReady)throw new Error('target shells did not become closed manifold solids');
+    currentParsed={positions:repaired.positions,nTri:repaired.nTri};sourceParsed=cloneParsed(currentParsed);
+    repairDismissed=false;scaleReference=null;updateAnalysis(sourceName,currentParsed);
+    setStatus(`Stage 3D complete — closed ${repaired.repairedOpenings} opening${repaired.repairedOpenings===1?'':'s'} / ${repaired.repairedOpenEdges} open edges. Pair is UNION READY.`);
+  }catch(err){console.error('Stage 3D shell preparation refused:',err);setStatus(`Stage 3D refused: ${err.message||err}`);}
+}
+
+
+function applyStage3CBatchFragmentRepair() {
+  const parsed = currentParsed || sourceParsed;
+  if (!parsed) { setStatus('No prepared mesh available for Stage 3C batch repair'); return; }
+  const before = analyseSanitiserMesh(parsed.positions, parsed.nTri);
+  const pairs = before.intersections?.pairs || [];
+  const safeStrayPairs = pairs.filter(p => p.overlapType === 'STRAY FRAGMENT CONTACT');
+  if (!safeStrayPairs.length) { setStatus('No proven safe stray fragments remain'); return; }
+  try {
+    setStatus('Stage 3C: removing all proven safe stray fragments...');
+    const repaired = repairSanitiserIntersectionStage3CBatch(parsed.positions, parsed.nTri, safeStrayPairs);
+    const after = analyseSanitiserMesh(repaired.positions, repaired.nTri);
+    if (after.nTri !== before.nTri - repaired.removedFaces) throw new Error('face-count safety gate failed');
+    if (after.nonManifoldEdges > before.nonManifoldEdges) throw new Error('non-manifold topology increased');
+    if (after.openEdges > before.openEdges) throw new Error('open-edge count increased');
+    if (after.degenerateTriangles > before.degenerateTriangles) throw new Error('degenerate triangles increased');
+    const beforeIx = before.intersections || {};
+    const afterIx = after.intersections || {};
+    if (!beforeIx.truncated && !afterIx.truncated && (afterIx.triangleIntersections || 0) > (beforeIx.triangleIntersections || 0)) throw new Error('proven intersections increased');
+    currentParsed = { positions: repaired.positions, nTri: repaired.nTri };
+    sourceParsed = cloneParsed(currentParsed);
+    repairDismissed = false;
+    scaleReference = null;
+    updateAnalysis(sourceName, currentParsed);
+    setStatus(`Stage 3C batch complete — removed ${repaired.removedShells} stray shell${repaired.removedShells === 1 ? '' : 's'} / ${repaired.removedFaces} face${repaired.removedFaces === 1 ? '' : 's'} and passed topology safety gates`);
+  } catch (err) {
+    console.error('Stage 3C batch fragment repair refused:', err);
+    setStatus(`Stage 3C batch repair refused: ${err.message || err}`);
+  }
+}
+
+function applyStage3CFragmentRepair(pairIndex) {
+  const parsed = currentParsed || sourceParsed;
+  if (!parsed) { setStatus('No prepared mesh available for Stage 3C'); return; }
+  const before = analyseSanitiserMesh(parsed.positions, parsed.nTri);
+  const pair = before.intersections?.pairs?.[pairIndex];
+  if (!pair) { setStatus('Stage 3C pair is no longer available; re-run analysis'); return; }
+  try {
+    setStatus(`Stage 3C: removing proven stray fragment from Shell ${pair.shellA+1} / ${pair.shellB+1}...`);
+    const repaired = repairSanitiserIntersectionStage3C(parsed.positions, parsed.nTri, pair);
+    const after = analyseSanitiserMesh(repaired.positions, repaired.nTri);
+    if (after.nTri !== before.nTri - repaired.removedFaces) throw new Error('face-count safety gate failed');
+    if (after.nonManifoldEdges > before.nonManifoldEdges) throw new Error('non-manifold topology increased');
+    if (after.openEdges > before.openEdges) throw new Error('open-edge count increased');
+    if (after.degenerateTriangles > before.degenerateTriangles) throw new Error('degenerate triangles increased');
+    // Intersection totals are not directly comparable when either analysis hit the
+    // Stage 3A safety budget: each value is only a proven lower bound and the
+    // traversal order changes after a shell is removed. Compare totals only when
+    // both analyses completed within budget.
+    const beforeIx = before.intersections || {};
+    const afterIx = after.intersections || {};
+    if (!beforeIx.truncated && !afterIx.truncated &&
+        (afterIx.triangleIntersections || 0) > (beforeIx.triangleIntersections || 0)) {
+      throw new Error('proven intersections increased');
+    }
+    currentParsed = { positions: repaired.positions, nTri: repaired.nTri };
+    sourceParsed = cloneParsed(currentParsed);
+    repairDismissed = false; scaleReference = null;
+    updateAnalysis(sourceName, currentParsed);
+    setStatus(`Stage 3C complete — removed ${repaired.removedFaces} stray face${repaired.removedFaces === 1 ? '' : 's'} and passed topology safety gates`);
+  } catch (err) {
+    console.error('Stage 3C fragment repair refused:', err);
+    setStatus(`Stage 3C repair refused: ${err.message || err}`);
+  }
+}
+
+function hideBoundaryRepairComplete() {
+  $('boundaryRepairComplete').hidden = true;
+}
+
+function applySelectedBoundaryRepair() {
+  const parsed = currentParsed || sourceParsed;
+  const loop = boundaryAnalysis?.boundaryLoops?.[selectedBoundaryIndex];
+
+  if (!parsed || !loop) {
+    setStatus('Select a repairable boundary first');
+    return;
+  }
+
+  try {
+    const repairedBoundaryLabel = boundaryLabel(loop, selectedBoundaryIndex);
+    setStatus(`Repairing ${repairedBoundaryLabel}...`);
+
+    const before = analyseSanitiserMesh(parsed.positions, parsed.nTri);
+    const repaired =
+      loop.edgeCount === 3
+        ? repairSanitiserBoundaryStage2B(
+            parsed.positions,
+            parsed.nTri,
+            loop
+          )
+        : loop.edgeCount === 4
+          ? repairSanitiserBoundaryStage2C(
+              parsed.positions,
+              parsed.nTri,
+              loop
+            )
+          : (() => {
+              throw new Error('Selected boundary is outside the supported Stage 2B/2C repair scope.');
+            })();
+
+    const after = analyseSanitiserMesh(repaired.positions, repaired.nTri);
+
+    // Hard post-repair safety gate. A supported N-edge planar cap must add
+    // exactly N-2 faces, remove exactly N open edges, and never increase
+    // non-manifold topology.
+    const expectedAddedFaces = loop.edgeCount - 2;
+    if (
+      repaired.addedFaces !== expectedAddedFaces ||
+      after.openEdges !== before.openEdges - loop.edgeCount ||
+      after.nonManifoldEdges !== before.nonManifoldEdges
+    ) {
+      throw new Error(
+        'Post-repair topology gate failed; original mesh has been preserved.'
+      );
+    }
+
+    currentParsed = {
+      positions: repaired.positions,
+      nTri: repaired.nTri,
+    };
+
+    // Successful repair becomes the new preparation baseline.
+    sourceParsed = cloneParsed(currentParsed);
+
+    boundaryRepairLastResult = {
+      beforeFaces: before.nTri,
+      afterFaces: after.nTri,
+      beforeOpenEdges: before.openEdges,
+      afterOpenEdges: after.openEdges,
+      beforeBoundaryGroups: before.boundaryLoops?.length || 0,
+      afterBoundaryGroups: after.boundaryLoops?.length || 0,
+      beforeWatertight: before.watertight,
+      afterWatertight: after.watertight,
+      addedFaces: repaired.addedFaces,
+      repairedBoundaryLabel,
+    };
+
+    hideBoundaryInspector();
+    $('boundaryRepairComplete').hidden = false;
+    $('boundaryRepairCompleteText').textContent =
+      `${repairedBoundaryLabel} repaired. ` +
+      `Faces ${before.nTri.toLocaleString()} → ${after.nTri.toLocaleString()}. ` +
+      `Open edges ${before.openEdges.toLocaleString()} → ${after.openEdges.toLocaleString()}. ` +
+      `Boundary groups ${(before.boundaryLoops?.length || 0).toLocaleString()} → ${(after.boundaryLoops?.length || 0).toLocaleString()}. ` +
+      `Watertight ${before.watertight ? 'YES' : 'NO'} → ${after.watertight ? 'YES' : 'NO'}.`;
+
+    repairDismissed = false;
+    scaleReference = null;
+    updateAnalysis(sourceName, currentParsed);
+
+    setStatus(
+      `Boundary repair complete — added ${repaired.addedFaces} face`
+    );
+  } catch (err) {
+    console.error('Stage 2B boundary repair failed:', err);
+    setStatus(`Boundary repair refused: ${err.message || err}`);
+  }
+}
+
+function makePreparedFileName() {
+  const base = String(sourceName || 'prepared_model')
+    .replace(/\.stl$/i, '')
+    .replace(/[\\/:*?"<>|]+/g, '_')
+    .trim() || 'prepared_model';
+  const suffix = (repairLastResult || boundaryRepairLastResult) ? 'repaired' : 'prepared';
+  return `${base}_${suffix}.stl`;
+}
+
+function buildBinarySTL(parsed) {
+  if (!parsed?.positions || !parsed?.nTri) {
+    throw new Error('No prepared mesh is available to export.');
+  }
+
+  const { positions, nTri } = parsed;
+  const buffer = new ArrayBuffer(84 + nTri * 50);
+  const dv = new DataView(buffer);
+
+  const headerText = 'MakerDeck Mesh Prep - Prepared STL';
+  for (let i = 0; i < 80; i++) {
+    dv.setUint8(i, i < headerText.length ? headerText.charCodeAt(i) : 0);
+  }
+
+  dv.setUint32(80, nTri, true);
+  let off = 84;
+
+  for (let i = 0; i < nTri; i++) {
+    const p = i * 9;
+
+    const ax = positions[p];
+    const ay = positions[p + 1];
+    const az = positions[p + 2];
+    const bx = positions[p + 3];
+    const by = positions[p + 4];
+    const bz = positions[p + 5];
+    const cx = positions[p + 6];
+    const cy = positions[p + 7];
+    const cz = positions[p + 8];
+
+    const ux = bx - ax;
+    const uy = by - ay;
+    const uz = bz - az;
+    const vx = cx - ax;
+    const vy = cy - ay;
+    const vz = cz - az;
+
+    let nx = uy * vz - uz * vy;
+    let ny = uz * vx - ux * vz;
+    let nz = ux * vy - uy * vx;
+
+    const nLen = Math.hypot(nx, ny, nz);
+    if (nLen > 1e-12) {
+      nx /= nLen;
+      ny /= nLen;
+      nz /= nLen;
+    } else {
+      nx = 0; ny = 0; nz = 0;
+    }
+
+    dv.setFloat32(off, nx, true); off += 4;
+    dv.setFloat32(off, ny, true); off += 4;
+    dv.setFloat32(off, nz, true); off += 4;
+
+    for (let v = 0; v < 9; v++) {
+      dv.setFloat32(off, positions[p + v], true);
+      off += 4;
+    }
+
+    dv.setUint16(off, 0, true);
+    off += 2;
+  }
+
+  return buffer;
+}
+
+function exportPreparedSTL() {
+  const parsed = currentParsed || sourceParsed;
+
+  if (!parsed) {
+    setStatus('No prepared STL available to export');
+    return;
+  }
+
+  try {
+    setStatus('Building prepared STL...');
+
+    const buffer = buildBinarySTL(parsed);
+    const blob = new Blob([buffer], { type: 'model/stl' });
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement('a');
+    a.href = url;
+    const exportName = makePreparedFileName();
+    a.download = exportName;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    setStatus(`${exportName} exported — ${parsed.nTri.toLocaleString()} faces`);
+  } catch (err) {
+    console.error('Prepared STL export failed:', err);
+    setStatus(`Export failed: ${err.message || err}`);
+  }
+}
+
+function updateAnalysis(name, parsed) {
+  setStatus('Analysing mesh...');
+  requestAnimationFrame(() => {
+    const a = analyseMesh(parsed.positions, parsed.nTri);
+    const san = analyseSanitiserMesh(parsed.positions, parsed.nTri);
+    $('fileName').textContent = `${name} — ${a.nTri.toLocaleString()} faces`;
+    $('statFaces').textContent = a.nTri.toLocaleString();
+    $('statSize').textContent = `${fmt(a.sizeX)} x ${fmt(a.sizeY)} x ${fmt(a.sizeZ)}`;
+    $('statEdge').textContent = fmt(a.avgEdge);
+    $('statRough').textContent = `${Math.round(a.rough * 100)}%`;
+    $('statOpen').textContent = san.openEdges.toLocaleString();
+    $('statBad').textContent = san.nonManifoldEdges.toLocaleString();
+    $('statDegenerate').textContent = san.degenerateTriangles.toLocaleString();
+    $('statShells').textContent = san.shells.toLocaleString();
+    $('statWatertight').textContent = san.watertight ? 'YES' : 'NO';
+    $('statBaseDetected').textContent = san.base.detected ? 'YES' : 'NO';
+
+$('statBaseArea').textContent = san.base.detected
+  ? `${Math.round(san.base.area).toLocaleString()} mm²`
+  : '-';
+
+$('statBaseSize').textContent = san.base.detected
+  ? `${san.base.width.toFixed(1)} x ${san.base.depth.toFixed(1)} mm`
+  : '-';
+
+$('statBaseCoverage').textContent = san.base.detected
+  ? `${(san.base.coverage * 100).toFixed(1)}%`
+  : '-';
+
+$('statBaseRating').textContent = san.base.rating;
+    showScaleWarning(san);
+    showRepairPanel(san);
+    showBoundaryInspector(san);
+    showIntersectionInspector(san);
+    console.log('[Sanitiser Core 0.1]', san);
+    showMesh(parsed.positions);
+    $('exportBtn').disabled = false;
+    $('clearModelBtn').disabled = false;
+    $('exportBtn').textContent = (repairLastResult || boundaryRepairLastResult) ? 'EXPORT REPAIRED STL' : 'EXPORT PREPARED STL';
+    setStatus('Analysis complete');
+  });
+}
+
+
+function clearMeshPrepModel() {
+  clearBoundaryHighlight();
+  if (wire) {
+    scene.remove(wire);
+    wire.geometry?.dispose?.();
+    wire.material?.dispose?.();
+    wire = null;
+  }
+  if (mesh) {
+    scene.remove(mesh);
+    mesh.geometry?.dispose?.();
+    mesh.material?.dispose?.();
+    mesh = null;
+  }
+
+  sourceParsed = null;
+  currentParsed = null;
+  sourceName = '';
+  scaleWarningDismissed = false;
+  scaleReference = null;
+  scaleEditingAxis = null;
+  repairDismissed = false;
+  repairLastResult = null;
+  boundaryRepairLastResult = null;
+  boundaryAnalysis = null;
+  selectedBoundaryIndex = -1;
+  resetBoundaryIds();
+
+  hideScaleWarning();
+  hideRepairPanel();
+  hideBoundaryInspector();
+  hideBoundaryRepairComplete();
+  $('intersectionPanel').hidden = true;
+  $('intersectionList').innerHTML = '';
+  $('fileInput').value = '';
+
+  for (const id of ['statFaces','statSize','statEdge','statRough','statOpen','statBad','statDegenerate','statShells','statWatertight','statBaseDetected','statBaseArea','statBaseSize','statBaseCoverage','statBaseRating']) {
+    $(id).textContent = '-';
+  }
+
+  $('fileName').textContent = 'No model loaded';
+  $('exportBtn').disabled = true;
+  $('exportBtn').textContent = 'EXPORT PREPARED STL';
+  $('clearModelBtn').disabled = true;
+  controls.target.set(0, 0, 0);
+  camera.position.set(0, 0, 100);
+  controls.update();
+  setStatus('Workspace cleared — ready for a new STL');
+}
+
+async function loadFile(file) {
+  try {
+    const parsed = parseSTL(await file.arrayBuffer());
+    sourceParsed = cloneParsed(parsed);
+    currentParsed = cloneParsed(parsed);
+    sourceName = file.name;
+    scaleWarningDismissed = false;
+    scaleReference = null;
+    repairDismissed = false;
+    repairLastResult = null;
+    boundaryRepairLastResult = null;
+    resetBoundaryIds();
+    hideBoundaryRepairComplete();
+    hideRepairPanel();
+    hideBoundaryInspector();
+    updateAnalysis(file.name, currentParsed);
+  } catch (e) {
+    setStatus('Error: ' + e.message);
+  }
+}
+
+
+$('clearModelBtn').addEventListener('click', clearMeshPrepModel);
+$('boundaryRepairSelected').addEventListener('click', applySelectedBoundaryRepair);
+
+$('repairAuto').addEventListener('click', applyStage1Repair);
+$('repairKeepOriginal').addEventListener('click', () => {
+  repairDismissed = true;
+  repairLastResult = null;
+  hideRepairPanel();
+  setStatus('Original mesh retained — no Stage 1 repair applied');
+});
+
+$('exportBtn').addEventListener('click', exportPreparedSTL);
+
+$('scaleSetSize').addEventListener('click', () => {
+  $('scalePromptActions').hidden = true;
+  $('scaleEditor').hidden = false;
+  $('scaleX').focus();
+  updateScalePreview();
+});
+$('scaleKeepOriginal').addEventListener('click', () => {
+  scaleWarningDismissed = true;
+  hideScaleWarning();
+  setStatus('Original model size retained');
+});
+$('scaleApply').addEventListener('click', applyRequestedScale);
+$('scaleCancel').addEventListener('click', () => {
+  $('scaleEditor').hidden = true;
+  $('scalePromptActions').hidden = false;
+});
+for (const axis of ['x','y','z']) {
+  const el = $('scale' + axis.toUpperCase());
+  el.addEventListener('focus', () => { scaleEditingAxis = axis; });
+  el.addEventListener('input', () => { scaleEditingAxis = axis; syncUniformScale(axis); });
+}
+$('scaleUniform').addEventListener('change', () => {
+  if ($('scaleUniform').checked && scaleEditingAxis) syncUniformScale(scaleEditingAxis);
+  else updateScalePreview();
+});
+
+$('dropZone').addEventListener('click', () => $('fileInput').click());
+$('fileInput').addEventListener('change', e => { const f = e.target.files[0]; if (f) loadFile(f); });
+$('dropZone').addEventListener('dragover', e => { e.preventDefault(); $('dropZone').classList.add('dragover'); });
+$('dropZone').addEventListener('dragleave', () => $('dropZone').classList.remove('dragover'));
+$('dropZone').addEventListener('drop', e => {
+  e.preventDefault(); $('dropZone').classList.remove('dragover');
+  const f = e.dataTransfer.files[0]; if (f) loadFile(f);
+});
+$('tbFrame').addEventListener('click', () => frame(mesh));
+$('tbWire').addEventListener('click', () => {
+  if (!mesh) return;
+  if (wire) { scene.remove(wire); wire = null; return; }
+  wire = new THREE.LineSegments(new THREE.WireframeGeometry(mesh.geometry), new THREE.LineBasicMaterial({ color: 0x8be9ff, transparent: true, opacity: 0.28 }));
+  scene.add(wire);
+});
+</script>
+</body>
+</html>

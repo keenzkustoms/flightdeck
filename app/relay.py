@@ -38,6 +38,41 @@ def _hex_dist(a: Optional[str], b: Optional[str]) -> float:
     return sum((x - y) ** 2 for x, y in zip(va, vb)) ** 0.5
 
 
+def _colour_family(color: Optional[str]) -> str:
+    color = _norm_hex(color)
+    if not color:
+        return ""
+    rgb = [int(color[i:i + 2], 16) for i in (1, 3, 5)]
+    spread = max(rgb) - min(rgb)
+    avg = sum(rgb) / 3
+    if spread <= 45:
+        if avg <= 45:
+            return "black"
+        if avg >= 220:
+            return "white"
+        return "grey_silver"
+    return ""
+
+
+def _colour_matches(actual: Optional[str], expected: Optional[str]) -> bool:
+    if not expected:
+        return True
+    if _hex_dist(actual, expected) <= 95:
+        return True
+    return bool(_colour_family(actual) == _colour_family(expected) == "grey_silver")
+
+
+def _nozzle_label(nozzle: Optional[int]) -> str:
+    return "left nozzle" if nozzle == 0 else "right nozzle" if nozzle == 1 else "unknown nozzle"
+
+
+def _slot_label(slot: dict) -> str:
+    unit = int(slot.get("unit") or 0)
+    slot_idx = int(slot.get("idx") or 0)
+    bay = "AMS HT" if unit >= 128 else f"AMS {unit + 1} slot {slot_idx + 1}"
+    return f"{bay} / {_nozzle_label(slot.get('nozzle'))}"
+
+
 def _norm_material(value: Optional[str]) -> str:
     return re.sub(r"[^a-z0-9]+", "", (value or "").lower())
 
@@ -60,7 +95,14 @@ def _bambu_preview_filaments(meta: dict) -> list[dict]:
         color = _norm_hex(row.get("color"))
         material = _norm_material(row.get("type") or meta.get("filament_type"))
         if color or material:
-            out.append({"color": color, "material": material, "used_g": row.get("used_g")})
+            item = {"color": color, "material": material, "used_g": row.get("used_g")}
+            try:
+                nozzle = int(row.get("nozzle"))
+                if nozzle in (0, 1):
+                    item["nozzle"] = nozzle
+            except (TypeError, ValueError):
+                pass
+            out.append(item)
     return out
 
 
@@ -95,6 +137,40 @@ def _bambu_ams_mapping(meta: dict, printer: "BambuPrinter") -> tuple[list[int], 
                 or slot["material_norm"] in req["material"]
             )
         ] or available
+        nozzle = req.get("nozzle")
+        enforce_nozzle_path = nozzle in (0, 1) and any("nozzle" in slot for slot in material_matches)
+        if enforce_nozzle_path:
+            nozzle_matches = [slot for slot in material_matches if slot.get("nozzle") == nozzle]
+            if nozzle_matches:
+                colour_matches = [
+                    slot for slot in nozzle_matches
+                    if _colour_matches(slot.get("color_norm"), req.get("color"))
+                ]
+                if colour_matches:
+                    material_matches = colour_matches
+                else:
+                    other_path = [
+                        slot for slot in material_matches
+                        if slot.get("nozzle") != nozzle
+                        and _colour_matches(slot.get("color_norm"), req.get("color"))
+                    ]
+                    wanted = " ".join(p for p in [req.get("material"), req.get("color")] if p) or "filament"
+                    if other_path:
+                        raise RuntimeError(
+                            f"H2D AMS mapping blocked: sliced filament {wanted} is assigned to "
+                            f"{_nozzle_label(nozzle)}, but the matching loaded tray is {_slot_label(other_path[0])}. "
+                            "Move that filament to the correct AMS path or re-slice the job for the nozzle fed by that AMS."
+                        )
+                    raise RuntimeError(
+                        f"H2D AMS mapping blocked: sliced filament {wanted} is assigned to "
+                        f"{_nozzle_label(nozzle)}, but no matching loaded tray is available on that AMS path."
+                    )
+            else:
+                wanted = " ".join(p for p in [req.get("material"), req.get("color")] if p) or "filament"
+                raise RuntimeError(
+                    f"H2D AMS mapping blocked: sliced filament {wanted} is assigned to "
+                    f"{_nozzle_label(nozzle)}, but Flightdeck cannot see any loaded AMS tray feeding that nozzle."
+                )
         ranked = sorted(
             material_matches,
             key=lambda slot: (
@@ -108,6 +184,7 @@ def _bambu_ams_mapping(meta: dict, printer: "BambuPrinter") -> tuple[list[int], 
         used.add(int(best["bambu_tray_id"]))
         notes.append(
             f"{req.get('material') or 'unknown'} {req.get('color') or ''}"
+            f"{' nozzle=' + ('R' if nozzle == 0 else 'L') if nozzle in (0, 1) else ''}"
             f"→{best['bambu_tray_id']} {best.get('type') or ''} {best.get('color') or ''}"
         )
 
@@ -153,7 +230,7 @@ async def bambu_upload(
                 raise
 
     subtask_name = filename.removesuffix(".gcode.3mf")
-    if preview and preview.image_png:
+    if preview:
         printer.seed_preview(subtask_name, preview)
 
     _evict_stale()
@@ -162,6 +239,7 @@ async def bambu_upload(
         "filament_g": preview.filament_weight_g if preview else None,
         "filament_type": preview.filament_type if preview else None,
         "filament_colors": preview.filament_colors if preview else None,
+        "filament_ids": preview.filament_ids if preview else None,
         "ts": time.monotonic(),
     }
 
@@ -189,13 +267,13 @@ async def bambu_print_start(
     """Issue MQTT project_file command to Bambu printer."""
     meta = _pending.get((printer_id, filename), {})
     ams_mapping, mapping_note = _bambu_ams_mapping(meta, printer)
+    filament_ids: list[int] | None = meta.get("filament_ids") or None
     try:
         await asyncio.to_thread(
-            printer._printer.start_print,
+            printer.start_uploaded_3mf,
             filename,
-            1,      # plate_number — OrcaSlicer sends single-plate 3mf
-            True,   # use_ams
             ams_mapping,
+            filament_ids,
         )
     except Exception as exc:
         db.log_decision(printer_id, "relay_start_failed",
@@ -207,6 +285,7 @@ async def bambu_print_start(
         "source": source_ip,
         "eta_s": meta.get("estimated_seconds"),
         "ams_mapping": ams_mapping,
+        "filament_ids": filament_ids,
         "mapping_note": mapping_note,
     }))
     log.info("relay: print started %s → %s from %s", filename, printer_id, source_ip)

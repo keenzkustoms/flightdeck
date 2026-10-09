@@ -51,6 +51,7 @@ class PrinterStatus:
     toolheads: list = field(default_factory=list)  # list of toolhead dicts; empty for single-tool printers
     maintenance: list = field(default_factory=list)  # live printer-reported care/advisory items
     light_state: Optional[str] = None  # Bambu chamber light state: "on" | "off" | "unknown"
+    timelapse_state: Optional[str] = None  # Bambu camera timelapse state: "enable" | "disable"
     temperature_presets: dict = field(default_factory=dict)  # {hotend: [{label, value}], bed: [...]}
     fan_speed: Optional[float] = None  # 0.0 - 1.0 where reported
     fan_speeds: dict[str, float] = field(default_factory=dict)  # channel -> 0.0 - 1.0

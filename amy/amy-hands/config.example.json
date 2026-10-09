@@ -1,0 +1,10 @@
+{
+  "port": 4701,
+  "roots": [
+    "C:\\Users\\Kidabah\\Documents",
+    "C:\\Users\\Kidabah\\Downloads",
+    "C:\\Users\\Kidabah\\Desktop",
+    "C:\\Users\\Kidabah\\flightdeck"
+  ],
+  "max_results": 40
+}

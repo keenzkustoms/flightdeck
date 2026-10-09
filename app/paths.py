@@ -34,6 +34,7 @@ _data_dir_configured = bool(os.environ.get("FLIGHTDECK_DATA_DIR"))
 DATA_DIR = _path_from_env("FLIGHTDECK_DATA_DIR", APP_DIR)
 DB_PATH = _path_from_env("FLIGHTDECK_DB_PATH", DATA_DIR / "flightdeck.db")
 UPLOADS_DIR = _path_from_env("FLIGHTDECK_UPLOADS_DIR", DATA_DIR / "uploads")
+FLIGHT_RECORDER_DIR = _path_from_env("FLIGHTDECK_FLIGHT_RECORDER_DIR", DATA_DIR / "flight_recorder")
 PRINTERS_CONFIG_PATH = _path_from_env("FLIGHTDECK_PRINTERS_CONFIG", DATA_DIR / "printers.yaml")
 PRINT_LIBRARY_DIR = _path_from_env(
     "FLIGHTDECK_PRINT_LIBRARY",

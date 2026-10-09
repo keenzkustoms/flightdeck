@@ -1,5 +1,7 @@
 # Flightdeck Install Guide
 
+> Beta note: the current public beta is Bambu-tested first. For the shortest first-run path, use the focused [Raspberry Pi install guide](docs/INSTALL_PI.md), then return here only if you need Windows tray setup, manual install, or deeper reference notes.
+
 Flightdeck install, easy as 1-2-3:
 
 1. **Install Flightdeck**
@@ -37,7 +39,7 @@ For a first install, use this path:
 2. **Add printers** in **System -> Settings -> Printers**.
 3. **Add spools** in **Spools**, then add shelves, scale, and label printer if you have them.
 
-After that, open **System -> Demo Mode** for a guided tour, or open `/demo` for the standalone interactive demo. Then use **System -> Settings -> Setup** to confirm the install health checks.
+After that, open **System -> Walkthrough Mode** for a guided tour through the real install, or open `/demo` for the standalone interactive demo. Then use **System -> Settings -> Setup** to confirm the install health checks.
 
 Keep destructive actions such as cancel, E-stop, SD cleanup, delete, and archive for a deliberate test pass.
 
@@ -66,12 +68,30 @@ Easy install:
 2. Open the Flightdeck folder.
 3. Double-click `Install-Flightdeck-Windows.cmd`.
 
-The bootstrap checks for Python, Git, and ffmpeg. If any are missing and `winget` is available, it asks Windows to install them. ffmpeg is required for Bambu live camera streams. Flightdeck treats Raspberry Pi OS/Debian apt FFmpeg 5.x and Gyan Windows FFmpeg 8.x as the tested camera-driver family; newer or custom FFmpeg major versions are allowed but will show as untested in Setup Health and diagnostics. If Windows SmartScreen warns because the installer is not digitally signed yet, choose **More info -> Run anyway**.
+The bootstrap checks for Python, Git, and ffmpeg. If any are missing and `winget` is available, it asks Windows to install them. ffmpeg is required for Bambu live camera streams. If Docker Desktop is already installed, the Windows installer also starts/repairs the browser OrcaSlicer and Bambu Studio sidecars, then pre-fills Flightdeck's slicer URLs. If Docker Desktop is not installed, Flightdeck still installs normally and tells the user how to add browser slicers later. Flightdeck treats Raspberry Pi OS/Debian apt FFmpeg 5.x and Gyan Windows FFmpeg 8.x as the tested camera-driver family; newer or custom FFmpeg major versions are allowed but will show as untested in Setup Health and diagnostics. If Windows SmartScreen warns because the installer is not digitally signed yet, choose **More info -> Run anyway**.
 
 PowerShell install, if you prefer running it manually:
 
 ```powershell
 .\scripts\windows\bootstrap-install.ps1
+```
+
+Force browser slicer setup during install. If Docker Desktop is missing and `winget` is available, this also installs Docker Desktop:
+
+```powershell
+.\scripts\windows\bootstrap-install.ps1 -BrowserSlicers yes
+```
+
+Skip browser slicers during install:
+
+```powershell
+.\scripts\windows\bootstrap-install.ps1 -BrowserSlicers no
+```
+
+Install Docker Desktop through `winget` during the normal auto path, then start the browser slicers:
+
+```powershell
+.\scripts\windows\bootstrap-install.ps1 -BrowserSlicers yes -InstallDockerDesktop
 ```
 
 Install with an existing Flightdeck data backup:
@@ -151,6 +171,54 @@ For fresh installs, the same values can be supplied during install:
   -SlicerSidecarCommand "<command that starts your /slice API sidecar>" `
   -SlicerSidecarUrl "http://127.0.0.1:3003"
 ```
+
+### Windows Browser Slicers
+
+For manual review in a browser, Flightdeck can run Docker desktop versions of OrcaSlicer and Bambu Studio on Windows. They use the same Print Vault as Flightdeck:
+
+```text
+%LOCALAPPDATA%\Flightdeck\print_library -> /prints
+%LOCALAPPDATA%\Flightdeck\orcaslicer    -> /config
+%LOCALAPPDATA%\Flightdeck\bambustudio   -> /config
+```
+
+Start or repair both browser slicers and save the matching Flightdeck slicer URLs:
+
+```powershell
+.\Start-Flightdeck-Slicers-Windows.cmd
+```
+
+Or run the PowerShell helper directly:
+
+```powershell
+.\scripts\windows\start-slicer-browsers.ps1
+```
+
+It starts Docker Desktop if it is closed, creates any missing config folders, then starts these containers:
+
+```text
+https://127.0.0.1:3011  OrcaSlicer
+https://127.0.0.1:3012  Bambu Studio
+```
+
+Default login:
+
+```text
+flightdeck / flightdeck
+```
+
+Useful repair options:
+
+```powershell
+.\scripts\windows\start-slicer-browsers.ps1 -CheckOnly
+.\scripts\windows\start-slicer-browsers.ps1 -OrcaOnly
+.\scripts\windows\start-slicer-browsers.ps1 -BambuOnly
+.\scripts\windows\start-slicer-browsers.ps1 -Force
+.\scripts\windows\start-slicer-browsers.ps1 -InstallDockerDesktop
+.\scripts\windows\start-slicer-browsers.ps1 -SkipFlightdeckSettings
+```
+
+`-Force` recreates the containers but keeps the persistent `/config` and `/prints` folders.
 
 ## Manual Install
 
@@ -316,6 +384,27 @@ FLIGHTDECK_LABEL_PRINTER_NAME=AusPrint
 ```
 
 Use the exact Windows printer queue name, or a unique part of it, for `FLIGHTDECK_LABEL_PRINTER_NAME`.
+
+Windows label printing goes through the Windows printer queue (no Zadig/WinUSB driver swap needed). Optional tuning, all in `.env`:
+
+```powershell
+FLIGHTDECK_LABEL_PAPER_NAME=62mm          # Windows paper size name on the queue; "62mm" also enables the compact QL-700 layout
+FLIGHTDECK_LABEL_PAPER_WIDTH_MM=62        # used when the queue has no matching paper size
+FLIGHTDECK_LABEL_SCALE=0.5                # full-size labels are scaled before printing on the QL-700 Windows driver
+FLIGHTDECK_LABEL_ROTATION=90              # degrees clockwise
+FLIGHTDECK_LABEL_COMPACT_LENGTH_MM=35     # compact 62mm layout only
+FLIGHTDECK_LABEL_COMPACT_TOP_PAD_PX=34    # compact 62mm layout only
+```
+
+The Dymo scale works on Windows through HID (`hidapi` is in `requirements-windows.txt`); no extra driver is needed.
+
+Bambu camera feeds are transcoded by ffmpeg. On a Windows host running several Bambu printers, lower the per-stream cost in `.env`:
+
+```powershell
+FLIGHTDECK_BAMBU_STREAM_WIDTH=640         # default 960
+FLIGHTDECK_BAMBU_STREAM_FPS=2             # default 5
+FLIGHTDECK_BAMBU_STREAM_QUALITY=8         # default 7 (higher number = smaller, softer frames)
+```
 
 ## Updating Flightdeck
 

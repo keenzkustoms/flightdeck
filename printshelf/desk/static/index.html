@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MeshFinder</title>
+  <link rel="stylesheet" href="/static/style.css?v=22">
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "/static/vendor/three.module.js",
+      "three/addons/": "/static/vendor/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="wordmark">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="38" height="38" aria-hidden="true"><path d="M10,52 L42,52 C44,52 46,51 47,49 L55,39 C56,37 56,36 54,36 L22,36 C20,36 18,37 17,39 L11,49 C10,51 10,52 12,52 Z" fill="#EF4444" opacity="0.3"/><path d="M10,38 L42,38 C44,38 46,37 47,35 L55,25 C56,23 56,22 54,22 L22,22 C20,22 18,23 17,25 L11,35 C10,37 10,38 12,38 Z" fill="#EF4444" opacity="0.6"/><path d="M10,24 L42,24 C44,24 46,23 47,21 L55,11 C56,9 56,8 54,8 L22,8 C20,8 18,9 17,11 L11,21 C10,23 10,24 12,24 Z" fill="#EF4444" opacity="1.0"/><line x1="36" y1="2" x2="36" y2="8" stroke="#e0e0e0" stroke-width="2.5" stroke-linecap="round"/><circle cx="36" cy="2" r="2.5" fill="#e0e0e0"/></svg>
+      <span class="wordmark-text"><span class="flight-text">MESH</span><span class="deck-text">FINDER</span></span>
+    </div>
+  </header>
+  <div class="app">
+    <aside class="tree-pane">
+      <div class="pane-head">
+        <strong>Folders</strong>
+        <button type="button" id="addFolder" class="text-btn">Add</button>
+      </div>
+      <div id="pins" class="tree-pins"></div>
+      <button type="button" id="excludeBtn" class="exclude-btn" hidden>Exclude</button>
+      <div id="tree" class="tree"></div>
+    </aside>
+    <div id="split" class="split" title="Drag to resize the folders"></div>
+    <main class="stage">
+      <nav id="pathbar" class="pathbar" aria-label="Folder path">
+        <button type="button" id="pathHome" class="path-home" title="Top of this folder">
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M12 4.2 3.5 11h2.2v8.2h4.6v-5.1h3.4v5.1h4.6V11h2.2L12 4.2z"/></svg>
+        </button>
+        <div id="pathsegs" class="path-segs"></div>
+        <div id="crumb" class="path-meta">Pick a folder</div>
+      </nav>
+      <header class="stage-bar">
+        <button type="button" id="backBtn" class="text-btn" hidden>Library</button>
+        <input id="search" class="search" type="search" placeholder="Search files" autocomplete="off" spellcheck="false">
+        <label class="switch" title="Show every model at once, including everything in subfolders">
+          <input type="checkbox" id="showAll">
+          <span>All</span>
+        </label>
+        <label class="switch" title="Only files you can print. Turn this off to also show pictures, SVGs, and documents.">
+          <input type="checkbox" id="printable" checked>
+          <span>Printable</span>
+        </label>
+        <div class="view-switch" id="viewSwitch">
+          <button type="button" data-cols="3" title="3 across">3</button>
+          <button type="button" data-cols="4" class="on" title="4 across">4</button>
+          <button type="button" data-cols="5" title="5 across">5</button>
+          <button type="button" data-cols="list" title="List">List</button>
+        </div>
+        <button type="button" id="openFile" class="open-btn" disabled>Open in slicer</button>
+      </header>
+      <div id="addBanner" class="add-banner" hidden>
+        <div>
+          <strong id="addTitle">Adding to a collection</strong>
+          <p>Click a card to select it. Shift-click another to grab everything in between.</p>
+        </div>
+        <button type="button" id="addDone" class="text-btn">Done</button>
+      </div>
+      <div id="stage" class="stage-body">
+        <div id="gallery" class="gallery cols-4"></div>
+        <div id="viewer" class="viewer" hidden></div>
+        <div id="picture" class="picture" hidden></div>
+        <pre id="doc" class="doc" hidden></pre>
+        <div id="empty" class="empty" hidden>Pick a folder.</div>
+      </div>
+    </main>
+  </div>
+  <div id="cardMenu" class="card-menu" hidden></div>
+  <div id="pickBar" class="pick-bar" hidden>
+    <span id="pickCount">0 selected</span>
+    <button type="button" id="pickAdd" class="open-btn">Add</button>
+    <button type="button" id="pickClose" class="text-btn" title="Stop selecting">×</button>
+  </div>
+  <div id="collectDialog" class="modal" hidden>
+    <form id="collectForm" class="modal-card">
+      <div class="modal-head">
+        <strong id="collectTitle">New collection</strong>
+        <button type="button" id="collectCancel" class="text-btn" title="Close">×</button>
+      </div>
+      <div id="collectChoices" class="collect-choices" hidden></div>
+      <input id="collectName" class="search" placeholder="Collection name" autocomplete="off">
+      <div class="modal-actions">
+        <button type="button" id="collectDismiss" class="text-btn">Cancel</button>
+        <button type="submit" id="collectSubmit" class="open-btn">Create</button>
+      </div>
+    </form>
+  </div>
+  <script type="module" src="/static/viewer.js?v=11"></script>
+  <script src="/static/app.js?v=33"></script>
+</body>
+</html>

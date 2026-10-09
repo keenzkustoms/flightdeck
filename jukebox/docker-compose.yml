@@ -1,0 +1,68 @@
+services:
+  navidrome:
+    image: deluan/navidrome:latest
+    container_name: cindy-navidrome
+    restart: unless-stopped
+    user: "1004:1004"
+    ports:
+      - "4533:4533"
+    environment:
+      # Navidrome 0.63 scanner setting names.
+      ND_SCANNER_SCHEDULE: "0 * * * *"
+      # Cindy's systemd service verifies all CIFS mounts and rebuilds the library
+      # view before restarting Navidrome, so the server can safely scan on startup.
+      ND_SCANNER_SCANONSTARTUP: "true"
+      ND_LOGLEVEL: info
+      ND_SESSIONTIMEOUT: "24h"
+      ND_BASEURL: ""
+      ND_PORT: "4533"
+      ND_MUSICFOLDER: /music
+      ND_DATAFOLDER: /data
+      ND_ENABLESHARING: "false"
+      ND_DEFAULTTHEME: Dark
+      ND_ENABLEFAVOURITES: "true"
+      ND_ENABLESTARRATING: "true"
+      ND_IGNOREFILERULES: "(\\.tmp|\\.part|Thumbs\\.db|desktop\\.ini|\\.DS_Store)"
+      # Drop DB rows for ignored/missing recycle junk after full scans.
+      ND_SCANNER_PURGEMISSING: "full"
+    volumes:
+      # Real Cindy mount so absolute symlinks in the library view resolve.
+      # rslave is important: MUSIC/CHECKED/JAMAL are separate CIFS mounts created
+      # underneath /mnt/cindy after boot, and must propagate into this container.
+      - type: bind
+        source: /mnt/cindy
+        target: /mnt/cindy
+        read_only: true
+        bind:
+          propagation: rslave
+      # Pi-local symlink view (excludes #recycle). Never writes to Cindy.
+      - /home/flightdeck/cindy-library-view:/music:ro
+      - /home/flightdeck/cindy-navidrome/data:/data
+
+  vinyl:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: cindy-vinyl
+    restart: unless-stopped
+    ports:
+      # Tailscale serve: https://flightdeck…:4540 → 127.0.0.1:4540
+      - "127.0.0.1:4540:4540"
+      # Home LAN (no Tailscale): http://<pi-lan-ip>:4541
+      - "4541:4540"
+    environment:
+      NAVIDROME_URL: http://navidrome:4533
+      NAVIDROME_DB: /data/navidrome.db
+      JUKEBOX_USER: ${JUKEBOX_USER:-jukebox}
+      JUKEBOX_PASSWORD: ${JUKEBOX_PASSWORD:?set JUKEBOX_PASSWORD in .env}
+      JUKEBOX_HOST: 0.0.0.0
+      JUKEBOX_PORT: "4540"
+      VINYL_DATA: /vinyl-data
+      CINDY_SMB_HOST: ${CINDY_SMB_HOST:-192.168.4.53}
+    volumes:
+      # Read-only index (incl. WAL) for folder-pack merging — Cindy untouched
+      - /home/flightdeck/cindy-navidrome/data:/data:ro
+      # Vinyl-only metadata overrides (never writes to Cindy)
+      - /home/flightdeck/cindy-vinyl-data:/vinyl-data
+    depends_on:
+      - navidrome

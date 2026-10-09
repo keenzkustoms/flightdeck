@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 240" fill="#000">
+  <title>Temora Vet — Celtic frame (hollow centre)</title>
+  <desc>Filled-path Celtic-style border for MakerDeck sign emboss. Centre open for text.</desc>
+
+  <!-- Frame bands (separate fills = hollow centre) -->
+  <path d="M 12 12 L 348 12 L 348 36 L 12 36 Z"/>
+  <path d="M 12 204 L 348 204 L 348 228 L 12 228 Z"/>
+  <path d="M 12 36 L 36 36 L 36 204 L 12 204 Z"/>
+  <path d="M 324 36 L 348 36 L 348 204 L 324 204 Z"/>
+
+  <!-- Top knot teeth -->
+  <path d="M 40 36 L 56 52 L 72 36 L 88 52 L 104 36 L 120 52 L 136 36 L 152 52 L 168 36 L 184 52 L 200 36 L 216 52 L 232 36 L 248 52 L 264 36 L 280 52 L 296 36 L 312 52 L 320 36 L 320 12 L 40 12 Z"/>
+  <!-- Bottom knot teeth -->
+  <path d="M 40 204 L 56 188 L 72 204 L 88 188 L 104 204 L 120 188 L 136 204 L 152 188 L 168 204 L 184 188 L 200 204 L 216 188 L 232 204 L 248 188 L 264 204 L 280 188 L 296 204 L 312 188 L 320 204 L 320 228 L 40 228 Z"/>
+
+  <!-- Corner bosses -->
+  <path d="M 18 18 L 54 18 L 62 30 L 54 42 L 18 42 L 10 30 Z"/>
+  <path d="M 306 18 L 342 18 L 350 30 L 342 42 L 306 42 L 298 30 Z"/>
+  <path d="M 18 198 L 54 198 L 62 210 L 54 222 L 18 222 L 10 210 Z"/>
+  <path d="M 306 198 L 342 198 L 350 210 L 342 222 L 306 222 L 298 210 Z"/>
+
+  <!-- Side bosses -->
+  <path d="M 18 100 L 42 100 L 50 120 L 42 140 L 18 140 L 10 120 Z"/>
+  <path d="M 318 100 L 342 100 L 350 120 L 342 140 L 318 140 L 310 120 Z"/>
+</svg>

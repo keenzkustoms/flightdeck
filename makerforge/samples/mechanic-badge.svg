@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 220" fill="none" stroke="#000" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round">
+  <title>Mechanic badge  MakerDeck emboss sample</title>
+  <desc>Simplified line-art badge (piston, plate, rod, crossed wrenches). Uses M/L/H/V/Z only for MakerDeck.</desc>
+
+  <!-- Crossed wrench shafts (behind) -->
+  <path d="M 14 38 L 186 182" />
+  <path d="M 186 38 L 14 182" />
+
+  <!-- Wrench jaws  top left -->
+  <path d="M 6 52 L 6 40 L 18 28 L 32 34 L 22 34 L 14 42 L 14 52 Z" />
+  <!-- top right -->
+  <path d="M 194 52 L 194 40 L 182 28 L 168 34 L 178 34 L 186 42 L 186 52 Z" />
+  <!-- bottom left -->
+  <path d="M 6 168 L 6 180 L 18 192 L 32 186 L 22 186 L 14 178 L 14 168 Z" />
+  <!-- bottom right -->
+  <path d="M 194 168 L 194 180 L 182 192 L 168 186 L 178 186 L 186 178 L 186 168 Z" />
+
+  <!-- Connecting rod big end -->
+  <path d="M 100 152 L 126 158 L 136 178 L 126 198 L 100 204 L 74 198 L 64 178 L 74 158 Z" />
+  <path d="M 100 166 L 114 170 L 118 178 L 114 186 L 100 190 L 86 186 L 82 178 L 86 170 Z" />
+
+  <!-- Rod stem -->
+  <path d="M 92 98 L 108 98 L 108 154 L 92 154 Z" />
+
+  <!-- Nameplate outer -->
+  <path d="M 28 58 L 172 58 L 178 64 L 178 92 L 172 98 L 28 98 L 22 92 L 22 64 Z" />
+  <!-- Nameplate inner frame -->
+  <path d="M 34 64 L 166 64 L 170 68 L 170 88 L 166 92 L 34 92 L 30 88 L 30 68 Z" />
+
+  <!-- Rivets -->
+  <path d="M 27 61 L 31 61 L 31 65 L 27 65 Z" />
+  <path d="M 169 61 L 173 61 L 173 65 L 169 65 Z" />
+  <path d="M 169 91 L 173 91 L 173 95 L 169 95 Z" />
+  <path d="M 27 91 L 31 91 L 31 95 L 27 95 Z" />
+
+  <!-- Piston crown -->
+  <path d="M 68 12 L 132 12 L 140 20 L 140 44 L 132 52 L 68 52 L 60 44 L 60 20 Z" />
+  <!-- Piston rings -->
+  <path d="M 62 18 L 138 18" />
+  <path d="M 62 24 L 138 24" />
+  <path d="M 62 30 L 138 30" />
+  <!-- Wrist pin hole -->
+  <path d="M 100 38 L 106 42 L 106 48 L 100 52 L 94 48 L 94 42 Z" />
+</svg>

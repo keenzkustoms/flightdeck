@@ -1,0 +1,8 @@
+# Local Navidrome ignore overlay — mounted over /music/.ndignore (Cindy stays read-only).
+# gitignore syntax; '#' must be escaped.
+
+\#recycle/
+**/\#recycle/
+$RECYCLE.BIN/
+**/@eaDir/
+**/System Volume Information/

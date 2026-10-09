@@ -1,0 +1,15 @@
+[Unit]
+Description=PrintShelf private printable inventory
+Wants=network-online.target
+After=network-online.target remote-fs.target
+
+[Service]
+User=flightdeck
+WorkingDirectory=/home/flightdeck/flightdeck/printshelf
+Environment=PRINTSHELF_CONFIG=/home/flightdeck/flightdeck/printshelf/config.json
+ExecStart=/home/flightdeck/flightdeck/.venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8100
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

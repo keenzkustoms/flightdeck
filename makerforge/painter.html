@@ -1,0 +1,4670 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>STL Painter · MakerDeck</title>
+<script type="importmap">
+{ "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.164.1/examples/jsm/"
+} }
+
+
+</script>
+<style>
+/* ================================================================== */
+/*  b625 — MakerDeck STL Painter  (tabbed layout)                     */
+/* ================================================================== */
+
+/* -- Reset & Vars -------------------------------------------------- */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#060a10; --panel:#0d1520; --panel-2:#121c2a;
+  --border:#243246; --text:#f1f5f9; --muted:#8b9cb3;
+  --accent:#3ecfff; --accent-dim:rgba(62,207,255,.12);
+  --green:#34d399; --red:#f87171; --amber:#fbbf24;
+  --radius:8px; --radius-sm:5px;
+  --sidebar-w:264px; --header-h:42px; --footer-h:32px; --tab-h:38px;
+  --bottom-h:0px; /* grows when components panel opens */
+}
+html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);
+  font:13px/1.45 'DM Sans',-apple-system,BlinkMacSystemFont,sans-serif}
+code,pre,.mono{font-family:'JetBrains Mono',monospace;font-size:12px}
+button{cursor:pointer;border:none;background:none;color:inherit;font:inherit}
+input[type=range]{width:100%;accent-color:var(--accent)}
+select{background:var(--panel-2);color:var(--text);border:1px solid var(--border);
+  border-radius:var(--radius-sm);padding:4px 8px;font:inherit;width:100%}
+::selection{background:var(--accent);color:var(--bg)}
+::-webkit-scrollbar{width:5px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+
+/* -- Layout -------------------------------------------------------- */
+.app{display:grid;height:100vh;
+  grid-template-rows:var(--header-h) 1fr var(--bottom-h) var(--footer-h);
+  grid-template-columns:var(--sidebar-w) 1fr;
+  grid-template-areas:
+    "header  header"
+    "sidebar viewport"
+    "bottom  bottom"
+    "footer  footer";
+}
+.app.bottom-open{--bottom-h:164px}
+.app.sidebar-collapsed{--sidebar-w:0px}
+
+/* -- Header -------------------------------------------------------- */
+.header{grid-area:header;display:flex;align-items:center;gap:10px;
+  padding:0 14px;background:var(--panel);border-bottom:1px solid var(--border);z-index:20}
+.header .logo{font-weight:700;font-size:14px;letter-spacing:.3px;white-space:nowrap}
+.header .logo span{color:var(--accent)}
+.header .logo{color:var(--text);text-decoration:none}
+.header .build{color:var(--muted);font-size:11px;margin-left:auto}
+.header .toggle-sidebar{width:28px;height:28px;display:flex;align-items:center;justify-content:center;
+  border-radius:var(--radius-sm);color:var(--muted);transition:background .15s}
+.header .toggle-sidebar:hover{background:var(--accent-dim);color:var(--text)}
+.header .tool-nav{display:flex;align-items:center;gap:2px;min-width:0}
+.header .tool-nav a{padding:4px 7px;border-radius:var(--radius-sm);color:var(--muted);
+  text-decoration:none;font-size:11px;font-weight:600;white-space:nowrap;transition:background .15s,color .15s}
+.header .tool-nav a:hover{background:var(--accent-dim);color:var(--text)}
+.header .tool-nav a.active{background:var(--accent-dim);color:var(--accent)}
+@media (max-width:900px){.header .tool-nav a:not(.active){display:none}}
+
+/* -- Sidebar ------------------------------------------------------- */
+.sidebar{grid-area:sidebar;display:flex;flex-direction:column;
+  background:var(--panel);border-right:1px solid var(--border);overflow:hidden;
+  transition:width .2s;min-width:0}
+.sidebar-collapsed .sidebar{width:0;border-right:none}
+
+.tab-bar{display:flex;height:var(--tab-h);border-bottom:1px solid var(--border);flex-shrink:0}
+.tab-btn{flex:1;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.4px;
+  color:var(--muted);border-bottom:2px solid transparent;transition:color .15s,border-color .15s}
+.tab-btn:hover{color:var(--text)}
+.tab-btn.active{color:var(--accent);border-bottom-color:var(--accent)}
+
+.tab-body{flex:1;overflow-y:auto;overflow-x:hidden;padding:10px 12px 16px}
+.tab-page{display:none}
+.tab-page.active{display:block}
+
+.section-label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;
+  color:var(--muted);margin:14px 0 6px;display:flex;align-items:center;gap:6px}
+.section-label:first-child{margin-top:2px}
+
+/* -- Drop Zone ----------------------------------------------------- */
+.drop-zone{border:2px dashed var(--border);border-radius:var(--radius);padding:18px 12px;
+  text-align:center;cursor:pointer;transition:border-color .2s,background .2s;
+  color:var(--muted);font-size:12px;line-height:1.4}
+.drop-zone:hover,.drop-zone.dragover{border-color:var(--accent);background:var(--accent-dim)}
+.drop-zone input{display:none}
+
+/* -- Slot Cards ---------------------------------------------------- */
+.slot-list{display:flex;flex-direction:column;gap:6px}
+.slot-card{display:flex;align-items:center;gap:8px;padding:6px 8px;
+  border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;
+  transition:border-color .15s,background .15s}
+.slot-card:hover{background:var(--panel-2)}
+.slot-card.active{border-color:var(--accent);background:var(--accent-dim)}
+.slot-card .swatch-wrap{position:relative;width:28px;height:28px;flex-shrink:0}
+.slot-card .swatch-wrap input[type=color]{
+  width:28px;height:28px;border:none;padding:0;cursor:pointer;
+  border-radius:var(--radius-sm);background:transparent}
+.slot-card .swatch-wrap input[type=color]::-webkit-color-swatch-wrapper{padding:0}
+.slot-card .swatch-wrap input[type=color]::-webkit-color-swatch{border:1px solid rgba(255,255,255,.15);border-radius:var(--radius-sm)}
+.slot-card .slot-info{flex:1;min-width:0}
+.slot-card .slot-name{font-size:12px;font-weight:600}
+.slot-card .slot-hex{font-size:10px;color:var(--muted);font-family:'JetBrains Mono',monospace}
+.slot-card .slot-actions{display:flex;gap:4px}
+.slot-card .slot-btn{font-size:10px;padding:2px 6px;border-radius:3px;
+  color:var(--muted);border:1px solid var(--border);transition:all .15s}
+.slot-card .slot-btn:hover{color:var(--text);border-color:var(--accent)}
+.slot-card .slot-btn.off{color:var(--red);border-color:var(--red)}
+.slot-card.slot-off{display:none}
+.swap-row{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;gap:5px}
+.swap-row span{color:var(--accent);font-size:16px;font-weight:700;line-height:1}
+.swap-row select{min-width:0;padding:4px 6px;font-size:11px}
+.section-label-row{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px}
+.section-label-row .section-label{margin:0}
+.slot-count-ctrl{display:inline-flex;align-items:center;gap:4px}
+.slot-count-ctrl button{width:26px;height:26px;padding:0;border-radius:var(--radius-sm);
+  border:1px solid var(--border);background:var(--panel-2);color:var(--text);
+  font-size:16px;font-weight:700;line-height:1;cursor:pointer;transition:all .15s}
+.slot-count-ctrl button:hover{border-color:var(--accent);background:var(--accent-dim)}
+.slot-count-ctrl button:disabled{opacity:.35;pointer-events:none;cursor:default}
+.slot-count-ctrl .slot-count-val{min-width:1.2em;text-align:center;font-size:12px;font-weight:700;
+  font-variant-numeric:tabular-nums;color:var(--muted)}
+.paint-target.slot-off{display:none}
+
+/* -- Preset Swatches ----------------------------------------------- */
+.preset-row{display:flex;gap:4px;flex-wrap:wrap;margin-top:4px}
+.preset-swatch{width:20px;height:20px;border-radius:4px;cursor:pointer;
+  border:2px solid transparent;transition:border-color .15s,transform .1s}
+.preset-swatch:hover{border-color:var(--text);transform:scale(1.15)}
+
+/* -- Buttons & Controls -------------------------------------------- */
+.btn{padding:5px 12px;border-radius:var(--radius-sm);font-size:12px;font-weight:600;
+  background:var(--panel-2);border:1px solid var(--border);color:var(--text);
+  transition:background .15s,border-color .15s}
+.btn:hover{background:var(--accent-dim);border-color:var(--accent)}
+.btn:disabled{opacity:.4;pointer-events:none}
+.btn-primary{background:rgba(62,207,255,.12);border-color:var(--accent);color:var(--accent)}
+.btn-primary:hover{background:rgba(62,207,255,.22)}
+.btn-success{background:rgba(52,211,153,.1);border-color:var(--green);color:var(--green)}
+.btn-success:hover{background:rgba(52,211,153,.2)}
+.btn-row{display:flex;gap:6px;margin-top:6px}
+
+.tool-grid{display:flex;gap:4px;flex-wrap:wrap}
+.tool-toggle{padding:5px 10px;border-radius:var(--radius-sm);font-size:12px;font-weight:600;
+  background:var(--panel-2);border:1px solid var(--border);transition:all .15s}
+.tool-toggle:hover{border-color:var(--accent)}
+.tool-toggle.active{background:var(--accent-dim);border-color:var(--accent);color:var(--accent)}
+.tool-btn.active-tool{background:var(--accent-dim);color:var(--accent)}
+.btn.active-mode{background:var(--accent-dim);border-color:var(--accent);color:var(--accent)}
+
+.stroke-row{display:flex;gap:4px}
+.stroke-btn{padding:3px 8px;border-radius:3px;font-size:11px;
+  background:var(--panel-2);border:1px solid var(--border);transition:all .15s}
+.stroke-btn:hover{border-color:var(--accent)}
+.stroke-btn.active{border-color:var(--accent);color:var(--accent);background:var(--accent-dim)}
+
+.form-group{margin:8px 0}
+.form-label{display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-bottom:3px}
+.form-label .value{color:var(--accent);font-family:'JetBrains Mono',monospace}
+.form-label .value-input{width:58px;height:21px;padding:1px 5px;text-align:right;
+  color:var(--accent);font-family:'JetBrains Mono',monospace;font-size:11px;
+  background:var(--panel-2);border:1px solid var(--border);border-radius:4px}
+.form-label .value-input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 2px rgba(62,207,255,.12)}
+
+.check-row{display:flex;align-items:center;gap:6px;font-size:12px;margin:6px 0;cursor:pointer}
+.check-row input{accent-color:var(--accent)}
+
+.solo-row{display:flex;align-items:center;gap:6px;font-size:11px;margin:6px 0;
+  cursor:pointer;color:var(--muted);padding:4px 6px;border-radius:var(--radius-sm);
+  border:1px solid transparent;transition:all .15s}
+.solo-row.active{border-color:var(--amber);color:var(--amber);background:rgba(251,191,36,.06)}
+
+.flow-desc{font-size:11px;color:var(--muted);line-height:1.4}
+
+.opts-panel{display:none;margin-top:8px;padding:8px 10px;
+  background:var(--panel-2);border-radius:var(--radius);border:1px solid var(--border)}
+.opts-panel.visible{display:block}
+
+.collapse-toggle{font-size:11px;color:var(--muted);padding:6px 0;width:100%;text-align:left;
+  transition:color .15s}
+.collapse-toggle:hover{color:var(--text)}
+.collapse-body{display:none;margin-top:4px}
+.collapse-body.open{display:block}
+
+.detect-preset-row{display:flex;gap:4px;margin-bottom:8px}
+.detect-preset-btn{padding:3px 10px;border-radius:3px;font-size:11px;font-weight:600;
+  background:var(--panel);border:1px solid var(--border);transition:all .15s}
+.detect-preset-btn:hover{border-color:var(--accent)}
+.detect-preset-btn.active{border-color:var(--accent);color:var(--accent);background:var(--accent-dim)}
+
+/* -- Viewport ------------------------------------------------------ */
+.viewport{grid-area:viewport;position:relative;overflow:hidden;background:var(--bg);touch-action:none}
+.viewport canvas{display:block;width:100%!important;height:100%!important}
+
+.viewport-toolbar{position:absolute;top:8px;left:50%;transform:translateX(-50%);
+  display:flex;align-items:center;gap:3px;padding:4px 6px;
+  background:rgba(13,21,32,.88);backdrop-filter:blur(8px);
+  border:1px solid var(--border);border-radius:var(--radius);z-index:10;white-space:nowrap}
+
+.paint-target{display:inline-flex;align-items:center;gap:3px;padding:3px 7px;
+  border-radius:var(--radius-sm);font-size:11px;font-weight:700;
+  border:1px solid transparent;transition:all .15s;color:var(--muted)}
+.paint-target:hover{color:var(--text)}
+.paint-target.active{border-color:var(--accent);color:var(--text);background:var(--accent-dim)}
+.paint-target .swatch{width:12px;height:12px;border-radius:3px;border:1px solid rgba(255,255,255,.2);display:inline-block}
+
+.tool-sep{width:1px;height:20px;background:var(--border);margin:0 3px}
+.tool-btn{padding:3px 8px;border-radius:var(--radius-sm);font-size:11px;font-weight:600;
+  color:var(--muted);transition:all .15s}
+.tool-btn:hover{color:var(--text);background:var(--accent-dim)}
+.tool-btn:disabled{opacity:.35;pointer-events:none}
+
+.select-rect{position:absolute;border:1.5px dashed var(--accent);background:rgba(62,207,255,.06);
+  pointer-events:none;display:none;z-index:5}
+.lasso-svg{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;display:none;z-index:5;
+  overflow:visible}
+.lasso-svg polyline{fill:rgba(62,207,255,.10);stroke:var(--accent);stroke-width:1.5;
+  stroke-dasharray:5 3;stroke-linejoin:round;stroke-linecap:round}
+.smart-cursor{position:absolute;border:2px solid var(--accent);border-radius:50%;
+  pointer-events:none;display:none;z-index:5;transition:width .08s,height .08s}
+.viewport-hint{position:absolute;bottom:12px;left:50%;transform:translateX(-50%);
+  font-size:11px;color:var(--muted);pointer-events:none;text-align:center;
+  background:rgba(6,10,16,.7);padding:4px 12px;border-radius:var(--radius-sm)}
+
+.export-modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1000;
+  display:none;align-items:center;justify-content:center;padding:20px}
+.export-modal-backdrop.open{display:flex}
+.export-modal{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
+  padding:18px 20px;max-width:380px;width:100%;box-shadow:0 16px 48px rgba(0,0,0,.45)}
+.export-modal h3{font-size:14px;font-weight:700;margin:0 0 8px}
+.export-modal p{font-size:12px;color:var(--muted);margin:0 0 14px;line-height:1.45}
+.export-modal .file-name{color:var(--text);font-family:'JetBrains Mono',monospace;font-size:11px;
+  word-break:break-all}
+.export-modal .btn-row{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end;margin-top:4px}
+.export-modal .btn-row .btn{min-width:88px}
+
+#selPaintBtn.has-selection:not(:disabled){
+  animation: fillPulse 1.2s ease-in-out infinite;
+  box-shadow:0 0 0 1px var(--accent);
+}
+@keyframes fillPulse{
+  0%,100%{filter:brightness(1)}
+  50%{filter:brightness(1.25)}
+}
+
+.viewport.select-mode{cursor:crosshair}
+.viewport.brush-mode{cursor:none}
+.viewport.eyedrop-mode{cursor:copy}
+.viewport.click-select-mode{cursor:pointer}
+.viewport.bucket-mode{cursor:cell}
+.viewport.art-mode{cursor:copy}
+.art-preview-wrap{margin-top:8px;background:#04080e;border:1px solid var(--border);border-radius:var(--radius-sm);
+  overflow:hidden;display:flex;align-items:center;justify-content:center;min-height:72px}
+.art-preview-wrap canvas{max-width:100%;max-height:88px;display:block}
+.art-preview-wrap.hidden,.art-meta.hidden{display:none}
+.art-meta{font-size:11px;color:var(--muted);margin-top:6px;line-height:1.35}
+
+/* -- Bottom Panel (Components) ------------------------------------- */
+.bottom-panel{grid-area:bottom;display:none;background:var(--panel);
+  border-top:1px solid var(--border);overflow:hidden;flex-direction:column}
+.app.bottom-open .bottom-panel{display:flex}
+
+.bottom-header{display:flex;align-items:center;gap:8px;padding:6px 14px;flex-shrink:0;
+  border-bottom:1px solid var(--border)}
+.bottom-header .title{font-size:11px;font-weight:700;text-transform:uppercase;
+  letter-spacing:.5px;color:var(--muted)}
+.bottom-header .count{font-size:11px;color:var(--accent);font-family:'JetBrains Mono',monospace}
+.bottom-header .spacer{flex:1}
+
+.island-list{flex:1;overflow-y:auto;overflow-x:auto;display:flex;gap:6px;padding:8px 14px;
+  align-items:flex-start}
+.island-card{flex-shrink:0;padding:8px 12px;border:1px solid var(--border);
+  border-radius:var(--radius);background:var(--panel-2);min-width:120px;cursor:pointer;
+  transition:border-color .15s,background .15s}
+.island-card:hover{border-color:var(--accent);background:rgba(62,207,255,.04)}
+.island-card.selected{border-color:var(--accent);background:var(--accent-dim)}
+.island-card.hidden{opacity:.4}
+.island-card .isl-name{font-size:12px;font-weight:600;margin-bottom:2px}
+.island-card .isl-meta{font-size:10px;color:var(--muted);font-family:'JetBrains Mono',monospace}
+.island-card .isl-actions{display:flex;gap:4px;margin-top:4px}
+.island-card .isl-btn{font-size:10px;padding:2px 6px;border-radius:3px;
+  color:var(--muted);border:1px solid var(--border);transition:all .15s}
+.island-card .isl-btn:hover{color:var(--text);border-color:var(--accent)}
+
+/* -- Footer -------------------------------------------------------- */
+.footer{grid-area:footer;display:flex;align-items:center;justify-content:space-between;
+  padding:0 14px;background:var(--panel);border-top:1px solid var(--border);z-index:20}
+.footer-status{display:flex;align-items:center;gap:6px;font-size:11px}
+.status-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+.status-dot.idle{background:var(--green)}
+.status-dot.working{background:var(--amber);animation:pulse 1s ease infinite}
+.status-dot.error{background:var(--red)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.footer span:last-child{font-size:10px;color:var(--muted)}
+
+/* -- Stats (inline in footer or sidebar) --------------------------- */
+.stat-row{display:flex;gap:10px;font-size:11px;color:var(--muted);font-family:'JetBrains Mono',monospace}
+.stat-row .sv{color:var(--text)}
+
+/* -- Batch --------------------------------------------------------- */
+.batch-zone{border:2px dashed var(--border);border-radius:var(--radius);padding:12px;
+  text-align:center;cursor:pointer;font-size:11px;color:var(--muted);transition:border-color .2s}
+.batch-zone:hover{border-color:var(--accent)}
+.batch-zone input{display:none}
+.batch-list{max-height:100px;overflow-y:auto;font-size:11px;margin-top:4px}
+.batch-item{display:flex;justify-content:space-between;padding:2px 0}
+.batch-item .status{font-weight:600}
+.batch-item .status.pending{color:var(--muted)}
+.batch-item .status.done{color:var(--green)}
+</style>
+</head>
+<body>
+
+<div class="app" id="app">
+  <!-- Header -->
+  <header class="header">
+    <button class="toggle-sidebar" id="toggleSidebar" title="Toggle sidebar">☰</button>
+    <a class="logo" href="index.html" title="MakerDeck home">Maker<span>Deck</span> · STL Painter</a>
+    <nav class="tool-nav" aria-label="MakerDeck tools">
+      <a href="index.html">Container</a>
+      <a href="painter.html?v=630" class="active" aria-current="page">STL Painter</a>
+      <a href="paper3d.html">Paper3D</a>
+      <a href="meshprep.html">Mesh Prep</a>
+      <a href="chop.html">Chop</a>
+    </nav>
+    <div class="build">b630</div>
+  </header>
+
+  <!-- Left Sidebar (tabbed) -->
+  <aside class="sidebar" id="sidebar">
+    <div class="tab-bar">
+      <button class="tab-btn active" data-tab="model">Model</button>
+      <button class="tab-btn" data-tab="colours">Color</button>
+      <button class="tab-btn" data-tab="paint">Paint</button>
+      <button class="tab-btn" data-tab="export">Export</button>
+    </div>
+    <div class="tab-body">
+
+      <!-- TAB: Model -->
+      <div class="tab-page active" id="tabModel">
+        <div class="section-label">Load model</div>
+        <div class="drop-zone" id="dropZone">
+          Drop STL, OBJ, or 3MF here<br><span style="font-size:11px;color:var(--muted)">or click to browse</span>
+          <input type="file" id="fileInput" accept=".stl,.obj,.3mf,model/obj,text/plain">
+        </div>
+
+        <div class="section-label">Orientation</div>
+        <p class="flow-desc">Sits the biggest flat on the bed. Use Flip if she landed upside down.</p>
+        <div class="btn-row">
+          <button class="btn" id="flipModelBtn" disabled title="Turn the model over (180° around X)">Flip over</button>
+          <button class="btn" id="rot90YBtn" disabled title="Spin 90° on the bed">Spin 90°</button>
+          <button class="btn" id="rot90XBtn" disabled title="Roll 90° toward the camera">Roll 90°</button>
+        </div>
+
+        <div class="section-label">Paint Resolution</div>
+        <p class="flow-desc" id="resMeta">Load a model to upgrade paint resolution.</p>
+        <div class="btn-row">
+          <button class="btn" id="resFineBtn" disabled>Fine ×4</button>
+          <button class="btn" id="resUltraBtn" disabled>Ultra ×16</button>
+        </div>
+
+        <div class="section-label">Clear</div>
+        <div class="btn-row">
+          <button class="btn" id="clearPaintBtn" disabled>Clear Paint</button>
+          <button class="btn" id="clearModelBtn" disabled style="color:var(--red)">Clear Model</button>
+        </div>
+
+        <div class="section-label" style="margin-top:16px">Stats</div>
+        <div class="stat-row" id="statsRow">
+          <span>V <span class="sv" id="statVerts">--</span></span>
+          <span>F <span class="sv" id="statFaces">--</span></span>
+          <span>S2 <span class="sv" id="statEmboss">--</span></span>
+          <span>S3 <span class="sv" id="statDeboss">--</span></span>
+          <span>S4 <span class="sv" id="statTrim">--</span></span>
+        </div>
+
+        <div class="section-label" style="margin-top:16px">Components</div>
+        <p class="flow-desc" id="islandInfo">Load a model to detect mesh islands.</p>
+        <div class="btn-row">
+          <button class="btn" id="detectIslandsBtn" disabled>Find Islands</button>
+          <button class="btn" id="toggleBottomBtn" disabled>Show Panel</button>
+        </div>
+      </div>
+
+      <!-- TAB: Colours -->
+      <div class="tab-page" id="tabColours">
+        <div class="section-label-row">
+          <div class="section-label">AMS Filament Slots</div>
+          <div class="slot-count-ctrl" title="Up to 16 filaments (multi-AMS)">
+            <button type="button" id="slotMinusBtn" title="Remove last slot">−</button>
+            <span class="slot-count-val" id="slotCountLabel">4</span>
+            <button type="button" id="slotPlusBtn" title="Add slot">+</button>
+          </div>
+        </div>
+        <p class="flow-desc" style="margin-top:0">+/− adds or removes colours (1–16 for multi-AMS). Removing a slot puts its paint back on Slot 1.</p>
+        <div class="slot-list" id="slotList"></div>
+
+        <div class="section-label">Swap base paint</div>
+        <p class="flow-desc" style="margin-top:0">Swaps painted model regions only. Stamped artwork stays locked.</p>
+        <div class="swap-row">
+          <select id="swapSlotA" aria-label="First colour slot to swap"></select>
+          <span aria-hidden="true">↔</span>
+          <select id="swapSlotB" aria-label="Second colour slot to swap"></select>
+        </div>
+        <button class="btn" id="swapSlotsBtn" style="margin-top:6px;width:100%" disabled>Swap base colours</button>
+
+        <div class="section-label">Presets</div>
+        <div class="preset-row" id="presetRow"></div>
+
+        <div class="btn-row" style="margin-top:10px">
+          <button class="btn" id="showAllColoursBtn">Show All</button>
+          <button class="btn" id="screenPickBtn">Screen Pick</button>
+        </div>
+        <label class="solo-row" id="soloRow">
+          <input type="checkbox" id="soloActive">
+          Isolate active colour only
+        </label>
+      </div>
+
+      <!-- TAB: Paint -->
+      <div class="tab-page" id="tabPaint">
+        <div class="section-label">Brush Type</div>
+        <div class="tool-grid">
+          <button class="tool-toggle active" id="toolBrush">Brush</button>
+          <button class="tool-toggle" id="toolSpray">Spray</button>
+          <button class="tool-toggle" id="toolEyedrop">Eyedrop</button>
+          <button class="tool-toggle" id="toolClickSelect">Select</button>
+          <button class="tool-toggle" id="toolBucket">Bucket</button>
+        </div>
+
+        <!-- Brush opts -->
+        <div class="opts-panel visible" id="brushOpts">
+          <div class="form-group">
+            <div class="form-label"><span>Size (mm)</span><span class="value" id="brushSizeVal">1.0</span></div>
+            <!-- Log-mapped 0–1000 → 0.2–12 mm (fine control at small sizes) -->
+            <input type="range" id="brushSize" min="0" max="1000" step="1" value="393">
+          </div>
+          <div class="form-group">
+            <div class="form-label"><span>Stroke</span><span class="value" id="strokeModeVal">Freehand</span></div>
+            <div class="stroke-row">
+              <button class="stroke-btn active" data-stroke="free" id="strokeFree">Freehand</button>
+              <button class="stroke-btn" data-stroke="horizontal" id="strokeH">Horiz</button>
+              <button class="stroke-btn" data-stroke="vertical" id="strokeV">Vert</button>
+            </div>
+          </div>
+        </div>
+        <!-- Spray opts -->
+        <div class="opts-panel" id="sprayOpts">
+          <div class="form-group">
+            <div class="form-label"><span>Nozzle (mm)</span><span class="value" id="sprayNozzleVal">4.0</span></div>
+            <!-- Log-mapped 0–1000 → 0.5–16 mm -->
+            <input type="range" id="sprayNozzle" min="0" max="1000" step="1" value="600">
+          </div>
+          <div class="form-group">
+            <div class="form-label"><span>Density</span><span class="value" id="sprayDensityVal">45%</span></div>
+            <input type="range" id="sprayDensity" min="10" max="90" step="5" value="45">
+          </div>
+        </div>
+        <!-- Eyedrop opts -->
+        <div class="opts-panel" id="eyedropOpts">
+          <p class="flow-desc">Click the model to pick that AMS slot, or use Screen Pick in the Colours tab to grab any colour from your desktop.</p>
+        </div>
+        <!-- Click-Select opts -->
+        <div class="opts-panel" id="clickSelectOpts">
+          <div class="form-group">
+            <div class="form-label"><span>Mode</span></div>
+            <div class="tool-grid">
+              <button class="stroke-btn active" id="selModeIsland" data-selmode="island">Island</button>
+              <button class="stroke-btn" id="selModeColor" data-selmode="color">Same Color</button>
+            </div>
+          </div>
+          <p class="flow-desc">Click a connected base-model region (good for whole patches). Stamped artwork is locked.</p>
+        </div>
+
+        <div class="section-label" style="margin-top:12px">Visibility</div>
+        <p class="flow-desc" style="margin-top:4px">Hide a colour (hard mask) → paint the edge → <b>Show All Hidden</b>. Hidden faces and stamped artwork never take paint.</p>
+        <div class="btn-row" style="margin-top:6px">
+          <button class="btn" id="hideActiveSlotBtn" disabled>Hide Active Colour</button>
+          <button class="btn" id="findPartsPaintBtn" disabled>Find Parts</button>
+        </div>
+        <button class="btn" id="showHiddenBtn" style="margin-top:6px;width:100%">Show All Hidden</button>
+
+        <div class="section-label" style="margin-top:12px">Area Fill</div>
+        <div class="tool-grid">
+          <button class="tool-toggle" id="toolLasso" title="Draw around an area (eyebrows, badges…)">Lasso</button>
+          <button class="tool-toggle" id="toolBox" title="Drag a rectangle">Box</button>
+        </div>
+        <div class="opts-panel" id="areaOpts">
+          <p class="flow-desc">Lasso/Box the base model (magenta = selected, not painted yet). Then click a colour slot or <b>Fill Selection</b>. Artwork stays locked.</p>
+        </div>
+        <div class="btn-row" style="margin-top:6px">
+          <button class="btn btn-primary" id="selPaintBtn" disabled>Fill Selection</button>
+          <button class="btn" id="selHideBtn" disabled>Hide</button>
+          <button class="btn" id="selClearBtn" disabled>Clear</button>
+        </div>
+        <label class="check-row" style="margin-top:8px">
+          <input type="checkbox" id="orbitLock">
+          <span>Lock left-drag (right-drag orbits)</span>
+        </label>
+        <label class="cb-label">
+          <input type="checkbox" id="symmetryToggle">
+          <span>Symmetry paint (mirror X)</span>
+        </label>
+
+        <div class="section-label" style="margin-top:12px">Artwork</div>
+        <div class="drop-zone" id="artDropZone">
+          Drop logo, SVG, or PNG<br><span style="font-size:11px;color:var(--muted)">team logos → Multi-colour trace · click to browse</span>
+          <input type="file" id="artFileInput" accept=".png,.jpg,.jpeg,.webp,.gif,.svg,image/png,image/jpeg,image/webp,image/gif,image/svg+xml">
+        </div>
+        <p class="art-meta hidden" id="artMeta"></p>
+        <div class="art-preview-wrap hidden" id="artPreviewWrap">
+          <canvas id="artPreviewCanvas" width="240" height="120"></canvas>
+        </div>
+        <div class="opts-panel" id="artOpts">
+          <div class="form-group">
+            <div class="form-label"><span>Size (mm)</span><input class="value-input" id="artSizeVal" type="number" min="8" max="180" step="1" value="48" aria-label="Artwork size in millimetres"></div>
+            <input type="range" id="artSize" min="8" max="180" step="1" value="48">
+          </div>
+          <div class="form-group">
+            <div class="form-label"><span>Rotation (°)</span><input class="value-input" id="artRotVal" type="number" min="-180" max="180" step="1" value="0" aria-label="Artwork rotation in degrees"></div>
+            <input type="range" id="artRot" min="-180" max="180" step="1" value="0">
+          </div>
+          <div class="form-group">
+            <div class="form-label"><span>Trace</span></div>
+            <div class="stroke-row">
+              <button class="stroke-btn" data-artmode="active" id="artModeActive">Active slot</button>
+              <button class="stroke-btn active" data-artmode="svg" id="artModeSvg">Multi-colour AMS</button>
+            </div>
+          </div>
+          <div class="form-group">
+            <div class="form-label"><span>Threshold</span><span class="value" id="artTraceThrVal">128</span></div>
+            <input type="range" id="artTraceThreshold" min="40" max="220" step="1" value="128">
+          </div>
+          <label class="check-row">
+            <input type="checkbox" id="artTraceInvert">
+            <span>Invert (light logo on dark)</span>
+          </label>
+          <p class="flow-desc" id="artPlaceHint">Click the model to position the logo. Drag its centre target to move, or blue ring to rotate.</p>
+          <div class="btn-row">
+            <button class="btn btn-primary" id="artPlaceBtn" disabled>Place on model</button>
+            <button class="btn" id="artCancelPlaceBtn" hidden>Cancel position</button>
+            <button class="btn" id="artTraceBtn" disabled>Trace</button>
+            <button class="btn" id="artClearBtn" disabled>Clear art</button>
+          </div>
+        </div>
+
+        <div class="section-label" style="margin-top:12px">Advanced Tools</div>
+        <div class="tool-grid">
+          <button class="tool-toggle" id="toolSmart">Smart</button>
+          <button class="tool-toggle" id="toolEdge">Clean Edge</button>
+          <button class="tool-toggle" id="toolDetect">Detect</button>
+        </div>
+
+        <!-- Smart opts -->
+        <div class="opts-panel" id="smartOpts">
+          <p class="flow-desc">Paints the facing patch under the cursor (Orca-style). Turn on Wrap only for posts/awnings.</p>
+          <div class="form-group">
+            <div class="form-label"><span>Size (mm)</span><span class="value" id="smartSizeVal">8</span></div>
+            <input type="range" id="smartSize" min="1" max="40" step="0.5" value="8">
+          </div>
+          <div class="form-group">
+            <div class="form-label"><span>Angle</span><span class="value" id="smartAngleVal">40°</span></div>
+            <input type="range" id="smartAngle" min="5" max="140" step="1" value="40">
+          </div>
+          <label class="check-row">
+            <input type="checkbox" id="smartSameColour" checked>
+            <span>Stay on same colour</span>
+          </label>
+          <label class="check-row">
+            <input type="checkbox" id="smartWrapEdges">
+            <span>Wrap around posts (surface path)</span>
+          </label>
+        </div>
+        <!-- Edge opts -->
+        <div class="opts-panel" id="edgeOpts">
+          <div class="form-group">
+            <div class="form-label"><span>Width</span><span class="value" id="edgeWidthVal">1</span></div>
+            <input type="range" id="edgeWidth" min="1" max="8" step="1" value="1">
+          </div>
+          <p class="flow-desc">Click the wrong-colour fringe (magenta = selected). Then <b>Fill</b> with the active colour or <b>Clear</b> back to Slot 1.</p>
+          <div class="btn-row">
+            <button class="btn btn-primary" id="edgeFillBtn">Fill</button>
+            <button class="btn" id="edgeClearBtn">Clear</button>
+          </div>
+        </div>
+        <!-- Detect opts -->
+        <div class="opts-panel" id="detectOpts">
+          <p class="flow-desc">Find raised / sunken geometry, then paint with Brush or Smart.</p>
+          <div class="detect-preset-row" id="detectPresetRow">
+            <button class="detect-preset-btn active" data-preset="fine">Fine</button>
+            <button class="detect-preset-btn" data-preset="bold">Bold</button>
+            <button class="detect-preset-btn" data-preset="custom">Custom</button>
+          </div>
+          <div class="form-group">
+            <div class="form-label"><span id="sensitivityLabel">Sensitivity</span><span class="value" id="sensitivityVal">0.22</span></div>
+            <input type="range" id="sensitivity" min="0.05" max="1.5" step="0.05" value="0.22">
+          </div>
+          <div class="form-group">
+            <div class="form-label"><span>Smoothing</span><span class="value" id="smoothIterVal">120</span></div>
+            <input type="range" id="smoothIter" min="5" max="200" step="5" value="120">
+          </div>
+          <div class="form-group">
+            <div class="form-label"><span>Min area (mm²)</span><span class="value" id="minClusterVal">0.5</span></div>
+            <input type="range" id="minCluster" min="0" max="20" step="0.5" value="0.5">
+          </div>
+          <label class="check-row"><input type="checkbox" id="adaptiveThr" checked><span>Adaptive threshold</span></label>
+          <label class="check-row"><input type="checkbox" id="ridgeTop" checked><span>Prefer ridge tops</span></label>
+          <div class="form-group">
+            <div class="form-label"><span>Morph close</span><span class="value" id="morphCloseVal">1</span></div>
+            <input type="range" id="morphClose" min="0" max="4" step="1" value="1">
+          </div>
+          <div class="form-group">
+            <div class="form-label"><span>Morph open</span><span class="value" id="morphOpenVal">1</span></div>
+            <input type="range" id="morphOpen" min="0" max="3" step="1" value="1">
+          </div>
+          <button class="btn btn-primary" id="detectBtn" disabled>Run Detect</button>
+          <p class="flow-desc" id="detectHint" style="margin-top:4px">Optional — unique to MakerDeck.</p>
+        </div>
+      </div>
+
+      <!-- TAB: Export -->
+      <div class="tab-page" id="tabExport">
+        <div class="section-label">Import Profile</div>
+        <select id="printerModel">
+          <option value="Bambu Lab X1 Carbon" selected>Neutral AMS import (recommended)</option>
+        </select>
+        <p class="flow-desc">Exports a neutral AMS colour project so Studio does not route painted slots to H2C/H2D HT or right-nozzle lanes.</p>
+        <div class="section-label">Filament Profile</div>
+        <select id="filamentProfile">
+          <option value="Generic PLA">Generic PLA</option>
+          <option value="Generic PETG">Generic PETG</option>
+          <option value="Generic ABS">Generic ABS</option>
+          <option value="Generic TPU">Generic TPU</option>
+          <option value="Generic ASA">Generic ASA</option>
+          <option value="PolyTerra PLA">PolyTerra PLA</option>
+          <option value="eSUN PLA+">eSUN PLA+</option>
+          <option value="Bambu PLA Basic">Bambu PLA Basic</option>
+          <option value="Bambu PLA Matte">Bambu PLA Matte</option>
+        </select>
+        <button class="btn btn-success" id="exportBtn" disabled style="margin-top:10px;width:100%">Export 3MF</button>
+
+        <div class="section-label" style="margin-top:20px">Batch Process</div>
+        <div class="batch-zone" id="batchZone">
+          Drop a folder of STLs / OBJs
+          <input type="file" id="batchInput" accept=".stl,.obj,.3mf" multiple webkitdirectory>
+        </div>
+        <div class="batch-list" id="batchList"></div>
+        <button class="btn" id="batchBtn" disabled style="margin-top:6px;width:100%">Process All</button>
+      </div>
+
+    </div>
+  </aside>
+
+  <!-- Viewport -->
+  <div class="viewport" id="viewport">
+    <div class="viewport-toolbar" id="viewportToolbar">
+      <span id="slotToolbarTargets" style="display:inline-flex;align-items:center;gap:3px"></span>
+      <div class="tool-sep"></div>
+      <button class="tool-btn" id="zoomOutBtn" title="Zoom out">−</button>
+      <button class="tool-btn" id="zoomInBtn" title="Zoom in">+</button>
+      <button class="tool-btn" id="frameBtn" title="Frame model">Frame</button>
+      <button class="tool-btn" id="flipToolBtn" title="Flip over (put the other face on the bed)" disabled>Flip</button>
+      <button class="tool-btn" id="wireframeBtn" title="Toggle wireframe overlay">Wire</button>
+      <button class="tool-btn" id="undoBtn" title="Undo (Z)" disabled>Undo</button>
+      <button class="tool-btn" id="redoBtn" title="Redo (Y)" disabled>Redo</button>
+      <button class="tool-btn" id="turntableBtn" title="Turntable (T)">Spin</button>
+      <button class="tool-btn" id="showHiddenToolBtn" title="Show hidden faces (H)">Show</button>
+      <button class="tool-btn" id="resetViewBtn" title="Reset all">Reset</button>
+    </div>
+    <div class="select-rect" id="selectRect"></div>
+    <svg class="lasso-svg" id="lassoSvg" aria-hidden="true">
+      <polyline id="lassoPoly" points=""></polyline>
+    </svg>
+    <div class="smart-cursor" id="smartCursor"></div>
+    <div class="viewport-hint" id="viewportHint">Load a model · pick a colour · paint</div>
+  </div>
+
+  <!-- Bottom Panel (Components / Islands) -->
+  <div class="bottom-panel" id="bottomPanel">
+    <div class="bottom-header">
+      <span class="title">Components</span>
+      <span class="count" id="islandCount">0 islands</span>
+      <span class="spacer"></span>
+      <button class="btn" id="paintIslandBtn" disabled style="font-size:10px;padding:2px 8px">Paint Selected</button>
+      <button class="btn" id="hideIslandBtn" disabled style="font-size:10px;padding:2px 8px">Hide</button>
+      <button class="btn" id="showAllIslandsBtn" style="font-size:10px;padding:2px 8px">Show All</button>
+      <button class="toggle-sidebar" id="closeBottomBtn" title="Close panel" style="font-size:14px">✕</button>
+    </div>
+    <div class="island-list" id="islandList"></div>
+  </div>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <div class="footer-status">
+      <span class="status-dot idle" id="statusDot"></span>
+      <span id="statusText">Ready — load an STL or OBJ to begin</span>
+    </div>
+    <span>MakerDeck · STL Painter b630</span>
+  </footer>
+</div>
+
+<div class="export-modal-backdrop" id="exportModal" role="dialog" aria-modal="true" aria-labelledby="exportModalTitle">
+  <div class="export-modal">
+    <h3 id="exportModalTitle">File already exported</h3>
+    <p>Replace <span class="file-name" id="exportModalFile"></span>, or save as a new file?</p>
+    <div class="btn-row">
+      <button type="button" class="btn" id="exportModalCancel">Cancel</button>
+      <button type="button" class="btn" id="exportModalSaveAs">Save as…</button>
+      <button type="button" class="btn btn-primary" id="exportModalReplace">Replace</button>
+    </div>
+  </div>
+</div>
+
+<!-- Main Script -->
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import {
+  parseSTLBinary, parseOBJ, deduplicateVertices, detectFeatures, cleanClusters,
+  buildFaceAdj, findPaintBoundary, brushDabFaces, smartFillFaces,
+  paintClassOf, upgradePaintResolution, export3MF,
+  findMeshIslands, buildIslandMap, floodFillSameClass, floodFillSameSlot, selectIsland,
+  import3MF, buildSymmetryMap, masksToFacePaint, facePaintToMasks, MAX_PAINT_SLOTS
+} from './js/painter.js?v=629';
+import {
+  rasterizeSvgText, rasterizeImageFile, makeStampFrame, mirrorStampFrameX,
+  nearestSlot, parseHexColor, extractSvgFillHexes, extractRasterPalette, stampSizeMm, buildStampSlabs,
+  buildStampSlabsFromMasks, stampLayersFromTrace, stampStepMm, scrubTraceMat,
+  isSvgArtFile, isRasterArtFile, clonePixelData, rasterHasAlpha,
+  ART_MATCH_DIST2
+} from './js/painter-art.js?v=622';
+import { loadImageFromFile, traceCanvasAsync, drawTracePreview } from './js/trace.js?v=370';
+
+/* ================================================================== */
+/*  STATE                                                             */
+/* ================================================================== */
+
+const S = {
+  rawVertices: null, rawNormals: null, nTri: 0,
+  verts: null, faces: null, nVerts: 0,
+  embossMask: null, debossMask: null, trimMask: null,
+  facePaint: null, // Uint8Array 0..15 — source of truth for AMS paint
+  featureEmboss: null, featureDeboss: null,
+  embossCount: 0, debossCount: 0, trimCount: 0,
+  mesh: null, fileName: 'model',
+  tool: 'orbit',
+  brushStroke: 'free',
+  paintTarget: 0, // 0-based slot index
+  slotCount: 4, // visible AMS slots (1–16 for multi-AMS)
+  exportHandle: null, // FileSystemFileHandle from last export (Chrome/Edge)
+  exportFileName: null,
+  detectMode: 'emboss',
+  undoStack: [], redoStack: [],
+  edgeHighlight: null,
+  edgePreviewMode: 'fill',
+  smartPreview: null, smartPreviewFaces: null,
+  faceAdj: null,
+  brushStrokeActive: null,
+  hiddenSlots: Array(16).fill(false),
+  soloActive: false,
+  orbitOverride: false,
+  resLevel: 0,
+  // Islands / click-select
+  islands: null,
+  islandMap: null,
+  hiddenIslands: new Set(),
+  selectedIsland: -1,
+  clickSelectMode: 'island', // 'island' | 'color'
+  clickSelection: null,      // Uint8Array highlight mask
+  hiddenManual: null,         // Uint8Array manual hide mask
+  clickSelectionFaces: null,  // number[]
+  // Wireframe overlay
+  wireframe: null,
+  wireframeOn: false,
+  // Symmetry painting
+  symmetryMap: null,
+  symmetryCenterX: 0,
+  symmetryOn: false,
+  turntable: false,
+};
+
+const art = {
+  fileName: '',
+  raster: null,
+  original: null,
+  hadAlpha: false,
+  mode: 'svg',
+  preview: null,
+  texture: null,
+  traceCanvas: null,
+  trace: null,
+  traceJob: 0,
+  traceTimer: null,
+  // A live anchor lets artwork be positioned and rotated before it becomes mesh geometry.
+  placement: null,
+  lastPlacement: null,
+  rotateHandle: null,
+  moveHandle: null,
+  rotationDrag: null,
+  moveDrag: null,
+};
+
+/* ================================================================== */
+/*  THREE.JS SCENE                                                    */
+/* ================================================================== */
+
+const viewport = document.getElementById('viewport');
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x060a10);
+
+const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 5000);
+camera.position.set(80, 60, 80);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(2, devicePixelRatio || 1));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.2;
+viewport.appendChild(renderer.domElement);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+Object.assign(controls, {
+  enableDamping: true, dampingFactor: 0.08, panSpeed: 0.8, rotateSpeed: 0.6,
+  screenSpacePanning: true, zoomToCursor: true, minDistance: 0.5, maxDistance: 8000, zoomSpeed: 1.15,
+});
+
+scene.add(new THREE.AmbientLight(0xffffff, 0.4));
+const dir1 = new THREE.DirectionalLight(0xffffff, 1.0);
+dir1.position.set(50, 80, 50); dir1.castShadow = true; dir1.shadow.mapSize.set(2048, 2048);
+scene.add(dir1);
+const dir2 = new THREE.DirectionalLight(0x8ea4c1, 0.5);
+dir2.position.set(-40, 40, -30);
+scene.add(dir2);
+scene.add(new THREE.HemisphereLight(0x3ecfff, 0x060a10, 0.28));
+scene.add(new THREE.GridHelper(200, 40, 0x263852, 0x151e2d));
+
+function resizeRenderer() {
+  const w = viewport.clientWidth, h = viewport.clientHeight;
+  if (!w || !h) return;
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  renderer.setSize(w, h);
+}
+window.addEventListener('resize', resizeRenderer);
+resizeRenderer();
+(function animate() { requestAnimationFrame(animate); if (S.turntable && S.mesh) { const a = 0.003; controls.target.copy(S.mesh.position); const d = camera.position.clone().sub(controls.target); const cos = Math.cos(a), sin = Math.sin(a); const nx = d.x*cos - d.z*sin, nz = d.x*sin + d.z*cos; camera.position.set(controls.target.x+nx, camera.position.y, controls.target.z+nz); } controls.update(); renderer.render(scene, camera); })();
+
+/* ================================================================== */
+/*  DOM REFS                                                          */
+/* ================================================================== */
+
+const $ = id => document.getElementById(id);
+const dropZone = $('dropZone'), fileInput = $('fileInput');
+const detectBtn = $('detectBtn'), exportBtn = $('exportBtn');
+const batchBtn = $('batchBtn'), batchZone = $('batchZone');
+const batchInput = $('batchInput'), batchListEl = $('batchList');
+const statusDot = $('statusDot'), statusText = $('statusText');
+const viewportHint = $('viewportHint');
+const orbitLockCheck = $('orbitLock');
+const selectRect = $('selectRect'), smartCursor = $('smartCursor');
+const lassoSvg = $('lassoSvg'), lassoPoly = $('lassoPoly');
+const raycaster = new THREE.Raycaster();
+const pointerNdc = new THREE.Vector2();
+
+/** Slot colours — rebuilt when AMS count changes. Indexed 0..15 */
+let colorInputs = {};
+let colorHexEls = {};
+
+const DEFAULT_SLOT_COLORS = [
+  '#B0B0B0', '#131211', '#F5F5F5', '#1E40AF',
+  '#DC2626', '#EA580C', '#CA8A04', '#16A34A',
+  '#0891B2', '#7C3AED', '#DB2777', '#854D0E',
+  '#44403C', '#A1A1AA', '#F97316', '#22D3EE',
+];
+const SLOT_NAME_SHORT = [
+  'Filament 1', 'Filament 2', 'Filament 3', 'Filament 4',
+  'Filament 5', 'Filament 6', 'Filament 7', 'Filament 8',
+  'Filament 9', 'Filament 10', 'Filament 11', 'Filament 12',
+  'Filament 13', 'Filament 14', 'Filament 15', 'Filament 16',
+];
+const LEGACY_SLOT = { body: 0, emboss: 1, deboss: 2, trim: 3 };
+const MAX_AMS_SLOTS = MAX_PAINT_SLOTS; // 16
+
+function slotIndex(target) {
+  if (typeof target === 'number' && Number.isFinite(target)) return Math.max(0, Math.min(15, target | 0));
+  if (LEGACY_SLOT[target] != null) return LEGACY_SLOT[target];
+  const n = parseInt(target, 10);
+  return Number.isFinite(n) ? Math.max(0, Math.min(15, n)) : 0;
+}
+function slotLabel(i) { return `Slot ${i + 1} · ${SLOT_NAME_SHORT[i] || ('Colour ' + (i + 1))}`; }
+function getSlotColor(i) { return colorInputs[i]?.value || DEFAULT_SLOT_COLORS[i] || '#888888'; }
+function slotColorsArray(n = S.slotCount) {
+  return Array.from({ length: n }, (_, i) => getSlotColor(i));
+}
+function ensureFacePaint() {
+  if (!S.nTri) return null;
+  if (!S.facePaint || S.facePaint.length !== S.nTri) {
+    S.facePaint = S.embossMask
+      ? masksToFacePaint(S.embossMask, S.debossMask, S.trimMask, S.nTri)
+      : new Uint8Array(S.nTri);
+  }
+  return S.facePaint;
+}
+function syncLegacyMasks() {
+  if (!S.facePaint || !S.nTri) return;
+  const m = facePaintToMasks(S.facePaint, S.nTri);
+  S.embossMask = m.embossMask;
+  S.debossMask = m.debossMask;
+  S.trimMask = m.trimMask;
+}
+
+/* ================================================================== */
+/*  STATUS & STATS                                                    */
+/* ================================================================== */
+
+function setStatus(text, mode = 'idle') {
+  statusText.textContent = text;
+  statusDot.className = 'status-dot ' + mode;
+}
+
+function updateStats() {
+  $('statVerts').textContent = S.nVerts > 0 ? S.nVerts.toLocaleString() : '--';
+  $('statFaces').textContent = S.nTri > 0 ? S.nTri.toLocaleString() : '--';
+  $('statEmboss').textContent = S.embossCount > 0 ? S.embossCount.toLocaleString() : '--';
+  $('statDeboss').textContent = S.debossCount > 0 ? S.debossCount.toLocaleString() : '--';
+  $('statTrim').textContent = S.trimCount > 0 ? S.trimCount.toLocaleString() : '--';
+}
+
+function recountPaint() {
+  let ec = 0, dc = 0, tc = 0;
+  const fp = S.facePaint;
+  if (fp) {
+    for (let i = 0; i < S.nTri; i++) {
+      const s = fp[i] || 0;
+      if (s === 1) ec++;
+      else if (s === 2) dc++;
+      else if (s === 3) tc++;
+    }
+  }
+  S.embossCount = ec; S.debossCount = dc; S.trimCount = tc;
+  updateStats();
+}
+
+/* ================================================================== */
+/*  DETECT PRESETS                                                    */
+/* ================================================================== */
+
+const DETECT_PRESETS = {
+  fine: { mode:'emboss', sensitivity:0.22, smoothIter:120, minCluster:0.5,
+    adaptive:true, ridgeTop:true, morphClose:1, morphOpen:1, scoreSmooth:2, hysteresis:0.55, majority:2 },
+  bold: { mode:'both', sensitivity:0.40, smoothIter:40, minCluster:3.0,
+    adaptive:true, ridgeTop:false, morphClose:1, morphOpen:1, scoreSmooth:1, hysteresis:0.65, majority:1 },
+};
+let activeDetectPreset = 'fine';
+let detectRefine = { scoreSmooth: 2, hysteresis: 0.55, majority: 2 };
+
+function updateSensitivityLabel() {
+  const el = $('sensitivityLabel');
+  if (el) el.textContent = $('adaptiveThr').checked ? 'Sensitivity (keep top %)' : 'Sensitivity (mm)';
+}
+
+function getDetectOpts() {
+  return {
+    threshold: parseFloat($('sensitivity').value),
+    iterations: parseInt($('smoothIter').value, 10),
+    weight: 0.5,
+    mode: S.detectMode || 'emboss',
+    adaptive: $('adaptiveThr').checked,
+    absFloor: 0.05,
+    ridgeTop: $('ridgeTop').checked,
+    morphCloseSteps: parseInt($('morphClose').value, 10),
+    morphOpenSteps: parseInt($('morphOpen').value, 10),
+    scoreSmoothPasses: detectRefine.scoreSmooth,
+    hysteresis: detectRefine.hysteresis,
+    majorityPasses: detectRefine.majority,
+  };
+}
+
+function setDetectPresetActive(name) {
+  activeDetectPreset = name;
+  document.querySelectorAll('.detect-preset-btn').forEach(b => b.classList.toggle('active', b.dataset.preset === name));
+}
+
+function applyDetectPreset(name) {
+  const p = DETECT_PRESETS[name];
+  if (!p) { setDetectPresetActive('custom'); return; }
+  S.detectMode = p.mode;
+  const sliders = { sensitivity: p.sensitivity, smoothIter: p.smoothIter, minCluster: p.minCluster,
+    morphClose: p.morphClose, morphOpen: p.morphOpen };
+  for (const [k, v] of Object.entries(sliders)) {
+    const el = $(k); if (el) el.value = String(v);
+  }
+  $('sensitivityVal').textContent = p.sensitivity.toFixed(2);
+  $('smoothIterVal').textContent = String(p.smoothIter);
+  $('minClusterVal').textContent = p.minCluster.toFixed(1);
+  $('morphCloseVal').textContent = String(p.morphClose);
+  $('morphOpenVal').textContent = String(p.morphOpen);
+  $('adaptiveThr').checked = p.adaptive;
+  $('ridgeTop').checked = p.ridgeTop;
+  detectRefine = { scoreSmooth: p.scoreSmooth ?? 2, hysteresis: p.hysteresis ?? 0.55, majority: p.majority ?? 1 };
+  updateSensitivityLabel();
+  setDetectPresetActive(name);
+  S.featureEmboss = null; S.featureDeboss = null;
+}
+
+/* ================================================================== */
+/*  MESH BUILD & COLORS                                               */
+/* ================================================================== */
+
+function meshBounds(verts, nVerts) {
+  let mnX=Infinity, mnY=Infinity, mnZ=Infinity, mxX=-Infinity, mxY=-Infinity, mxZ=-Infinity;
+  for (let i = 0; i < nVerts; i++) {
+    const x=verts[i*3], y=verts[i*3+1], z=verts[i*3+2];
+    if(x<mnX)mnX=x; if(x>mxX)mxX=x;
+    if(y<mnY)mnY=y; if(y>mxY)mxY=y;
+    if(z<mnZ)mnZ=z; if(z>mxZ)mxZ=z;
+  }
+  return { min:[mnX,mnY,mnZ], max:[mxX,mxY,mxZ], size:[mxX-mnX,mxY-mnY,mxZ-mnZ] };
+}
+
+function candidatePointInto(out, x, y, z, upAxis, upSign) {
+  if (upAxis === 0) { out[0] = y; out[1] = x * upSign; out[2] = z; return out; }
+  if (upAxis === 1) { out[0] = x; out[1] = y * upSign; out[2] = z; return out; }
+  out[0] = x; out[1] = z * upSign; out[2] = -y; return out;
+}
+
+function chooseBedOrientation(verts, faces, nVerts, nTri) {
+  const b = meshBounds(verts, nVerts);
+  const dims = b.size.map((size, axis) => ({ size: Math.max(0, size), axis }))
+    .sort((a, b) => a.size - b.size);
+  const thin = dims[0].size > 0 && dims[0].size <= dims[1].size * 0.35 && dims[2].size >= dims[0].size * 3;
+  const candidates = [];
+  const axes = thin ? [dims[0].axis] : [1, 2, 0]; // Prefer existing Y-up, then normal STL Z-up, then side-laying rescue.
+
+  for (const upAxis of axes) {
+    for (const upSign of [1, -1]) {
+      let minY = Infinity, maxY = -Infinity, minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+      const p = [0, 0, 0];
+      for (let i = 0; i < nVerts; i++) {
+        candidatePointInto(p, verts[i * 3], verts[i * 3 + 1], verts[i * 3 + 2], upAxis, upSign);
+        if (p[0] < minX) minX = p[0]; if (p[0] > maxX) maxX = p[0];
+        if (p[1] < minY) minY = p[1]; if (p[1] > maxY) maxY = p[1];
+        if (p[2] < minZ) minZ = p[2]; if (p[2] > maxZ) maxZ = p[2];
+      }
+
+      // Score the dominant near-horizontal flat, not absolute minY. A Chop
+      // connector socket sits a few mm below the cut face, so minY is the
+      // pocket floor and the real bed plane would miss a tight bottom band.
+      let contactArea = 0;
+      if (faces && nTri) {
+        const height = Math.max(maxY - minY, 1);
+        const binSize = Math.max(0.5, height / 200);
+        const bins = new Map();
+        const stride = Math.max(1, Math.ceil(nTri / 60000));
+        const pa = [0, 0, 0], pb = [0, 0, 0], pc = [0, 0, 0];
+        for (let fi = 0; fi < nTri; fi += stride) {
+          const a = faces[fi * 3], b = faces[fi * 3 + 1], c = faces[fi * 3 + 2];
+          candidatePointInto(pa, verts[a * 3], verts[a * 3 + 1], verts[a * 3 + 2], upAxis, upSign);
+          candidatePointInto(pb, verts[b * 3], verts[b * 3 + 1], verts[b * 3 + 2], upAxis, upSign);
+          candidatePointInto(pc, verts[c * 3], verts[c * 3 + 1], verts[c * 3 + 2], upAxis, upSign);
+          const e1x = pb[0] - pa[0], e1y = pb[1] - pa[1], e1z = pb[2] - pa[2];
+          const e2x = pc[0] - pa[0], e2y = pc[1] - pa[1], e2z = pc[2] - pa[2];
+          const nx = e1y * e2z - e1z * e2y;
+          const ny = e1z * e2x - e1x * e2z;
+          const nz = e1x * e2y - e1y * e2x;
+          const area2 = Math.sqrt(nx * nx + ny * ny + nz * nz);
+          if (area2 <= 1e-9 || Math.abs(ny) / area2 <= 0.55) continue;
+          const cy = (pa[1] + pb[1] + pc[1]) / 3;
+          const bin = Math.round((cy - minY) / binSize);
+          bins.set(bin, (bins.get(bin) || 0) + area2 * 0.5 * stride);
+        }
+        let maxBinArea = 0;
+        for (const area of bins.values()) if (area > maxBinArea) maxBinArea = area;
+        let bestBin = 0, bestArea = 0;
+        for (const [bin, area] of bins) {
+          if (area >= maxBinArea * 0.9 && (bestArea === 0 || bin < bestBin)) {
+            bestBin = bin;
+            bestArea = area;
+          }
+        }
+        const rel = Math.min(1, Math.max(0, (bestBin * binSize) / height));
+        contactArea = bestArea * (1 - rel);
+      }
+
+      const bedArea = Math.max(0, maxX - minX) * Math.max(0, maxZ - minZ);
+      const height = Math.max(0, maxY - minY);
+      const heightPenalty = height / Math.max(Math.sqrt(Math.max(bedArea, 1)), 1);
+      const score = (contactArea || bedArea * 0.0001) - heightPenalty * 0.02 + (upAxis === 1 ? 0.01 : 0) + (upAxis === 2 ? 0.005 : 0);
+      candidates.push({ upAxis, upSign, thin, score });
+    }
+  }
+  candidates.sort((a, b) => b.score - a.score);
+  return candidates[0] || { upAxis: 2, upSign: 1, thin: false };
+}
+
+function seatVertsOnBed(verts, nVerts) {
+  let mnX=Infinity, mnY=Infinity, mnZ=Infinity, mxX=-Infinity, mxZ=-Infinity;
+  for (let i = 0; i < nVerts; i++) {
+    const x = verts[i * 3], y = verts[i * 3 + 1], z = verts[i * 3 + 2];
+    if (x < mnX) mnX = x; if (x > mxX) mxX = x;
+    if (y < mnY) mnY = y;
+    if (z < mnZ) mnZ = z; if (z > mxZ) mxZ = z;
+  }
+  const cx = (mnX + mxX) * 0.5, cz = (mnZ + mxZ) * 0.5;
+  for (let i = 0; i < nVerts; i++) {
+    verts[i * 3] -= cx;
+    verts[i * 3 + 1] -= mnY;
+    verts[i * 3 + 2] -= cz;
+  }
+}
+
+function orientAndSeatVertsOnBed(verts, nVerts, faces = null, nTri = 0) {
+  const orientation = chooseBedOrientation(verts, faces, nVerts, nTri);
+  const { upAxis, upSign, thin } = orientation;
+  const tmp = [0, 0, 0];
+  for (let i = 0; i < nVerts; i++) {
+    const off = i * 3;
+    candidatePointInto(tmp, verts[off], verts[off + 1], verts[off + 2], upAxis, upSign);
+    verts[off] = tmp[0]; verts[off + 1] = tmp[1]; verts[off + 2] = tmp[2];
+  }
+  seatVertsOnBed(verts, nVerts);
+  return { upAxis, upSign, thin, score: orientation.score };
+}
+
+// STL files are defined in normal Z-up coordinates. Painter works Y-up internally,
+// so use a deterministic transform instead of guessing the bed axis:
+// STL (x, y, z) -> Painter (x, z, -y).
+function orientSTLZUpAndSeat(verts, nVerts) {
+  for (let i = 0; i < nVerts; i++) {
+    const off = i * 3;
+    const x = verts[off];
+    const y = verts[off + 1];
+    const z = verts[off + 2];
+    verts[off] = x;
+    verts[off + 1] = z;
+    verts[off + 2] = -y;
+  }
+  seatVertsOnBed(verts, nVerts);
+  return { upAxis: 2, upSign: 1, thin: false, score: Infinity };
+}
+
+function rotateModel(axis, radians, label) {
+  if (!S.verts || !S.nVerts) return;
+  const b = meshBounds(S.verts, S.nVerts);
+  const cx = (b.min[0] + b.max[0]) * 0.5;
+  const cy = (b.min[1] + b.max[1]) * 0.5;
+  const cz = (b.min[2] + b.max[2]) * 0.5;
+  const c = Math.cos(radians), s = Math.sin(radians);
+  for (let i = 0; i < S.nVerts; i++) {
+    let x = S.verts[i * 3] - cx, y = S.verts[i * 3 + 1] - cy, z = S.verts[i * 3 + 2] - cz;
+    let nx = x, ny = y, nz = z;
+    if (axis === 'x') { ny = y * c - z * s; nz = y * s + z * c; }
+    else if (axis === 'y') { nx = x * c + z * s; nz = -x * s + z * c; }
+    else { nx = x * c - y * s; ny = x * s + y * c; }
+    S.verts[i * 3] = nx + cx;
+    S.verts[i * 3 + 1] = ny + cy;
+    S.verts[i * 3 + 2] = nz + cz;
+  }
+  seatVertsOnBed(S.verts, S.nVerts);
+  S.symmetryMap = null;
+  buildMesh({ frame: true });
+  setStatus(label || 'Rotated', 'idle');
+}
+
+function facePaintSlot(i) {
+  const fp = S.facePaint;
+  return fp ? (fp[i] || 0) : slotIndex(paintClassOf(i, S.embossMask, S.debossMask, S.trimMask));
+}
+/** @deprecated string class — prefer facePaintSlot */
+function facePaintClass(i) {
+  const s = facePaintSlot(i);
+  return s === 1 ? 'emboss' : s === 2 ? 'deboss' : s === 3 ? 'trim' : 'body';
+}
+
+/** Stamped artwork is appended after the original model and is never paintable. */
+function baseFaceCount() {
+  const firstArtFace = Number.isInteger(S.stampTri0) ? S.stampTri0 : S.nTri;
+  return Math.max(0, Math.min(firstArtFace, S.nTri));
+}
+
+function isArtworkFace(i) {
+  return i >= baseFaceCount() && i < S.nTri;
+}
+
+function isFaceHidden(i) {
+  if (S.hiddenManual && S.hiddenManual[i]) return true;
+  if (S.islandMap && S.hiddenIslands.has(S.islandMap[i])) return true;
+  const slot = facePaintSlot(i);
+  if (S.soloActive) return slot !== slotIndex(S.paintTarget);
+  return !!S.hiddenSlots[slot];
+}
+
+function isPaintableBaseFace(i) {
+  return i >= 0 && i < baseFaceCount() && !isFaceHidden(i);
+}
+
+function paintableBaseRegion() {
+  const region = new Uint8Array(S.nTri);
+  for (let i = 0, end = baseFaceCount(); i < end; i++) {
+    if (!isFaceHidden(i)) region[i] = 1;
+  }
+  return region;
+}
+
+function buildMesh({ frame = true } = {}) {
+  if (S.mesh) { scene.remove(S.mesh); S.mesh.geometry.dispose(); S.mesh.material?.dispose?.(); }
+
+  const geom = new THREE.BufferGeometry();
+  const pos = new Float32Array(S.nTri * 9);
+  const cols = new Float32Array(S.nTri * 9);
+  const bodyCol = new THREE.Color(getSlotColor(0));
+
+  for (let i = 0; i < S.nTri; i++) {
+    for (let v = 0; v < 3; v++) {
+      const vi = S.faces[i * 3 + v];
+      pos[i*9+v*3]   = S.verts[vi*3];
+      pos[i*9+v*3+1] = S.verts[vi*3+1];
+      pos[i*9+v*3+2] = S.verts[vi*3+2];
+      for (let c = 0; c < 3; c++) cols[i*9+v*3+c] = bodyCol.toArray()[c];
+    }
+  }
+
+  geom.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geom.setAttribute('color', new THREE.BufferAttribute(cols, 3));
+  geom.computeVertexNormals();
+
+  S.mesh = new THREE.Mesh(geom, new THREE.MeshStandardMaterial({
+    vertexColors: true, roughness: 0.55, metalness: 0.05, flatShading: false
+  }));
+  S.mesh.castShadow = true; S.mesh.receiveShadow = true;
+  scene.add(S.mesh);
+
+  if (frame) frameModel();
+  updateMeshColors();
+  rebuildWireframe();
+}
+
+function rebuildWireframe() {
+  if (S.wireframe) { scene.remove(S.wireframe); S.wireframe.geometry?.dispose(); S.wireframe.material?.dispose(); S.wireframe = null; }
+  if (!S.mesh) return;
+  const wg = new THREE.WireframeGeometry(S.mesh.geometry);
+  S.wireframe = new THREE.LineSegments(wg, new THREE.LineBasicMaterial({ color: 0x3ecfff, opacity: 0.18, transparent: true, depthTest: true }));
+  S.wireframe.rotation.copy(S.mesh.rotation);
+  S.wireframe.visible = S.wireframeOn;
+  scene.add(S.wireframe);
+}
+
+function toggleWireframe() {
+  S.wireframeOn = !S.wireframeOn;
+  if (S.wireframe) S.wireframe.visible = S.wireframeOn;
+  $('wireframeBtn').classList.toggle('active-tool', S.wireframeOn);
+  setStatus(S.wireframeOn ? 'Wireframe on' : 'Wireframe off', 'idle');
+}
+
+function updateMeshColors() {
+  if (!S.mesh) return;
+  const colors = S.mesh.geometry.attributes.color;
+  const slotCols = Array.from({ length: MAX_AMS_SLOTS }, (_, i) => new THREE.Color(getSlotColor(i)));
+  const ghostCol = new THREE.Color(0x2a3548);
+  const edgeCol = new THREE.Color('#7dffb3');
+  const smartCol = new THREE.Color('#f5c542');
+  const selectCol = new THREE.Color('#ff6bff'); // magenta for click-selection
+  const clearSelectCol = new THREE.Color('#25d8ff'); // cyan for clear-preview
+  const fp = ensureFacePaint();
+
+  for (let i = 0; i < S.nTri; i++) {
+    let col = slotCols[0];
+    if (S.clickSelection && S.clickSelection[i]) col = S._edgeSelectionMode === 'clear' ? clearSelectCol : selectCol;
+    else if (S.edgeHighlight && S.edgeHighlight[i]) col = edgeCol;
+    else if (S.smartPreview && S.smartPreview[i]) col = smartCol;
+    else {
+      const s = fp ? (fp[i] || 0) : 0;
+      col = slotCols[s] || slotCols[0];
+    }
+
+    const isHighlighted = (S.clickSelection?.[i]) || (S.edgeHighlight?.[i]) || (S.smartPreview?.[i]);
+    if (isFaceHidden(i) && !isHighlighted) col = ghostCol;
+
+    for (let v = 0; v < 3; v++) colors.setXYZ(i * 3 + v, col.r, col.g, col.b);
+  }
+  colors.needsUpdate = true;
+}
+
+function disposeSceneObject(obj) {
+  if (!obj) return;
+  scene.remove(obj);
+  obj.geometry?.dispose?.();
+  if (Array.isArray(obj.material)) obj.material.forEach(m => m?.dispose?.());
+  else obj.material?.dispose?.();
+}
+
+function clearSceneModel() {
+  disposeSceneObject(S.mesh);
+  disposeSceneObject(S.wireframe);
+  disposeArtPreview();
+  art.placement = null;
+  art.lastPlacement = null;
+  art.rotationDrag = null;
+  art.moveDrag = null;
+  S.mesh = null;
+  S.wireframe = null;
+  S.hiddenManual = null;
+  S.hiddenSlots = Array(16).fill(false);
+  S.soloActive = false;
+  S.hiddenIslands?.clear?.();
+}
+
+function frameModel() {
+  if (!S.mesh) return;
+  S.mesh.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(S.mesh);
+  const size = new THREE.Vector3(), center = new THREE.Vector3();
+  box.getSize(size); box.getCenter(center);
+  const d = Math.max(size.x, size.y, size.z, 1) * 1.8;
+  camera.position.set(center.x + d * 0.7, center.y + d * 0.35, center.z + d * 0.7);
+  controls.target.copy(center);
+  controls.update();
+}
+
+function zoomBy(factor) {
+  const dir = new THREE.Vector3().subVectors(camera.position, controls.target);
+  camera.position.copy(controls.target).addScaledVector(dir, factor);
+  controls.update();
+}
+
+/* ================================================================== */
+/*  PAINT SYSTEM                                                      */
+/* ================================================================== */
+
+function pushUndo({ geom = false } = {}) {
+  const fp = ensureFacePaint();
+  if (!fp) return;
+  const snap = { paint: fp.slice() };
+  if (geom) {
+    snap.verts = S.verts.slice();
+    snap.faces = new Uint32Array(S.faces);
+    snap.nVerts = S.nVerts;
+    snap.nTri = S.nTri;
+  }
+  S.undoStack.push(snap);
+  if (S.undoStack.length > 30) S.undoStack.shift();
+  S.redoStack.length = 0; // new paint action clears redo
+  $('undoBtn').disabled = false;
+  $('redoBtn').disabled = true;
+}
+
+/** Paint only the colour buffer for specific faces (fast live brush feedback). */
+function tintFacesLive(faceIndices, slot) {
+  if (!S.mesh || !faceIndices?.length) return;
+  const colors = S.mesh.geometry.attributes.color;
+  if (!colors) return;
+  const col = new THREE.Color(getSlotColor(slot));
+  for (const i of faceIndices) {
+    for (let v = 0; v < 3; v++) colors.setXYZ(i * 3 + v, col.r, col.g, col.b);
+  }
+  colors.needsUpdate = true;
+}
+
+function paintFacesFree(faceIndices, target, { undo = true, refresh = true, live = false } = {}) {
+  const fp = ensureFacePaint();
+  if (!fp || !faceIndices.length) return 0;
+  const slot = slotIndex(target != null ? target : S.paintTarget);
+  let faces = [];
+  for (const i of faceIndices) {
+    if (!isPaintableBaseFace(i)) continue;
+    if ((fp[i] || 0) === slot) continue; // already painted — skip work
+    faces.push(i);
+  }
+  if (!faces.length) return 0;
+  // Mirror faces for symmetry painting
+  if (S.symmetryOn && S.symmetryMap) {
+    const extra = [];
+    for (const i of faces) {
+      const m = S.symmetryMap[i];
+      if (m >= 0 && m !== i && isPaintableBaseFace(m) && (fp[m] || 0) !== slot) extra.push(m);
+    }
+    if (extra.length) faces = faces.concat(extra);
+  }
+  if (undo) pushUndo();
+  for (const i of faces) fp[i] = slot;
+  if (live) {
+    tintFacesLive(faces, slot);
+  } else if (refresh) {
+    syncLegacyMasks();
+    updateMeshColors();
+    recountPaint();
+  }
+  exportBtn.disabled = false;
+  return faces.length;
+}
+
+function clearFacesFree(faceIndices, { undo = true, refresh = true } = {}) {
+  const fp = ensureFacePaint();
+  if (!fp || !faceIndices.length) return 0;
+  let faces = faceIndices.filter(isPaintableBaseFace);
+  if (!faces.length) return 0;
+  if (S.symmetryOn && S.symmetryMap) {
+    const extra = [];
+    for (const i of faces) {
+      const m = S.symmetryMap[i];
+      if (m >= 0 && m !== i && isPaintableBaseFace(m)) extra.push(m);
+    }
+    if (extra.length) faces = faces.concat(extra);
+  }
+  if (undo) pushUndo();
+  for (const i of faces) fp[i] = 0;
+  if (refresh) {
+    syncLegacyMasks();
+    updateMeshColors();
+    recountPaint();
+  }
+  exportBtn.disabled = false;
+  return faces.length;
+}
+
+function ensureFaceAdj() {
+  if (!S.faceAdj && S.faces && S.nTri) {
+    setStatus('Building edge map…', 'working');
+    S.faceAdj = buildFaceAdj(S.faces, S.nTri);
+  }
+  return S.faceAdj;
+}
+
+/* ================================================================== */
+/*  RAYCASTING                                                        */
+/* ================================================================== */
+
+function pickHitAtClient(clientX, clientY) {
+  if (!S.mesh) return null;
+  const rect = viewport.getBoundingClientRect();
+  pointerNdc.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+  pointerNdc.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+  raycaster.setFromCamera(pointerNdc, camera);
+  for (const hit of raycaster.intersectObject(S.mesh, false)) {
+    if (hit.faceIndex == null || isFaceHidden(hit.faceIndex)) continue;
+    return { faceIndex: hit.faceIndex, point: S.mesh.worldToLocal(hit.point.clone()), worldPoint: hit.point };
+  }
+  return null;
+}
+
+function faceNormalLocal(faceIndex) {
+  const i0 = S.faces[faceIndex * 3], i1 = S.faces[faceIndex * 3 + 1], i2 = S.faces[faceIndex * 3 + 2];
+  const ax = S.verts[i0 * 3], ay = S.verts[i0 * 3 + 1], az = S.verts[i0 * 3 + 2];
+  const bx = S.verts[i1 * 3], by = S.verts[i1 * 3 + 1], bz = S.verts[i1 * 3 + 2];
+  const cx = S.verts[i2 * 3], cy = S.verts[i2 * 3 + 1], cz = S.verts[i2 * 3 + 2];
+  const nx = (by - ay) * (cz - az) - (bz - az) * (cy - ay);
+  const ny = (bz - az) * (cx - ax) - (bx - ax) * (cz - az);
+  const nz = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+  const L = Math.hypot(nx, ny, nz) || 1;
+  return [nx / L, ny / L, nz / L];
+}
+
+function artAspect() {
+  if (art.trace?.width && art.trace?.height) return art.trace.width / art.trace.height;
+  return art.raster?.aspect || 1;
+}
+
+function artSizeMm() {
+  return stampSizeMm(parseFloat($('artSize')?.value) || 48, artAspect());
+}
+
+function artRotationDeg() {
+  return parseFloat($('artRot')?.value) || 0;
+}
+
+function artTraceThreshold() {
+  return parseFloat($('artTraceThreshold')?.value) || 128;
+}
+
+function artTraceInvert() {
+  return !!$('artTraceInvert')?.checked;
+}
+
+function artTraceSummary() {
+  const t = art.trace;
+  if (!t) return 'tracing…';
+  const n = t.colorLayers?.length || 0;
+  if (n) {
+    const labels = t.colorLayers.map((l) => l.label).filter(Boolean).slice(0, 6).join(', ');
+    const merged = t.rawColourBucketCount > n ? ` · merged from ${t.rawColourBucketCount} inks` : '';
+    return `${n} colours · multi-colour logo${merged}${labels ? ` · ${labels}` : ''}`;
+  }
+  if (t.outlineRaster) return `${(t.rectCount || 0).toLocaleString()} ink runs · line art`;
+  return t.mode || 'traced';
+}
+
+function syncArtMeta() {
+  const meta = $('artMeta');
+  const wrap = $('artPreviewWrap');
+  const has = !!art.raster;
+  $('artOpts')?.classList.toggle('visible', has);
+  if ($('artClearBtn')) $('artClearBtn').disabled = !has;
+  if ($('artTraceBtn')) $('artTraceBtn').disabled = !has;
+  if ($('artPlaceBtn')) $('artPlaceBtn').disabled = !has || !S.mesh;
+  if (!has) {
+    if (meta) { meta.classList.add('hidden'); meta.textContent = ''; }
+    wrap?.classList.add('hidden');
+    hideArtPreview();
+    syncArtPlacementUI();
+    return;
+  }
+  const { widthMm, heightMm } = artSizeMm();
+  if (meta) {
+    meta.classList.remove('hidden');
+    meta.textContent = `${art.fileName || 'logo'} · ${widthMm.toFixed(0)}×${heightMm.toFixed(0)} mm · ${artTraceSummary()}`;
+  }
+  wrap?.classList.remove('hidden');
+  const dest = $('artPreviewCanvas');
+  if (dest && art.traceCanvas && art.trace) {
+    drawTracePreview(dest, art.traceCanvas, art.trace);
+  } else if (dest && art.raster?.canvas) {
+    const src = art.raster.canvas;
+    const ctx = dest.getContext('2d');
+    ctx.clearRect(0, 0, dest.width, dest.height);
+    const scale = Math.min(dest.width / src.width, dest.height / src.height);
+    const dw = src.width * scale, dh = src.height * scale;
+    ctx.drawImage(src, (dest.width - dw) / 2, (dest.height - dh) / 2, dw, dh);
+  }
+  syncArtPlacementUI();
+}
+
+function hexToRgb255(hex) {
+  const rgb = parseHexColor(hex);
+  return rgb || [136, 136, 136];
+}
+
+function artInkCanvas() {
+  const t = art.trace;
+  if (!t?.width || !t?.height) return art.raster?.canvas || null;
+  const w = t.width, h = t.height;
+  const c = document.createElement('canvas');
+  c.width = w;
+  c.height = h;
+  const ctx = c.getContext('2d');
+  const img = ctx.createImageData(w, h);
+  const d = img.data;
+  if (art.mode !== 'active' && t.colorLayers?.length) {
+    for (const layer of t.colorLayers) {
+      const [r, g, b] = layer.rgb || [180, 180, 180];
+      const mask = layer.mask;
+      if (!mask) continue;
+      for (let i = 0; i < mask.length; i++) {
+        if (!mask[i]) continue;
+        const o = i * 4;
+        d[o] = r; d[o + 1] = g; d[o + 2] = b; d[o + 3] = 255;
+      }
+    }
+  } else {
+    const mask = t.silhouetteMask || t.mask;
+    const [r, g, b] = hexToRgb255(getSlotColor(slotIndex(S.paintTarget)));
+    if (mask) {
+      for (let i = 0; i < mask.length; i++) {
+        if (!mask[i]) continue;
+        const o = i * 4;
+        d[o] = r; d[o + 1] = g; d[o + 2] = b; d[o + 3] = 230;
+      }
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  return c;
+}
+
+function refreshArtTexture() {
+  if (art.texture) { art.texture.dispose(); art.texture = null; }
+  const canvas = artInkCanvas();
+  if (!canvas) return;
+  art.texture = new THREE.CanvasTexture(canvas);
+  art.texture.needsUpdate = true;
+  if (art.preview?.material) {
+    art.preview.material.map = art.texture;
+    art.preview.material.needsUpdate = true;
+  }
+}
+
+function ensureSlotsForHexes(hexes) {
+  if (!hexes?.length) return;
+  for (const hex of hexes) {
+    const rgb = parseHexColor(hex);
+    if (!rgb) continue;
+    const slots = slotColorsArray(S.slotCount).map((h) => parseHexColor(h) || [0, 0, 0]);
+    const { dist2 } = nearestSlot(rgb, slots);
+    if (dist2 <= ART_MATCH_DIST2) continue;
+    if (S.slotCount >= MAX_AMS_SLOTS) break;
+    S.slotCount += 1;
+    syncSlotCountUI();
+    const i = S.slotCount - 1;
+    if (colorInputs[i]) colorInputs[i].value = hex;
+    if (colorHexEls[i]) colorHexEls[i].textContent = hex.toUpperCase();
+  }
+  syncPaintSwatches();
+  updateMeshColors();
+}
+
+function paintFaceSlotPairs(pairs) {
+  const fp = ensureFacePaint();
+  if (!fp || !pairs?.length) return 0;
+  let faces = pairs.filter((p) => p.face >= 0 && p.face < S.nTri && !isFaceHidden(p.face));
+  if (S.symmetryOn && S.symmetryMap) {
+    const extra = [];
+    for (const p of faces) {
+      const m = S.symmetryMap[p.face];
+      if (m >= 0 && m !== p.face && !isFaceHidden(m)) extra.push({ face: m, slot: p.slot });
+    }
+    if (extra.length) faces = faces.concat(extra);
+  }
+  if (!faces.length) return 0;
+  pushUndo();
+  for (const p of faces) fp[p.face] = slotIndex(p.slot);
+  syncLegacyMasks();
+  updateMeshColors();
+  recountPaint();
+  exportBtn.disabled = false;
+  return faces.length;
+}
+
+function disposeArtPreview() {
+  if (art.preview) {
+    scene.remove(art.preview);
+    art.preview.geometry?.dispose?.();
+    art.preview.material?.dispose?.();
+    art.preview = null;
+  }
+  if (art.rotateHandle) {
+    scene.remove(art.rotateHandle);
+    art.rotateHandle.geometry?.dispose?.();
+    art.rotateHandle.material?.dispose?.();
+    art.rotateHandle = null;
+  }
+  if (art.moveHandle) {
+    scene.remove(art.moveHandle);
+    art.moveHandle.geometry?.dispose?.();
+    art.moveHandle.material?.dispose?.();
+    art.moveHandle = null;
+  }
+}
+
+function hideArtPreview() {
+  if (art.preview) art.preview.visible = false;
+  if (art.rotateHandle) art.rotateHandle.visible = false;
+  if (art.moveHandle) art.moveHandle.visible = false;
+}
+
+function artStampFrameFromHit(hit, rotationDeg = artRotationDeg()) {
+  const n = faceNormalLocal(hit.faceIndex);
+  return makeStampFrame([hit.point.x, hit.point.y, hit.point.z], n, rotationDeg);
+}
+
+function cloneArtPlacement(placement) {
+  if (!placement) return null;
+  return {
+    origin: placement.origin.slice(),
+    normal: placement.normal.slice(),
+    rotationDeg: placement.rotationDeg,
+  };
+}
+
+function artStampFrameFromPlacement(placement = art.placement) {
+  if (!placement) return null;
+  return makeStampFrame(placement.origin, placement.normal, placement.rotationDeg);
+}
+
+function artWorldFrame(frame) {
+  const origin = new THREE.Vector3(frame.origin[0], frame.origin[1], frame.origin[2]);
+  const right = new THREE.Vector3(frame.right[0], frame.right[1], frame.right[2]);
+  const up = new THREE.Vector3(frame.up[0], frame.up[1], frame.up[2]);
+  const normal = new THREE.Vector3(frame.normal[0], frame.normal[1], frame.normal[2]);
+  S.mesh.updateMatrixWorld(true);
+  S.mesh.localToWorld(origin);
+  right.transformDirection(S.mesh.matrixWorld).normalize();
+  up.transformDirection(S.mesh.matrixWorld).normalize();
+  normal.transformDirection(S.mesh.matrixWorld).normalize();
+  return { origin, right, up, normal };
+}
+
+function ensureArtRotateHandle() {
+  if (art.rotateHandle) return art.rotateHandle;
+  const geometry = new THREE.TorusGeometry(1, 0.055, 10, 80);
+  const material = new THREE.MeshBasicMaterial({
+    color: 0x25d8ff, transparent: true, opacity: 0.88,
+    depthTest: false, depthWrite: false,
+  });
+  art.rotateHandle = new THREE.Mesh(geometry, material);
+  art.rotateHandle.renderOrder = 3;
+  scene.add(art.rotateHandle);
+  return art.rotateHandle;
+}
+
+function ensureArtMoveHandle() {
+  if (art.moveHandle) return art.moveHandle;
+  const geometry = new THREE.RingGeometry(0.45, 1, 28);
+  const material = new THREE.MeshBasicMaterial({
+    color: 0x25d8ff, transparent: true, opacity: 0.92,
+    depthTest: false, depthWrite: false, side: THREE.DoubleSide,
+  });
+  art.moveHandle = new THREE.Mesh(geometry, material);
+  art.moveHandle.renderOrder = 4;
+  scene.add(art.moveHandle);
+  return art.moveHandle;
+}
+
+function showArtPreviewForFrame(frame, { adjustable = false } = {}) {
+  if (!art.raster || !S.mesh || !frame) { hideArtPreview(); return; }
+  const { widthMm, heightMm } = artSizeMm();
+  if (!art.texture) refreshArtTexture();
+  if (!art.texture) return;
+  if (!art.preview) {
+    const geom = new THREE.PlaneGeometry(1, 1);
+    const mat = new THREE.MeshBasicMaterial({
+      map: art.texture, transparent: true, opacity: 0.78, depthWrite: false,
+      side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2,
+    });
+    art.preview = new THREE.Mesh(geom, mat);
+    art.preview.renderOrder = 2;
+    scene.add(art.preview);
+  } else if (art.preview.material.map !== art.texture) {
+    art.preview.material.map = art.texture;
+    art.preview.material.needsUpdate = true;
+  }
+  const { origin, right, up, normal } = artWorldFrame(frame);
+  const m = new THREE.Matrix4().makeBasis(right, up, normal);
+  art.preview.quaternion.setFromRotationMatrix(m);
+  art.preview.position.copy(origin).addScaledVector(normal, 0.25);
+  art.preview.scale.set(widthMm, heightMm, 1);
+  art.preview.visible = true;
+
+  if (adjustable) {
+    const ring = ensureArtRotateHandle();
+    const move = ensureArtMoveHandle();
+    const radius = Math.hypot(widthMm * 0.5, heightMm * 0.5) + 7;
+    ring.quaternion.copy(art.preview.quaternion);
+    ring.position.copy(origin).addScaledVector(normal, 0.48);
+    ring.scale.setScalar(radius);
+    ring.visible = true;
+    move.quaternion.copy(art.preview.quaternion);
+    move.position.copy(origin).addScaledVector(normal, 0.72);
+    move.scale.setScalar(Math.max(4.5, Math.min(8, Math.min(widthMm, heightMm) * 0.12)));
+    move.visible = true;
+  } else if (art.rotateHandle) {
+    art.rotateHandle.visible = false;
+    if (art.moveHandle) art.moveHandle.visible = false;
+  }
+}
+
+function updateArtPreviewAtHit(hit) {
+  if (!art.raster || !S.mesh || S.tool !== 'art' || !hit || art.placement) {
+    if (!art.placement) hideArtPreview();
+    return;
+  }
+  showArtPreviewForFrame(artStampFrameFromHit(hit));
+}
+
+function updatePlacedArtPreview() {
+  if (!art.placement) return;
+  showArtPreviewForFrame(artStampFrameFromPlacement(), { adjustable: true });
+}
+
+function syncArtPlacementUI() {
+  const placeBtn = $('artPlaceBtn');
+  const cancelBtn = $('artCancelPlaceBtn');
+  const hint = $('artPlaceHint');
+  if (!placeBtn) return;
+  const hasStamp = S.stampTri0 != null && S.nTri > S.stampTri0;
+  if (art.placement) {
+    placeBtn.textContent = 'Stamp artwork';
+    if (hint) hint.textContent = 'Drag the centre target to move. Drag the blue ring or use Rotation, then stamp it.';
+  } else if (art.lastPlacement && hasStamp) {
+    placeBtn.textContent = 'Adjust artwork';
+    if (hint) hint.textContent = 'Reopen the stamped artwork to move or rotate it without retracing.';
+  } else {
+    placeBtn.textContent = 'Place on model';
+    if (hint) hint.textContent = 'Click the model to position the logo. Drag its centre target to move, or blue ring to rotate.';
+  }
+  if (cancelBtn) cancelBtn.hidden = !art.placement;
+}
+
+function setArtRotation(value) {
+  const rotationDeg = ((Number(value) + 180) % 360 + 360) % 360 - 180;
+  const input = $('artRot');
+  if (input) input.value = String(rotationDeg);
+  if ($('artRotVal')) $('artRotVal').value = String(Math.round(rotationDeg));
+  if (art.placement) {
+    art.placement.rotationDeg = rotationDeg;
+    updatePlacedArtPreview();
+  }
+}
+
+function setArtPlacementAtHit(hit, { announce = true } = {}) {
+  const normal = faceNormalLocal(hit.faceIndex);
+  art.placement = {
+    origin: [hit.point.x, hit.point.y, hit.point.z],
+    normal,
+    rotationDeg: artRotationDeg(),
+  };
+  updatePlacedArtPreview();
+  syncArtPlacementUI();
+  if (announce) setStatus('Artwork positioned — drag the centre target to move, or blue ring to rotate', 'idle');
+}
+
+function resumeArtPlacement() {
+  if (!art.lastPlacement) return false;
+  art.placement = cloneArtPlacement(art.lastPlacement);
+  setArtRotation(art.placement.rotationDeg);
+  setTool('art', { sticky: true });
+  updatePlacedArtPreview();
+  syncArtPlacementUI();
+  setStatus('Artwork reopened — drag the centre target to move it or blue ring to rotate it', 'idle');
+  return true;
+}
+
+function cancelArtPlacement() {
+  art.rotationDrag = null;
+  art.moveDrag = null;
+  art.placement = null;
+  hideArtPreview();
+  syncArtPlacementUI();
+  setTool('orbit', { sticky: true });
+  setStatus('Artwork adjustment cancelled — the existing stamp was kept', 'idle');
+}
+
+function setRayFromClient(clientX, clientY) {
+  const rect = viewport.getBoundingClientRect();
+  pointerNdc.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+  pointerNdc.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+  raycaster.setFromCamera(pointerNdc, camera);
+}
+
+function artRotationHandleAtClient(clientX, clientY) {
+  if (!art.placement || !art.rotateHandle?.visible) return null;
+  art.rotateHandle.updateMatrixWorld(true);
+  setRayFromClient(clientX, clientY);
+  return raycaster.intersectObject(art.rotateHandle, false)[0] || null;
+}
+
+function artMoveHandleAtClient(clientX, clientY) {
+  if (!art.placement || !art.moveHandle?.visible) return null;
+  art.moveHandle.updateMatrixWorld(true);
+  setRayFromClient(clientX, clientY);
+  return raycaster.intersectObject(art.moveHandle, false)[0] || null;
+}
+
+function artPointerAngleAtClient(clientX, clientY) {
+  if (!art.placement || !S.mesh) return null;
+  const baseFrame = makeStampFrame(art.placement.origin, art.placement.normal, 0);
+  const { origin, right, up, normal } = artWorldFrame(baseFrame);
+  setRayFromClient(clientX, clientY);
+  const point = raycaster.ray.intersectPlane(new THREE.Plane().setFromNormalAndCoplanarPoint(normal, origin), new THREE.Vector3());
+  if (!point) return null;
+  point.sub(origin);
+  if (point.lengthSq() < 1e-5) return null;
+  return Math.atan2(point.dot(up), point.dot(right)) * 180 / Math.PI;
+}
+
+function startArtRotationDrag(e) {
+  const angle = artPointerAngleAtClient(e.clientX, e.clientY);
+  if (angle == null || !art.placement) return false;
+  art.rotationDrag = { pointerId: e.pointerId, startAngle: angle, startRotation: art.placement.rotationDeg };
+  controls.enabled = false;
+  try { viewport.setPointerCapture?.(e.pointerId); } catch {}
+  setStatus('Rotating artwork — release to keep the new angle', 'working');
+  return true;
+}
+
+function moveArtRotationDrag(e) {
+  const drag = art.rotationDrag;
+  if (!drag || drag.pointerId !== e.pointerId) return false;
+  const angle = artPointerAngleAtClient(e.clientX, e.clientY);
+  if (angle == null) return true;
+  let delta = angle - drag.startAngle;
+  if (delta > 180) delta -= 360;
+  if (delta < -180) delta += 360;
+  setArtRotation(drag.startRotation + delta);
+  return true;
+}
+
+function endArtRotationDrag(e, { keep = true } = {}) {
+  if (!art.rotationDrag || (e?.pointerId != null && art.rotationDrag.pointerId !== e.pointerId)) return false;
+  const pointerId = art.rotationDrag.pointerId;
+  art.rotationDrag = null;
+  releaseViewportPointer(pointerId);
+  syncOrbitLock();
+  if (keep) setStatus('Artwork rotated — click Stamp artwork when it looks right', 'idle');
+  return true;
+}
+
+function startArtMoveDrag(e) {
+  if (!art.placement) return false;
+  art.moveDrag = { pointerId: e.pointerId };
+  controls.enabled = false;
+  try { viewport.setPointerCapture?.(e.pointerId); } catch {}
+  setStatus('Moving artwork — drag across the fabric, then release to keep it', 'working');
+  return true;
+}
+
+function moveArtMoveDrag(e) {
+  const drag = art.moveDrag;
+  if (!drag || drag.pointerId !== e.pointerId) return false;
+  const hit = pickHitAtClient(e.clientX, e.clientY);
+  if (hit) setArtPlacementAtHit(hit, { announce: false });
+  return true;
+}
+
+function endArtMoveDrag(e, { keep = true } = {}) {
+  if (!art.moveDrag || (e?.pointerId != null && art.moveDrag.pointerId !== e.pointerId)) return false;
+  const pointerId = art.moveDrag.pointerId;
+  art.moveDrag = null;
+  releaseViewportPointer(pointerId);
+  syncOrbitLock();
+  if (keep) setStatus('Artwork moved — drag the blue ring to rotate, then Stamp artwork', 'idle');
+  return true;
+}
+
+function logoPaletteRgbs() {
+  const hexes = extractRasterPalette(art.raster.imageData.data);
+  return hexes.map((h) => parseHexColor(h)).filter(Boolean);
+}
+
+function stripPreviousStamp() {
+  if (S.stampTri0 == null || S.nTri <= S.stampTri0) return;
+  S.nTri = S.stampTri0;
+  S.nVerts = S.stampVert0;
+  S.faces = S.faces.slice(0, S.nTri * 3);
+  S.verts = S.verts.slice(0, S.nVerts * 3);
+  if (S.facePaint) S.facePaint = S.facePaint.slice(0, S.nTri);
+  S.faceAdj = null;
+  S.symmetryMap = null;
+}
+
+function appendStampMesh(positions, indices, faceSlots) {
+  const nNewV = positions.length / 3;
+  const nNewT = indices.length / 3;
+  if (!nNewT) return 0;
+  const fp = ensureFacePaint();
+  const newVerts = new Float32Array((S.nVerts + nNewV) * 3);
+  newVerts.set(S.verts);
+  newVerts.set(positions, S.nVerts * 3);
+  const newFaces = new Uint32Array((S.nTri + nNewT) * 3);
+  newFaces.set(S.faces);
+  const vBase = S.nVerts;
+  for (let i = 0; i < indices.length; i++) newFaces[S.nTri * 3 + i] = indices[i] + vBase;
+  const newPaint = new Uint8Array(S.nTri + nNewT);
+  if (fp) newPaint.set(fp);
+  for (let i = 0; i < nNewT; i++) newPaint[S.nTri + i] = slotIndex(faceSlots[i] || 0);
+  S.verts = newVerts;
+  S.faces = newFaces;
+  S.nVerts += nNewV;
+  S.nTri += nNewT;
+  S.facePaint = newPaint;
+  S.faceAdj = null;
+  S.symmetryMap = null;
+  syncLegacyMasks();
+  buildMesh({ frame: false });
+  recountPaint();
+  exportBtn.disabled = false;
+  return nNewT;
+}
+
+function stampSlabsForFrame(frame, { widthMm, heightMm }) {
+  const slotRgbs = slotColorsArray(S.slotCount).map((h) => parseHexColor(h) || [0, 0, 0]);
+  const geom = {
+    origin: frame.origin, right: frame.right, up: frame.up, normal: frame.normal,
+    widthMm, heightMm, stepMm: stampStepMm(widthMm, heightMm),
+    verts: S.verts, faces: S.faces, nTri: S.stampTri0 != null ? S.stampTri0 : S.nTri,
+  };
+  if (art.trace) {
+    const packed = stampLayersFromTrace(art.trace, {
+      singleSlot: art.mode === 'active' ? slotIndex(S.paintTarget) : null,
+      slotForRgb: (rgb) => nearestSlot(rgb, slotRgbs).slot,
+      pixels: art.raster?.imageData?.data,
+      srcW: art.raster?.width,
+      srcH: art.raster?.height,
+    });
+    return { ...buildStampSlabsFromMasks({ ...geom, ...packed }), layers: packed.layers, imgW: packed.imgW, imgH: packed.imgH };
+  }
+  return { positions: [], indices: [], faceSlots: [], layers: [], imgW: 0, imgH: 0 };
+}
+
+function stampArtworkForFrame(frame, placement) {
+  if (!art.raster || !S.mesh || !frame || !placement) return;
+  const size = artSizeMm();
+  setStatus('Building logo geometry…', 'working');
+  requestAnimationFrame(() => {
+    try {
+      let { positions, indices, faceSlots } = stampSlabsForFrame(frame, size);
+      if (S.symmetryOn) {
+        const mir = stampSlabsForFrame(mirrorStampFrameX(frame, S.symmetryCenterX || 0), size);
+        const vBase = positions.length / 3;
+        positions = positions.concat(mir.positions);
+        for (const idx of mir.indices) indices.push(idx + vBase);
+        faceSlots = faceSlots.concat(mir.faceSlots);
+      }
+      if (!indices.length) {
+        setStatus('Artwork missed the surface — try a bigger size or click a flatter face', 'idle');
+        return;
+      }
+      pushUndo({ geom: true });
+      stripPreviousStamp();
+      if (S.stampTri0 == null) {
+        S.stampTri0 = S.nTri;
+        S.stampVert0 = S.nVerts;
+      }
+      const n = appendStampMesh(positions, indices, faceSlots);
+      art.lastPlacement = cloneArtPlacement(placement);
+      art.placement = null;
+      art.rotationDrag = null;
+      art.moveDrag = null;
+      hideArtPreview();
+      syncArtPlacementUI();
+      setTool('orbit', { sticky: true });
+      setStatus(`Logo geometry stamped — ${n.toLocaleString()} faces. Use Adjust artwork to change it again.`, 'idle');
+    } catch (err) {
+      setStatus(err.message || 'Artwork stamp failed', 'error');
+    }
+  });
+}
+
+function stampArtworkAtPlacement() {
+  if (!art.placement) return;
+  const placement = cloneArtPlacement(art.placement);
+  stampArtworkForFrame(artStampFrameFromPlacement(placement), placement);
+}
+
+function typedArtFile(file) {
+  if (file?.type && /^image\//.test(file.type)) return file;
+  const name = String(file?.name || '').toLowerCase();
+  const type = name.endsWith('.png') ? 'image/png'
+    : name.endsWith('.webp') ? 'image/webp'
+    : name.endsWith('.gif') ? 'image/gif'
+    : /\.jpe?g$/.test(name) ? 'image/jpeg'
+    : file.type;
+  return type ? new File([file], file.name, { type }) : file;
+}
+
+function rasterFromCanvas(canvas) {
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  return {
+    imageData, width: canvas.width, height: canvas.height,
+    aspect: canvas.width / Math.max(canvas.height, 1e-6),
+    canvas, viewBox: null,
+  };
+}
+
+async function retraceArtwork() {
+  if (!art.traceCanvas) return;
+  const job = ++art.traceJob;
+  setStatus('Tracing multi-colour logo…', 'working');
+  try {
+    let result = await traceCanvasAsync(art.traceCanvas, {
+      threshold: artTraceThreshold(),
+      invert: artTraceInvert(),
+      mode: 'multi-colour',
+      colorSeparation: false,
+    });
+    if (job !== art.traceJob) return;
+    if (!result?.colorLayers?.length) {
+      result = await traceCanvasAsync(art.traceCanvas, {
+        threshold: artTraceThreshold(),
+        invert: artTraceInvert(),
+        mode: 'auto',
+        preferWrapLineArt: true,
+      });
+    }
+    if (job !== art.traceJob) return;
+    art.trace = scrubTraceMat(result, art.raster ? {
+      pixels: art.raster.imageData.data,
+      srcW: art.raster.width,
+      srcH: art.raster.height,
+    } : null);
+    const fills = (art.trace.colorLayers || []).map((l) => l.hex).filter(Boolean);
+    if (fills.length) ensureSlotsForHexes(fills);
+    refreshArtTexture();
+    syncArtMeta();
+    const n = art.trace.colorLayers?.length || 0;
+    setStatus(n
+      ? `${n} AMS colours traced — click the model to stamp`
+      : 'Trace ready — click the model to stamp', 'idle');
+  } catch (err) {
+    if (job !== art.traceJob) return;
+    setStatus(err.message || 'Trace failed', 'error');
+  }
+}
+
+function scheduleArtTrace() {
+  clearTimeout(art.traceTimer);
+  art.traceTimer = setTimeout(() => retraceArtwork(), 350);
+}
+
+async function loadArtworkFile(file) {
+  if (!file) return;
+  const name = file.name || 'logo';
+  const svg = isSvgArtFile(file);
+  const rasterOk = isRasterArtFile(file);
+  if (!svg && !rasterOk) {
+    setStatus('Drop a PNG, JPG, or SVG', 'error');
+    return;
+  }
+  setStatus(`Loading ${name}…`, 'working');
+  try {
+    let result;
+    let fills = [];
+    if (svg) {
+      const text = await file.text();
+      result = await rasterizeSvgText(text, 1600);
+      fills = extractSvgFillHexes(text);
+    } else {
+      try {
+        const loaded = await loadImageFromFile(typedArtFile(file));
+        result = rasterFromCanvas(loaded.canvas);
+      } catch {
+        result = await rasterizeImageFile(file, 1600);
+      }
+    }
+    art.raster = result;
+    art.original = clonePixelData(result.imageData);
+    art.hadAlpha = rasterHasAlpha(result.imageData.data);
+    art.fileName = name;
+    art.traceCanvas = result.canvas;
+    art.trace = null;
+    art.placement = null;
+    art.lastPlacement = null;
+    art.rotationDrag = null;
+    art.moveDrag = null;
+    if (art.texture) { art.texture.dispose(); art.texture = null; }
+    disposeArtPreview();
+    if (art.mode === 'svg' && fills.length) ensureSlotsForHexes(fills);
+    syncArtMeta();
+    setTool('art', { sticky: true });
+    switchTab('paint');
+    await retraceArtwork();
+  } catch (err) {
+    setStatus(err.message || 'Could not read artwork', 'error');
+  }
+}
+
+function clearArtwork() {
+  art.traceJob += 1;
+  clearTimeout(art.traceTimer);
+  art.fileName = '';
+  art.raster = null;
+  art.original = null;
+  art.hadAlpha = false;
+  art.traceCanvas = null;
+  art.trace = null;
+  art.placement = null;
+  art.lastPlacement = null;
+  art.rotationDrag = null;
+  art.moveDrag = null;
+  if (art.texture) { art.texture.dispose(); art.texture = null; }
+  disposeArtPreview();
+  const input = $('artFileInput');
+  if (input) input.value = '';
+  syncArtMeta();
+  if (S.tool === 'art') setTool('orbit');
+  setStatus('Artwork cleared', 'idle');
+}
+
+function facesInScreenBox(x0, y0, x1, y1) {
+  const left = Math.min(x0,x1), right = Math.max(x0,x1);
+  const top = Math.min(y0,y1), bottom = Math.max(y0,y1);
+  if (right-left < 3 || bottom-top < 3) return [];
+  const w = viewport.clientWidth, h = viewport.clientHeight;
+  S.mesh.updateMatrixWorld(true);
+  const mat = S.mesh.matrixWorld;
+  const v = new THREE.Vector3(), camDir = new THREE.Vector3();
+  camera.getWorldDirection(camDir);
+  const hit = [];
+  for (let i = 0; i < S.nTri; i++) {
+    if (isFaceHidden(i)) continue;
+    let anyIn = false;
+    const world = [];
+    for (let k = 0; k < 3; k++) {
+      const vi = S.faces[i * 3 + k];
+      v.set(S.verts[vi*3], S.verts[vi*3+1], S.verts[vi*3+2]).applyMatrix4(mat);
+      world.push(v.x, v.y, v.z);
+      v.project(camera);
+      if (v.z >= -1 && v.z <= 1) {
+        const sx = (v.x*.5+.5)*w, sy = (-v.y*.5+.5)*h;
+        if (sx >= left && sx <= right && sy >= top && sy <= bottom) anyIn = true;
+      }
+    }
+    if (!anyIn) {
+      let cx=(world[0]+world[3]+world[6])/3, cy=(world[1]+world[4]+world[7])/3, cz=(world[2]+world[5]+world[8])/3;
+      v.set(cx,cy,cz).project(camera);
+      if (v.z<-1||v.z>1) continue;
+      const sx=(v.x*.5+.5)*w, sy=(-v.y*.5+.5)*h;
+      if (sx<left||sx>right||sy<top||sy>bottom) continue;
+    }
+    // Backface cull
+    const e1x=world[3]-world[0],e1y=world[4]-world[1],e1z=world[5]-world[2];
+    const e2x=world[6]-world[0],e2y=world[7]-world[1],e2z=world[8]-world[2];
+    const nx=e1y*e2z-e1z*e2y, ny=e1z*e2x-e1x*e2z, nz=e1x*e2y-e1y*e2x;
+    if (nx*camDir.x+ny*camDir.y+nz*camDir.z > 0) continue;
+    hit.push(i);
+  }
+  return hit;
+}
+
+function pointInPolygon(x, y, pts) {
+  let inside = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const xi = pts[i].x, yi = pts[i].y, xj = pts[j].x, yj = pts[j].y;
+    if (((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / ((yj - yi) || 1e-12) + xi)) inside = !inside;
+  }
+  return inside;
+}
+
+/** Faces whose screen centroid (or any vertex) sits inside a freehand lasso. */
+function facesInScreenLasso(pts) {
+  if (!pts || pts.length < 3 || !S.mesh) return [];
+  let left = Infinity, right = -Infinity, top = Infinity, bottom = -Infinity;
+  for (const p of pts) {
+    if (p.x < left) left = p.x; if (p.x > right) right = p.x;
+    if (p.y < top) top = p.y; if (p.y > bottom) bottom = p.y;
+  }
+  if (right - left < 4 || bottom - top < 4) return [];
+  const w = viewport.clientWidth, h = viewport.clientHeight;
+  S.mesh.updateMatrixWorld(true);
+  const mat = S.mesh.matrixWorld;
+  const v = new THREE.Vector3(), camDir = new THREE.Vector3();
+  camera.getWorldDirection(camDir);
+  const hit = [];
+  for (let i = 0; i < S.nTri; i++) {
+    if (isFaceHidden(i)) continue;
+    let anyIn = false;
+    const world = [];
+    for (let k = 0; k < 3; k++) {
+      const vi = S.faces[i * 3 + k];
+      v.set(S.verts[vi * 3], S.verts[vi * 3 + 1], S.verts[vi * 3 + 2]).applyMatrix4(mat);
+      world.push(v.x, v.y, v.z);
+      v.project(camera);
+      if (v.z >= -1 && v.z <= 1) {
+        const sx = (v.x * .5 + .5) * w, sy = (-v.y * .5 + .5) * h;
+        if (sx >= left && sx <= right && sy >= top && sy <= bottom && pointInPolygon(sx, sy, pts)) anyIn = true;
+      }
+    }
+    if (!anyIn) {
+      const cx = (world[0] + world[3] + world[6]) / 3;
+      const cy = (world[1] + world[4] + world[7]) / 3;
+      const cz = (world[2] + world[5] + world[8]) / 3;
+      v.set(cx, cy, cz).project(camera);
+      if (v.z < -1 || v.z > 1) continue;
+      const sx = (v.x * .5 + .5) * w, sy = (-v.y * .5 + .5) * h;
+      if (sx < left || sx > right || sy < top || sy > bottom) continue;
+      if (!pointInPolygon(sx, sy, pts)) continue;
+    }
+    const e1x = world[3] - world[0], e1y = world[4] - world[1], e1z = world[5] - world[2];
+    const e2x = world[6] - world[0], e2y = world[7] - world[1], e2z = world[8] - world[2];
+    const nx = e1y * e2z - e1z * e2y, ny = e1z * e2x - e1x * e2z, nz = e1x * e2y - e1y * e2x;
+    if (nx * camDir.x + ny * camDir.y + nz * camDir.z > 0) continue;
+    hit.push(i);
+  }
+  return hit;
+}
+
+/* ================================================================== */
+/*  BRUSH / SPRAY                                                     */
+/* ================================================================== */
+
+/** Log-map a 0..1 slider position into [minMm, maxMm]. Gives fine control at small sizes. */
+function logMapMm(t, minMm, maxMm) {
+  const u = Math.max(0, Math.min(1, t));
+  return minMm * Math.pow(maxMm / minMm, u);
+}
+
+function sliderT(el) {
+  if (!el) return 0;
+  const min = parseFloat(el.min) || 0;
+  const max = parseFloat(el.max) || 1;
+  const v = parseFloat(el.value);
+  if (!Number.isFinite(v) || max <= min) return 0;
+  return (v - min) / (max - min);
+}
+
+function formatBrushMm(mm) {
+  if (mm < 1) return mm.toFixed(2);
+  if (mm < 10) return mm.toFixed(1);
+  return String(Math.round(mm));
+}
+
+function brushRadiusMm() {
+  if (S.tool === 'spray') {
+    // Prefer mapped log value; fall back if an old linear control is cached.
+    const el = $('sprayNozzle');
+    if (el && parseFloat(el.max) >= 100) return logMapMm(sliderT(el), 0.5, 16);
+    return parseFloat(el?.value) || 4;
+  }
+  const el = $('brushSize');
+  if (el && parseFloat(el.max) >= 100) return logMapMm(sliderT(el), 0.2, 12);
+  return parseFloat(el?.value) || 1;
+}
+
+function syncBrushSizeLabels() {
+  const b = $('brushSizeVal');
+  if (b) b.textContent = formatBrushMm(logMapMm(sliderT($('brushSize')), 0.2, 12));
+  const s = $('sprayNozzleVal');
+  if (s) s.textContent = formatBrushMm(logMapMm(sliderT($('sprayNozzle')), 0.5, 16));
+}
+
+function applyBrushDab(hit, { undo = false, live = false } = {}) {
+  if (!hit || !S.mesh || !S.brushStrokeActive) return 0;
+  ensureFaceAdj();
+  const radius = brushRadiusMm();
+  const density = S.tool === 'spray' ? (parseFloat($('sprayDensity')?.value) || 45) / 100 : 1;
+  const maxAngleDeg = S.tool === 'spray' ? 100 : (S.brushStroke === 'free' ? 110 : 80);
+  const faces = brushDabFaces(hit.faceIndex, hit.point, S.verts, S.faces, S.nTri, S.faceAdj, {
+    radius,
+    density,
+    maxAngleDeg,
+    canUseFace: i => !isFaceHidden(i),
+  });
+  if (!faces.length) return 0;
+  return paintFacesFree(faces, S.paintTarget, { undo, refresh: false, live });
+}
+
+function constrainBrushClient(x, y, origin) {
+  if (!origin || S.brushStroke === 'free') return { x, y };
+  if (S.brushStroke === 'horizontal') return { x, y: origin.y };
+  if (S.brushStroke === 'vertical') return { x: origin.x, y };
+  return { x, y };
+}
+
+function strokeBrushTo(clientX, clientY) {
+  const stroke = S.brushStrokeActive;
+  if (!stroke) return 0;
+  const pt = constrainBrushClient(clientX, clientY, stroke.origin);
+  const prev = stroke.lastClient || pt;
+  const dist = Math.hypot(pt.x - prev.x, pt.y - prev.y);
+  // Keep moves cheap so pointerup can fire immediately (was up to 96 dabs/move → laggy "won't stop").
+  const step = Math.max(3, Math.min(10, brushRadiusMm() * 1.6));
+  const samples = dist < 0.75 ? 1 : Math.min(8, Math.ceil(dist / step));
+  let painted = 0;
+  let lastHit = null;
+  for (let s = 1; s <= samples; s++) {
+    if (!S.brushStrokeActive || S.brushStrokeActive !== stroke) break;
+    const t = s / samples;
+    const x = prev.x + (pt.x - prev.x) * t, y = prev.y + (pt.y - prev.y) * t;
+    const hit = pickHitAtClient(x, y);
+    if (!hit) continue;
+    lastHit = hit;
+    const n = applyBrushDab(hit, { undo: !stroke.undid, live: true });
+    if (n) { painted += n; stroke.undid = true; }
+  }
+  stroke.lastClient = pt;
+  if (lastHit) updateSmartCursor(pt.x, pt.y, lastHit.worldPoint);
+  return painted;
+}
+
+/* ================================================================== */
+/*  SMART FILL                                                        */
+/* ================================================================== */
+
+function computeSmartFill(hit) {
+  if (!hit || !ensureFacePaint()) return [];
+  ensureFaceAdj();
+  return smartFillFaces(hit.faceIndex, hit.point, S.verts, S.faces, S.nTri,
+    S.embossMask, S.debossMask, S.faceAdj, {
+      radius: parseFloat($('smartSize').value) || 8,
+      maxAngleDeg: parseFloat($('smartAngle').value) || 40,
+      samePaintOnly: $('smartSameColour')?.checked !== false,
+      localNormals: $('smartWrapEdges')?.checked !== false,
+      trimMask: S.trimMask,
+      facePaint: S.facePaint,
+      canUseFace: isPaintableBaseFace,
+    });
+}
+
+function previewSmartFill(clientX, clientY) {
+  if (S.tool !== 'smart' || !S.mesh) return;
+  const hit = pickHitAtClient(clientX, clientY);
+  if (!hit) { clearSmartPreview(); return; }
+  updateSmartCursor(clientX, clientY, hit.worldPoint);
+  const faces = computeSmartFill(hit);
+  const mask = new Uint8Array(S.nTri);
+  for (const i of faces) mask[i] = 1;
+  S.smartPreview = mask; S.smartPreviewFaces = faces;
+  S.edgeHighlight = null;
+  updateMeshColors();
+}
+
+function commitSmartFill() {
+  const faces = S.smartPreviewFaces;
+  if (!faces?.length) { setStatus('Nothing to fill — hover, tweak Size/Angle, then click', 'idle'); return; }
+  paintFacesFree(faces, S.paintTarget);
+  S.smartPreview = null; S.smartPreviewFaces = null;
+  updateMeshColors();
+  setStatus(`Smart fill: ${faces.length.toLocaleString()} faces → ${S.paintTarget}`, 'idle');
+}
+
+/* ================================================================== */
+/*  BUCKET FILL — CONNECTED BASE PATCH ONLY                           */
+/* ================================================================== */
+
+function bucketFillAtClient(clientX, clientY) {
+  const hit = pickHitAtClient(clientX, clientY);
+  if (!hit) {
+    setStatus('Bucket — click a base-model patch to fill it', 'idle');
+    return;
+  }
+  if (isArtworkFace(hit.faceIndex)) {
+    setStatus('Artwork is locked — bucket fill only changes the base model', 'idle');
+    return;
+  }
+  const fp = ensureFacePaint();
+  ensureFaceAdj();
+  const faces = floodFillSameSlot(hit.faceIndex, fp, S.nTri, S.faceAdj, {
+    region: paintableBaseRegion(),
+  });
+  const count = paintFacesFree(faces, S.paintTarget);
+  if (!count) {
+    setStatus(`Bucket fill already uses ${slotLabel(slotIndex(S.paintTarget))}`, 'idle');
+    return;
+  }
+  setStatus(`Bucket filled ${count.toLocaleString()} base faces → ${slotLabel(slotIndex(S.paintTarget))} · artwork kept`, 'idle');
+}
+
+function clearSmartPreview() {
+  S.smartPreview = null; S.smartPreviewFaces = null;
+  if (smartCursor) smartCursor.style.display = 'none';
+  updateMeshColors();
+}
+
+/* ================================================================== */
+/*  EDGE TOOL                                                         */
+/* ================================================================== */
+
+function edgePaintMask() {
+  const fp = ensureFacePaint();
+  const t = slotIndex(S.paintTarget);
+  const m = new Uint8Array(S.nTri);
+  if (!fp) return m;
+  if (t === 0) {
+    for (let i = 0; i < S.nTri; i++) if (fp[i]) m[i] = 1;
+  } else {
+    for (let i = 0; i < S.nTri; i++) if (fp[i] === t) m[i] = 1;
+  }
+  return m;
+}
+
+function faceNormal(fi) {
+  const a = S.faces[fi * 3], b = S.faces[fi * 3 + 1], c = S.faces[fi * 3 + 2];
+  const ax = S.verts[a * 3], ay = S.verts[a * 3 + 1], az = S.verts[a * 3 + 2];
+  const bx = S.verts[b * 3], by = S.verts[b * 3 + 1], bz = S.verts[b * 3 + 2];
+  const cx = S.verts[c * 3], cy = S.verts[c * 3 + 1], cz = S.verts[c * 3 + 2];
+  const e1x = bx - ax, e1y = by - ay, e1z = bz - az;
+  const e2x = cx - ax, e2y = cy - ay, e2z = cz - az;
+  let nx = e1y * e2z - e1z * e2y;
+  let ny = e1z * e2x - e1x * e2z;
+  let nz = e1x * e2y - e1y * e2x;
+  const len = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1;
+  return [nx / len, ny / len, nz / len];
+}
+
+function faceCenter(fi) {
+  const a = S.faces[fi * 3], b = S.faces[fi * 3 + 1], c = S.faces[fi * 3 + 2];
+  return [
+    (S.verts[a * 3] + S.verts[b * 3] + S.verts[c * 3]) / 3,
+    (S.verts[a * 3 + 1] + S.verts[b * 3 + 1] + S.verts[c * 3 + 1]) / 3,
+    (S.verts[a * 3 + 2] + S.verts[b * 3 + 2] + S.verts[c * 3 + 2]) / 3,
+  ];
+}
+
+function faceCenterDistSq(fi, p) {
+  const c = faceCenter(fi);
+  const dx = c[0] - p.x, dy = c[1] - p.y, dz = c[2] - p.z;
+  return dx * dx + dy * dy + dz * dz;
+}
+
+function edgeRunFromHit(hit) {
+  const fp = ensureFacePaint();
+  if (!hit || !fp || !S.faceAdj) return [];
+  const target = slotIndex(S.paintTarget);
+  const edgeWidth = Math.max(1, parseInt($('edgeWidth')?.value || '2', 10) || 1);
+  const maxAngleDeg = Math.min(105, 45 + edgeWidth * 6);
+  const cosThr = Math.cos(maxAngleDeg * Math.PI / 180);
+  const localRadius = Math.max(0.8, edgeWidth * 0.9);
+  const localRadiusSq = localRadius * localRadius;
+  const searchRadius = Math.max(4, edgeWidth * 4);
+  const searchRadiusSq = searchRadius * searchRadius;
+  let seed = hit.faceIndex;
+  let seedSlot = fp[seed] || 0;
+
+  if (seedSlot === target) {
+    const n = faceNormal(seed);
+    const next = S.faceAdj[seed].find(nb => {
+      if (isFaceHidden(nb) || (fp[nb] || 0) === target) return false;
+      const nn = faceNormal(nb);
+      return n[0] * nn[0] + n[1] * nn[1] + n[2] * nn[2] >= cosThr;
+    });
+    if (next == null) return [];
+    seed = next;
+    seedSlot = fp[seed] || 0;
+  }
+  if (seedSlot === target) return [];
+
+  // First find the connected wrong-colour patch under the pointer, then only
+  // select the band of that patch which touches the active paint colour.
+  const inPatch = new Uint8Array(S.nTri);
+  const patch = [];
+  const queue = [seed];
+  inPatch[seed] = 1;
+
+  while (queue.length) {
+    const fi = queue.pop();
+    if (isFaceHidden(fi)) continue;
+    if ((fp[fi] || 0) !== seedSlot) continue;
+    if (faceCenterDistSq(fi, hit.point) > searchRadiusSq) continue;
+    patch.push(fi);
+    const n = faceNormal(fi);
+    for (const nb of S.faceAdj[fi]) {
+      if (inPatch[nb] || isFaceHidden(nb) || (fp[nb] || 0) !== seedSlot) continue;
+      const nn = faceNormal(nb);
+      if (n[0] * nn[0] + n[1] * nn[1] + n[2] * nn[2] < cosThr) continue;
+      inPatch[nb] = 1;
+      queue.push(nb);
+    }
+  }
+
+  const boundary = [];
+  let nearestBoundary = -1;
+  let nearestBoundaryDist = Infinity;
+  for (const fi of patch) {
+    const n = faceNormal(fi);
+    for (const nb of S.faceAdj[fi]) {
+      if (isFaceHidden(nb) || (fp[nb] || 0) !== target) continue;
+      const nn = faceNormal(nb);
+      if (n[0] * nn[0] + n[1] * nn[1] + n[2] * nn[2] < cosThr) continue;
+      boundary.push(fi);
+      const d = faceCenterDistSq(fi, hit.point);
+      if (d < nearestBoundaryDist) {
+        nearestBoundaryDist = d;
+        nearestBoundary = fi;
+      }
+      break;
+    }
+  }
+  if (!boundary.length || nearestBoundary < 0) return [];
+
+  const boundaryMask = new Uint8Array(S.nTri);
+  for (const fi of boundary) boundaryMask[fi] = 1;
+  const localBoundary = [];
+  const localSeen = new Uint8Array(S.nTri);
+  const boundaryQueue = [nearestBoundary];
+  localSeen[nearestBoundary] = 1;
+  while (boundaryQueue.length) {
+    const fi = boundaryQueue.pop();
+    if (faceCenterDistSq(fi, hit.point) > localRadiusSq) continue;
+    localBoundary.push(fi);
+    const n = faceNormal(fi);
+    for (const nb of S.faceAdj[fi]) {
+      if (localSeen[nb] || !boundaryMask[nb] || isFaceHidden(nb)) continue;
+      const nn = faceNormal(nb);
+      if (n[0] * nn[0] + n[1] * nn[1] + n[2] * nn[2] < cosThr) continue;
+      localSeen[nb] = 1;
+      boundaryQueue.push(nb);
+    }
+  }
+  if (!localBoundary.length) localBoundary.push(nearestBoundary);
+
+  const outMask = new Uint8Array(S.nTri);
+  const dist = new Int16Array(S.nTri);
+  dist.fill(-1);
+  const out = [];
+  const grow = localBoundary.slice();
+  for (const fi of localBoundary) {
+    outMask[fi] = 1;
+    dist[fi] = 0;
+    out.push(fi);
+  }
+
+  for (let gi = 0; gi < grow.length; gi++) {
+    const fi = grow[gi];
+    if (dist[fi] >= edgeWidth - 1) continue;
+    const n = faceNormal(fi);
+    for (const nb of S.faceAdj[fi]) {
+      if (outMask[nb] || !inPatch[nb] || isFaceHidden(nb) || (fp[nb] || 0) !== seedSlot) continue;
+      const nn = faceNormal(nb);
+      if (n[0] * nn[0] + n[1] * nn[1] + n[2] * nn[2] < cosThr) continue;
+      outMask[nb] = 1;
+      dist[nb] = dist[fi] + 1;
+      out.push(nb);
+      grow.push(nb);
+    }
+  }
+  return out;
+}
+
+function previewEdgeRun(clientX, clientY, { quiet = false, lock = false } = {}) {
+  if (!ensureFacePaint() || !S.mesh) return 0;
+  ensureFaceAdj();
+  const hit = pickHitAtClient(clientX, clientY);
+  if (!hit) {
+    if (quiet && !S._edgeSelectionLocked) clearClickSelection();
+    if (!quiet) setStatus('Clean Edge — click the wrong-colour fringe beside the active colour', 'idle');
+    return 0;
+  }
+  const faces = edgeRunFromHit(hit);
+  if (!faces.length) {
+    if (quiet && !S._edgeSelectionLocked) clearClickSelection();
+    if (!quiet) clearClickSelection();
+    if (!quiet) setStatus('No edge fringe found — click the wrong-colour side touching the active colour', 'idle');
+    return 0;
+  }
+  S._edgeLastSeeds = null;
+  S.edgeHighlight = null;
+  S._edgeSelectionMode = S.edgePreviewMode || 'fill';
+  if (lock) S._edgeSelectionLocked = true;
+  setFaceSelection(faces, 'edge cleanup band', { quiet });
+  return faces.length;
+}
+
+function applyEdgePreview() {
+  const faces = S.clickSelectionFaces;
+  if (!faces?.length) {
+    setStatus('No Clean Edge preview — hover or click the rough boundary first', 'idle');
+    return 0;
+  }
+  const mode = S._edgeSelectionMode || S.edgePreviewMode || 'fill';
+  const n = faces.length;
+  if (mode === 'clear') {
+    clearFacesFree(faces);
+    clearClickSelection();
+    setStatus(`Clean Edge cleared ${n.toLocaleString()} faces back to Slot 1`, 'idle');
+  } else {
+    const slot = slotIndex(S.paintTarget);
+    paintFacesFree(faces, slot);
+    clearClickSelection();
+    setStatus(`Clean Edge filled ${n.toLocaleString()} faces → ${slotLabel(slot)}`, 'idle');
+  }
+  return n;
+}
+
+function runEdgeFinder(seedFaceList) {
+  if (!ensureFacePaint() || !S.mesh) return 0;
+  ensureFaceAdj();
+  const width = parseInt($('edgeWidth').value, 10) || 0;
+  let region = null;
+  if (seedFaceList?.length) { region = new Uint8Array(S.nTri); for (const i of seedFaceList) region[i] = 1; }
+  const growInto = slotIndex(S.paintTarget) === 0 ? 'paint' : 'body';
+  const mask = findPaintBoundary(edgePaintMask(), S.faces, S.nTri, { width, growInto, region, faceAdj: S.faceAdj });
+  const faces = [];
+  for (let i = 0; i < S.nTri; i++) if (mask[i]) faces.push(i);
+  S.edgeHighlight = null;
+  if (!faces.length) {
+    clearClickSelection();
+    return 0;
+  }
+  setFaceSelection(faces, 'edge band');
+  return faces.length;
+}
+
+function fillEdgeHighlight() {
+  if (S.clickSelectionFaces?.length) {
+    applyEdgePreview();
+    return;
+  }
+  setStatus('No edge preview — click an edge run or drag a box first', 'idle');
+}
+
+function syncEdgeModeUI() {
+  $('edgeFillBtn')?.classList.toggle('active-mode', (S.edgePreviewMode || 'fill') === 'fill');
+  $('edgeClearBtn')?.classList.toggle('active-mode', S.edgePreviewMode === 'clear');
+}
+
+function setEdgePreviewMode(mode) {
+  S.edgePreviewMode = mode === 'clear' ? 'clear' : 'fill';
+  S._edgeSelectionMode = S.edgePreviewMode;
+  if (S.clickSelectionFaces?.length) updateMeshColors();
+  syncEdgeModeUI();
+}
+
+/** Commit Clean Edge selection: Fill = active slot, Clear = Slot 1. */
+function commitEdgeSelection(mode) {
+  setEdgePreviewMode(mode);
+  if (!S.clickSelectionFaces?.length) {
+    setStatus(
+      mode === 'clear'
+        ? 'Clean Edge — click the wrong-colour fringe first, then Clear'
+        : 'Clean Edge — click the wrong-colour fringe first, then Fill',
+      'idle'
+    );
+    return;
+  }
+  applyEdgePreview();
+}
+
+/* ================================================================== */
+/*  CLICK-TO-SELECT                                                   */
+/* ================================================================== */
+
+function performClickSelect(clientX, clientY) {
+  const hit = pickHitAtClient(clientX, clientY);
+  if (!hit) { clearClickSelection(); setStatus('Click on the model to select a region', 'idle'); return; }
+  if (isArtworkFace(hit.faceIndex)) {
+    clearClickSelection();
+    setStatus('Artwork is locked — select a base-model region instead', 'idle');
+    return;
+  }
+  ensureFaceAdj();
+
+  let faces;
+  if (S.clickSelectMode === 'island') {
+    if (!S.islands || !S.islandMap) computeIslands();
+    faces = selectIsland(hit.faceIndex, S.islandMap, S.islands);
+    S.selectedIsland = S.islandMap[hit.faceIndex];
+    syncIslandCards();
+  } else {
+    faces = floodFillSameSlot(hit.faceIndex, ensureFacePaint(), S.nTri, S.faceAdj);
+    S.selectedIsland = -1;
+  }
+
+  faces = (faces || []).filter(isPaintableBaseFace);
+  const mask = new Uint8Array(S.nTri);
+  for (const f of faces) mask[f] = 1;
+  S.clickSelection = mask;
+  S.clickSelectionFaces = faces;
+  syncFillSelectionBtn();
+  updateMeshColors();
+  const modeLabel = S.clickSelectMode === 'island' ? 'island' : 'color region';
+  setStatus(`Selected ${faces.length.toLocaleString()} faces (${modeLabel}) — click a colour slot or Fill Selection`, 'idle');
+}
+
+function syncFillSelectionBtn() {
+  const btn = $('selPaintBtn');
+  if (!btn) return;
+  const has = !!(S.clickSelectionFaces?.length);
+  btn.disabled = !has;
+  btn.classList.toggle('has-selection', has);
+  $('selHideBtn') && ($('selHideBtn').disabled = !has);
+  $('selClearBtn') && ($('selClearBtn').disabled = !has);
+}
+
+function clearClickSelection({ repaint = true, syncIslands = true } = {}) {
+  S.clickSelection = null; S.clickSelectionFaces = null; S.selectedIsland = -1;
+  S._edgeSelectionLocked = false;
+  S._edgeSelectionMode = null;
+  syncFillSelectionBtn();
+  if (syncIslands) syncIslandCards();
+  if (repaint) updateMeshColors();
+}
+
+/** Put faces into the shared selection (Paint / Hide Selection), not auto-paint. */
+function setFaceSelection(faces, label = 'selection', { quiet = false } = {}) {
+  faces = (faces || []).filter(isPaintableBaseFace);
+  if (!faces?.length) {
+    clearClickSelection();
+    if (!quiet) setStatus('No faces in selection', 'idle');
+    return;
+  }
+  const mask = new Uint8Array(S.nTri);
+  for (const f of faces) mask[f] = 1;
+  S.clickSelection = mask;
+  S.clickSelectionFaces = faces;
+  S.selectedIsland = -1;
+  syncFillSelectionBtn();
+  syncIslandCards();
+  updateMeshColors();
+  if (quiet) return;
+  const slot = slotIndex(S.paintTarget);
+  setStatus(
+    `Selected ${faces.length.toLocaleString()} faces (${label}) — magenta = selected. Click slot ${slot + 1} or Fill Selection`,
+    'idle'
+  );
+}
+
+function paintClickSelection() {
+  if (!S.clickSelectionFaces?.length) {
+    setStatus('Nothing selected — Lasso/Box an area first', 'idle');
+    return;
+  }
+  const slot = slotIndex(S.paintTarget);
+  const n = paintFacesFree(S.clickSelectionFaces, slot);
+  clearClickSelection();
+  setStatus(n
+    ? `Filled ${n.toLocaleString()} base faces → ${slotLabel(slot)}`
+    : 'Artwork is locked — no base faces were changed', 'idle');
+}
+
+/* ================================================================== */
+/*  MESH ISLANDS                                                      */
+/* ================================================================== */
+
+const ISLAND_SCAN_FACE_LIMIT = 500000;
+
+function computeIslands({ force = false } = {}) {
+  if (!S.faces || !S.nTri) return;
+  if (!force && !S.islands && S.nTri > ISLAND_SCAN_FACE_LIMIT) {
+    $('islandInfo').textContent = `Skipped: ${S.nTri.toLocaleString()} faces is too large for live part detection`;
+    $('islandCount').textContent = 'not scanned';
+    $('toggleBottomBtn').disabled = false;
+    $('app').classList.add('bottom-open');
+    setTimeout(resizeRenderer, 250);
+    setStatus(
+      `Find Parts skipped on ${S.nTri.toLocaleString()} faces to avoid freezing. Use Select → Same Color, Hide, or Hide Active Colour.`,
+      'idle'
+    );
+    return;
+  }
+  ensureFaceAdj();
+  setStatus('Finding mesh islands…', 'working');
+  setTimeout(() => {
+    try {
+      S.islands = findMeshIslands(S.faces, S.nTri, S.faceAdj, S.verts);
+      S.islandMap = buildIslandMap(S.islands, S.nTri);
+      S.hiddenIslands.clear();
+      $('islandInfo').textContent = `${S.islands.length} island${S.islands.length !== 1 ? 's' : ''} found`;
+      $('islandCount').textContent = `${S.islands.length} islands`;
+      $('toggleBottomBtn').disabled = false;
+      buildIslandCards();
+      setStatus(`Found ${S.islands.length} mesh island${S.islands.length !== 1 ? 's' : ''}`, 'idle');
+    } catch (err) {
+      setStatus(err.message || 'Find Parts failed', 'error');
+    }
+  }, 30);
+}
+
+function buildIslandCards() {
+  const list = $('islandList');
+  list.innerHTML = '';
+  if (!S.islands) return;
+  for (const isl of S.islands) {
+    const card = document.createElement('div');
+    card.className = 'island-card';
+    card.dataset.id = isl.id;
+    const sz = isl.bbox.size.map(v => v.toFixed(1));
+    card.innerHTML = `
+      <div class="isl-name">Island ${isl.id + 1}</div>
+      <div class="isl-meta">${isl.faceCount.toLocaleString()} faces</div>
+      <div class="isl-meta">${sz[0]}×${sz[1]}×${sz[2]} mm</div>
+      <div class="isl-actions">
+        <button class="isl-btn isl-select">Select</button>
+        <button class="isl-btn isl-hide">Hide</button>
+        <button class="isl-btn isl-paint">Paint</button>
+      </div>`;
+    card.querySelector('.isl-select').addEventListener('click', e => { e.stopPropagation(); selectIslandById(isl.id); });
+    card.querySelector('.isl-hide').addEventListener('click', e => { e.stopPropagation(); toggleIslandHide(isl.id); });
+    card.querySelector('.isl-paint').addEventListener('click', e => { e.stopPropagation(); paintIslandById(isl.id); });
+    card.addEventListener('click', () => selectIslandById(isl.id));
+    list.appendChild(card);
+  }
+}
+
+function selectIslandById(id) {
+  const isl = S.islands?.find(i => i.id === id);
+  if (!isl) return;
+  const mask = new Uint8Array(S.nTri);
+  const faces = Array.from(isl.faces).filter(isPaintableBaseFace);
+  if (!faces.length) {
+    clearClickSelection();
+    setStatus('Artwork is locked — that island cannot be painted', 'idle');
+    return;
+  }
+  for (const f of faces) mask[f] = 1;
+  S.clickSelection = mask; S.clickSelectionFaces = faces; S.selectedIsland = id;
+  syncFillSelectionBtn();
+  syncIslandCards();
+  updateMeshColors();
+  setStatus(`Selected island ${id + 1} (${isl.faceCount.toLocaleString()} faces) — click a colour or Fill Selection`, 'idle');
+}
+
+function toggleIslandHide(id) {
+  if (S.hiddenIslands.has(id)) S.hiddenIslands.delete(id);
+  else S.hiddenIslands.add(id);
+  syncIslandCards();
+  updateMeshColors();
+}
+
+function paintIslandById(id) {
+  const isl = S.islands?.find(i => i.id === id);
+  if (!isl) return;
+  const count = paintFacesFree(Array.from(isl.faces), S.paintTarget);
+  setStatus(count
+    ? `Painted ${count.toLocaleString()} base faces → ${S.paintTarget}`
+    : 'Artwork is locked — that island cannot be painted', 'idle');
+}
+
+function syncIslandCards() {
+  document.querySelectorAll('.island-card').forEach(card => {
+    const id = parseInt(card.dataset.id);
+    card.classList.toggle('selected', id === S.selectedIsland);
+    card.classList.toggle('hidden', S.hiddenIslands.has(id));
+    const hideBtn = card.querySelector('.isl-hide');
+    if (hideBtn) hideBtn.textContent = S.hiddenIslands.has(id) ? 'Show' : 'Hide';
+  });
+  if ($('paintIslandBtn')) $('paintIslandBtn').disabled = S.selectedIsland < 0;
+  if ($('hideIslandBtn')) $('hideIslandBtn').disabled = S.selectedIsland < 0;
+}
+
+/* ================================================================== */
+/*  CURSOR & UI HELPERS                                               */
+/* ================================================================== */
+
+function updateSmartCursor(clientX, clientY, worldPoint) {
+  if (!smartCursor || !S.mesh) return;
+  const radius = isBrushTool() ? brushRadiusMm() : (parseFloat($('smartSize')?.value) || 10);
+  const rect = viewport.getBoundingClientRect();
+  const dist = camera.position.distanceTo(worldPoint);
+  const vFov = (camera.fov * Math.PI) / 180;
+  const worldH = 2 * Math.tan(vFov / 2) * dist;
+  const pxPerMm = rect.height / worldH;
+  const d = Math.max(8, radius * pxPerMm * 2);
+  Object.assign(smartCursor.style, {
+    display: 'block', width: d+'px', height: d+'px',
+    left: (clientX - rect.left - d/2)+'px', top: (clientY - rect.top - d/2)+'px',
+    borderColor: S.tool === 'spray' ? 'rgba(251,191,36,.55)' : '',
+    background: S.tool === 'spray' ? 'rgba(251,191,36,.08)' : '',
+  });
+}
+
+function isBrushTool(t = S.tool) { return t === 'brush' || t === 'spray'; }
+
+function isSlotActive(target) {
+  return slotIndex(target) < S.slotCount;
+}
+
+/** Remap painted faces on a removed slot back to Slot 1. Returns face count. */
+function clearSlotPaintToBody(slot) {
+  const fp = ensureFacePaint();
+  const s = slotIndex(slot);
+  if (!fp || !S.nTri || s === 0) return 0;
+  const faces = [];
+  for (let i = 0, end = baseFaceCount(); i < end; i++) if (fp[i] === s) faces.push(i);
+  if (faces.length) paintFacesFree(faces, 0);
+  return faces.length;
+}
+
+function artworkUsesSlot(slot) {
+  const fp = ensureFacePaint();
+  if (!fp) return false;
+  for (let i = baseFaceCount(); i < S.nTri; i++) {
+    if ((fp[i] || 0) === slot) return true;
+  }
+  return false;
+}
+
+function syncSwapControls() {
+  const a = $('swapSlotA'), b = $('swapSlotB'), button = $('swapSlotsBtn');
+  if (!a || !b || !button) return;
+  const prevA = Number(a.value), prevB = Number(b.value);
+  const options = Array.from({ length: S.slotCount }, (_, i) => `<option value="${i}">${slotLabel(i)}</option>`).join('');
+  a.innerHTML = options;
+  b.innerHTML = options;
+  const fallbackA = Math.max(0, Math.min(S.slotCount - 1, slotIndex(S.paintTarget)));
+  const fallbackB = S.slotCount > 1 ? (fallbackA === 0 ? 1 : 0) : 0;
+  a.value = Number.isInteger(prevA) && prevA >= 0 && prevA < S.slotCount ? String(prevA) : String(fallbackA);
+  b.value = Number.isInteger(prevB) && prevB >= 0 && prevB < S.slotCount && prevB !== Number(a.value)
+    ? String(prevB) : String(fallbackB);
+  button.disabled = S.slotCount < 2;
+}
+
+function swapBasePaintSlots(a, b) {
+  const first = slotIndex(a), second = slotIndex(b);
+  if (first === second) {
+    setStatus('Choose two different colour slots to swap', 'idle');
+    return;
+  }
+  const fp = ensureFacePaint();
+  if (!fp) return;
+  let count = 0;
+  for (let i = 0, end = baseFaceCount(); i < end; i++) {
+    const slot = fp[i] || 0;
+    if (slot === first || slot === second) count++;
+  }
+  if (!count) {
+    setStatus('Those slots have no base-model paint to swap; artwork was kept unchanged', 'idle');
+    return;
+  }
+  pushUndo();
+  for (let i = 0, end = baseFaceCount(); i < end; i++) {
+    const slot = fp[i] || 0;
+    if (slot === first) fp[i] = second;
+    else if (slot === second) fp[i] = first;
+  }
+  syncLegacyMasks();
+  clearClickSelection({ repaint: false });
+  updateMeshColors();
+  recountPaint();
+  exportBtn.disabled = false;
+  setStatus(`Swapped ${count.toLocaleString()} base faces: ${slotLabel(first)} ↔ ${slotLabel(second)} · artwork kept`, 'idle');
+}
+
+function rebuildSlotUI() {
+  const list = $('slotList');
+  const bar = $('slotToolbarTargets');
+  if (!list || !bar) return;
+  const prevColors = slotColorsArray(MAX_AMS_SLOTS);
+  list.innerHTML = '';
+  bar.innerHTML = '';
+  colorInputs = {};
+  colorHexEls = {};
+  const n = Math.max(1, Math.min(MAX_AMS_SLOTS, S.slotCount | 0));
+  S.slotCount = n;
+  for (let i = 0; i < n; i++) {
+    const hex = prevColors[i] || DEFAULT_SLOT_COLORS[i];
+    const card = document.createElement('div');
+    card.className = 'slot-card' + (slotIndex(S.paintTarget) === i ? ' active' : '');
+    card.dataset.slot = String(i);
+    card.innerHTML = `
+      <div class="swatch-wrap"><input type="color" data-slot-color="${i}" value="${hex}"></div>
+      <div class="slot-info">
+        <div class="slot-name">${slotLabel(i)}</div>
+        <div class="slot-hex">${hex.toUpperCase()}</div>
+      </div>
+      <div class="slot-actions">
+        <button type="button" class="slot-btn" data-hide-slot="${i}">Hide</button>
+      </div>`;
+    list.appendChild(card);
+    const input = card.querySelector('input[type=color]');
+    const hexEl = card.querySelector('.slot-hex');
+    colorInputs[i] = input;
+    colorHexEls[i] = hexEl;
+    input.addEventListener('input', () => {
+      hexEl.textContent = input.value.toUpperCase();
+      syncPaintSwatches(); updateMeshColors();
+    });
+    input.addEventListener('click', e => e.stopPropagation());
+    card.addEventListener('click', e => {
+      if (e.target?.type === 'color' || e.target?.closest?.('[data-hide-slot]')) return;
+      setPaintTarget(i, { fillIfSelected: true });
+    });
+    card.querySelector('[data-hide-slot]')?.addEventListener('click', e => {
+      e.stopPropagation();
+      if (S.soloActive) { S.soloActive = false; $('soloActive').checked = false; S.hiddenSlots = Array(16).fill(false); }
+      S.hiddenSlots[i] = !S.hiddenSlots[i];
+      syncHideUI(); updateMeshColors();
+      setStatus(S.hiddenSlots[i] ? `Hidden ${slotLabel(i)}` : `Showing ${slotLabel(i)}`, 'idle');
+    });
+
+    const btn = document.createElement('button');
+    btn.className = 'paint-target' + (slotIndex(S.paintTarget) === i ? ' active' : '');
+    btn.title = slotLabel(i);
+    btn.dataset.slot = String(i);
+    btn.innerHTML = `<span class="swatch" style="background:${hex}"></span>${i + 1}`;
+    btn.addEventListener('click', () => setPaintTarget(i, { fillIfSelected: true }));
+    bar.appendChild(btn);
+  }
+  const label = $('slotCountLabel');
+  if (label) label.textContent = String(n);
+  if ($('slotMinusBtn')) $('slotMinusBtn').disabled = n <= 1;
+  if ($('slotPlusBtn')) $('slotPlusBtn').disabled = n >= MAX_AMS_SLOTS;
+  syncSwapControls();
+  syncHideUI();
+  syncPaintSwatches();
+}
+
+function syncSlotCountUI() {
+  const n = Math.max(1, Math.min(MAX_AMS_SLOTS, S.slotCount | 0));
+  S.slotCount = n;
+  if (slotIndex(S.paintTarget) >= n) S.paintTarget = 0;
+  rebuildSlotUI();
+}
+
+function addAmsSlot() {
+  if (S.slotCount >= MAX_AMS_SLOTS) {
+    setStatus(`Max ${MAX_AMS_SLOTS} filaments (multi-AMS)`, 'idle');
+    return;
+  }
+  S.slotCount += 1;
+  syncSlotCountUI();
+  setPaintTarget(S.slotCount - 1);
+  setStatus(`Added ${slotLabel(S.slotCount - 1)} — ${S.slotCount} of ${MAX_AMS_SLOTS}`, 'idle');
+}
+
+function removeAmsSlot() {
+  if (S.slotCount <= 1) {
+    setStatus('Need at least Slot 1', 'idle');
+    return;
+  }
+  const slot = S.slotCount - 1;
+  if (artworkUsesSlot(slot)) {
+    setStatus(`${slotLabel(slot)} is used by locked artwork — clear or restamp the artwork before removing that slot`, 'idle');
+    return;
+  }
+  const cleared = clearSlotPaintToBody(slot);
+  S.hiddenSlots[slot] = false;
+  S.slotCount -= 1;
+  syncSlotCountUI();
+  setStatus(
+    cleared
+      ? `Removed ${slotLabel(slot)} — ${cleared.toLocaleString()} faces → Slot 1`
+      : `Removed ${slotLabel(slot)} — ${S.slotCount} of ${MAX_AMS_SLOTS}`,
+    'idle'
+  );
+}
+
+function syncHideUI() {
+  document.querySelectorAll('.slot-card .slot-btn[data-hide-slot]').forEach(btn => {
+    const i = parseInt(btn.dataset.hideSlot, 10);
+    const hidden = S.soloActive ? i !== slotIndex(S.paintTarget) : !!S.hiddenSlots[i];
+    btn.textContent = hidden ? 'Show' : 'Hide';
+    btn.classList.toggle('off', hidden);
+    btn.closest('.slot-card')?.classList.toggle('hidden', hidden);
+  });
+  $('soloRow')?.classList.toggle('active', S.soloActive);
+}
+
+function syncPaintSwatches() {
+  document.querySelectorAll('#slotToolbarTargets .paint-target').forEach(btn => {
+    const i = parseInt(btn.dataset.slot, 10);
+    const sw = btn.querySelector('.swatch');
+    if (sw) sw.style.background = getSlotColor(i);
+  });
+}
+
+function syncSlotCards() {
+  const cur = slotIndex(S.paintTarget);
+  document.querySelectorAll('.slot-card').forEach(c => c.classList.toggle('active', parseInt(c.dataset.slot, 10) === cur));
+  document.querySelectorAll('#slotToolbarTargets .paint-target').forEach(b => b.classList.toggle('active', parseInt(b.dataset.slot, 10) === cur));
+}
+
+function updateResMeta() {
+  const el = $('resMeta');
+  if (!el || !S.nTri) { if(el) el.textContent = 'Load a model to upgrade.'; return; }
+  const tag = S.resLevel === 0 ? 'Original' : S.resLevel === 1 ? 'Fine' : `Ultra (×${Math.pow(4, S.resLevel)})`;
+  el.textContent = `${S.nTri.toLocaleString()} faces · ${tag}`;
+}
+
+/* ================================================================== */
+/*  TOOL SWITCHING                                                    */
+/* ================================================================== */
+
+function showToolOpts(tool) {
+  for (const [id, t] of [['brushOpts','brush'],['sprayOpts','spray'],['eyedropOpts','eyedrop'],
+    ['clickSelectOpts','clickSelect'],['smartOpts','smart'],['edgeOpts','edge'],['detectOpts','detect']]) {
+    $(id)?.classList.toggle('visible', tool === t);
+  }
+  $('areaOpts')?.classList.toggle('visible', tool === 'lasso' || tool === 'box');
+}
+
+function setTool(tool, { sticky = false } = {}) {
+  if (!sticky && tool === S.tool && tool !== 'orbit') tool = 'orbit';
+  S.tool = tool;
+  resetInteraction();
+  if (tool !== 'art') hideArtPreview();
+
+  for (const [id, t] of [['toolBrush','brush'],['toolSpray','spray'],['toolEyedrop','eyedrop'],
+    ['toolClickSelect','clickSelect'],['toolBucket','bucket'],['toolLasso','lasso'],['toolSmart','smart'],
+    ['toolBox','box'],['toolEdge','edge'],['toolDetect','detect']]) {
+    $(id)?.classList.toggle('active', tool === t);
+  }
+  $('artPlaceBtn')?.classList.toggle('active-mode', tool === 'art');
+  showToolOpts(tool);
+  if (tool !== 'smart') clearSmartPreview();
+  // Keep face selection across tool switches so you can Lasso → pick slot → Fill
+
+  // Area tools need Lock so left-drag draws instead of orbiting. Clean Edge is click-first.
+  if ((tool === 'lasso' || tool === 'box') && orbitLockCheck && !orbitLockCheck.checked) {
+    orbitLockCheck.checked = true;
+  }
+  if (tool === 'edge' && orbitLockCheck?.checked) orbitLockCheck.checked = false;
+
+  viewport.className = 'viewport';
+  if (tool === 'box' || tool === 'lasso' || tool === 'edge' || tool === 'smart' || isBrushTool(tool)) viewport.classList.add('select-mode');
+  if (isBrushTool(tool)) viewport.classList.add('brush-mode');
+  if (tool === 'eyedrop') viewport.classList.add('eyedrop-mode');
+  if (tool === 'clickSelect') viewport.classList.add('click-select-mode');
+  if (tool === 'bucket') viewport.classList.add('bucket-mode');
+  if (tool === 'art') viewport.classList.add('art-mode');
+
+  const hints = {
+    brush: 'Brush — paint on model · right-drag or Alt+drag to orbit',
+    spray: 'Spray — mist on model · right-drag to orbit',
+    eyedrop: 'Eyedropper — click a face to pick its slot',
+    clickSelect: 'Click to select a connected region · then Fill Selection',
+    bucket: 'Bucket — click a connected base patch to fill it · artwork stays locked',
+    edge: 'Clean Edge — click the fringe to select · Fill / Clear to commit',
+    smart: 'Smart fill — facing patch only · hover preview · click to paint · Wrap off by default',
+    lasso: 'Lasso — Lock on, draw around an area (eyebrow…) · pick slot · Fill Selection',
+    box: 'Box — Lock on, drag a rectangle · pick slot · Fill Selection',
+    detect: 'Detect — find raised/sunken detail',
+    art: 'Artwork — click to stamp the logo · right-drag orbits',
+  };
+  if (tool === 'edge') syncEdgeModeUI();
+  viewportHint.textContent = hints[tool] || 'Left-drag orbits · scroll zooms · pick a tool';
+
+  // Auto-switch to Paint tab when selecting a tool
+  if (['brush','spray','eyedrop','clickSelect','bucket','smart','box','edge','detect','art'].includes(tool)) {
+    switchTab('paint');
+  }
+}
+
+function setPaintTarget(target, { fillIfSelected = false } = {}) {
+  const slot = slotIndex(target);
+  if (!isSlotActive(slot)) {
+    setStatus(`${slotLabel(slot)} is off — use + to add a slot`, 'idle');
+    return;
+  }
+  S.paintTarget = slot;
+  syncSlotCards(); syncHideUI();
+  if (S.soloActive) updateMeshColors();
+  // Natural flow: lasso shirt → click red → fills (magenta was only the selection)
+  if (fillIfSelected && S.tool !== 'edge' && S.clickSelectionFaces?.length) {
+    paintClickSelection();
+  }
+}
+
+function setBrushStroke(mode) {
+  S.brushStroke = mode || 'free';
+  document.querySelectorAll('.stroke-btn[data-stroke]').forEach(b => b.classList.toggle('active', b.dataset.stroke === S.brushStroke));
+  const el = $('strokeModeVal');
+  if (el) el.textContent = { free:'Freehand', horizontal:'Horizontal', vertical:'Vertical' }[S.brushStroke] || 'Freehand';
+}
+
+/* ================================================================== */
+/*  INTERACTION STATE                                                 */
+/* ================================================================== */
+
+function syncOrbitLock() {
+  const locked = !!orbitLockCheck?.checked;
+  const stroking = !!S.brushStrokeActive || !!S._smartClick || !!boxDrag || !!lassoDrag || !!art.rotationDrag || !!art.moveDrag;
+  // During an active paint stroke, kill OrbitControls entirely so it cannot steal the pointer.
+  if (stroking && !S.orbitOverride) {
+    controls.enabled = false;
+    return;
+  }
+  controls.enabled = true;
+  controls.enableRotate = true;
+  controls.enablePan = true;
+  // Brush/spray/smart/eyedrop own left-drag. Box/Lasso need Lock. Edge is click-select.
+  const leftBlocked = S.orbitOverride ? false :
+    (S.tool === 'eyedrop' || S.tool === 'smart' || S.tool === 'clickSelect' || S.tool === 'bucket' || S.tool === 'edge' || S.tool === 'art' ||
+     isBrushTool() || ((S.tool === 'box' || S.tool === 'lasso') && locked));
+  controls.mouseButtons.LEFT = leftBlocked ? -1 : THREE.MOUSE.ROTATE;
+  controls.mouseButtons.MIDDLE = THREE.MOUSE.DOLLY;
+  controls.mouseButtons.RIGHT = THREE.MOUSE.ROTATE;
+}
+
+function releaseViewportPointer(id) {
+  if (id == null) return;
+  try { viewport.releasePointerCapture?.(id); } catch {}
+}
+
+function resetInteraction(msg) {
+  const pids = [S.brushStrokeActive?.pointerId, S._smartClick?.pointerId, boxDrag?.pointerId, lassoDrag?.pointerId, art.rotationDrag?.pointerId, art.moveDrag?.pointerId].filter(v => v != null);
+  S.brushStrokeActive = null; S._smartClick = null; S.orbitOverride = false;
+  art.rotationDrag = null;
+  art.moveDrag = null;
+  if (boxDrag) endBoxDrag();
+  if (lassoDrag) endLassoDrag();
+  for (const id of pids) releaseViewportPointer(id);
+  selectRect.style.display = 'none';
+  hideLassoSvg();
+  if (smartCursor) smartCursor.style.display = 'none';
+  controls.enabled = true; controls.enableRotate = true; controls.enablePan = true;
+  syncOrbitLock();
+  if (msg) setStatus(msg, 'idle');
+}
+
+function showAllColours() {
+  S.soloActive = false;
+  S.hiddenSlots = Array(16).fill(false);
+  S.hiddenIslands.clear();
+  $('soloActive').checked = false;
+  syncHideUI(); syncIslandCards(); updateMeshColors();
+  resetInteraction('All colours visible');
+}
+
+function ensureSlotFor(target) {
+  const idx = slotIndex(target);
+  if (S.slotCount < idx + 1) {
+    S.slotCount = Math.min(MAX_AMS_SLOTS, idx + 1);
+    syncSlotCountUI();
+  }
+}
+
+function sampleEyedrop(clientX, clientY) {
+  const hit = pickHitAtClient(clientX, clientY);
+  if (!hit) { setStatus('Eyedropper — click on the model', 'idle'); return; }
+  const slot = facePaintSlot(hit.faceIndex);
+  ensureSlotFor(slot);
+  setPaintTarget(slot);
+  setStatus(`Eyedropper → ${slotLabel(slot)}`, 'idle');
+}
+
+function endBrushStroke(status = true) {
+  const stroke = S.brushStrokeActive;
+  if (!stroke) return;
+  // Clear first so any in-flight move samples abort immediately.
+  S.brushStrokeActive = null;
+  releaseViewportPointer(stroke.pointerId);
+  syncOrbitLock();
+  if (stroke.undid) {
+    // Defer heavy bookkeeping so mouse-up feels instant.
+    requestAnimationFrame(() => {
+      syncLegacyMasks();
+      updateMeshColors();
+      recountPaint();
+    });
+  }
+  if (status) {
+    const n = stroke.painted || 0;
+    setStatus(
+      n
+        ? `${S.tool === 'spray' ? 'Spray' : 'Brush'} → ${slotLabel(slotIndex(S.paintTarget))} (${n.toLocaleString()} faces)`
+        : 'No faces hit',
+      'idle'
+    );
+  }
+}
+
+/** Start a brush/spray stroke. Returns true if a stroke began. */
+function startBrushStroke(e) {
+  if (!isBrushTool() || !S.mesh || e.altKey || S.orbitOverride) return false;
+  if (e.button !== 0 && !(e.buttons & 1)) return false;
+  const origin = { x: e.clientX, y: e.clientY };
+  const pt = constrainBrushClient(e.clientX, e.clientY, origin);
+  const hit = pickHitAtClient(pt.x, pt.y);
+  if (!hit) return false;
+  // End any stuck stroke before starting a new one.
+  if (S.brushStrokeActive) endBrushStroke(false);
+  S.brushStrokeActive = {
+    origin, pointerId: e.pointerId, painted: 0, undid: false, lastClient: pt, id: (S._strokeId = (S._strokeId || 0) + 1),
+  };
+  syncOrbitLock();
+  updateSmartCursor(pt.x, pt.y, hit.worldPoint);
+  const n = applyBrushDab(hit, { undo: true, live: true });
+  S.brushStrokeActive.painted += n;
+  if (n) S.brushStrokeActive.undid = true;
+  try { viewport.setPointerCapture?.(e.pointerId); } catch {}
+  return true;
+}
+
+/** Continue an active brush/spray stroke. */
+function moveBrushStroke(e) {
+  const stroke = S.brushStrokeActive;
+  if (!stroke) return;
+  // Stop the instant the primary button is up — even if pointerup was delayed.
+  if (e.buttons != null && !(e.buttons & 1)) { endBrushStroke(true); return; }
+  if (stroke.pointerId != null && e.pointerId !== stroke.pointerId) return;
+  stroke.painted += strokeBrushTo(e.clientX, e.clientY);
+}
+
+let boxDrag = null;
+function endBoxDrag(e) {
+  if (e?.pointerId != null) releaseViewportPointer(e.pointerId);
+  selectRect.style.display = 'none';
+  const start = boxDrag; boxDrag = null; return start;
+}
+
+let lassoDrag = null;
+function hideLassoSvg() {
+  if (lassoSvg) lassoSvg.style.display = 'none';
+  if (lassoPoly) lassoPoly.setAttribute('points', '');
+}
+function updateLassoSvg(pts) {
+  if (!lassoSvg || !lassoPoly || !pts?.length) return;
+  lassoSvg.style.display = 'block';
+  const closed = pts.map(p => `${p.x},${p.y}`).join(' ');
+  // Close the visual loop back to start while drawing
+  const first = pts[0];
+  lassoPoly.setAttribute('points', pts.length > 2 ? `${closed} ${first.x},${first.y}` : closed);
+}
+function endLassoDrag(e) {
+  if (e?.pointerId != null) releaseViewportPointer(e.pointerId);
+  const start = lassoDrag; lassoDrag = null;
+  hideLassoSvg();
+  return start;
+}
+
+function isSelectTool() { return S.tool === 'box' || S.tool === 'lasso' || S.tool === 'edge'; }
+function isAreaTool(t = S.tool) { return t === 'box' || t === 'lasso'; }
+
+/* ================================================================== */
+/*  RESOLUTION UPGRADE                                                */
+/* ================================================================== */
+
+function runResolutionUpgrade(levels) {
+  if (!S.verts || !S.nTri) return Promise.resolve();
+  setStatus(`Upgrading paint detail (×${Math.pow(4, levels)})…`, 'working');
+  return new Promise((resolve, reject) => {
+    setTimeout(() => {
+      try {
+        ensureFacePaint();
+        let r = { verts:S.verts, faces:S.faces, nVerts:S.nVerts, nTri:S.nTri,
+          embossMask:S.embossMask, debossMask:S.debossMask, trimMask:S.trimMask, facePaint:S.facePaint };
+        for (let i = 0; i < levels; i++) {
+          r = upgradePaintResolution(r.verts, r.faces, r.nVerts, r.nTri,
+            { embossMask:r.embossMask, debossMask:r.debossMask, trimMask:r.trimMask, facePaint:r.facePaint });
+        }
+        Object.assign(S, { verts:r.verts, faces:r.faces, nVerts:r.nVerts, nTri:r.nTri,
+          embossMask:r.embossMask, debossMask:r.debossMask, trimMask:r.trimMask, facePaint:r.facePaint,
+          featureEmboss:null, featureDeboss:null, faceAdj:null,
+          edgeHighlight:null, smartPreview:null, smartPreviewFaces:null,
+          islands:null, islandMap:null, undoStack:[], hiddenManual:null });
+        S.hiddenIslands.clear();
+        S.resLevel += levels;
+        $('undoBtn').disabled = true;
+        buildMesh({ frame: false });
+        recountPaint();
+        updateResMeta();
+        $('islandInfo').textContent = 'Mesh changed — re-detect islands.';
+        setStatus(`Paint detail upgraded — ${S.nTri.toLocaleString()} faces`, 'idle');
+        resolve();
+      } catch (err) {
+        setStatus(err.message || 'Upgrade failed', 'error');
+        reject(err);
+      }
+    }, 30);
+  });
+}
+
+/* ================================================================== */
+/*  LOAD MESH (STL / OBJ)                                             */
+/* ================================================================== */
+
+async function applyLoadedSoup(file, vertices, normals, nTri, stemExt) {
+  setStatus(`Loading ${file.name}…`, 'working');
+  clearSceneModel();
+  resetInteraction();
+  S.fileName = file.name.replace(stemExt, '');
+
+  S.rawVertices = vertices; S.rawNormals = normals; S.nTri = nTri;
+
+  const { verts, faces, nVerts } = deduplicateVertices(vertices, nTri);
+  const orientation = orientSTLZUpAndSeat(verts, nVerts);
+  Object.assign(S, { verts, faces, nVerts,
+    embossMask: new Uint8Array(nTri), debossMask: new Uint8Array(nTri), trimMask: new Uint8Array(nTri),
+    facePaint: new Uint8Array(nTri),
+    featureEmboss:null, featureDeboss:null, embossCount:0, debossCount:0, trimCount:0,
+    edgeHighlight:null, smartPreview:null, smartPreviewFaces:null, faceAdj:null,
+    undoStack:[], resLevel:0, islands:null, islandMap:null, clickSelection:null, clickSelectionFaces:null,
+    hiddenSlots: Array(16).fill(false), hiddenManual:null, soloActive:false, selectedIsland:-1,
+  });
+  S.hiddenIslands.clear();
+  S.stampTri0 = null;
+  S.stampVert0 = null;
+  clearExportDestination();
+  $('soloActive').checked = false;
+  $('undoBtn').disabled = true;
+
+  buildMesh({ frame: true });
+  updateStats(); syncHideUI(); updateResMeta();
+  detectBtn.disabled = false; exportBtn.disabled = false;
+  $('resFineBtn').disabled = false; $('resUltraBtn').disabled = false;
+  $('detectIslandsBtn').disabled = false;
+  $('hideActiveSlotBtn').disabled = false; $('findPartsPaintBtn').disabled = false;
+  $('clearPaintBtn').disabled = false; $('clearModelBtn').disabled = false;
+  $('flipModelBtn').disabled = false; $('rot90YBtn').disabled = false; $('rot90XBtn').disabled = false;
+  $('flipToolBtn').disabled = false;
+  $('islandInfo').textContent = 'Click "Find Islands" to detect mesh components.';
+  viewportHint.style.display = 'block';
+  syncArtMeta();
+  setStatus(`Loaded ${file.name} — ${nTri.toLocaleString()} faces${orientation.thin ? ', laid flat' : ''}`, 'idle');
+}
+
+async function loadSTL(file) {
+  const buf = await file.arrayBuffer();
+  const { vertices, normals, nTri } = parseSTLBinary(buf);
+  await applyLoadedSoup(file, vertices, normals, nTri, /\.stl$/i);
+}
+
+async function loadOBJFile(file) {
+  const text = await file.text();
+  const { vertices, normals, nTri } = parseOBJ(text);
+  await applyLoadedSoup(file, vertices, normals, nTri, /\.obj$/i);
+}
+
+/* ================================================================== */
+/*  LOAD FILE (dispatcher)                                            */
+/* ================================================================== */
+
+function loadFile(file) {
+  const name = file.name.toLowerCase();
+  if (name.endsWith('.3mf')) load3MF(file);
+  else if (name.endsWith('.obj')) loadOBJFile(file).catch(err => {
+    console.error(err);
+    setStatus(err?.message || 'OBJ load failed', 'error');
+  });
+  else if (name.endsWith('.stl')) loadSTL(file).catch(err => {
+    console.error(err);
+    setStatus(err?.message || 'STL load failed', 'error');
+  });
+  else setStatus('Unsupported file — drop an STL, OBJ, or 3MF', 'error');
+}
+
+/* ================================================================== */
+/*  LOAD 3MF                                                          */
+/* ================================================================== */
+
+async function load3MF(file) {
+  setStatus(`Loading 3MF: ${file.name}…`, 'working');
+  clearSceneModel();
+  resetInteraction();
+  S.fileName = file.name.replace(/\.3mf$/i, '');
+
+  try {
+    if (!file.size) {
+      throw new Error('This 3MF is empty (0 bytes). The last export crashed before writing — reload the hoodie STL, stamp again, then export.');
+    }
+    const buf = await file.arrayBuffer();
+    const result = await import3MF(buf);
+
+    const orientation = orientAndSeatVertsOnBed(result.verts, result.nVerts, result.faces, result.nTri);
+    const facePaint = result.facePaint || masksToFacePaint(result.embossMask, result.debossMask, result.trimMask, result.nTri);
+    Object.assign(S, {
+      verts: result.verts, faces: result.faces, nVerts: result.nVerts, nTri: result.nTri,
+      embossMask: result.embossMask, debossMask: result.debossMask, trimMask: result.trimMask,
+      facePaint,
+      rawVertices: null, rawNormals: null,
+      featureEmboss: null, featureDeboss: null,
+      edgeHighlight: null, smartPreview: null, smartPreviewFaces: null,
+      faceAdj: null, undoStack: [], resLevel: 0,
+      islands: null, islandMap: null, clickSelection: null, clickSelectionFaces: null,
+      hiddenSlots: Array(16).fill(false), hiddenManual: null,
+      soloActive: false, selectedIsland: -1,
+      stampTri0: result.stampTri0,
+      stampVert0: result.stampVert0,
+    });
+    S.hiddenIslands.clear();
+    clearExportDestination();
+
+    // Expand slot count to cover imported paint / colours
+    let used = 1;
+    for (let i = 0; i < result.nTri; i++) {
+      const s = facePaint[i] || 0;
+      if (s + 1 > used) used = s + 1;
+    }
+    if (result.colors?.length) used = Math.max(used, Math.min(MAX_AMS_SLOTS, result.colors.length));
+    S.slotCount = Math.min(MAX_AMS_SLOTS, Math.max(1, used));
+    syncSlotCountUI();
+    // Apply imported colours after UI rebuild
+    if (result.colors?.length) {
+      for (let i = 0; i < Math.min(S.slotCount, result.colors.length); i++) {
+        const c = result.colors[i];
+        if (c && colorInputs[i]) {
+          const hex = c.length > 7 ? c.slice(0, 7) : c;
+          colorInputs[i].value = hex;
+          if (colorHexEls[i]) colorHexEls[i].textContent = hex.toUpperCase();
+        }
+      }
+      syncPaintSwatches();
+    }
+
+    $('soloActive').checked = false;
+    $('undoBtn').disabled = true;
+    buildMesh({ frame: true });
+    recountPaint(); updateStats(); syncHideUI(); updateResMeta();
+    detectBtn.disabled = false; exportBtn.disabled = false;
+    $('resFineBtn').disabled = false; $('resUltraBtn').disabled = false;
+    $('detectIslandsBtn').disabled = false;
+    $('hideActiveSlotBtn').disabled = false; $('findPartsPaintBtn').disabled = false;
+    $('clearPaintBtn').disabled = false; $('clearModelBtn').disabled = false;
+    $('flipModelBtn').disabled = false; $('rot90YBtn').disabled = false; $('rot90XBtn').disabled = false;
+    $('flipToolBtn').disabled = false;
+    $('islandInfo').textContent = 'Click "Find Islands" to detect components.';
+    viewportHint.style.display = 'block';
+    syncArtMeta();
+    const painted = result.painted ?? [...facePaint].filter(s => s > 0).length;
+    const placed = result.transformsApplied ? ', applied 3MF placement' : '';
+    const laidFlat = orientation.thin ? ', laid flat' : '';
+    setStatus(
+      `Loaded 3MF: ${file.name} — ${result.nTri.toLocaleString()} faces, ${painted.toLocaleString()} painted (${S.slotCount} colours${placed}${laidFlat})`,
+      painted ? 'idle' : 'error'
+    );
+  } catch (err) {
+    setStatus(`3MF import failed: ${err.message}`, 'error');
+    console.error('3MF import error:', err);
+  }
+}
+
+/* ================================================================== */
+/*  CLEAR PAINT / CLEAR MODEL                                         */
+/* ================================================================== */
+
+async function screenPickColour() {
+  if (!window.EyeDropper) { setStatus('EyeDropper API not supported in this browser', 'idle'); return; }
+  try {
+    const picker = new EyeDropper();
+    const result = await picker.open();
+    const hex = result.sRGBHex;
+    // Apply to active paint target's colour input
+    const input = colorInputs[slotIndex(S.paintTarget)];
+    if (!input) return;
+    input.value = hex;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    setStatus(`Screen pick → ${slotLabel(slotIndex(S.paintTarget))} set to ${hex}`, 'idle');
+  } catch (e) {
+    if (e.name !== 'AbortError') setStatus('Screen pick cancelled', 'idle');
+  }
+}
+
+function hideSelection() {
+  if (!S.clickSelectionFaces || !S.clickSelectionFaces.length) return;
+  if (!S.hiddenManual) S.hiddenManual = new Uint8Array(S.nTri);
+  for (const i of S.clickSelectionFaces) S.hiddenManual[i] = 1;
+  const count = S.clickSelectionFaces.length;
+  clearClickSelection();
+  updateMeshColors();
+  setStatus(`Hidden ${count} faces — click Show to reveal`, 'idle');
+}
+
+function hideActiveSlot() {
+  if (!S.mesh) return;
+  const slot = slotIndex(S.paintTarget);
+  if (S.soloActive) {
+    S.soloActive = false;
+    $('soloActive').checked = false;
+  }
+  S.hiddenSlots[slot] = true;
+  clearClickSelection({ repaint: false });
+  syncHideUI();
+  updateMeshColors();
+  setStatus(`Hidden ${slotLabel(slot)} — paint exposed areas, then Show All Hidden`, 'idle');
+}
+
+function showHidden() {
+  let changed = false;
+  if (S.hiddenManual) { S.hiddenManual.fill(0); changed = true; }
+  if (S.hiddenIslands?.size) { S.hiddenIslands.clear(); changed = true; }
+  if (S.hiddenSlots?.some(Boolean)) { S.hiddenSlots.fill(false); changed = true; }
+  if (S.soloActive) {
+    S.soloActive = false;
+    $('soloActive').checked = false;
+    changed = true;
+  }
+  syncHideUI();
+  syncIslandCards();
+  updateMeshColors();
+  setStatus(changed ? 'All hidden faces, parts, and colours revealed' : 'Nothing hidden', 'idle');
+}
+
+function clearPaint() {
+  const fp = ensureFacePaint();
+  if (!fp) return;
+  pushUndo();
+  fp.fill(0, 0, baseFaceCount());
+  syncLegacyMasks();
+  S.edgeHighlight = null;
+  S.smartPreview = null; S.smartPreviewFaces = null;
+  clearClickSelection({ repaint: false });
+  updateMeshColors(); recountPaint();
+  setStatus(S.nTri > baseFaceCount()
+    ? 'Base paint cleared — stamped artwork was kept'
+    : 'All paint cleared — model is Slot 1 colour only', 'idle');
+}
+
+function clearModel() {
+  clearSceneModel();
+  Object.assign(S, {
+    rawVertices: null, rawNormals: null, nTri: 0,
+    verts: null, faces: null, nVerts: 0, mesh: null,
+    embossMask: null, debossMask: null, trimMask: null, facePaint: null,
+    featureEmboss: null, featureDeboss: null,
+    embossCount: 0, debossCount: 0, trimCount: 0,
+    edgeHighlight: null, smartPreview: null, smartPreviewFaces: null,
+    faceAdj: null, undoStack: [], redoStack: [], resLevel: 0,
+    islands: null, islandMap: null, clickSelection: null, clickSelectionFaces: null,
+    hiddenSlots: Array(16).fill(false), hiddenManual: null,
+    soloActive: false, selectedIsland: -1, fileName: 'model',
+    wireframe: null, wireframeOn: false, turntable: false,
+    symmetryMap: null, symmetryCenterX: 0, symmetryOn: false,
+  });
+  S.hiddenIslands.clear();
+  clearExportDestination();
+  $('soloActive').checked = false;
+  $('undoBtn').disabled = true;
+  detectBtn.disabled = true; exportBtn.disabled = true;
+  $('resFineBtn').disabled = true; $('resUltraBtn').disabled = true;
+  $('detectIslandsBtn').disabled = true;
+  $('hideActiveSlotBtn').disabled = true; $('findPartsPaintBtn').disabled = true;
+  $('clearPaintBtn').disabled = true; $('clearModelBtn').disabled = true;
+  $('flipModelBtn').disabled = true; $('rot90YBtn').disabled = true; $('rot90XBtn').disabled = true;
+  $('flipToolBtn').disabled = true;
+  $('toggleBottomBtn').disabled = true;
+  $('wireframeBtn').classList.remove('active-tool');
+  $('turntableBtn').classList.remove('active-tool');
+  $('redoBtn').disabled = true;
+  $('symmetryToggle').checked = false;
+  $('app').classList.remove('bottom-open');
+  $('islandList').innerHTML = '';
+  // Reset file input so the same file can be re-loaded
+  fileInput.value = '';
+  updateStats(); updateResMeta();
+  syncArtMeta();
+  viewportHint.textContent = 'Load a model · pick a colour · paint';
+  viewportHint.style.display = 'block'; viewportHint.style.opacity = '1';
+  setStatus('Model cleared — drop an STL or 3MF to start', 'idle');
+  setTimeout(resizeRenderer, 100);
+}
+
+/* ================================================================== */
+
+function switchTab(name) {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+  document.querySelectorAll('.tab-page').forEach(p => p.classList.toggle('active', p.id === 'tab' + name.charAt(0).toUpperCase() + name.slice(1)));
+}
+
+/* ================================================================== */
+/*  EVENT BINDINGS                                                    */
+/* ================================================================== */
+
+// Tabs
+document.querySelectorAll('.tab-btn').forEach(b => b.addEventListener('click', () => switchTab(b.dataset.tab)));
+
+// Sidebar toggle
+$('toggleSidebar').addEventListener('click', () => {
+  $('app').classList.toggle('sidebar-collapsed');
+  setTimeout(resizeRenderer, 250);
+});
+
+// Bottom panel
+$('toggleBottomBtn')?.addEventListener('click', () => {
+  $('app').classList.toggle('bottom-open');
+  setTimeout(resizeRenderer, 250);
+});
+$('closeBottomBtn')?.addEventListener('click', () => {
+  $('app').classList.remove('bottom-open');
+  setTimeout(resizeRenderer, 250);
+});
+
+// File loading
+dropZone.addEventListener('click', () => fileInput.click());
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+dropZone.addEventListener('drop', e => { e.preventDefault(); dropZone.classList.remove('dragover'); if (e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]); });
+fileInput.addEventListener('change', () => { if (fileInput.files[0]) loadFile(fileInput.files[0]); });
+
+// Presets (first 4 slots)
+const presets = [
+  { name:'Spidey', colors:['#C20820','#131211','#F5F5F5','#1E40AF'] },
+  { name:'White', colors:['#FFFFFF','#FF0000','#0000FF','#FFD700'] },
+  { name:'Black', colors:['#222222','#FFD700','#00CED1','#E94560'] },
+  { name:'Silver', colors:['#BBBBBB','#FF6600','#0066FF','#00AE42'] },
+  { name:'Wood', colors:['#C8A26E','#5C3A1E','#2E5E3E','#8B4513'] },
+  { name:'Ocean', colors:['#1A5276','#F39C12','#2ECC71','#E8F6FF'] },
+  { name:'Neon', colors:['#1A1A2E','#E94560','#0F3460','#39FF14'] },
+  { name:'Pastel', colors:['#FAD6A5','#FF6F91','#845EC2','#4FFBDF'] },
+  { name:'Bambu', colors:['#E8E8E8','#00AE42','#333333','#FF6A00'] },
+];
+const presetRow = $('presetRow');
+for (const p of presets) {
+  const sw = document.createElement('div');
+  sw.className = 'preset-swatch'; sw.style.background = p.colors[0]; sw.title = p.name;
+  sw.addEventListener('click', () => {
+    if (S.slotCount < Math.min(4, p.colors.length)) {
+      S.slotCount = Math.min(4, p.colors.length);
+      syncSlotCountUI();
+    }
+    for (let i = 0; i < p.colors.length && i < S.slotCount; i++) {
+      if (colorInputs[i]) {
+        colorInputs[i].value = p.colors[i];
+        if (colorHexEls[i]) colorHexEls[i].textContent = p.colors[i].toUpperCase();
+      }
+    }
+    syncPaintSwatches(); updateMeshColors();
+  });
+  presetRow.appendChild(sw);
+}
+
+$('soloActive')?.addEventListener('change', e => {
+  S.soloActive = !!e.target.checked;
+  if (S.soloActive) S.hiddenSlots = Array(16).fill(false);
+  syncHideUI(); updateMeshColors();
+});
+$('showAllColoursBtn')?.addEventListener('click', showAllColours);
+
+// Paint tools
+$('toolBrush')?.addEventListener('click', () => setTool('brush'));
+$('toolSpray')?.addEventListener('click', () => setTool('spray'));
+$('toolEyedrop')?.addEventListener('click', () => setTool('eyedrop'));
+$('toolClickSelect')?.addEventListener('click', () => setTool('clickSelect'));
+$('toolBucket')?.addEventListener('click', () => setTool('bucket'));
+$('toolLasso')?.addEventListener('click', () => setTool('lasso'));
+$('toolSmart')?.addEventListener('click', () => setTool('smart'));
+$('toolBox')?.addEventListener('click', () => setTool('box'));
+$('toolEdge')?.addEventListener('click', () => setTool('edge'));
+$('toolDetect')?.addEventListener('click', () => setTool('detect'));
+
+const artDrop = $('artDropZone');
+artDrop?.addEventListener('click', () => $('artFileInput')?.click());
+artDrop?.addEventListener('dragover', (e) => { e.preventDefault(); artDrop.classList.add('dragover'); });
+artDrop?.addEventListener('dragleave', () => artDrop.classList.remove('dragover'));
+artDrop?.addEventListener('drop', (e) => {
+  e.preventDefault(); artDrop.classList.remove('dragover');
+  const file = e.dataTransfer?.files?.[0];
+  if (file) loadArtworkFile(file);
+});
+$('artFileInput')?.addEventListener('change', () => {
+  if ($('artFileInput').files[0]) loadArtworkFile($('artFileInput').files[0]);
+});
+$('artPlaceBtn')?.addEventListener('click', () => {
+  if (!art.raster) { setStatus('Drop a PNG, JPG, or SVG first', 'idle'); return; }
+  if (!S.mesh) { setStatus('Load a model first', 'idle'); return; }
+  if (art.placement) {
+    stampArtworkAtPlacement();
+    return;
+  }
+  if (resumeArtPlacement()) return;
+  setTool('art', { sticky: true });
+  setStatus('Click the model to position the artwork', 'idle');
+});
+$('artCancelPlaceBtn')?.addEventListener('click', cancelArtPlacement);
+$('artClearBtn')?.addEventListener('click', clearArtwork);
+$('artTraceBtn')?.addEventListener('click', () => retraceArtwork());
+$('artTraceThreshold')?.addEventListener('input', () => {
+  $('artTraceThrVal').textContent = String(Math.round(artTraceThreshold()));
+  scheduleArtTrace();
+});
+$('artTraceInvert')?.addEventListener('change', () => retraceArtwork());
+function setArtSize(value) {
+  const size = Math.max(8, Math.min(180, Math.round(parseFloat(value) || 48)));
+  if ($('artSize')) $('artSize').value = String(size);
+  if ($('artSizeVal')) $('artSizeVal').value = String(size);
+  syncArtMeta();
+  updatePlacedArtPreview();
+}
+
+$('artSize')?.addEventListener('input', () => setArtSize($('artSize').value));
+$('artSizeVal')?.addEventListener('change', () => setArtSize($('artSizeVal').value));
+$('artSizeVal')?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); setArtSize(e.currentTarget.value); e.currentTarget.blur(); }
+});
+$('artRot')?.addEventListener('input', () => {
+  setArtRotation(parseFloat($('artRot').value) || 0);
+});
+$('artRotVal')?.addEventListener('change', () => setArtRotation($('artRotVal').value));
+$('artRotVal')?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); setArtRotation(e.currentTarget.value); e.currentTarget.blur(); }
+});
+document.querySelectorAll('[data-artmode]').forEach((b) => {
+  b.addEventListener('click', () => {
+    art.mode = b.dataset.artmode === 'active' ? 'active' : 'svg';
+    document.querySelectorAll('[data-artmode]').forEach((x) => x.classList.toggle('active', x === b));
+    refreshArtTexture();
+    syncArtMeta();
+  });
+});
+syncArtMeta();
+
+// Stroke mode
+document.querySelectorAll('.stroke-btn[data-stroke]').forEach(b => b.addEventListener('click', () => setBrushStroke(b.dataset.stroke)));
+
+// Click-select mode
+$('selModeIsland')?.addEventListener('click', () => {
+  S.clickSelectMode = 'island';
+  $('selModeIsland').classList.add('active'); $('selModeColor').classList.remove('active');
+});
+$('selModeColor')?.addEventListener('click', () => {
+  S.clickSelectMode = 'color';
+  $('selModeColor').classList.add('active'); $('selModeIsland').classList.remove('active');
+});
+$('selPaintBtn')?.addEventListener('click', paintClickSelection);
+$('selClearBtn')?.addEventListener('click', clearClickSelection);
+$('selHideBtn')?.addEventListener('click', hideSelection);
+$('hideActiveSlotBtn')?.addEventListener('click', hideActiveSlot);
+$('showHiddenBtn')?.addEventListener('click', showHidden);
+$('showHiddenToolBtn')?.addEventListener('click', showHidden);
+
+// Sliders
+$('brushSize')?.addEventListener('input', () => {
+  syncBrushSizeLabels();
+  // Refresh cursor size if hovering the model with brush/spray.
+  if (isBrushTool() && smartCursor?.style.display === 'block') {
+    /* label only — cursor updates on next move */
+  }
+});
+$('sprayNozzle')?.addEventListener('input', syncBrushSizeLabels);
+$('sprayDensity')?.addEventListener('input', () => { $('sprayDensityVal').textContent = $('sprayDensity').value + '%'; });
+syncBrushSizeLabels();
+$('smartSize')?.addEventListener('input', () => { $('smartSizeVal').textContent = parseFloat($('smartSize').value).toFixed(0); });
+$('smartAngle')?.addEventListener('input', () => { $('smartAngleVal').textContent = $('smartAngle').value + '°'; });
+
+// Edge tool
+$('edgeWidth')?.addEventListener('input', () => {
+  $('edgeWidthVal').textContent = $('edgeWidth').value;
+  if (S._edgeLastSeeds) {
+    const n = runEdgeFinder(S._edgeLastSeeds);
+    setStatus(n ? `Edge preview: ${n.toLocaleString()} faces — magenta = selected` : 'No edge found', 'idle');
+  }
+});
+$('edgeFillBtn')?.addEventListener('click', () => commitEdgeSelection('fill'));
+$('edgeClearBtn')?.addEventListener('click', () => commitEdgeSelection('clear'));
+syncEdgeModeUI();
+
+// Detect sliders
+for (const id of ['sensitivity','smoothIter','minCluster','morphClose','morphOpen']) {
+  $(id)?.addEventListener('input', () => {
+    const val = parseFloat($(id).value);
+    const fmt = id === 'sensitivity' ? val.toFixed(2) : id === 'minCluster' ? val.toFixed(1) : String(Math.round(val));
+    $(id + 'Val').textContent = fmt;
+    if (activeDetectPreset !== 'custom') setDetectPresetActive('custom');
+    S.featureEmboss = null; S.featureDeboss = null;
+  });
+}
+$('adaptiveThr')?.addEventListener('change', () => { updateSensitivityLabel(); if(activeDetectPreset!=='custom') setDetectPresetActive('custom'); });
+$('ridgeTop')?.addEventListener('change', () => { if(activeDetectPreset!=='custom') setDetectPresetActive('custom'); });
+document.querySelectorAll('.detect-preset-btn').forEach(b => {
+  b.addEventListener('click', () => { if (b.dataset.preset === 'custom') setDetectPresetActive('custom'); else applyDetectPreset(b.dataset.preset); });
+});
+updateSensitivityLabel();
+
+// AMS slot count (+/−)
+$('slotPlusBtn')?.addEventListener('click', addAmsSlot);
+$('slotMinusBtn')?.addEventListener('click', removeAmsSlot);
+$('swapSlotsBtn')?.addEventListener('click', () => {
+  swapBasePaintSlots($('swapSlotA')?.value, $('swapSlotB')?.value);
+});
+
+// Viewport toolbar
+$('zoomInBtn').addEventListener('click', () => zoomBy(0.72));
+$('zoomOutBtn').addEventListener('click', () => zoomBy(1.38));
+$('frameBtn').addEventListener('click', () => { resetInteraction(); frameModel(); });
+$('flipToolBtn')?.addEventListener('click', () => rotateModel('x', Math.PI, 'Flipped onto the other face'));
+$('flipModelBtn')?.addEventListener('click', () => rotateModel('x', Math.PI, 'Flipped onto the other face'));
+$('rot90YBtn')?.addEventListener('click', () => rotateModel('y', Math.PI / 2, 'Spun 90° on the bed'));
+$('rot90XBtn')?.addEventListener('click', () => rotateModel('x', Math.PI / 2, 'Rolled 90°'));
+$('undoBtn').addEventListener('click', doUndo);
+$('redoBtn').addEventListener('click', doRedo);
+$('turntableBtn').addEventListener('click', toggleTurntable);
+
+function restoreGeomSnap(snap) {
+  if (!snap?.verts) return;
+  S.verts = snap.verts;
+  S.faces = snap.faces;
+  S.nVerts = snap.nVerts;
+  S.nTri = snap.nTri;
+  S.faceAdj = null;
+  S.symmetryMap = null;
+}
+
+function doUndo() {
+  const snap = S.undoStack.pop(); if (!snap) return;
+  const fp = ensureFacePaint();
+  const redoSnap = { paint: fp ? fp.slice() : null };
+  if (snap.verts) {
+    redoSnap.verts = S.verts.slice();
+    redoSnap.faces = new Uint32Array(S.faces);
+    redoSnap.nVerts = S.nVerts;
+    redoSnap.nTri = S.nTri;
+  }
+  S.redoStack.push(redoSnap);
+  if (S.redoStack.length > 30) S.redoStack.shift();
+  restoreGeomSnap(snap);
+  if (snap.paint) {
+    S.facePaint = snap.paint;
+    syncLegacyMasks();
+  } else if (snap.emboss) {
+    S.embossMask = snap.emboss; S.debossMask = snap.deboss; S.trimMask = snap.trim;
+    S.facePaint = masksToFacePaint(S.embossMask, S.debossMask, S.trimMask, S.nTri);
+  }
+  if (snap.verts) buildMesh({ frame: false });
+  S.edgeHighlight = null; S.smartPreview = null; S.smartPreviewFaces = null;
+  clearClickSelection();
+  updateMeshColors(); recountPaint();
+  $('undoBtn').disabled = S.undoStack.length === 0;
+  $('redoBtn').disabled = S.redoStack.length === 0;
+  setStatus('Undo', 'idle');
+}
+
+function doRedo() {
+  const snap = S.redoStack.pop(); if (!snap) return;
+  const fp = ensureFacePaint();
+  const undoSnap = { paint: fp ? fp.slice() : null };
+  if (snap.verts) {
+    undoSnap.verts = S.verts.slice();
+    undoSnap.faces = new Uint32Array(S.faces);
+    undoSnap.nVerts = S.nVerts;
+    undoSnap.nTri = S.nTri;
+  }
+  S.undoStack.push(undoSnap);
+  restoreGeomSnap(snap);
+  if (snap.paint) {
+    S.facePaint = snap.paint;
+    syncLegacyMasks();
+  } else if (snap.emboss) {
+    S.embossMask = snap.emboss; S.debossMask = snap.deboss; S.trimMask = snap.trim;
+    S.facePaint = masksToFacePaint(S.embossMask, S.debossMask, S.trimMask, S.nTri);
+  }
+  if (snap.verts) buildMesh({ frame: false });
+  S.edgeHighlight = null; S.smartPreview = null; S.smartPreviewFaces = null;
+  clearClickSelection();
+  updateMeshColors(); recountPaint();
+  $('undoBtn').disabled = S.undoStack.length === 0;
+  $('redoBtn').disabled = S.redoStack.length === 0;
+  setStatus('Redo', 'idle');
+}
+
+function toggleTurntable() {
+  S.turntable = !S.turntable;
+  $('turntableBtn').classList.toggle('active-tool', S.turntable);
+  setStatus(S.turntable ? 'Turntable on' : 'Turntable off', 'idle');
+}
+$('resetViewBtn').addEventListener('click', () => {
+  if (orbitLockCheck) orbitLockCheck.checked = false;
+  showAllColours(); clearPaint(); resetInteraction('Reset — paint cleared, all colours on');
+});
+orbitLockCheck?.addEventListener('change', () => { resetInteraction(orbitLockCheck.checked ? 'Left-drag locked' : 'Unlocked'); });
+
+
+// Clear buttons
+$('clearPaintBtn')?.addEventListener('click', clearPaint);
+$('clearModelBtn')?.addEventListener('click', clearModel);
+$('wireframeBtn')?.addEventListener('click', toggleWireframe);
+$('screenPickBtn')?.addEventListener('click', screenPickColour);
+$('symmetryToggle')?.addEventListener('change', (e) => {
+  S.symmetryOn = e.target.checked;
+  if (S.symmetryOn && !S.symmetryMap && S.verts && S.faces) {
+    setStatus('Building symmetry map…', 'working');
+    const result = buildSymmetryMap(S.verts, S.faces, S.nTri);
+    S.symmetryMap = result.map; S.symmetryCenterX = result.centerX;
+    const pct = Math.round(100 * result.matched / result.total);
+    setStatus(`Symmetry on — ${result.axis} axis, ${pct}% faces matched`, 'idle');
+  } else {
+    setStatus(S.symmetryOn ? 'Symmetry on' : 'Symmetry off', 'idle');
+  }
+});
+// Resolution
+$('resFineBtn')?.addEventListener('click', () => runResolutionUpgrade(1));
+$('resUltraBtn')?.addEventListener('click', () => runResolutionUpgrade(2));
+
+// Islands
+$('detectIslandsBtn')?.addEventListener('click', () => {
+  const force = S.nTri > ISLAND_SCAN_FACE_LIMIT && confirm(`This model has ${S.nTri.toLocaleString()} faces and may freeze while finding parts. Continue anyway?`);
+  computeIslands({ force });
+  $('app').classList.add('bottom-open');
+  setTimeout(resizeRenderer, 250);
+});
+$('findPartsPaintBtn')?.addEventListener('click', () => { computeIslands(); $('app').classList.add('bottom-open'); setTimeout(resizeRenderer, 250); });
+$('paintIslandBtn')?.addEventListener('click', () => { if(S.selectedIsland>=0) paintIslandById(S.selectedIsland); });
+$('hideIslandBtn')?.addEventListener('click', () => { if(S.selectedIsland>=0) toggleIslandHide(S.selectedIsland); });
+$('showAllIslandsBtn')?.addEventListener('click', () => { S.hiddenIslands.clear(); syncIslandCards(); updateMeshColors(); });
+
+/* ================================================================== */
+/*  VIEWPORT POINTER EVENTS (b573 freehand stroke)                    */
+/*  Hold = paint, release = stop immediately. Live tint, cheap moves. */
+/* ================================================================== */
+
+function pointerMatchesStroke(e, stroke) {
+  if (!stroke) return false;
+  if (stroke.pointerId == null) return e.button === 0 || e.type === 'pointerup' || e.type === 'pointercancel';
+  return e.pointerId === stroke.pointerId || (e.button === 0 && e.type === 'pointerup');
+}
+
+viewport.addEventListener('pointerdown', (e) => {
+  if (e.target.closest?.('.viewport-toolbar')) return;
+  if (e.button === 2 || e.button === 1) {
+    if (S.brushStrokeActive) endBrushStroke(false);
+    syncOrbitLock();
+    return;
+  }
+  if (e.button !== 0 || !S.mesh) return;
+
+  if (S.tool === 'eyedrop') {
+    e.preventDefault(); e.stopPropagation();
+    sampleEyedrop(e.clientX, e.clientY);
+    return;
+  }
+
+  if (S.tool === 'art') {
+    if (e.altKey || S.orbitOverride) return;
+    e.preventDefault(); e.stopPropagation();
+    if (!art.raster) {
+      setStatus('Drop a PNG, JPG, or SVG first', 'idle');
+      return;
+    }
+    if (artMoveHandleAtClient(e.clientX, e.clientY)) {
+      startArtMoveDrag(e);
+      return;
+    }
+    if (artRotationHandleAtClient(e.clientX, e.clientY)) {
+      startArtRotationDrag(e);
+      return;
+    }
+    const hit = pickHitAtClient(e.clientX, e.clientY);
+    if (hit) setArtPlacementAtHit(hit);
+    else setStatus('Click the model to position the artwork', 'idle');
+    return;
+  }
+
+  if (S.tool === 'clickSelect') {
+    if (e.altKey || S.orbitOverride) return;
+    e.preventDefault(); e.stopPropagation();
+    performClickSelect(e.clientX, e.clientY);
+    return;
+  }
+
+  if (S.tool === 'bucket') {
+    if (e.altKey || S.orbitOverride) return;
+    e.preventDefault(); e.stopPropagation();
+    bucketFillAtClient(e.clientX, e.clientY);
+    return;
+  }
+
+  if (isBrushTool()) {
+    if (startBrushStroke(e)) {
+      e.preventDefault(); e.stopPropagation();
+    }
+    return;
+  }
+
+  if (S.tool === 'smart') {
+    if (e.altKey || S.orbitOverride) return;
+    e.preventDefault(); e.stopPropagation();
+    S._smartClick = { x: e.clientX, y: e.clientY, pointerId: e.pointerId, moved: false };
+    syncOrbitLock();
+    previewSmartFill(e.clientX, e.clientY);
+    try { viewport.setPointerCapture?.(e.pointerId); } catch {}
+    return;
+  }
+
+  // Clean Edge: click selects fringe only — Fill / Clear buttons commit.
+  if (S.tool === 'edge') {
+    if (e.altKey || S.orbitOverride) return;
+    e.preventDefault(); e.stopPropagation();
+    const n = previewEdgeRun(e.clientX, e.clientY, { lock: true });
+    if (n) {
+      setStatus(
+        `Clean Edge: ${n.toLocaleString()} faces selected — Fill → ${slotLabel(slotIndex(S.paintTarget))} or Clear`,
+        'idle'
+      );
+    }
+    return;
+  }
+
+  if (!isAreaTool()) return;
+  if (!orbitLockCheck?.checked) { setStatus('Turn Lock on to drag-select', 'idle'); return; }
+  e.preventDefault(); e.stopPropagation();
+  syncOrbitLock();
+  const rect = viewport.getBoundingClientRect();
+  if (S.tool === 'lasso') {
+    const p = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    lassoDrag = { points: [p], pointerId: e.pointerId };
+    updateLassoSvg(lassoDrag.points);
+    syncOrbitLock();
+    try { viewport.setPointerCapture?.(e.pointerId); } catch {}
+    return;
+  }
+  boxDrag = { x0: e.clientX - rect.left, y0: e.clientY - rect.top, pointerId: e.pointerId };
+  selectRect.style.display = 'block';
+  selectRect.style.left = boxDrag.x0 + 'px'; selectRect.style.top = boxDrag.y0 + 'px';
+  selectRect.style.width = '0px'; selectRect.style.height = '0px';
+  syncOrbitLock();
+  try { viewport.setPointerCapture?.(e.pointerId); } catch {}
+}, true);
+
+viewport.addEventListener('pointermove', (e) => {
+  if (moveArtMoveDrag(e)) return;
+  if (moveArtRotationDrag(e)) return;
+  if (S.brushStrokeActive) {
+    moveBrushStroke(e);
+    return;
+  }
+  if (lassoDrag) {
+    const rect = viewport.getBoundingClientRect();
+    const p = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    const last = lassoDrag.points[lassoDrag.points.length - 1];
+    if (Math.hypot(p.x - last.x, p.y - last.y) >= 2.5) {
+      lassoDrag.points.push(p);
+      updateLassoSvg(lassoDrag.points);
+    }
+    return;
+  }
+  if (boxDrag) {
+    const rect = viewport.getBoundingClientRect();
+    const x1 = e.clientX - rect.left, y1 = e.clientY - rect.top;
+    const left = Math.min(boxDrag.x0, x1), top = Math.min(boxDrag.y0, y1);
+    selectRect.style.left = left + 'px'; selectRect.style.top = top + 'px';
+    selectRect.style.width = Math.abs(x1 - boxDrag.x0) + 'px';
+    selectRect.style.height = Math.abs(y1 - boxDrag.y0) + 'px';
+    return;
+  }
+  if (S._smartClick) {
+    if (Math.hypot(e.clientX - S._smartClick.x, e.clientY - S._smartClick.y) > 6) {
+      S._smartClick.moved = true;
+    }
+    return;
+  }
+  if (isBrushTool()) {
+    const hit = pickHitAtClient(e.clientX, e.clientY);
+    if (hit) updateSmartCursor(e.clientX, e.clientY, hit.worldPoint);
+    else if (smartCursor) smartCursor.style.display = 'none';
+    return;
+  }
+  if (S.tool === 'smart') {
+    previewSmartFill(e.clientX, e.clientY);
+    return;
+  }
+  if (S.tool === 'art') {
+    if (!art.placement) updateArtPreviewAtHit(pickHitAtClient(e.clientX, e.clientY));
+    renderer.domElement.style.cursor = artMoveHandleAtClient(e.clientX, e.clientY) ? 'move'
+      : artRotationHandleAtClient(e.clientX, e.clientY) ? 'grab' : '';
+    return;
+  }
+  if (S.tool === 'edge') {
+    if (S._edgeSelectionLocked) return;
+    const now = performance.now();
+    const last = S._edgeHover || {};
+    if (!last.t || now - last.t > 120 || Math.hypot(e.clientX - last.x, e.clientY - last.y) > 12) {
+      S._edgeHover = { t: now, x: e.clientX, y: e.clientY };
+      previewEdgeRun(e.clientX, e.clientY, { quiet: true });
+    }
+  }
+});
+
+function finishPointerUp(e) {
+  if (endArtMoveDrag(e)) return true;
+  if (endArtRotationDrag(e)) return true;
+  if (S.brushStrokeActive && pointerMatchesStroke(e, S.brushStrokeActive)) {
+    endBrushStroke(true);
+    return true;
+  }
+  if (S._smartClick && pointerMatchesStroke(e, S._smartClick)) {
+    const clicked = S._smartClick;
+    S._smartClick = null;
+    releaseViewportPointer(e.pointerId);
+    syncOrbitLock();
+    if (!clicked.moved) {
+      previewSmartFill(e.clientX, e.clientY);
+      commitSmartFill();
+    } else {
+      clearSmartPreview();
+    }
+    return true;
+  }
+  if (lassoDrag) {
+    const pts = lassoDrag.points.slice();
+    endLassoDrag(e);
+    syncOrbitLock();
+    if (!S.mesh || pts.length < 8) {
+      setStatus('Draw a larger loop around the area, then Fill Selection', 'idle');
+      return true;
+    }
+    setStatus('Selecting…', 'working');
+    requestAnimationFrame(() => setFaceSelection(facesInScreenLasso(pts), 'lasso'));
+    return true;
+  }
+  if (boxDrag) {
+    const rect = viewport.getBoundingClientRect();
+    const x1 = e.clientX - rect.left, y1 = e.clientY - rect.top;
+    const start = endBoxDrag(e);
+    syncOrbitLock();
+    if (!start || !S.mesh) return true;
+    setStatus('Selecting…', 'working');
+    requestAnimationFrame(() => setFaceSelection(facesInScreenBox(start.x0, start.y0, x1, y1), 'box'));
+    return true;
+  }
+  return false;
+}
+
+viewport.addEventListener('pointerup', (e) => {
+  if (e.button === 2 || e.button === 1) { syncOrbitLock(); return; }
+  finishPointerUp(e);
+});
+
+viewport.addEventListener('pointercancel', (e) => {
+  endArtMoveDrag(e, { keep: false });
+  endArtRotationDrag(e, { keep: false });
+  if (S.brushStrokeActive) endBrushStroke(false);
+  S._smartClick = null;
+  if (boxDrag) endBoxDrag(e);
+  if (lassoDrag) endLassoDrag(e);
+  syncOrbitLock();
+});
+
+viewport.addEventListener('lostpointercapture', (e) => {
+  if (S.brushStrokeActive && e.pointerId === S.brushStrokeActive.pointerId) endBrushStroke(true);
+  if (S._smartClick && e.pointerId === S._smartClick.pointerId) {
+    S._smartClick = null;
+    syncOrbitLock();
+  }
+});
+
+viewport.addEventListener('contextmenu', (e) => { if (S.tool !== 'orbit') e.preventDefault(); });
+viewport.addEventListener('pointerleave', () => {
+  if (S.tool === 'smart' && !S._smartClick) clearSmartPreview();
+  if (S.tool === 'art' && !art.placement) hideArtPreview();
+  if (isBrushTool() && !S.brushStrokeActive && smartCursor) smartCursor.style.display = 'none';
+});
+
+viewport.addEventListener('dblclick', (e) => {
+  if (S.tool !== 'orbit' || !S.mesh) return;
+  const rect = viewport.getBoundingClientRect();
+  pointerNdc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+  pointerNdc.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+  raycaster.setFromCamera(pointerNdc, camera);
+  const hits = raycaster.intersectObject(S.mesh, false);
+  if (!hits.length) return;
+  const p = hits[0].point;
+  const dir = new THREE.Vector3().subVectors(camera.position, controls.target);
+  controls.target.copy(p);
+  camera.position.copy(p).addScaledVector(dir.normalize(), Math.max(dir.length() * 0.35, controls.minDistance * 4));
+  controls.update();
+});
+
+// Capture-phase window listeners so lift always ends the stroke even outside the viewport.
+window.addEventListener('pointerup', (e) => {
+  if (e.button === 0) endArtMoveDrag(e);
+  if (e.button === 0) endArtRotationDrag(e);
+  if (e.button === 0 && S.brushStrokeActive) endBrushStroke(true);
+}, true);
+window.addEventListener('pointercancel', () => {
+  endArtMoveDrag(null, { keep: false });
+  endArtRotationDrag(null, { keep: false });
+  if (S.brushStrokeActive) endBrushStroke(false);
+}, true);
+window.addEventListener('blur', () => {
+  endArtMoveDrag(null, { keep: false });
+  endArtRotationDrag(null, { keep: false });
+  endBrushStroke(false);
+  S._smartClick = null;
+  if (boxDrag) endBoxDrag();
+  if (lassoDrag) endLassoDrag();
+  syncOrbitLock();
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    if (art.placement) { cancelArtPlacement(); return; }
+    resetInteraction('Controls reset'); clearClickSelection(); setTool('orbit'); return;
+  }
+  if (e.code === 'Space' && !e.repeat && !e.target.closest?.('input,textarea,select')) {
+    e.preventDefault(); S.orbitOverride = true; syncOrbitLock(); return;
+  }
+  if (e.key === 'Alt') { S.orbitOverride = true; syncOrbitLock(); }
+});
+document.addEventListener('keyup', (e) => {
+  if (e.code === 'Space' || e.key === 'Alt') { S.orbitOverride = false; syncOrbitLock(); }
+});
+controls.addEventListener('start', () => {
+  if (viewportHint.style.display !== 'none') {
+    viewportHint.style.opacity = '0'; viewportHint.style.transition = 'opacity .5s';
+    setTimeout(() => viewportHint.style.display = 'none', 500);
+  }
+});
+
+/* ================================================================== */
+/*  DETECT FEATURES                                                   */
+/* ================================================================== */
+
+detectBtn.addEventListener('click', () => {
+  if (!S.verts) return;
+  setStatus('Detecting features…', 'working');
+  setTimeout(() => {
+    const opts = getDetectOpts();
+    pushUndo();
+    const result = detectFeatures(S.verts, S.faces, S.nVerts, S.nTri, opts);
+    const minArea = parseFloat($('minCluster').value);
+    if (minArea > 0) {
+      cleanClusters(result.embossMask, S.faces, S.nTri, S.verts, minArea);
+      cleanClusters(result.debossMask, S.faces, S.nTri, S.verts, minArea);
+    }
+    S.featureEmboss = result.embossMask; S.featureDeboss = result.debossMask;
+    S.embossMask = result.embossMask.slice(); S.debossMask = result.debossMask.slice();
+    S.trimMask = new Uint8Array(S.nTri);
+    S.facePaint = masksToFacePaint(S.embossMask, S.debossMask, S.trimMask, S.nTri);
+    if (S.slotCount < 3) { S.slotCount = 3; syncSlotCountUI(); }
+    updateMeshColors(); recountPaint(); exportBtn.disabled = false;
+    setStatus(`Detected — ${S.embossCount.toLocaleString()} accent, ${S.debossCount.toLocaleString()} detail faces`, 'idle');
+  }, 30);
+});
+
+/* ================================================================== */
+/*  EXPORT 3MF                                                        */
+/* ================================================================== */
+
+function clearExportDestination() {
+  S.exportHandle = null;
+  S.exportFileName = null;
+}
+
+function showExportChoiceModal(fileName) {
+  return new Promise(resolve => {
+    const modal = $('exportModal');
+    const fileEl = $('exportModalFile');
+    if (!modal) { resolve('saveas'); return; }
+    if (fileEl) fileEl.textContent = fileName || 'painted.3mf';
+    modal.classList.add('open');
+    const finish = (choice) => {
+      modal.classList.remove('open');
+      $('exportModalReplace')?.removeEventListener('click', onReplace);
+      $('exportModalSaveAs')?.removeEventListener('click', onSaveAs);
+      $('exportModalCancel')?.removeEventListener('click', onCancel);
+      modal.removeEventListener('click', onBackdrop);
+      resolve(choice);
+    };
+    const onReplace = () => finish('replace');
+    const onSaveAs = () => finish('saveas');
+    const onCancel = () => finish('cancel');
+    const onBackdrop = (e) => { if (e.target === modal) finish('cancel'); };
+    $('exportModalReplace')?.addEventListener('click', onReplace);
+    $('exportModalSaveAs')?.addEventListener('click', onSaveAs);
+    $('exportModalCancel')?.addEventListener('click', onCancel);
+    modal.addEventListener('click', onBackdrop);
+  });
+}
+
+async function writeBlobToHandle(handle, blob) {
+  if (!blob || blob.size < 64) throw new Error('Export produced an empty 3MF');
+  const writable = await handle.createWritable();
+  await writable.write(blob);
+  await writable.close();
+}
+
+function downloadBlobAs(blob, fileName) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(a.href);
+}
+
+/** Pick Replace / Save as. Must run in a user-gesture tick for the save picker. */
+async function resolveExportDestination(suggestedName) {
+  const canPicker = typeof window.showSaveFilePicker === 'function';
+
+  // Already exported this session — ask Replace vs Save as
+  if (S.exportHandle || S.exportFileName) {
+    const choice = await showExportChoiceModal(S.exportFileName || suggestedName);
+    if (choice === 'cancel') return null;
+    if (choice === 'replace' && S.exportHandle) {
+      return {
+        name: S.exportFileName || suggestedName,
+        handle: S.exportHandle,
+        write: (blob) => writeBlobToHandle(S.exportHandle, blob),
+      };
+    }
+    if (choice === 'replace' && !canPicker) {
+      const name = S.exportFileName || suggestedName;
+      return { name, write: async (blob) => downloadBlobAs(blob, name) };
+    }
+    // save as — fall through (picker or rename prompt)
+    if (choice === 'saveas') S.exportHandle = null;
+  }
+
+  if (canPicker) {
+    try {
+      const handle = await window.showSaveFilePicker({
+        suggestedName,
+        types: [{
+          description: '3MF model',
+          accept: {
+            'model/3mf': ['.3mf'],
+            'application/vnd.ms-package.3dmanufacturing-3dmodel+xml': ['.3mf'],
+          },
+        }],
+      });
+      S.exportHandle = handle;
+      S.exportFileName = handle.name || suggestedName;
+      return {
+        name: S.exportFileName,
+        handle,
+        write: (blob) => writeBlobToHandle(handle, blob),
+      };
+    } catch (err) {
+      if (err?.name === 'AbortError') return null;
+      // Fall through to download if picker fails
+    }
+  }
+
+  let name = suggestedName;
+  if (S.exportFileName && !S.exportHandle) {
+    // Fallback browsers: prompt for a new name on Save as
+    const typed = window.prompt('Save as filename:', suggestedName);
+    if (typed == null) return null;
+    name = typed.trim() || suggestedName;
+    if (!/\.3mf$/i.test(name)) name += '.3mf';
+  }
+  S.exportFileName = name;
+  return { name, write: async (blob) => downloadBlobAs(blob, name) };
+}
+
+function buildPainted3mfBlob() {
+  const profile = $('filamentProfile').value;
+  const printerModel = $('printerModel')?.value || 'Bambu Lab X1 Carbon';
+  const filType = profile.includes('PETG') ? 'PETG' : profile.includes('ABS') ? 'ABS' :
+    profile.includes('TPU') ? 'TPU' : profile.includes('ASA') ? 'ASA' : 'PLA';
+  const colors = slotColorsArray(S.slotCount);
+  const zip = export3MF(S.verts, S.faces, S.nVerts, S.nTri,
+    S.embossMask || new Uint8Array(S.nTri), S.debossMask || new Uint8Array(S.nTri), {
+      facePaint: ensureFacePaint(),
+      slotColors: colors,
+      slotCount: S.slotCount,
+      bodyColor: colors[0], embossColor: colors[1] || colors[0],
+      debossColor: colors[2] || colors[0], trimColor: colors[3] || colors[0],
+      trimMask: S.trimMask || new Uint8Array(S.nTri),
+      filamentType: Array(S.slotCount).fill(filType),
+      filamentProfile: profile,
+      printerModel,
+      projectName: S.fileName || 'painted_object',
+      stampTri0: S.stampTri0,
+      stampVert0: S.stampVert0,
+    });
+  return new Blob([zip], { type: 'application/vnd.ms-package.3dmanufacturing-3dmodel+xml' });
+}
+
+exportBtn.addEventListener('click', async () => {
+  if (!S.verts) return;
+  const suggested = `${S.fileName || 'model'}_painted.3mf`;
+  let dest;
+  try {
+    dest = await resolveExportDestination(suggested);
+  } catch (err) {
+    setStatus(err?.message || 'Export cancelled', 'idle');
+    return;
+  }
+  if (!dest) { setStatus('Export cancelled', 'idle'); return; }
+
+  setStatus('Exporting 3MF…', 'working');
+  try {
+    await new Promise(r => setTimeout(r, 10)); // let status paint
+    const blob = buildPainted3mfBlob();
+    if (blob.size < 64) throw new Error('Export produced an empty 3MF');
+    await dest.write(blob);
+    setStatus(`Exported ${dest.name} (${(blob.size / 1e6).toFixed(1)} MB, ${S.slotCount} colours)`, 'idle');
+  } catch (err) {
+    console.error(err);
+    if (dest.handle?.remove) {
+      try { await dest.handle.remove(); } catch { /* leftover 0-byte file */ }
+      S.exportHandle = null;
+    }
+    setStatus(err?.message || 'Export failed', 'error');
+  }
+});
+
+/* ================================================================== */
+/*  BATCH MODE                                                        */
+/* ================================================================== */
+
+let batchFiles = [];
+batchZone.addEventListener('click', () => batchInput.click());
+batchInput.addEventListener('change', () => {
+  batchFiles = Array.from(batchInput.files).filter(f => {
+    const n = f.name.toLowerCase();
+    return n.endsWith('.stl') || n.endsWith('.obj');
+  });
+  batchListEl.innerHTML = '';
+  for (const f of batchFiles) {
+    const div = document.createElement('div'); div.className = 'batch-item';
+    div.innerHTML = `<span>${f.name}</span><span class="status pending">pending</span>`;
+    div.id = 'batch-' + f.name.replace(/[^a-zA-Z0-9]/g, '_');
+    batchListEl.appendChild(div);
+  }
+  batchBtn.disabled = batchFiles.length === 0;
+});
+
+batchBtn.addEventListener('click', async () => {
+  if (!batchFiles.length) return;
+  batchBtn.disabled = true;
+  setStatus('Batch processing…', 'working');
+  const opts = getDetectOpts();
+  const minArea = parseFloat($('minCluster').value);
+  const profile = $('filamentProfile').value;
+  const filType = profile.includes('PETG')?'PETG':profile.includes('ABS')?'ABS':
+    profile.includes('TPU')?'TPU':profile.includes('ASA')?'ASA':'PLA';
+
+  for (let fi = 0; fi < batchFiles.length; fi++) {
+    const file = batchFiles[fi];
+    const elId = 'batch-' + file.name.replace(/[^a-zA-Z0-9]/g, '_');
+    setStatus(`Processing ${fi+1}/${batchFiles.length}: ${file.name}`, 'working');
+    await new Promise(r => setTimeout(r, 10));
+    try {
+      const lower = file.name.toLowerCase();
+      const parsed = lower.endsWith('.obj')
+        ? parseOBJ(await file.text())
+        : parseSTLBinary(await file.arrayBuffer());
+      const deduped = deduplicateVertices(parsed.vertices, parsed.nTri);
+      orientSTLZUpAndSeat(deduped.verts, deduped.nVerts);
+      const result = detectFeatures(deduped.verts, deduped.faces, deduped.nVerts, parsed.nTri, opts);
+      if (minArea > 0) { cleanClusters(result.embossMask, deduped.faces, parsed.nTri, deduped.verts, minArea); cleanClusters(result.debossMask, deduped.faces, parsed.nTri, deduped.verts, minArea); }
+      const colors = slotColorsArray(Math.max(S.slotCount, 3));
+      const zip = export3MF(deduped.verts, deduped.faces, deduped.nVerts, parsed.nTri,
+        result.embossMask, result.debossMask, {
+          facePaint: masksToFacePaint(result.embossMask, result.debossMask, new Uint8Array(parsed.nTri), parsed.nTri),
+          slotColors: colors,
+          slotCount: colors.length,
+          bodyColor: colors[0], embossColor: colors[1] || colors[0],
+          debossColor: colors[2] || colors[0], trimColor: colors[3] || colors[0],
+          trimMask: new Uint8Array(parsed.nTri),
+          filamentType: Array(colors.length).fill(filType),
+          filamentProfile: profile,
+          printerModel: $('printerModel')?.value || 'Bambu Lab X1 Carbon',
+          projectName: file.name.replace(/\.(stl|obj)$/i, ''),
+        });
+      const blob = new Blob([zip],{type:'application/vnd.ms-package.3dmanufacturing-3dmodel+xml'});
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+      a.download = file.name.replace(/\.(stl|obj)$/i, '_painted.3mf'); document.body.appendChild(a); a.click();
+      document.body.removeChild(a); URL.revokeObjectURL(a.href);
+      const el = document.getElementById(elId);
+      if (el) { el.querySelector('.status').className = 'status done'; el.querySelector('.status').textContent = 'done'; }
+    } catch (err) {
+      const el = document.getElementById(elId);
+      if (el) { el.querySelector('.status').style.color = 'var(--red)'; el.querySelector('.status').textContent = 'error'; }
+      console.error(`Batch error on ${file.name}:`, err);
+    }
+  }
+  batchBtn.disabled = false;
+  setStatus(`Batch complete — ${batchFiles.length} files`, 'idle');
+});
+
+/* ================================================================== */
+/*  INIT                                                              */
+/* ================================================================== */
+
+syncOrbitLock();
+syncSlotCountUI();
+setBrushStroke('free');
+setTool('brush');
+
+
+/* ================================================================== */
+/*  KEYBOARD SHORTCUTS                                                */
+/* ================================================================== */
+
+window.addEventListener('keydown', (e) => {
+  // Skip if typing in an input/textarea
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+  switch (e.key.toLowerCase()) {
+    // Slots
+    case '1': case '2': case '3': case '4': case '5':
+    case '6': case '7': case '8': case '9': {
+      const slot = parseInt(e.key, 10) - 1;
+      if (isSlotActive(slot)) setPaintTarget(slot, { fillIfSelected: true });
+      e.preventDefault(); break;
+    }
+    case '0': if (isSlotActive(9)) setPaintTarget(9, { fillIfSelected: true }); e.preventDefault(); break;
+    case '+': case '=': addAmsSlot(); e.preventDefault(); break;
+    case '-': case '_': removeAmsSlot(); e.preventDefault(); break;
+    // Tools
+    case 'b': setTool('brush'); e.preventDefault(); break;
+    case 's': setTool('spray'); e.preventDefault(); break;
+    case 'e': setTool('eyedrop'); e.preventDefault(); break;
+    case 'c': setTool('clickSelect'); e.preventDefault(); break;
+    case 'l': setTool('lasso'); e.preventDefault(); break;
+    case 'm': setTool('smart'); e.preventDefault(); break;
+    case 'x': setTool('box'); e.preventDefault(); break;
+    case 'g': setTool('edge'); e.preventDefault(); break;
+    case 'h': showHidden(); e.preventDefault(); break;
+    case 'd': setTool('detect'); e.preventDefault(); break;
+    // Actions
+    case 'z': doUndo(); e.preventDefault(); break;
+    case 'y': doRedo(); e.preventDefault(); break;
+    case 'enter': if (S.clickSelectionFaces?.length) { paintClickSelection(); e.preventDefault(); } break;
+    case 'f': if (S.mesh) { resetInteraction(); frameModel(); } e.preventDefault(); break;
+    case 'w': toggleWireframe(); e.preventDefault(); break;
+    case 't': toggleTurntable(); e.preventDefault(); break;
+    case 'r': if (S.mesh) screenPickColour(); e.preventDefault(); break;
+  }
+});
+
+async function loadPainterHandoff() {
+  const params = new URLSearchParams(location.search);
+  const src = params.get('src');
+  if (!src || !src.startsWith('/api/painter/inbox/')) return;
+  const name = params.get('name') || 'model.stl';
+  setStatus(`Opening ${name}…`, 'working');
+  const res = await fetch(src);
+  if (!res.ok) throw new Error('STL Painter could not fetch that file');
+  const blob = await res.blob();
+  loadFile(new File([blob], name, { type: blob.type || 'application/octet-stream' }));
+}
+loadPainterHandoff().catch(err => setStatus(err?.message || 'Open failed', 'error'));
+</script>
+</body>
+</html>

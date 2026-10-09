@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MeshFinder</title>
+  <link rel="shortcut icon" href="/printshelf-icon.svg?v=2">
+  <link rel="icon" type="image/svg+xml" href="/printshelf-icon.svg?v=2">
+  <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png?v=2">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=2">
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#070b12">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,500;9..144,700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css?v=69">
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.170.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.170.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <div class="app">
+    <aside class="rail">
+      <div class="brand">
+        <div class="brand-mark">MF</div>
+        <div>
+          <div class="brand-name">MeshFinder</div>
+          <div class="brand-sub">Private printable inventory</div>
+        </div>
+      </div>
+      <nav class="nav">
+        <button class="nav-btn active" data-view="library">Library</button>
+        <button class="nav-btn" data-view="settings">Folders</button>
+      </nav>
+      <div class="rail-stats" id="railStats">Loading…</div>
+      <button class="scan-btn" id="scanBtn">Rescan</button>
+      <button class="scan-btn secondary" id="rebuildThumbsBtn" type="button">Rebuild thumbs</button>
+      <button class="scan-btn secondary" id="scanIssuesBtn" type="button">Scan issues (0)</button>
+      <div class="scan-status" id="scanStatus"></div>
+    </aside>
+
+    <main class="main">
+      <section class="view" id="view-library">
+        <header class="top">
+          <div>
+            <h1>Library</h1>
+            <p class="lede">Files stay where they are. MeshFinder indexes them.</p>
+          </div>
+          <div class="filters">
+            <button type="button" class="secondary" id="refreshLibraryBtn" title="Scan disk for new/changed files, then reload the grid">Refresh</button>
+            <input type="search" id="search" placeholder="Search name or path…">
+            <select id="filterSource">
+              <option value="">All sources</option>
+              <option value="local">Local</option>
+              <option value="nas">NAS</option>
+            </select>
+            <select id="filterRoot" title="Watched folder">
+              <option value="">All folders</option>
+            </select>
+            <select id="filterFilament" title="Assigned filament">
+              <option value="">All filaments</option>
+            </select>
+            <select id="sortBy" title="Sort">
+              <option value="seen">Newest seen</option>
+              <option value="name">Name A–Z</option>
+              <option value="name_desc">Name Z–A</option>
+              <option value="size">Largest</option>
+              <option value="size_asc">Smallest</option>
+              <option value="kind">Type</option>
+            </select>
+            <label class="check"><input type="checkbox" id="filterTextures"> Has textures</label>
+            <label class="check"><input type="checkbox" id="filterSliced"> Sliced 3MF</label>
+            <label class="check"><input type="checkbox" id="filterHidden"> Show hidden</label>
+          </div>
+        </header>
+        <div class="scan-banner" id="scanBanner" hidden>
+          <div class="scan-banner-copy">
+            <strong id="scanBannerTitle">Scanning…</strong>
+            <span id="scanBannerDetail"></span>
+            <div class="scan-banner-kinds" id="scanBannerKinds"></div>
+          </div>
+          <div class="scan-banner-actions">
+            <label class="check scan-live"><input type="checkbox" id="scanLiveRefresh" checked> Live refresh</label>
+            <button type="button" class="secondary" id="scanBannerRefreshBtn">Refresh now</button>
+          </div>
+        </div>
+        <div class="view-modes" id="viewModes" role="tablist" aria-label="Browse mode">
+          <button type="button" class="view-mode" data-mode="folders">Folders</button>
+          <button type="button" class="view-mode active" data-mode="all">Designs</button>
+        </div>
+        <nav class="crumbs" id="crumbs" aria-label="Folder path" hidden></nav>
+        <div class="type-tabs" id="typeTabs" role="tablist" aria-label="File type">
+          <button type="button" class="type-tab active" role="tab" data-kind="" aria-selected="true">All <span class="type-count" data-count-for="">0</span></button>
+          <button type="button" class="type-tab" role="tab" data-kind="stl" aria-selected="false">STL <span class="type-count" data-count-for="stl">0</span></button>
+          <button type="button" class="type-tab" role="tab" data-kind="3mf" aria-selected="false">3MF <span class="type-count" data-count-for="3mf">0</span></button>
+          <button type="button" class="type-tab" role="tab" data-kind="gcode.3mf" aria-selected="false">Gcode 3MF <span class="type-count" data-count-for="gcode.3mf">0</span></button>
+          <button type="button" class="type-tab" role="tab" data-kind="obj" aria-selected="false">OBJ <span class="type-count" data-count-for="obj">0</span></button>
+          <button type="button" class="type-tab" role="tab" data-kind="zip" aria-selected="false">ZIP <span class="type-count" data-count-for="zip">0</span></button>
+          <button type="button" class="type-tab dup-tab" role="tab" data-kind="__duplicates__" aria-selected="false" hidden>Duplicates <span class="type-count" data-count-for="__duplicates__">0</span></button>
+          <div class="type-menu-wrap" id="typeMenuWrap">
+            <button type="button" class="type-tab type-menu-btn" id="typeMenuBtn" aria-expanded="false">More types ▾</button>
+            <div class="type-menu-panel" id="typeMenuPanel" hidden></div>
+          </div>
+        </div>
+        <div class="bulk-bar" id="bulkBar" hidden>
+          <span id="bulkCount">0 selected</span>
+          <span class="bulk-hint" title="Click one file, then Shift-click another to select everything in between">Shift = range</span>
+          <button type="button" class="secondary" id="bulkSelectAllBtn">Select all visible</button>
+          <button type="button" class="secondary" id="bulkClearBtn">Clear</button>
+          <button type="button" class="secondary" id="bulkHideBtn">Hide</button>
+          <button type="button" class="secondary" id="bulkUnhideBtn">Unhide</button>
+          <button type="button" class="danger" id="bulkDeleteBtn">Delete from disk…</button>
+        </div>
+        <div class="workspace">
+          <div class="grid-pane" id="gridPane">
+            <div class="grid" id="grid"></div>
+          </div>
+          <aside class="detail" id="detail">
+            <div class="detail-empty">Select a file to see print details.</div>
+          </aside>
+        </div>
+      </section>
+
+      <section class="view hidden" id="view-settings">
+        <header class="top">
+          <div>
+            <h1>Watched folders</h1>
+            <p class="lede">Local disks and NAS mounts. Index in place — nothing is uploaded.</p>
+          </div>
+        </header>
+        <div class="settings-card" id="watchedFoldersCard">
+          <div class="settings-card-head">
+            <h2 class="settings-subhead" style="margin:0">Watched folders</h2>
+            <button class="secondary" id="watchedFoldersToggle" type="button">Collapse</button>
+          </div>
+          <div id="watchedFoldersBody">
+          <div id="folderList"></div>
+          <form id="folderForm" class="folder-form">
+            <input name="id" placeholder="id (e.g. nas-models)" required>
+            <input name="label" placeholder="Label" required>
+            <input name="path" placeholder="Pi/Linux path only (e.g. /mnt/koko-kidabah/…)" required>
+            <input name="windows_path" placeholder="Windows path for copy buttons (e.g. \\Koko\kidabah or Z:)">
+            <select name="source_kind">
+              <option value="local">local</option>
+              <option value="nas">nas</option>
+            </select>
+            <button type="submit">Add folder</button>
+          </form>
+          <p class="lede" style="margin-top:10px">Pi path must exist on the Pi. Windows Downloads won’t scan — drop files on the NAS (already watched) or mount that folder under <code>/mnt/…</code>.</p>
+          <button class="secondary" id="saveFoldersBtn">Save folders</button>
+          </div>
+        </div>
+        <div class="settings-card" style="margin-top:16px">
+          <h2 class="settings-subhead">Exclude patterns</h2>
+          <p class="lede">One glob per line. Matching folders are skipped during Rescan (<code>__MACOSX</code>, <code>node_modules</code>, etc. are always pruned).</p>
+          <textarea id="ignoreGlobsInput" class="meta-input meta-notes" rows="8" spellcheck="false" placeholder="**/__MACOSX/**&#10;**/node_modules/**"></textarea>
+          <button class="secondary" id="saveIgnoreBtn" type="button" style="margin-top:10px">Save exclude patterns</button>
+        </div>
+        <div class="settings-card" style="margin-top:16px">
+          <h2 class="settings-subhead">Scan issues</h2>
+          <p class="lede">Files that failed to parse/index. Retry after fixing the source file, or ignore to hide the alert.</p>
+          <div class="detail-actions" style="margin:8px 0 10px">
+            <button class="secondary" id="retryAllIssuesBtn" type="button">Retry all unresolved</button>
+            <button class="secondary" id="refreshIssuesBtn" type="button">Refresh issues</button>
+          </div>
+          <div id="scanIssuesList" class="scan-issues-list"></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div class="ps-toasts" id="psToasts" aria-live="polite" aria-relevant="additions"></div>
+  <div class="ps-modal-root" id="psModalRoot" hidden>
+    <div class="ps-modal-backdrop" data-ps-modal-dismiss></div>
+    <div class="ps-modal" role="dialog" aria-modal="true" aria-labelledby="psModalTitle">
+      <div class="ps-modal-brand">
+        <div class="brand-mark">MF</div>
+        <div>
+          <div class="brand-name">MeshFinder</div>
+          <div class="brand-sub" id="psModalEyebrow">Confirm</div>
+        </div>
+      </div>
+      <h2 id="psModalTitle"></h2>
+      <div class="ps-modal-body" id="psModalBody"></div>
+      <div class="ps-modal-actions" id="psModalActions">
+        <button type="button" class="secondary" id="psModalCancel">Cancel</button>
+        <button type="button" class="card-open secondary" id="psModalAlt" hidden>Alt</button>
+        <button type="button" class="card-open danger" id="psModalConfirm">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="viewer.js?v=62"></script>
+  <script src="app.js?v=76"></script>
+  <script src="design-selection.js?v=1"></script>
+  <script src="root-filter.js?v=1"></script>
+</body>
+</html>

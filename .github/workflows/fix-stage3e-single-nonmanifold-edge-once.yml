@@ -1,0 +1,23 @@
+name: Fix Stage 3E single non-manifold edge once
+on:
+  push:
+    paths:
+      - '.github/workflows/fix-stage3e-single-nonmanifold-edge-once.yml'
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - run: python .github/scripts/fix_stage3e_single_nonmanifold_edge.py
+      - run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add makerforge/meshprep.html
+          git diff --cached --quiet && exit 0
+          git commit -m 'Repair unique Stage 3E non-manifold edge candidate'
+          git push

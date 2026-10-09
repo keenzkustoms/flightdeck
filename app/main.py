@@ -6,6 +6,7 @@ import ipaddress
 import io
 import json
 import logging
+import math
 import os
 import re
 import shutil
@@ -17,6 +18,7 @@ import tempfile
 import time
 import urllib.parse
 import urllib.request
+import uuid
 import zipfile
 from html import escape as html_escape
 from contextlib import asynccontextmanager
@@ -35,17 +37,18 @@ if not _app_log.handlers:
 log = logging.getLogger(__name__)
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket
-from fastapi.responses import FileResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 import httpx
 
-from . import db, relay
+from . import db, makerdeck_library, makerworld, relay, slice_meta
 from .camera import BambuCameraProxy
+from .native_recorder import PrintNativeRecorder, finalize_capture_dir
 from .label_printer import LabelPrinter
-from .models import PrintPreview
-from .paths import APP_DIR, DATA_DIR, DB_PATH, PRINTERS_CONFIG_PATH, PRINT_LIBRARY_DIR, UPLOADS_DIR
+from .models import PrintPreview, PrinterStatus
+from .paths import APP_DIR, DATA_DIR, DB_PATH, FLIGHT_RECORDER_DIR, PRINTERS_CONFIG_PATH, PRINT_LIBRARY_DIR, UPLOADS_DIR
 from .printer_config import AdaptiveCamera, BambuConnection, BambuRtspCamera, MjpegDirectCamera, MoonrakerConnection, NtfyConfig, PrinterEntry, SimulatedConnection, SnapmakerU1Connection, WebrtcCamera, load, save
 from .printers import moonraker, simulated
 from .printers.bambu import BambuPrinter
@@ -58,7 +61,10 @@ _simulated: list[tuple[str, str, str, str, str, str]] = []  # (id, model_name, c
 _cameras: dict = {}          # printer_id → Camera config
 _presets: dict[str, dict] = {}  # printer_id → temperature_presets dict
 _cam_proxies: dict[str, BambuCameraProxy] = {}  # printer_id → live RTSP proxy
+_native_recorders: dict[str, PrintNativeRecorder] = {}  # printer_id → active camera capture
+_calibration_sessions: dict[str, dict] = {}  # printer_id → active calibration orchestration
 _ws_clients: set[WebSocket] = set()
+_project_slice_jobs: dict[str, dict] = {}  # vault-relative path → slice job status
 _broadcast_task: asyncio.Task | None = None
 _ntfy: NtfyConfig | None = None
 _prev_states: dict[str, str] = {}  # printer_id → last known state
@@ -68,14 +74,32 @@ _latest_printers_at: datetime | None = None
 _gather_lock: asyncio.Lock | None = None
 _scale_keep_awake_task: asyncio.Task | None = None
 _EMPTY_SLOT_AUTO_RETURN_GRACE_SECONDS = 600
+_AMS_SLOT_FINGERPRINTS: dict[str, dict] = {}
 _scale = Scale()
 _label_printer = LabelPrinter()
 _MAX_PRINT_FILE_BYTES = int(os.getenv("FLIGHTDECK_MAX_PRINT_FILE_MB", "2048")) * 1024 * 1024
 _MAX_PROFILE_UPLOAD_BYTES = int(os.getenv("FLIGHTDECK_MAX_PROFILE_UPLOAD_MB", "64")) * 1024 * 1024
+_MAX_MAKERDECK_DESIGN_PART_BYTES = int(os.getenv("FLIGHTDECK_MAKERDECK_DESIGN_PART_MB", "8")) * 1024 * 1024
+_MAX_FLIGHT_RECORDER_BYTES = int(os.getenv("FLIGHTDECK_MAX_FLIGHT_RECORDER_MB", "2048")) * 1024 * 1024
+_QUEUE_ACTIVE_STALE_GRACE_SECONDS = int(os.getenv("FLIGHTDECK_QUEUE_ACTIVE_STALE_GRACE_SECONDS", "480"))
 _UPLOAD_READ_CHUNK_BYTES = 1024 * 1024
 _BAMBU_FILE_LIST_TIMEOUT_SECONDS = float(os.getenv("FLIGHTDECK_BAMBU_FILE_LIST_TIMEOUT", "2.5"))
 _FILE_DESK_TARGET_CACHE_SECONDS = float(os.getenv("FLIGHTDECK_FILE_DESK_TARGET_CACHE_SECONDS", "20"))
 _file_desk_target_cache: dict[str, dict] = {}
+_FLIGHT_RECORDER_EXTS = {".mp4", ".webm", ".mov", ".avi"}
+_BAMBU_RECORDER_ROOTS = ("timelapse", "video", "movie", "ipcam", "record", "records")
+_MOONRAKER_RECORDER_ROOTS = ("timelapse", "gcodes")
+_LOCAL_RECORDER_SEARCH_NAMES = ("flight_recorder", "timelapse", "timelapses", "recordings", "records", "videos", "camera")
+_FLIGHT_RECORDER_AUTO_RETRY_DELAYS = tuple(
+    int(part.strip())
+    for part in os.getenv("FLIGHTDECK_RECORDER_AUTO_RETRY_SECONDS", "30,90,180").split(",")
+    if part.strip().isdigit()
+) or (30, 90, 180)
+_NATIVE_RECORDER_ENABLED = os.getenv("FLIGHTDECK_NATIVE_RECORDER", "1").strip().lower() not in {
+    "0", "false", "no", "off",
+}
+_flight_recorder_harvest_pending: set[tuple[str, int]] = set()
+_ATTACHED_TIMELAPSE_NAME_RE = re.compile(r"^(\d+)-")
 
 
 def _dt_default(obj):
@@ -122,6 +146,10 @@ def _offline_printer_entry(
         "kind": kind,
         "state": "offline",
         "error": error,
+        "temps": {},
+        "job": None,
+        "ams": [],
+        "toolheads": [],
         "last_seen": _last_seen_cache.get(printer_id),
         "updated_at": datetime.utcnow(),
         "temperature_presets": _presets.get(printer_id, {}),
@@ -143,6 +171,7 @@ def _stale_or_offline_printer_entry(
     error: str = "telemetry timeout",
     extra: Optional[dict] = None,
 ) -> dict:
+    """Keep the last good status (flagged stale) rather than flipping a slow printer to offline."""
     previous = _latest_printers.get(printer_id)
     if previous and previous.get("state") != "offline":
         stale = dict(previous)
@@ -153,6 +182,7 @@ def _stale_or_offline_printer_entry(
 
 
 def _prime_printer_cache() -> None:
+    """Fill the printer cache with placeholder entries so the UI renders before the first poll finishes."""
     global _latest_printers_at
     out: list[dict] = []
     for pid, model_name, custom_name, icon, url, kind, toolhead_count in _moonraker:
@@ -200,14 +230,13 @@ async def _gather_all_locked() -> list[dict]:
             )
         except Exception as exc:
             log.warning("moonraker fetch timed out/failed for %s: %s", id, exc)
-            error = str(exc) or "telemetry timeout"
             return _stale_or_offline_printer_entry(
                 id,
                 model_name,
                 custom_name,
                 icon,
                 kind,
-                error=error,
+                error=str(exc) or "telemetry timeout",
                 extra={
                     "_error_print_id": moonraker._error_print_id.get(id),
                     "klipper_ui_url": url,
@@ -221,24 +250,45 @@ async def _gather_all_locked() -> list[dict]:
             d["eta_calibration"] = cal
         d["health"] = db.get_printer_health(id)
         d["_error_print_id"] = moonraker._error_print_id.get(id)
+        d["_last_finished_print_id"] = moonraker._last_finished_print_id.get(id)
+        d["_last_timelapse_path"] = None
         parsed = urllib.parse.urlparse(url)
         d["klipper_ui_url"] = f"{parsed.scheme or 'http'}://{parsed.hostname}" if parsed.hostname else url
         return d
 
     async def _fetch_bambu(p):
         try:
-            status = await asyncio.wait_for(asyncio.to_thread(p.status), timeout=12.0)
-        except Exception as exc:
-            log.warning("bambu fetch timed out/failed for %s: %s", p.id, exc)
-            return _stale_or_offline_printer_entry(
-                p.id,
-                p.model_name,
-                p.custom_name,
-                p.icon,
-                "bambu",
-                error=str(exc) or "telemetry timeout",
-                extra={"_error_print_id": p._error_print_id},
-            )
+            status = await asyncio.wait_for(asyncio.to_thread(p.status), timeout=4.0)
+        except asyncio.TimeoutError:
+            log.warning("bambu status timed out for %s", p.id)
+            previous = _latest_printers.get(p.id)
+            if previous and previous.get("state") != "offline":
+                stale = dict(previous)
+                stale["stale"] = True
+                stale["telemetry_error"] = "Status timed out"
+                return stale
+            d = {
+                "id": p.id,
+                "model_name": p.model_name,
+                "custom_name": p.custom_name,
+                "icon": p.icon,
+                "kind": "bambu",
+                "state": "offline",
+                "error": "Status timed out",
+                "temps": {},
+                "job": None,
+                "ams": [],
+                "toolheads": [],
+                "last_seen": getattr(p, "_last_seen", None),
+                "updated_at": datetime.utcnow(),
+            }
+            d["temperature_presets"] = _presets.get(p.id, {})
+            d["health"] = db.get_printer_health(p.id)
+            d["_error_print_id"] = p._error_print_id
+            d["_current_print_id"] = p._current_print_id
+            d["_last_finished_print_id"] = p._last_finished_print_id
+            d["_last_timelapse_path"] = p._last_timelapse_path
+            return d
         status.temperature_presets = _presets.get(p.id, {})
         _update_last_seen(status)
         d = asdict(status)
@@ -250,6 +300,15 @@ async def _gather_all_locked() -> list[dict]:
             d["eta_calibration"] = cal
         d["health"] = db.get_printer_health(p.id)
         d["_error_print_id"] = p._error_print_id
+        d["_current_print_id"] = p._current_print_id
+        d["_last_finished_print_id"] = p._last_finished_print_id
+        d["_last_timelapse_path"] = p._last_timelapse_path
+        cal_session = _calibration_sessions.get(p.id)
+        if cal_session:
+            d["calibration"] = {
+                "active": bool(cal_session.get("active")),
+                "pending_job_id": cal_session.get("pending_job_id"),
+            }
         return d
 
     async def _fetch_simulated(id, model_name, custom_name, icon, profile, scenario):
@@ -287,13 +346,19 @@ async def _gather_all_locked() -> list[dict]:
     return out
 
 
-def _cached_printers(max_age_seconds: Optional[float] = 8.0) -> Optional[list[dict]]:
+def _cached_printers(max_age_seconds: float = 8.0) -> Optional[list[dict]]:
     if not _latest_printers or _latest_printers_at is None:
         return None
-    if max_age_seconds is not None:
-        age = (datetime.utcnow() - _latest_printers_at).total_seconds()
-        if age > max_age_seconds:
-            return None
+    age = (datetime.utcnow() - _latest_printers_at).total_seconds()
+    if age > max_age_seconds:
+        return None
+    return list(_latest_printers.values())
+
+
+def _stale_printers() -> Optional[list[dict]]:
+    """Any in-memory snapshot, even if older than the fresh-cache window."""
+    if not _latest_printers:
+        return None
     return list(_latest_printers.values())
 
 
@@ -302,18 +367,20 @@ def _gather_in_progress() -> bool:
 
 
 async def _gather_all_with_cache(timeout: float = 5.0) -> list[dict]:
+    """Serve fresh cache, else the stale snapshot, else a bounded live gather."""
     cached = _cached_printers()
     if cached is not None:
         return cached
-    stale = _cached_printers(max_age_seconds=None)
+    stale = _stale_printers()
     if stale is not None:
+        if not _gather_in_progress():
+            asyncio.create_task(_gather_all())
         return stale
     try:
         return await asyncio.wait_for(_gather_all(), timeout=timeout)
     except Exception as exc:
         log.warning("printer gather timed out/failed: %s", exc)
-        stale = _cached_printers(max_age_seconds=None)
-        return stale if stale is not None else []
+        return _stale_printers() or []
 
 
 async def _seed_prev_states() -> None:
@@ -629,14 +696,233 @@ def _best_spool_for_reported_slot(slot: dict, candidates: list[dict], preferred_
     return best[3], best[0], best[4]
 
 
-def _reconcile_reported_loaded_slots(printer_status: dict) -> None:
-    """Do not move inventory based only on Bambu AMS reports.
+def _ams_auto_claim_enabled() -> bool:
+    try:
+        settings = db.get_all_settings()
+    except Exception:
+        settings = {}
+    return str(settings.get("ams_auto_claim_enabled", "true")).strip().lower() in {"1", "true", "yes", "on"}
 
-    Bambu can retain stale tray profile data after the physical spool changes,
-    especially on AMS HT. The AMS Profile Doctor still scores and suggests
-    likely shelf matches, but stock movement must be operator-approved.
+
+def _slot_fingerprint_key(printer_id: str, flat_slot: int) -> str:
+    return f"{printer_id}:{flat_slot}"
+
+
+def _tray_state_int(slot: dict) -> Optional[int]:
+    try:
+        return int(slot.get("tray_state"))
+    except (TypeError, ValueError):
+        return None
+
+
+def _reported_slot_is_unknown_loaded(slot: dict) -> bool:
+    if not slot or slot.get("empty"):
+        return False
+    material = str(_reported_slot_material_text(slot) or "").strip()
+    color = str(slot.get("color") or "").strip()
+    brandish = str(slot.get("brand") or slot.get("profile_name") or slot.get("profile_id") or "").strip()
+    return not material and not color and not brandish
+
+
+def _reported_slot_is_low_confidence(slot: dict) -> bool:
+    return _reported_slot_is_generic(slot) or _reported_slot_is_unknown_loaded(slot)
+
+
+def _slot_loaded_signature(slot: dict) -> str:
+    parts = [
+        str(slot.get("profile_id") or "").strip().upper(),
+        str(slot.get("color") or "").strip().upper(),
+        str(slot.get("type") or "").strip().upper(),
+        _norm_material(str(slot.get("brand") or "")),
+        _norm_material(str(slot.get("profile_name") or "")),
+        str(_tray_state_int(slot) or ""),
+    ]
+    return "|".join(parts)
+
+
+def _slot_fingerprint(slot: dict) -> dict:
+    empty = bool(slot.get("empty")) or _reported_slot_is_stale_empty(slot)
+    return {
+        "empty": empty,
+        "loaded_sig": "" if empty else _slot_loaded_signature(slot),
+        "tray_state": _tray_state_int(slot),
+    }
+
+
+def _slot_report_transition(prev: Optional[dict], curr: dict) -> bool:
+    """True when the MQTT report changed like a fresh spool insert."""
+    if not prev:
+        return False
+    if prev.get("empty") and not curr.get("empty"):
+        return True
+    if prev.get("tray_state") != 11 and curr.get("tray_state") == 11 and not curr.get("empty"):
+        return True
+    if (
+        not prev.get("empty")
+        and not curr.get("empty")
+        and prev.get("loaded_sig") != curr.get("loaded_sig")
+    ):
+        return True
+    return False
+
+
+def _generic_slot_spool_match(
+    slot: dict,
+    spool: dict,
+    preferred_spool_id: Optional[int],
+) -> Optional[tuple[float, str]]:
+    """Match a shelved spool to a generic Bambu report using material + slot memory."""
+    if spool.get("location_printer_id") is not None or spool.get("archived_at"):
+        return None
+    if preferred_spool_id is not None and int(spool.get("id") or 0) != int(preferred_spool_id):
+        return None
+    if preferred_spool_id is None:
+        return None
+    reported_material = _reported_slot_material_text(slot)
+    if not _spool_matches_material(spool, str(reported_material)):
+        return None
+    if _generic_profile_rejects_spool(slot, spool):
+        return None
+    return 85.0, "slot memory, generic report"
+
+
+def _best_spool_for_generic_reported_slot(
+    slot: dict,
+    candidates: list[dict],
+    preferred_spool_id: Optional[int],
+) -> Optional[tuple[dict, float, str]]:
+    if preferred_spool_id is None:
+        return None
+    for spool in candidates:
+        result = _generic_slot_spool_match(slot, spool, preferred_spool_id)
+        if result:
+            score, reason = result
+            return spool, score, reason
+    return None
+
+
+def _slot_physically_present(slot: dict) -> bool:
+    if slot.get("empty") or _reported_slot_is_stale_empty(slot):
+        return False
+    if _tray_state_int(slot) == 11:
+        return True
+    tray_type = str(slot.get("type") or "").strip()
+    color = str(slot.get("color") or "").strip()
+    return bool(tray_type and color)
+
+
+def _recent_auto_return_from_slot(printer_id: str, flat_slot: int, spool_id: int) -> bool:
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            row = conn.execute(
+                """
+                SELECT 1
+                FROM decisions
+                WHERE event = 'spool_auto_returned'
+                  AND detail LIKE ?
+                  AND logged_at >= datetime('now', ?)
+                LIMIT 1
+                """,
+                (
+                    f"Spool #{spool_id} %from empty %{printer_id}:{flat_slot}%",
+                    f"-{_EMPTY_SLOT_AUTO_RETURN_GRACE_SECONDS} seconds",
+                ),
+            ).fetchone()
+        return row is not None
+    except Exception as exc:
+        log.debug("recent auto-return check failed: %s", exc)
+        return False
+
+
+def _reconcile_reported_loaded_slots(printer_status: dict) -> None:
+    """Claim a shelved spool when Bambu reports a fresh AMS/MMU load.
+
+    Only reacts to empty→loaded or profile/colour transitions between polls.
+    Persistent stale tray data — common on AMS HT — is ignored until the report
+    actually changes, which is what caused false auto-claims before.
     """
-    return
+    printer_id = printer_status.get("id")
+    if not printer_id:
+        return
+
+    loaded_by_slot = db.get_spools_by_printer(str(printer_id))
+    auto_claim = _ams_auto_claim_enabled()
+    available = [
+        spool for spool in db.get_spools()
+        if spool.get("location_printer_id") is None and not spool.get("archived_at")
+    ]
+
+    for slot in _flatten_reported_ams_slots(printer_status, include_empty=True):
+        flat_slot = slot.get("flat_slot")
+        if flat_slot is None:
+            continue
+        key = _slot_fingerprint_key(str(printer_id), int(flat_slot))
+        curr_fp = _slot_fingerprint(slot)
+        prev_fp = _AMS_SLOT_FINGERPRINTS.get(key)
+        _AMS_SLOT_FINGERPRINTS[key] = curr_fp
+
+        if not auto_claim or not available:
+            continue
+        if curr_fp.get("empty"):
+            continue
+        if loaded_by_slot.get(int(flat_slot)):
+            continue
+        if not _slot_report_transition(prev_fp, curr_fp):
+            continue
+        if not _slot_physically_present(slot):
+            continue
+        if _reported_slot_is_unknown_loaded(slot):
+            continue
+
+        preferred_spool_id = db.get_recent_spool_for_slot(str(printer_id), int(flat_slot))
+        slot_available = available
+        if _reported_slot_is_generic(slot):
+            if preferred_spool_id is None:
+                continue
+            slot_available = [
+                spool for spool in available
+                if int(spool.get("id") or 0) == int(preferred_spool_id)
+            ]
+            if not slot_available:
+                continue
+            best = _best_spool_for_generic_reported_slot(slot, slot_available, preferred_spool_id)
+        else:
+            best = _best_spool_for_reported_slot(slot, slot_available, preferred_spool_id)
+        if not best:
+            continue
+
+        spool, score, reason = best
+        if _recent_auto_return_from_slot(str(printer_id), int(flat_slot), int(spool["id"])):
+            continue
+
+        result = db.move_spool(
+            int(spool["id"]),
+            str(printer_id),
+            int(flat_slot),
+            spool.get("storage_location_id") or spool.get("home_storage_location_id"),
+        )
+        if not result.get("ok"):
+            continue
+
+        source_location = _spool_location_label(
+            spool.get("storage_location_id") or spool.get("home_storage_location_id")
+        )
+        reported = " ".join(
+            str(slot.get(key) or "").strip()
+            for key in ("brand", "type", "profile_name")
+            if str(slot.get(key) or "").strip()
+        ) or "filament"
+        db.log_decision(
+            str(printer_id),
+            "spool_auto_claimed",
+            (
+                f"Spool #{spool['id']} auto-claimed from {source_location} "
+                f"to {slot.get('label') or flat_slot}; fresh printer report "
+                f"{reported} {slot.get('color') or ''} (score {score:.0f}: {reason})"
+            ),
+        )
+        loaded_by_slot[int(flat_slot)] = spool
+        available = [candidate for candidate in available if int(candidate["id"]) != int(spool["id"])]
 
 
 async def _grab_snapshot(printer_id: str) -> Optional[bytes]:
@@ -705,7 +991,7 @@ def _fetch_mjpeg_frame_sync(url: str) -> tuple[bytes, str]:
                     return buf[start:end + 2], "image/jpeg"
             if len(buf) > 2_000_000:
                 buf = buf[-512_000:]
-    if buf and content_type.startswith("image/"):
+    if buf and content_type.startswith("image/") and "multipart" not in content_type:
         return buf, content_type
     raise RuntimeError("MJPEG frame unavailable")
 
@@ -722,15 +1008,11 @@ def _camera_unavailable_response(printer_id: str, detail: str = "Camera frame un
   <text x="320" y="292" fill="#dbeafe" font-family="Segoe UI, Arial, sans-serif" font-size="28" font-weight="800" text-anchor="middle">{name}</text>
   <text x="320" y="320" fill="#93a4bd" font-family="Segoe UI, Arial, sans-serif" font-size="16" text-anchor="middle">{note}</text>
 </svg>'''
-    return Response(
-        content=svg,
-        media_type="image/svg+xml",
-        headers={
-            "Cache-Control": "no-cache, no-store, must-revalidate",
-            "Pragma": "no-cache",
-            "Expires": "0",
-        },
-    )
+    return Response(content=svg, media_type="image/svg+xml", headers={
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+    })
 
 
 async def _do_failure_snapshot(printer_id: str, print_id: Optional[int]) -> None:
@@ -794,42 +1076,245 @@ def _recently_finished(printer_id: str, ttl: timedelta | None = None) -> bool:
     return (datetime.utcnow() - finished_at) <= ttl
 
 
+def _native_recorder_enabled() -> bool:
+    return _NATIVE_RECORDER_ENABLED
+
+
+def _native_recorder_proxy(printer_id: str) -> Optional[BambuCameraProxy]:
+    return _cam_proxies.get(printer_id)
+
+
+def _resolve_native_print_id(printer_id: str, p: Optional[dict] = None) -> Optional[int]:
+    if p:
+        current = p.get("_current_print_id")
+        if current:
+            return int(current)
+    open_id = db.get_open_print_id(printer_id)
+    if open_id:
+        return int(open_id)
+    return None
+
+
+def _native_recorder_first_layer_ready(p: dict) -> bool:
+    """Wait for first-layer extrusion — skip AMS prep / bed heat / calibration."""
+    if str(p.get("state") or "").lower() not in {"printing", "paused"}:
+        return False
+    job = p.get("job") or {}
+    try:
+        layer = job.get("layer_current")
+        if layer is not None and int(layer) >= 1:
+            return True
+    except (TypeError, ValueError):
+        pass
+    progress = float(job.get("progress") or 0)
+    return progress >= 0.015
+
+
+def _native_capture_paths(printer_id: str, print_id: int, filename: str = "print") -> tuple[Path, Path]:
+    safe_printer = re.sub(r"[^a-zA-Z0-9_.-]+", "-", printer_id).strip("-") or "printer"
+    work_dir = FLIGHT_RECORDER_DIR / safe_printer / f".{print_id}-capture"
+    output_path = _timelapse_safe_output_path(printer_id, print_id, filename or "print", ".mp4")
+    return work_dir, output_path
+
+
+def _attach_native_timelapse_path(printer_id: str, print_id: int, path: Path) -> bool:
+    if path.stat().st_size > _MAX_FLIGHT_RECORDER_BYTES:
+        log.warning(
+            "native recorder clip too large for %s print_id=%s (%d bytes)",
+            printer_id,
+            print_id,
+            path.stat().st_size,
+        )
+        try:
+            path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        return False
+    if db.attach_print_timelapse(print_id, path, source="flightdeck-native"):
+        db.log_decision(
+            printer_id,
+            "flight_recorder_native",
+            f"Attached native RTSP clip {path.name}",
+            print_id=print_id,
+        )
+        log.info("native recorder attached: %s print_id=%s", printer_id, print_id)
+        return True
+    log.warning("native recorder attach failed: %s print_id=%s", printer_id, print_id)
+    return False
+
+
+async def _finalize_orphan_native_capture(printer_id: str, print_id: int) -> bool:
+    """Concat leftover seg_*.mp4 for a finished print when no in-memory recorder is running."""
+    item = db.get_print_by_id(print_id)
+    if not item or item.get("printer_id") != printer_id:
+        return False
+    if item.get("has_timelapse"):
+        return False
+    work_dir, output_path = _native_capture_paths(printer_id, print_id, item.get("filename") or "print")
+    if not work_dir.is_dir():
+        return False
+    if not any(work_dir.glob("seg_*.mp4")):
+        shutil.rmtree(work_dir, ignore_errors=True)
+        return False
+    try:
+        path = await finalize_capture_dir(
+            work_dir,
+            output_path,
+            printer_id=printer_id,
+            print_id=print_id,
+        )
+    except Exception as exc:
+        log.warning("orphan native finalize failed for %s print_id=%s: %s", printer_id, print_id, exc)
+        return False
+    if not path:
+        return False
+    return _attach_native_timelapse_path(printer_id, print_id, path)
+
+
+async def _maybe_start_native_recorder(printer_id: str, p: dict) -> None:
+    if not _native_recorder_enabled():
+        return
+    if printer_id in _native_recorders:
+        return
+    if p.get("kind") != "bambu":
+        return
+    if not _native_recorder_first_layer_ready(p):
+        return
+    proxy = _native_recorder_proxy(printer_id)
+    if not proxy:
+        return
+    print_id = _resolve_native_print_id(printer_id, p)
+    if not print_id:
+        return
+    item = db.get_print_by_id(print_id)
+    if not item or item.get("printer_id") != printer_id:
+        return
+    if item.get("has_timelapse"):
+        return
+    work_dir, output_path = _native_capture_paths(printer_id, print_id, item.get("filename") or "print")
+    recorder = PrintNativeRecorder(proxy, printer_id, print_id, work_dir, output_path)
+    prior_segments = recorder.existing_segment_count()
+    try:
+        await recorder.start()
+    except Exception as exc:
+        log.warning("native recorder start failed for %s print_id=%s: %s", printer_id, print_id, exc)
+        return
+    _native_recorders[printer_id] = recorder
+    if prior_segments:
+        db.log_decision(
+            printer_id,
+            "flight_recorder_native_resume",
+            f"Resumed native timelapse for print #{print_id} with {prior_segments} existing segment(s)",
+            print_id=print_id,
+        )
+    else:
+        db.log_decision(
+            printer_id,
+            "flight_recorder_native_start",
+            f"Recording timelapse from first layer for print #{print_id}",
+            print_id=print_id,
+        )
+
+
+async def _stop_native_recorder(printer_id: str, print_id: Optional[int] = None) -> None:
+    recorder = _native_recorders.pop(printer_id, None)
+    target_print_id = print_id or (recorder.print_id if recorder else None)
+    if recorder:
+        try:
+            path = await recorder.stop()
+        except Exception as exc:
+            log.warning("native recorder stop failed for %s: %s", printer_id, exc)
+            path = None
+        if path and target_print_id:
+            _attach_native_timelapse_path(printer_id, target_print_id, path)
+            return
+    if target_print_id:
+        await _finalize_orphan_native_capture(printer_id, target_print_id)
+
+
+async def _handle_print_recorder_finish(
+    printer_id: str,
+    print_id: Optional[int],
+    mqtt_hint: Optional[str] = None,
+) -> None:
+    await _stop_native_recorder(printer_id, print_id)
+    if print_id:
+        await _auto_harvest_flight_recorder(printer_id, print_id, mqtt_hint)
+
+
 def _check_transitions(data: list[dict]) -> None:
     for p in data:
         pid = p["id"]
         curr = p["state"]
         prev = _prev_states.get(pid)
         _prev_states[pid] = curr
-        if prev is None or prev == curr:
+        is_simulated = bool(p.get("_simulated"))
+        if prev is None:
+            finished_print_id = p.get("_last_finished_print_id")
+            if not is_simulated and curr == "finished" and finished_print_id:
+                asyncio.create_task(_handle_print_recorder_finish(
+                    pid, finished_print_id, p.get("_last_timelapse_path"),
+                ))
+            if not is_simulated and curr in ("printing", "paused"):
+                asyncio.create_task(_maybe_start_native_recorder(pid, p))
+            continue
+        if prev == curr:
+            if not is_simulated and curr in ("printing", "paused") and pid not in _native_recorders:
+                asyncio.create_task(_maybe_start_native_recorder(pid, p))
             continue
         log.info("state transition %s: %s → %s", pid, prev, curr)
         name = p.get("custom_name") or p.get("id")
         job = p.get("job") or {}
         fname = (job.get("filename") or "").rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
-        sub = (job.get("subtask_name") or "").strip()
+        sub = job.get("subtask_name", "").strip()
         label = sub if sub and sub != fname else fname
         has_error_print = p.get("_error_print_id") is not None
-        is_simulated = bool(p.get("_simulated"))
         title_prefix = "SIM " if is_simulated else ""
 
-        if prev == "printing" and curr in {"finished", "ready", "standby", "complete"}:
-            if curr == "finished" or _recently_finished(pid):
+        if prev == "printing" and curr in {"finished", "ready", "standby", "complete", "idle"}:
+            last = None if is_simulated else db.get_last_print(pid)
+            last_finished = str((last or {}).get("final_state") or "").upper() == "FINISHED"
+            completed = (
+                curr == "finished"
+                or _recently_finished(pid)
+                or (curr == "idle" and last_finished)
+            )
+            if completed:
                 msg = f"{name}" + (f" · {label}" if label else "")
                 _notify("success", f"{title_prefix}Print complete", msg, printer_id=pid, link=f"#/printer/{pid}/history")
                 if not is_simulated:
                     asyncio.create_task(_send_ntfy("Print complete", msg, ["white_check_mark"]))
                 asyncio.create_task(_on_print_finished_queue(pid))
+                if not is_simulated:
+                    finished_print_id = p.get("_last_finished_print_id") or db.get_latest_finished_print_id(pid)
+                    if finished_print_id:
+                        asyncio.create_task(_handle_print_recorder_finish(
+                            pid, finished_print_id, p.get("_last_timelapse_path"),
+                        ))
+            elif curr == "idle":
+                # Idle without a finish window — leave queue row for reconciler
+                # (stale cancel / filename match) instead of assuming user cancel.
+                pass
             else:
                 msg = f"{name}" + (f" · {label}" if label else "")
                 _notify("warn", f"{title_prefix}Print cancelled", msg, printer_id=pid, link=f"#/printer/{pid}/history")
                 if not is_simulated:
                     asyncio.create_task(_send_ntfy("Print cancelled", msg, ["x"]))
                 db.queue_cancel_active(pid, "cancelled")
+                asyncio.create_task(_maybe_auto_advance_queue(pid, trigger="print_cancelled"))
+                if not is_simulated:
+                    asyncio.create_task(_handle_print_recorder_finish(
+                        pid, _resolve_native_print_id(pid, p), p.get("_last_timelapse_path"),
+                    ))
         elif curr in ("error", "estop"):
             error_pid = p.get("_error_print_id")
             is_print_failure = prev == "printing" or has_error_print
             if is_print_failure:
                 asyncio.create_task(_do_failure_snapshot(pid, error_pid))
+                if error_pid and not is_simulated:
+                    asyncio.create_task(_handle_print_recorder_finish(
+                        pid, error_pid, p.get("_last_timelapse_path"),
+                    ))
             if curr == "error" and is_print_failure:
                 msg = f"{name}" + (f" · {label}" if label else "")
                 if p.get("error"):
@@ -837,7 +1322,7 @@ def _check_transitions(data: list[dict]) -> None:
                 _notify("error", f"{title_prefix}Print error", msg, printer_id=pid, print_id=error_pid, link=f"#/printer/{pid}/live")
                 if not is_simulated:
                     asyncio.create_task(_send_ntfy("Print error", msg, ["warning"], priority=4))
-                db.queue_cancel_active(pid, "failed")
+                db.queue_fail_active(pid, str(p.get("error") or "Printer reported an error"))
         elif prev == "printing" and curr == "paused":
             msg = f"{name}" + (f" · {label}" if label else "")
             if p.get("error"):
@@ -845,12 +1330,28 @@ def _check_transitions(data: list[dict]) -> None:
             _notify("info", f"{title_prefix}Print paused", msg, printer_id=pid, link=f"#/printer/{pid}/live")
             if not is_simulated:
                 asyncio.create_task(_send_ntfy("Print paused", msg, ["double_vertical_bar"]))
+            if "ams mapping" in str(p.get("error") or "").lower():
+                db.queue_fail_active(pid, str(p.get("error") or "Failed to get AMS mapping table"))
         elif prev == "printing" and curr == "idle":
             msg = f"{name}" + (f" · {label}" if label else "")
             _notify("warn", f"{title_prefix}Print cancelled", msg, printer_id=pid, link=f"#/printer/{pid}/history")
             if not is_simulated:
                 asyncio.create_task(_send_ntfy("Print cancelled", msg, ["x"]))
             db.queue_cancel_active(pid, "cancelled")
+            asyncio.create_task(_maybe_auto_advance_queue(pid, trigger="print_cancelled"))
+            if not is_simulated:
+                asyncio.create_task(_handle_print_recorder_finish(
+                    pid, _resolve_native_print_id(pid, p), p.get("_last_timelapse_path"),
+                ))
+        elif prev == "paused" and curr not in ("printing", "paused") and not is_simulated:
+            asyncio.create_task(_handle_print_recorder_finish(
+                pid,
+                p.get("_last_finished_print_id") or p.get("_error_print_id") or _resolve_native_print_id(pid, p),
+                p.get("_last_timelapse_path"),
+            ))
+
+        if not is_simulated and prev not in ("printing", "paused") and curr in ("printing", "paused"):
+            asyncio.create_task(_maybe_start_native_recorder(pid, p))
 
 
 async def _push_toast(message: str, sub: str = "", toast_type: str = "warning") -> None:
@@ -866,13 +1367,23 @@ async def _push_toast(message: str, sub: str = "", toast_type: str = "warning") 
 
 
 async def _broadcast_loop():
+    poll_counter = 0
     while True:
-        await asyncio.sleep(15)
+        await asyncio.sleep(5)
         try:
-            if _gather_in_progress():
+            try:
+                data = await asyncio.wait_for(_gather_all(), timeout=8.0)
+            except asyncio.TimeoutError:
+                log.warning("broadcast gather timed out; serving stale printer snapshot")
+                data = _stale_printers() or []
+            if not data:
                 continue
-            data = await _gather_all()
             _check_transitions(data)
+            _check_calibration_sessions(data)
+            poll_counter += 1
+            if poll_counter >= 12:
+                poll_counter = 0
+                await _scan_idle_queue_dispatch()
             if not _ws_clients:
                 continue
             msg = json.dumps(data, default=_dt_default)
@@ -912,9 +1423,23 @@ async def _scale_keep_awake_loop():
             log.debug("scale keep-awake ping failed: %s", exc)
 
 
+def _raise_multipart_limits() -> None:
+    """Starlette defaults to 1 MB per multipart part — too small for MakerDeck 3MF library saves."""
+    try:
+        from starlette import formparsers
+
+        cap = _MAX_PRINT_FILE_BYTES
+        formparsers.MultiPartParser.max_part_size = cap
+        if hasattr(formparsers.MultiPartParser, "max_file_size"):
+            formparsers.MultiPartParser.max_file_size = cap
+    except Exception:
+        log.warning("Could not raise Starlette multipart upload limits", exc_info=True)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _broadcast_task, _scale_keep_awake_task, _ntfy
+    _raise_multipart_limits()
     db.init()
     _last_seen_cache.update(db.get_all_last_seen())
     cfg = load()
@@ -954,12 +1479,15 @@ async def lifespan(app: FastAPI):
                 conn.scenario,
             ))
 
+    # Seed prev states so startup doesn't fire spurious notifications.
+    # Prime the cache with placeholders and seed in the background so a slow or
+    # offline printer never blocks the app shell from coming up.
     _prime_printer_cache()
-    # Seed prev states in the background so slow/offline printers do not block the app shell.
     asyncio.create_task(_delayed_seed_prev_states())
 
     _broadcast_task = asyncio.create_task(_broadcast_loop())
     _scale_keep_awake_task = asyncio.create_task(_scale_keep_awake_loop())
+    asyncio.create_task(_boot_queue_auto_dispatch())
 
     yield
 
@@ -970,6 +1498,19 @@ async def lifespan(app: FastAPI):
     for proxy in _cam_proxies.values():
         await proxy.stop()
     _cam_proxies.clear()
+    # Suspend only — keep seg_*.mp4 so a mid-print restart can resume the same capture.
+    for recorder in list(_native_recorders.values()):
+        try:
+            kept = await recorder.suspend()
+            log.info(
+                "native recorder suspended on shutdown: %s print_id=%s segments=%s",
+                recorder.printer_id,
+                recorder.print_id,
+                kept,
+            )
+        except Exception as exc:
+            log.warning("native recorder suspend failed for %s: %s", recorder.printer_id, exc)
+    _native_recorders.clear()
     for p in _bambu:
         try:
             await asyncio.wait_for(asyncio.to_thread(p.stop), timeout=5)
@@ -993,6 +1534,14 @@ class NoCacheStaticFiles(StaticFiles):
 
 
 app.mount("/static", NoCacheStaticFiles(directory=_STATIC), name="static")
+
+_MAKERDECK = APP_DIR / "makerforge"
+if _MAKERDECK.is_dir():
+    app.mount(
+        "/makerdeck",
+        NoCacheStaticFiles(directory=_MAKERDECK, html=True),
+        name="makerdeck",
+    )
 
 
 class FileQueueRequest(BaseModel):
@@ -1037,6 +1586,19 @@ class SlicerOpenRequest(BaseModel):
     source_id: str
     path: str
     filename: str = ""
+    target: str = "desktop_orca"
+
+
+class SlicerOpenPathRequest(BaseModel):
+    """Open an existing local/UNC path on the Windows worker (PrintShelf NAS handoff)."""
+    path: str
+    target: str = "bambu_studio"
+
+
+class ShellOpenPathRequest(BaseModel):
+    """Open or reveal a local/UNC path on the Windows worker (Explorer / default app)."""
+    path: str
+    mode: str = "open"  # open | reveal
 
 
 class SlicerConnectionCheckRequest(BaseModel):
@@ -1081,6 +1643,11 @@ def standalone_demo():
             "Pragma": "no-cache",
         },
     )
+
+
+@app.get("/makerdeck", include_in_schema=False)
+def makerdeck_redirect():
+    return RedirectResponse(url="/makerdeck/", status_code=307)
 
 
 @app.get("/health")
@@ -1212,6 +1779,7 @@ def _local_library_files() -> list[dict]:
         rows.append({
             "name": path.name,
             "path": rel,
+            "folder": path.parent.relative_to(root).as_posix() if path.parent != root else "",
             "kind": _file_kind(path.name),
             "size": stat.st_size,
             "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
@@ -1243,9 +1811,13 @@ def _safe_library_path(rel_path: str) -> Path:
 
 
 async def _moonraker_files(base_url: str) -> list[dict]:
+    return await _moonraker_files_root(base_url, "gcodes")
+
+
+async def _moonraker_files_root(base_url: str, root: str) -> list[dict]:
     timeout = httpx.Timeout(4.0, connect=1.0)
     async with httpx.AsyncClient(timeout=timeout) as client:
-        r = await client.get(f"{base_url.rstrip('/')}/server/files/list", params={"root": "gcodes"})
+        r = await client.get(f"{base_url.rstrip('/')}/server/files/list", params={"root": root})
         r.raise_for_status()
         result = r.json().get("result", [])
     rows = []
@@ -1264,11 +1836,11 @@ async def _moonraker_files(base_url: str) -> list[dict]:
     return sorted(rows, key=lambda r: (r["kind"] != "dir", r["path"].lower()))
 
 
-async def _download_moonraker_file(base_url: str, path: str) -> bytes:
+async def _download_moonraker_file(base_url: str, path: str, root: str = "gcodes") -> bytes:
     from urllib.parse import quote
     safe = quote(path.lstrip("/"), safe="/")
     async with httpx.AsyncClient(timeout=120.0) as client:
-        r = await client.get(f"{base_url.rstrip('/')}/server/files/gcodes/{safe}")
+        r = await client.get(f"{base_url.rstrip('/')}/server/files/{root}/{safe}")
         r.raise_for_status()
         return r.content
 
@@ -1366,7 +1938,9 @@ def _queue_file_metadata(filename: str, data: bytes) -> dict:
     if _queue_file_extension(filename) == ".3mf":
         try:
             from .printers.bambu_ftp import _parse_3mf
-            p = _parse_3mf(io.BytesIO(data))
+            # Queue only needs slice_info filament/nozzle metadata + thumbnail —
+            # never walk plate gcode for object shapes (that pegs the API).
+            p = _parse_3mf(io.BytesIO(data), include_object_geometry=False)
             preview_png = p.image_png
             estimated_seconds = p.estimated_total_seconds
             filament_weight_g = p.filament_weight_g
@@ -1401,6 +1975,73 @@ def _queue_file_metadata(filename: str, data: bytes) -> dict:
         "filament_weight_g": filament_weight_g,
         "filament_type": filament_type,
         "filament_colors": filament_colors,
+    }
+
+
+def _queue_plate_metas(filename: str, data: bytes, *, split_plates: bool) -> list[dict]:
+    """One metadata dict per printable plate (or a single whole-file job)."""
+    base = _queue_file_metadata(filename, data)
+    if not split_plates or _queue_file_extension(filename) != ".3mf":
+        return [{**base, "plate_number": None, "plate_count": None}]
+    try:
+        from .printers.bambu_ftp import _parse_3mf, list_3mf_gcode_plates
+        plates = list_3mf_gcode_plates(data)
+    except Exception:
+        plates = []
+    if len(plates) <= 1:
+        plate_n = plates[0] if plates else None
+        return [{**base, "plate_number": plate_n, "plate_count": len(plates) or None}]
+    out: list[dict] = []
+    buf = io.BytesIO(data)
+    for n in plates:
+        try:
+            buf.seek(0)
+            p = _parse_3mf(buf, plate_number=n, include_object_geometry=False)
+            out.append({
+                "preview_png": p.image_png or base["preview_png"],
+                "estimated_seconds": p.estimated_total_seconds,
+                "filament_weight_g": p.filament_weight_g,
+                "filament_type": p.filament_type or base["filament_type"],
+                "filament_colors": p.filament_colors or base["filament_colors"],
+                "plate_number": n,
+                "plate_count": len(plates),
+            })
+        except Exception:
+            out.append({**base, "plate_number": n, "plate_count": len(plates)})
+    return out or [{**base, "plate_number": None, "plate_count": None}]
+
+
+def _enqueue_print_file(
+    printer_id: str,
+    filename: str,
+    file_path: str,
+    data: bytes,
+    *,
+    calibrate_before_start: bool = False,
+    split_plates: bool = False,
+) -> list[int]:
+    metas = _queue_plate_metas(filename, data, split_plates=split_plates)
+    job_ids: list[int] = []
+    for i, meta in enumerate(metas):
+        job_ids.append(db.queue_add(
+            printer_id, filename, file_path, len(data),
+            preview_png=meta["preview_png"],
+            estimated_seconds=meta["estimated_seconds"],
+            filament_weight_g=meta["filament_weight_g"],
+            filament_type=meta["filament_type"],
+            filament_colors=meta["filament_colors"],
+            calibrate_before_start=bool(calibrate_before_start and i == 0),
+            plate_number=meta.get("plate_number"),
+            plate_count=meta.get("plate_count"),
+        ))
+    return job_ids
+
+
+def _queue_enqueue_response(job_ids: list[int]) -> dict:
+    return {
+        "id": job_ids[0] if job_ids else None,
+        "ids": job_ids,
+        "count": len(job_ids),
     }
 
 
@@ -1605,17 +2246,17 @@ async def queue_file_from_file_desk(body: FileQueueRequest):
     with open(file_path, "wb") as f:
         f.write(data)
 
-    meta = _queue_file_metadata(filename, data)
-    job_id = db.queue_add(
-        printer_id, filename, file_path, len(data),
-        preview_png=meta["preview_png"],
-        estimated_seconds=meta["estimated_seconds"],
-        filament_weight_g=meta["filament_weight_g"],
-        filament_type=meta["filament_type"],
-        filament_colors=meta["filament_colors"],
+    job_ids = _enqueue_print_file(
+        printer_id, filename, file_path, data,
+        split_plates=target_kind == "bambu",
     )
-    db.log_decision(printer_id, "filedesk_queued", f"{source_id}:{source_path} -> job #{job_id}")
-    return {"id": job_id}
+    db.log_decision(
+        printer_id,
+        "filedesk_queued",
+        f"{source_id}:{source_path} -> jobs {job_ids}",
+    )
+    asyncio.create_task(_maybe_auto_advance_queue(printer_id, trigger="filedesk_queue"))
+    return _queue_enqueue_response(job_ids)
 
 
 @app.post("/api/files/library/copy", status_code=201)
@@ -1698,7 +2339,7 @@ async def preview_file_desk_source(source_id: str, path: str, view: Optional[str
         raise HTTPException(status_code=404, detail="No preview available")
     try:
         from .printers.bambu_ftp import _parse_3mf
-        preview = _parse_3mf(io.BytesIO(data))
+        preview = _parse_3mf(io.BytesIO(data), include_object_geometry=False)
     except Exception as exc:
         raise HTTPException(status_code=404, detail="No preview available") from exc
     prefer_top = (view or "").strip().lower() == "top"
@@ -1731,33 +2372,44 @@ async def plan_slice_from_file_desk(body: SlicePlanRequest):
 
     settings = db.get_all_settings()
     browser_url = (settings.get("orcaslicer_docker_url") or "").strip().rstrip("/")
+    bambustudio_url = (settings.get("bambustudio_docker_url") or "").strip().rstrip("/")
     worker_url = (settings.get("orcaslicer_worker_url") or "").strip().rstrip("/")
     api_url = (settings.get("orcaslicer_api_url") or "").strip().rstrip("/")
+    slicer_use_api = str(settings.get("slicer_use_api") or "").strip().lower() in {"1", "true", "yes", "on"}
+    slicer_open_mode = (settings.get("slicer_open_mode") or "same").strip() or "same"
     output_ext = ".gcode.3mf" if target_kind == "bambu" else ".gcode"
     base_name = _file_archive_key(filename) or "sliced_model"
     target = next((p for p in await _gather_all() if p.get("id") == printer_id), None)
     slice_options = _slice_option_summary(body.bed_type, body.support_mode, body.brim_mode)
     profiles = _slice_request_profiles(body, settings, printer_id)
     missing_profiles = [label for label, value in profiles.items() if not str(value or "").strip()]
-    can_slice = bool(worker_url or api_url or _orca_executable()) and not missing_profiles and not is_step_source
+    can_slice = slicer_use_api and bool(worker_url or api_url or _orca_executable()) and not missing_profiles and not is_step_source
     can_handoff = is_step_source and not missing_profiles
     h2d_loose_mesh = _h2d_loose_mesh_requires_sidecar(filename, profiles)
     slicer_api_probe = None
-    if h2d_loose_mesh and api_url:
+    if slicer_use_api and h2d_loose_mesh and api_url:
         slicer_api_probe = await _probe_slicer_api(api_url)
-    if h2d_loose_mesh and not (slicer_api_probe or {}).get("ok"):
+    if slicer_use_api and h2d_loose_mesh and not (slicer_api_probe or {}).get("ok"):
         can_slice = False
         can_handoff = not missing_profiles
+    background_slice_paused = not slicer_use_api
+    if background_slice_paused and not missing_profiles:
+        can_slice = False
+        can_handoff = True
     return {
         "ok": True,
         "ready": can_slice or can_handoff,
         "can_background_slice": can_slice,
         "manual_handoff": can_handoff,
+        "background_slice_paused": background_slice_paused,
         "sidecar_url": browser_url,
         "browser_url": browser_url,
+        "bambustudio_url": bambustudio_url,
         "api_url": api_url,
         "api_health": slicer_api_probe,
         "worker_url": worker_url,
+        "slicer_use_api": slicer_use_api,
+        "slicer_open_mode": slicer_open_mode,
         "source": {
             "source_id": source_id,
             "path": source_path,
@@ -1785,6 +2437,8 @@ async def plan_slice_from_file_desk(body: SlicePlanRequest):
         "plate": body.plate or "auto",
         "all_plates": bool(body.all_plates),
         "message": (
+            "In-Flightdeck background slicing is paused while the managed Orca printer/AMS workflow is validated. Open the model in Orca, inspect the plate, then export the sliced job back to the Print Vault."
+            if background_slice_paused and not missing_profiles else
             f"H2D STL/OBJ background slicing needs a running slicer API sidecar. {(slicer_api_probe or {}).get('detail') or 'Configure the sidecar API URL first.'} Use Open Orca until it is online."
             if h2d_loose_mesh and not (slicer_api_probe or {}).get("ok") and not missing_profiles else
             "STEP models need Orca GUI import; use Download model/Open Orca, then export the sliced job back to the Print Vault."
@@ -2046,6 +2700,138 @@ def _open_orca_model_bytes(filename: str, data: bytes) -> dict:
     }
 
 
+def _launch_desktop_orca(path: Path) -> dict:
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Model file was not found")
+    resolved = path.resolve()
+    exe = _orca_executable()
+    if exe:
+        args = [str(exe), str(resolved)]
+        kwargs: dict = {
+            "stdout": subprocess.DEVNULL,
+            "stderr": subprocess.DEVNULL,
+            "stdin": subprocess.DEVNULL,
+            "close_fds": True,
+        }
+        if os.name == "nt":
+            detached = getattr(subprocess, "DETACHED_PROCESS", 0)
+            new_group = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+            if detached or new_group:
+                kwargs["creationflags"] = detached | new_group
+        try:
+            subprocess.Popen(args, **kwargs)
+            return {
+                "ok": True,
+                "filename": resolved.name,
+                "path": str(resolved),
+                "executable": str(exe),
+                "mode": "desktop-orca",
+            }
+        except OSError as exc:
+            log.warning("Desktop Orca executable launch failed for %s: %s", resolved, exc)
+    if os.name == "nt":
+        try:
+            os.startfile(str(resolved))  # type: ignore[attr-defined]
+            return {
+                "ok": True,
+                "filename": resolved.name,
+                "path": str(resolved),
+                "executable": "windows-file-association",
+                "mode": "desktop-file-association",
+            }
+        except OSError as exc:
+            log.warning("Windows file association open failed for %s: %s", resolved, exc)
+    raise HTTPException(status_code=404, detail="Desktop OrcaSlicer executable was not found on this machine")
+
+
+def _open_desktop_orca_model_bytes(filename: str, data: bytes) -> dict:
+    _enforce_file_size(len(data), label="Orca model")
+    dest, rel = _import_model_for_orca(filename, data)
+    result = _launch_desktop_orca(dest)
+    result["path"] = rel
+    return result
+
+
+def _bambu_studio_executable() -> Path | None:
+    candidates: list[Path] = []
+    env_exe = os.environ.get("BAMBUSTUDIO_EXE", "").strip()
+    if env_exe:
+        candidates.append(Path(env_exe))
+    if os.name == "nt":
+        local_app = os.environ.get("LOCALAPPDATA")
+        if local_app:
+            candidates.extend([
+                Path(local_app) / "Programs" / "BambuStudio" / "bambu-studio.exe",
+                Path(local_app) / "Programs" / "Bambu Studio" / "bambu-studio.exe",
+            ])
+        for base in (os.environ.get("ProgramFiles"), os.environ.get("ProgramFiles(x86)")):
+            if base:
+                candidates.append(Path(base) / "Bambu Studio" / "bambu-studio.exe")
+                candidates.append(Path(base) / "BambuStudio" / "bambu-studio.exe")
+    else:
+        candidates.extend([
+            Path("/usr/bin/bambu-studio"),
+            Path("/usr/local/bin/bambu-studio"),
+        ])
+    for path in candidates:
+        if path.exists():
+            return path
+    found = shutil.which("bambu-studio") or shutil.which("bambu-studio.exe")
+    return Path(found) if found else None
+
+
+def _launch_desktop_bambu_studio(path: Path) -> dict:
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Model file was not found")
+    resolved = path.resolve()
+    exe = _bambu_studio_executable()
+    if exe:
+        args = [str(exe), str(resolved)]
+        kwargs: dict = {
+            "stdout": subprocess.DEVNULL,
+            "stderr": subprocess.DEVNULL,
+            "stdin": subprocess.DEVNULL,
+            "close_fds": True,
+        }
+        if os.name == "nt":
+            detached = getattr(subprocess, "DETACHED_PROCESS", 0)
+            new_group = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+            if detached or new_group:
+                kwargs["creationflags"] = detached | new_group
+        try:
+            subprocess.Popen(args, **kwargs)
+            return {
+                "ok": True,
+                "filename": resolved.name,
+                "path": str(resolved),
+                "executable": str(exe),
+                "mode": "desktop-bambu",
+            }
+        except OSError as exc:
+            log.warning("Desktop Bambu Studio executable launch failed for %s: %s", resolved, exc)
+    if os.name == "nt":
+        try:
+            os.startfile(str(resolved))  # type: ignore[attr-defined]
+            return {
+                "ok": True,
+                "filename": resolved.name,
+                "path": str(resolved),
+                "executable": "windows-file-association",
+                "mode": "desktop-file-association",
+            }
+        except OSError as exc:
+            log.warning("Windows file association open failed for %s: %s", resolved, exc)
+    raise HTTPException(status_code=404, detail="Desktop Bambu Studio executable was not found on this machine")
+
+
+def _open_desktop_bambu_studio_model_bytes(filename: str, data: bytes) -> dict:
+    _enforce_file_size(len(data), label="Bambu model")
+    dest, rel = _import_model_for_orca(filename, data)
+    result = _launch_desktop_bambu_studio(dest)
+    result["path"] = rel
+    return result
+
+
 def _suppress_orca_internal_update_prompt() -> dict:
     result = {
         "configured": False,
@@ -2259,21 +3045,22 @@ async def _probe_slicer_api(api_url: str, *, timeout: float = 3.0) -> dict:
 async def check_slicer_connection(body: SlicerConnectionCheckRequest):
     kind = (body.kind or "").strip().lower()
     base_url = (body.url or "").strip().rstrip("/")
-    if kind not in {"api", "worker", "browser"}:
-        raise HTTPException(status_code=422, detail="kind must be api, worker, or browser")
+    browser_like = kind in {"browser", "bambu_browser"}
+    if kind not in {"api", "worker", "browser", "bambu_browser"}:
+        raise HTTPException(status_code=422, detail="kind must be api, worker, browser, or bambu_browser")
     parsed = urllib.parse.urlparse(base_url)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         raise HTTPException(status_code=422, detail="Enter a full http:// or https:// URL")
 
     path = "/health" if kind == "api" else ("/api/slicer/worker/status" if kind == "worker" else "")
     target = f"{base_url}{path}"
-    verify_tls = False if kind == "browser" else True
+    verify_tls = False if browser_like else True
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(connect=3.0, read=8.0, write=3.0, pool=3.0), follow_redirects=True, verify=verify_tls) as client:
             resp = await client.get(target)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Could not reach {kind} URL: {exc}") from exc
-    auth_required = kind == "browser" and resp.status_code in {401, 403}
+    auth_required = browser_like and resp.status_code in {401, 403}
     if resp.status_code >= 400 and not auth_required:
         raise HTTPException(status_code=resp.status_code, detail=f"{kind} URL returned HTTP {resp.status_code}")
 
@@ -2292,6 +3079,56 @@ async def check_slicer_connection(body: SlicerConnectionCheckRequest):
         "status": resp.status_code,
         "version": version,
         "auth_required": auth_required,
+    }
+
+
+@app.get("/api/slicer/health")
+async def slicer_health_summary():
+    """Probe all configured slicer components concurrently and return a health summary."""
+    settings = db.get_all_settings()
+    worker_url = (settings.get("orcaslicer_worker_url") or "").strip().rstrip("/")
+    browser_url = (settings.get("orcaslicer_docker_url") or "").strip().rstrip("/")
+    bambu_url = (settings.get("bambustudio_docker_url") or "").strip().rstrip("/")
+    api_url = (settings.get("orcaslicer_api_url") or "").strip().rstrip("/")
+
+    async def _probe(url: str, path: str = "", *, verify: bool = True, timeout: float = 3.0) -> dict:
+        if not url:
+            return {"configured": False, "ok": False, "url": "", "detail": "Not configured"}
+        target = url.rstrip("/") + path
+        try:
+            async with httpx.AsyncClient(
+                timeout=httpx.Timeout(connect=timeout, read=timeout, write=timeout, pool=timeout),
+                follow_redirects=True, verify=verify,
+            ) as client:
+                resp = await client.get(target)
+        except Exception as exc:
+            return {"configured": True, "ok": False, "url": url, "detail": str(exc)}
+        if not verify and resp.status_code in {401, 403}:
+            return {"configured": True, "ok": True, "url": url, "detail": "Reachable (sign-in required)"}
+        if resp.status_code >= 400:
+            return {"configured": True, "ok": False, "url": url, "detail": f"HTTP {resp.status_code}"}
+        payload = None
+        try:
+            payload = resp.json()
+        except Exception:
+            pass
+        version = str((payload or {}).get("version") or (payload or {}).get("executable") or "") if payload else ""
+        return {"configured": True, "ok": True, "url": url, "detail": f"Reachable{f' · {version}' if version else ''}"}
+
+    worker_r, browser_r, bambu_r, api_r = await asyncio.gather(
+        _probe(worker_url, "/api/slicer/worker/status"),
+        _probe(browser_url, verify=False),
+        _probe(bambu_url, verify=False),
+        _probe(api_url, "/health"),
+    )
+    configured = [r for r in (worker_r, browser_r, bambu_r, api_r) if r["configured"]]
+    return {
+        "worker": worker_r,
+        "orca_browser": browser_r,
+        "bambu_browser": bambu_r,
+        "slicer_api": api_r,
+        "all_ok": all(r["ok"] for r in configured),
+        "any_configured": bool(configured),
     }
 
 
@@ -2321,7 +3158,10 @@ async def slicer_worker_slice(
         "filament": filament_profile,
     }
     sidecar_url = (sidecar_url or "").strip().rstrip("/")
-    if sidecar_url:
+    # Prefer the Docker sidecar when the Pi passed a URL. Fall back to local
+    # Orca if the sidecar is unreachable (unless this file truly needs it).
+    use_sidecar = bool(sidecar_url)
+    if use_sidecar:
         try:
             name, data, _log = await asyncio.to_thread(
                 _run_orca_slice_sidecar,
@@ -2339,11 +3179,13 @@ async def slicer_worker_slice(
                 brim_mode=brim_mode,
             )
         except HTTPException as exc:
-            if exc.status_code != 502:
+            detail = str(exc.detail or "")
+            unreachable = exc.status_code == 502 and "unreachable" in detail.lower()
+            if not unreachable or _h2d_loose_mesh_requires_sidecar(source_name, profiles):
+                if unreachable:
+                    raise HTTPException(status_code=502, detail=_h2d_sidecar_required_message()) from exc
                 raise
-            if _h2d_loose_mesh_requires_sidecar(source_name, profiles):
-                raise HTTPException(status_code=502, detail=_h2d_sidecar_required_message()) from exc
-            log.warning("slicer sidecar unreachable on worker, falling back to local Orca: %s", exc.detail)
+            log.warning("slicer sidecar unreachable on worker, falling back to local Orca: %s", detail)
             name, data, _log = await asyncio.to_thread(
                 _run_orca_slice_local,
                 filename=source_name,
@@ -2383,10 +3225,83 @@ async def slicer_worker_slice(
 
 
 @app.post("/api/slicer/worker/open")
-async def slicer_worker_open(file: UploadFile = File(...)):
+async def slicer_worker_open(file: UploadFile = File(...), target: str = Form("desktop_orca")):
     source_name = _safe_basename(file.filename, "flightdeck-model.3mf")
     source_data = await _read_upload_bytes(file, label="Orca model")
-    return await asyncio.to_thread(_open_orca_model_bytes, source_name, source_data)
+    target = (target or "desktop_orca").strip().lower()
+    if target in {"browser_orca", "docker_orca"}:
+        return await asyncio.to_thread(_open_orca_model_bytes, source_name, source_data)
+    if target in {"desktop_orca", "orca", "same"}:
+        return await asyncio.to_thread(_open_desktop_orca_model_bytes, source_name, source_data)
+    if target in {"bambu_studio", "desktop_bambu"}:
+        return await asyncio.to_thread(_open_desktop_bambu_studio_model_bytes, source_name, source_data)
+    raise HTTPException(status_code=422, detail="target must be desktop_orca, browser_orca, or bambu_studio")
+
+
+@app.post("/api/slicer/worker/open-path")
+async def slicer_worker_open_path(body: SlicerOpenPathRequest):
+    """
+    Launch desktop Orca/Bambu with an already-local Windows/UNC path.
+    Used by PrintShelf so NAS files open like File → Open (no HTTP 3MF dance).
+    """
+    raw = (body.path or "").strip()
+    if not raw:
+        raise HTTPException(status_code=422, detail="path is required")
+    target = (body.target or "bambu_studio").strip().lower()
+    path = Path(raw)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail=f"Path not found on worker: {raw}")
+    if target in {"bambu_studio", "desktop_bambu"}:
+        result = await asyncio.to_thread(_launch_desktop_bambu_studio, path)
+    elif target in {"desktop_orca", "orca", "same"}:
+        result = await asyncio.to_thread(_launch_desktop_orca, path)
+    else:
+        raise HTTPException(status_code=422, detail="target must be desktop_orca or bambu_studio")
+    if isinstance(result, dict):
+        result["mode"] = result.get("mode") or "open-path"
+        result["path"] = str(path)
+    return result
+
+
+def _shell_open_windows_path(path: Path, mode: str = "open") -> dict:
+    """Open with the default app, or reveal in Explorer (Windows worker only)."""
+    if os.name != "nt":
+        raise HTTPException(status_code=400, detail="Shell open only runs on the Windows worker")
+    if not path.exists():
+        raise HTTPException(status_code=404, detail=f"Path not found on worker: {path}")
+    resolved = path.resolve() if path.exists() else path
+    action = (mode or "open").strip().lower()
+    if action not in {"open", "reveal"}:
+        raise HTTPException(status_code=422, detail="mode must be open or reveal")
+    try:
+        if action == "reveal":
+            # explorer /select,<path> — select file in its folder
+            subprocess.Popen(
+                ["explorer", f"/select,{resolved}"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL,
+                close_fds=True,
+                creationflags=getattr(subprocess, "DETACHED_PROCESS", 0)
+                | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
+            )
+            return {"ok": True, "path": str(resolved), "mode": "reveal"}
+        os.startfile(str(resolved))  # type: ignore[attr-defined]
+        return {"ok": True, "path": str(resolved), "mode": "open"}
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Could not open path: {exc}") from exc
+
+
+@app.post("/api/slicer/worker/shell-open")
+async def slicer_worker_shell_open(body: ShellOpenPathRequest):
+    """
+    Open a file with the Windows default app (zip → Explorer/7-Zip) or reveal in Explorer.
+    Used by PrintShelf card ⋮ → Open on PC.
+    """
+    raw = (body.path or "").strip()
+    if not raw:
+        raise HTTPException(status_code=422, detail="path is required")
+    return await asyncio.to_thread(_shell_open_windows_path, Path(raw), body.mode or "open")
 
 
 @app.post("/api/slicer/open")
@@ -2396,29 +3311,112 @@ async def open_file_in_orca(body: SlicerOpenRequest):
     filename, data = await _read_file_desk_source(source_id, source_path)
     if body.filename.strip():
         filename = _safe_basename(body.filename, filename)
+    target = (body.target or "desktop_orca").strip().lower()
+    if target == "same":
+        target = "desktop_orca"
+    if target == "orca":
+        target = "desktop_orca"
+    if target not in {"desktop_orca", "browser_orca", "docker_orca", "bambu_studio"}:
+        raise HTTPException(status_code=422, detail="target must be desktop_orca, browser_orca, or bambu_studio")
 
     settings = db.get_all_settings()
     worker_url = (settings.get("orcaslicer_worker_url") or "").strip().rstrip("/")
     local_orca = _docker_inspect_container(_ORCA_DOCKER_BROWSER_CONTAINER)
-    if not local_orca and worker_url:
+    if target == "bambu_studio" and worker_url:
         files = {"file": (filename, data, "application/octet-stream")}
+        form_data = {"target": target}
         try:
             async with httpx.AsyncClient(timeout=httpx.Timeout(connect=10.0, read=45.0, write=60.0, pool=10.0)) as client:
-                resp = await client.post(f"{worker_url}/api/slicer/worker/open", files=files)
+                resp = await client.post(f"{worker_url}/api/slicer/worker/open", files=files, data=form_data)
         except Exception as exc:
             detail = str(exc).strip() or "connection timed out"
             raise HTTPException(status_code=502, detail=f"Slicer worker unreachable: {detail}") from exc
         payload = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
         if resp.status_code >= 400:
             detail = payload.get("detail") if isinstance(payload, dict) else resp.text
-            raise HTTPException(status_code=resp.status_code, detail=detail or "Slicer worker could not open Orca")
+            raise HTTPException(status_code=resp.status_code, detail=detail or "Slicer worker could not open desktop Bambu Studio")
         if isinstance(payload, dict):
             payload["forwarded"] = True
             payload["worker_url"] = worker_url
             return payload
         return {"ok": True, "forwarded": True, "worker_url": worker_url}
 
-    if source_id == "library" and local_orca:
+    if target == "bambu_studio":
+        if source_id == "library":
+            try:
+                source_file = _safe_library_path(source_path)
+                result = await asyncio.to_thread(_launch_desktop_bambu_studio, source_file)
+                result["forwarded"] = False
+                return result
+            except HTTPException as exc:
+                if exc.status_code != 404 or not worker_url:
+                    raise
+        elif _bambu_studio_executable():
+            result = await asyncio.to_thread(_open_desktop_bambu_studio_model_bytes, filename, data)
+            result["forwarded"] = False
+            return result
+        raise HTTPException(status_code=404, detail="Desktop Bambu Studio was not found here and no Windows worker is configured")
+
+    if target == "desktop_orca" and worker_url:
+        files = {"file": (filename, data, "application/octet-stream")}
+        form_data = {"target": target}
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(connect=10.0, read=45.0, write=60.0, pool=10.0)) as client:
+                resp = await client.post(f"{worker_url}/api/slicer/worker/open", files=files, data=form_data)
+        except Exception as exc:
+            detail = str(exc).strip() or "connection timed out"
+            raise HTTPException(status_code=502, detail=f"Slicer worker unreachable: {detail}") from exc
+        payload = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
+        if resp.status_code >= 400:
+            detail = payload.get("detail") if isinstance(payload, dict) else resp.text
+            raise HTTPException(status_code=resp.status_code, detail=detail or "Slicer worker could not open desktop Orca")
+        if isinstance(payload, dict):
+            payload["forwarded"] = True
+            payload["worker_url"] = worker_url
+            return payload
+        return {"ok": True, "forwarded": True, "worker_url": worker_url}
+
+    if target == "desktop_orca":
+        if source_id == "library":
+            try:
+                source_file = _safe_library_path(source_path)
+                result = await asyncio.to_thread(_launch_desktop_orca, source_file)
+                result["forwarded"] = False
+                return result
+            except HTTPException as exc:
+                if exc.status_code != 404 or not worker_url:
+                    raise
+        elif _orca_executable():
+            result = await asyncio.to_thread(_open_desktop_orca_model_bytes, filename, data)
+            result["forwarded"] = False
+            return result
+
+    if target != "desktop_orca" and worker_url:
+        files = {"file": (filename, data, "application/octet-stream")}
+        form_data = {"target": target}
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(connect=10.0, read=45.0, write=60.0, pool=10.0)) as client:
+                resp = await client.post(f"{worker_url}/api/slicer/worker/open", files=files, data=form_data)
+        except Exception as exc:
+            if local_orca:
+                log.warning("Slicer worker unreachable for browser open; falling back to local Orca container: %s", exc)
+            else:
+                detail = str(exc).strip() or "connection timed out"
+                raise HTTPException(status_code=502, detail=f"Slicer worker unreachable: {detail}") from exc
+        else:
+            payload = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
+            if resp.status_code < 400:
+                if isinstance(payload, dict):
+                    payload["forwarded"] = True
+                    payload["worker_url"] = worker_url
+                    return payload
+                return {"ok": True, "forwarded": True, "worker_url": worker_url}
+            if not local_orca:
+                detail = payload.get("detail") if isinstance(payload, dict) else resp.text
+                raise HTTPException(status_code=resp.status_code, detail=detail or "Slicer worker could not open Orca")
+            log.warning("Slicer worker could not open Orca; falling back to local Orca container: %s", payload or resp.text)
+
+    if target in {"browser_orca", "docker_orca"} and source_id == "library" and local_orca:
         source_file = _safe_library_path(source_path)
         container_path = _orca_container_path_for_library_file(source_file)
         await asyncio.to_thread(_open_orca_container_file, container_path)
@@ -2430,9 +3428,125 @@ async def open_file_in_orca(body: SlicerOpenRequest):
             "mode": "local-docker",
             "forwarded": False,
         }
+    if target == "desktop_orca":
+        raise HTTPException(status_code=404, detail="Desktop OrcaSlicer was not found here and no Windows worker is configured")
     result = await asyncio.to_thread(_open_orca_model_bytes, filename, data)
     result["forwarded"] = False
     return result
+
+
+async def _slice_model_to_bytes(
+    *,
+    filename: str,
+    data: bytes,
+    printer_id: str,
+    output_filename: str,
+    all_plates: bool = False,
+    plate: str = "1",
+    bed_type: str = "Textured PEI Plate",
+    support_mode: str = "profile",
+    brim_mode: str = "profile",
+) -> tuple[str, bytes, dict, dict]:
+    """Slice a source model. Returns (sliced_name, sliced_data, profiles, slice_options)."""
+    target_kind = _printer_kind(printer_id)
+    if target_kind is None:
+        raise HTTPException(status_code=404, detail="Target printer not found")
+    settings = db.get_all_settings()
+    profiles = {
+        "printer": (settings.get(_slicer_profile_key(printer_id, "printer"), "") or "").strip(),
+        "process": (settings.get(_slicer_profile_key(printer_id, "process"), "") or "").strip(),
+        "filament": (settings.get(_slicer_profile_key(printer_id, "filament"), "") or "").strip(),
+    }
+    missing_profiles = [label for label, value in profiles.items() if not str(value or "").strip()]
+    if missing_profiles:
+        raise HTTPException(status_code=422, detail=f"Set slicer defaults for {', '.join(missing_profiles)} first")
+
+    output_kind = "gcode.3mf" if target_kind == "bambu" else "gcode"
+    worker_url = (settings.get("orcaslicer_worker_url") or "").strip().rstrip("/")
+    sidecar_url = (settings.get("orcaslicer_api_url") or "").strip().rstrip("/")
+    target = _printer_meta(printer_id) or {}
+    target_name = " ".join(
+        str(v or "") for v in ((target or {}).get("model_name"), (target or {}).get("custom_name"), profiles["printer"])
+    )
+    arrange = target_kind == "bambu" and ("h2d" in target_name.lower() or filename.lower().endswith(".3mf"))
+    slice_options = _slice_option_summary(bed_type, support_mode, brim_mode)
+    h2d_loose_mesh = _h2d_loose_mesh_requires_sidecar(filename, profiles)
+    if h2d_loose_mesh and not sidecar_url:
+        raise HTTPException(status_code=422, detail=_h2d_sidecar_required_message())
+    if filename.lower().endswith(".3mf") and not filename.lower().endswith(".gcode.3mf"):
+        data = slice_meta.sanitize_3mf_cli_sentinels(data)
+
+    sliced_name = output_filename
+    sliced_data = b""
+    slicer_use_api = str(settings.get("slicer_use_api") or "").strip().lower() in {"1", "true", "yes", "on"}
+    # H2D STL/OBJ always needs the sidecar. Other files use it when Settings → Use Slicer API is on.
+    worker_sidecar = sidecar_url if sidecar_url and (h2d_loose_mesh or slicer_use_api) else ""
+    if worker_url:
+        form = {
+            "printer_profile": profiles["printer"],
+            "process_profile": profiles["process"],
+            "filament_profile": profiles["filament"],
+            "output_kind": output_kind,
+            "output_filename": output_filename,
+            "plate": plate or "1",
+            "all_plates": str(bool(all_plates)).lower(),
+            "sidecar_url": worker_sidecar,
+            "arrange": str(bool(arrange)).lower(),
+            "bed_type": slice_options["bed_type"],
+            "support_mode": slice_options["support_mode"],
+            "brim_mode": slice_options["brim_mode"],
+        }
+        files = {"file": (filename, data, "application/octet-stream")}
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(connect=15.0, read=900.0, write=180.0, pool=15.0)) as client:
+                resp = await client.post(f"{worker_url}/api/slicer/worker/slice", data=form, files=files)
+        except Exception as exc:
+            detail = str(exc).strip() or "connection timed out"
+            raise HTTPException(
+                status_code=502,
+                detail=f"Windows slicer worker unreachable ({worker_url}): {detail}",
+            ) from exc
+        if resp.status_code >= 400:
+            try:
+                detail = resp.json().get("detail")
+            except Exception:
+                detail = resp.text
+            raise HTTPException(status_code=resp.status_code, detail=detail or "Slicer worker failed")
+        sliced_name = resp.headers.get("X-Flightdeck-Sliced-Filename") or output_filename
+        sliced_data = resp.content
+        _enforce_file_size(len(sliced_data), label="Sliced output")
+    elif sidecar_url:
+        sliced_name, sliced_data, _log = await asyncio.to_thread(
+            _run_orca_slice_sidecar,
+            sidecar_url=sidecar_url,
+            filename=filename,
+            data=data,
+            profiles=profiles,
+            output_kind=output_kind,
+            output_filename=output_filename,
+            plate=plate or "1",
+            all_plates=bool(all_plates),
+            arrange=arrange,
+            bed_type=slice_options["bed_type"],
+            support_mode=slice_options["support_mode"],
+            brim_mode=slice_options["brim_mode"],
+        )
+    else:
+        sliced_name, sliced_data, _log = await asyncio.to_thread(
+            _run_orca_slice_local,
+            filename=filename,
+            data=data,
+            profiles=profiles,
+            output_kind=output_kind,
+            output_filename=output_filename,
+            plate=plate or "1",
+            all_plates=bool(all_plates),
+            support_mode=slice_options["support_mode"],
+            brim_mode=slice_options["brim_mode"],
+        )
+    _enforce_file_size(len(sliced_data), label="Sliced output")
+    # Sidecar often returns a generic result.3mf — keep the printable .gcode.3mf name.
+    return output_filename, sliced_data, profiles, slice_options
 
 
 @app.post("/api/slicer/run")
@@ -2448,112 +3562,29 @@ async def run_slice_from_file_desk(body: SliceRunRequest):
     if filename.lower().endswith(".gcode.3mf") or ext not in _SOURCE_MODEL_EXT:
         raise HTTPException(status_code=422, detail="Only source model files can be sliced")
 
-    settings = db.get_all_settings()
-    profiles = _slice_request_profiles(body, settings, printer_id)
-    missing_profiles = [label for label, value in profiles.items() if not str(value or "").strip()]
-    if missing_profiles:
-        raise HTTPException(status_code=422, detail=f"Set slicer defaults for {', '.join(missing_profiles)} first")
-
     output_kind = "gcode.3mf" if target_kind == "bambu" else "gcode"
     output_ext = ".gcode.3mf" if output_kind == "gcode.3mf" else ".gcode"
     base_name = _file_archive_key(filename) or "sliced_model"
     output_filename = (body.output_filename or f"{base_name}_{printer_id}{output_ext}").strip()
-    worker_url = (settings.get("orcaslicer_worker_url") or "").strip().rstrip("/")
-    sidecar_url = (settings.get("orcaslicer_api_url") or "").strip().rstrip("/")
-    target = _printer_meta(printer_id) or {}
-    target_name = " ".join(str(v or "") for v in ((target or {}).get("model_name"), (target or {}).get("custom_name"), profiles["printer"]))
-    arrange = target_kind == "bambu" and ("h2d" in target_name.lower() or filename.lower().endswith(".3mf"))
-    slice_options = _slice_option_summary(body.bed_type, body.support_mode, body.brim_mode)
-    h2d_loose_mesh = _h2d_loose_mesh_requires_sidecar(filename, profiles)
-    if h2d_loose_mesh and not sidecar_url:
-        raise HTTPException(status_code=422, detail=_h2d_sidecar_required_message())
-
-    if worker_url:
-        form = {
-            "printer_profile": profiles["printer"],
-            "process_profile": profiles["process"],
-            "filament_profile": profiles["filament"],
-            "output_kind": output_kind,
-            "output_filename": output_filename,
-            "plate": body.plate or "1",
-            "all_plates": str(bool(body.all_plates)).lower(),
-            "sidecar_url": sidecar_url,
-            "arrange": str(bool(arrange)).lower(),
-            "bed_type": slice_options["bed_type"],
-            "support_mode": slice_options["support_mode"],
-            "brim_mode": slice_options["brim_mode"],
-        }
-        files = {"file": (filename, data, "application/octet-stream")}
-        try:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(connect=10.0, read=900.0, write=30.0, pool=10.0)) as client:
-                resp = await client.post(f"{worker_url}/api/slicer/worker/slice", data=form, files=files)
-        except Exception as exc:
-            if not sidecar_url:
-                detail = str(exc).strip() or "connection timed out"
-                raise HTTPException(status_code=502, detail=f"Slicer worker unreachable: {detail}") from exc
-            log.warning("slicer worker unreachable, falling back to API: %s", exc)
-            sliced_name, sliced_data, _log = await asyncio.to_thread(
-                _run_orca_slice_sidecar,
-                sidecar_url=sidecar_url,
-                filename=filename,
-                data=data,
-                profiles=profiles,
-                output_kind=output_kind,
-                output_filename=output_filename,
-                plate=body.plate or "1",
-                all_plates=bool(body.all_plates),
-                arrange=arrange,
-                bed_type=slice_options["bed_type"],
-                support_mode=slice_options["support_mode"],
-                brim_mode=slice_options["brim_mode"],
-            )
-        else:
-            if resp.status_code >= 400:
-                try:
-                    detail = resp.json().get("detail")
-                except Exception:
-                    detail = resp.text
-                raise HTTPException(status_code=resp.status_code, detail=detail or "Slicer worker failed")
-            sliced_name = resp.headers.get("X-Flightdeck-Sliced-Filename") or output_filename
-            sliced_data = resp.content
-            _enforce_file_size(len(sliced_data), label="Sliced output")
-    elif sidecar_url:
-        sliced_name, sliced_data, _log = await asyncio.to_thread(
-            _run_orca_slice_sidecar,
-            sidecar_url=sidecar_url,
-            filename=filename,
-            data=data,
-            profiles=profiles,
-            output_kind=output_kind,
-            output_filename=output_filename,
-            plate=body.plate or "1",
-            all_plates=bool(body.all_plates),
-            arrange=arrange,
-            bed_type=slice_options["bed_type"],
-            support_mode=slice_options["support_mode"],
-            brim_mode=slice_options["brim_mode"],
-        )
-    else:
-        sliced_name, sliced_data, _log = await asyncio.to_thread(
-            _run_orca_slice_local,
-            filename=filename,
-            data=data,
-            profiles=profiles,
-            output_kind=output_kind,
-            output_filename=output_filename,
-            plate=body.plate or "1",
-            all_plates=bool(body.all_plates),
-            support_mode=slice_options["support_mode"],
-            brim_mode=slice_options["brim_mode"],
-        )
+    sliced_name, sliced_data, profiles, slice_options = await _slice_model_to_bytes(
+        filename=filename,
+        data=data,
+        printer_id=printer_id,
+        output_filename=output_filename,
+        all_plates=bool(body.all_plates),
+        plate=body.plate or "1",
+        bed_type=body.bed_type,
+        support_mode=body.support_mode,
+        brim_mode=body.brim_mode,
+    )
 
     library_root = _print_library_path().resolve()
     library_root.mkdir(parents=True, exist_ok=True)
-    _enforce_file_size(len(sliced_data), label="Sliced output")
     dest = _unique_library_destination(library_root, sliced_name or output_filename)
     dest.write_bytes(sliced_data)
     stat = dest.stat()
     output_path = dest.relative_to(library_root).as_posix()
+    feature_counts = _slicer_output_feature_counts(sliced_data, dest.name)
     preview_url = None
     if dest.name.lower().endswith(".gcode.3mf") or _queue_file_extension(dest.name) == ".3mf":
         preview_url = "/api/files/source/preview?" + urllib.parse.urlencode({
@@ -2564,7 +3595,6 @@ async def run_slice_from_file_desk(body: SliceRunRequest):
     db.log_decision(printer_id, "slicer_run", json.dumps({
         "source": filename,
         "output": dest.name,
-        "worker": worker_url or "local",
         "profiles": profiles,
         "slice_options": slice_options,
     }))
@@ -2578,6 +3608,7 @@ async def run_slice_from_file_desk(body: SliceRunRequest):
         "preview_url": preview_url,
         "profiles": profiles,
         "slice_options": slice_options,
+        "feature_counts": feature_counts,
     }
 
 
@@ -2628,7 +3659,34 @@ async def clear_bambu_sd_print_files(printer_id: str, body: BambuSdClearRequest)
 
 @app.get("/api/printers")
 async def get_printers():
-    return await _gather_all_with_cache()
+    cached = _cached_printers(max_age_seconds=12.0)
+    if cached is not None:
+        return cached
+    stale = _stale_printers()
+    if stale is not None:
+        # Refresh in background; don't stall the UI behind a hung printer.
+        if _gather_lock is None or not _gather_lock.locked():
+            asyncio.create_task(_gather_all())
+        return stale
+    try:
+        return await asyncio.wait_for(_gather_all(), timeout=5.0)
+    except asyncio.TimeoutError:
+        log.warning("get_printers: gather timed out")
+        return _stale_printers() or []
+
+
+@app.get("/api/printers/bed-sizes")
+async def get_printer_bed_sizes():
+    cfg = load()
+    return [
+        {
+            "id": entry.id,
+            "model_name": entry.model_name,
+            "custom_name": entry.custom_name,
+            "build_volume": entry.build_volume,
+        }
+        for entry in cfg.printers
+    ]
 
 
 @app.get("/api/printers/{printer_id}")
@@ -2646,6 +3704,27 @@ async def get_printer(printer_id: str):
             return asdict(simulated.status(id, model_name, custom_name, icon, profile, scenario))
 
     raise HTTPException(status_code=404, detail="printer not found")
+
+
+@app.get("/api/printers/{printer_id}/slots/{slot}/memory")
+async def get_printer_slot_memory(printer_id: str, slot: int):
+    spool_id = db.get_recent_spool_for_slot(printer_id, int(slot))
+    spool = db.get_spool(spool_id) if spool_id else None
+    return {"spool_id": spool_id, "spool": spool}
+
+
+@app.get("/api/printers/{printer_id}/bambu/mqtt")
+async def get_bambu_mqtt_debug(printer_id: str):
+    printer = _find_bambu(printer_id)
+    if not printer:
+        raise HTTPException(status_code=404, detail="Bambu printer not found")
+    try:
+        payload = await asyncio.to_thread(printer.mqtt_debug_snapshot)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Could not read Bambu MQTT snapshot: {exc}") from exc
+    return _diagnostic_redact_value("", payload)
 
 
 @app.websocket("/ws")
@@ -2801,6 +3880,22 @@ class ControlRequest(BaseModel):
     action: str
 
 
+class CalibrationRequest(BaseModel):
+    bed_leveling: bool = True
+    vibration: bool = True
+    motor_noise: bool = True
+    nozzle_offset: bool = False
+    high_temp_heatbed: bool = False
+
+
+class QueueCalibrateRequest(BaseModel):
+    calibrate_before_start: bool
+
+
+class QueueAllowShortFilamentRequest(BaseModel):
+    allow_short_filament: bool
+
+
 class SetTempRequest(BaseModel):
     heater: str
     target: int
@@ -2839,7 +3934,9 @@ class AmsFilamentActionRequest(BaseModel):
 
 @app.post("/api/printers/{printer_id}/set-temp")
 async def set_printer_temp(printer_id: str, req: SetTempRequest):
-    if req.heater not in ("hotend", "bed", "chamber"):
+    heater = req.heater
+    command_heater = "hotend" if heater in ("hotend_l", "hotend_r") else heater
+    if command_heater not in ("hotend", "bed", "chamber"):
         raise HTTPException(status_code=400, detail="invalid heater")
     if not (0 <= req.target <= 350):
         raise HTTPException(status_code=400, detail="target out of range (0-350)")
@@ -2847,14 +3944,14 @@ async def set_printer_temp(printer_id: str, req: SetTempRequest):
     for (id, model_name, custom_name, icon, url, _kind, _toolhead_count) in _moonraker:
         if id == printer_id:
             try:
-                await moonraker.set_temp(url, req.heater, req.target)
+                await moonraker.set_temp(url, command_heater, req.target)
             except Exception as exc:
                 raise HTTPException(status_code=502, detail=str(exc))
             return {"ok": True}
 
     for p in _bambu:
         if p.id == printer_id:
-            await asyncio.to_thread(p.set_temp, req.heater, req.target)
+            await asyncio.to_thread(p.set_temp, command_heater, req.target)
             return {"ok": True}
 
     for (id, *_) in _simulated:
@@ -3018,6 +4115,199 @@ async def control_printer(printer_id: str, req: ControlRequest):
     raise HTTPException(status_code=404, detail="printer not found")
 
 
+def _bambu_printer(printer_id: str) -> Optional[BambuPrinter]:
+    for p in _bambu:
+        if p.id == printer_id:
+            return p
+    return None
+
+
+def _default_calibration_options(printer_status: Optional[dict]) -> dict[str, bool]:
+    h2 = _is_h2_printer_status(printer_status)
+    return {
+        "bed_leveling": True,
+        "vibration": True,
+        "motor_noise": True,
+        "nozzle_offset": h2,
+        "high_temp_heatbed": False,
+    }
+
+
+_CALIBRATION_IDLE_STATES = {"idle", "ready", "standby", "finished"}
+_CALIBRATION_SUBSTAGES = {
+    1, 3, 8, 9, 12, 18, 19, 25, 36, 37, 38, 39, 40, 47, 48,
+}
+
+
+def _is_calibration_substage(substage: object) -> bool:
+    if substage is None:
+        return False
+    try:
+        return int(substage) in _CALIBRATION_SUBSTAGES
+    except (TypeError, ValueError):
+        text = str(substage).lower()
+        return "calibrat" in text or "bed level" in text or "vibration" in text
+
+
+def _printer_idle_for_calibration(status: Optional[dict]) -> bool:
+    return str((status or {}).get("state") or "").lower() in _CALIBRATION_IDLE_STATES
+
+
+def _calibration_option_summary(options: dict[str, bool]) -> str:
+    labels = []
+    if options.get("bed_leveling"):
+        labels.append("bed")
+    if options.get("vibration"):
+        labels.append("vibration")
+    if options.get("motor_noise"):
+        labels.append("motor noise")
+    if options.get("nozzle_offset"):
+        labels.append("nozzle offset")
+    if options.get("high_temp_heatbed"):
+        labels.append("high-temp bed")
+    return ", ".join(labels) or "calibration"
+
+
+async def _begin_bambu_calibration(
+    printer_id: str,
+    *,
+    options: Optional[dict[str, bool]] = None,
+    pending_job_id: Optional[int] = None,
+    notify: bool = True,
+) -> None:
+    if printer_id in _calibration_sessions:
+        raise HTTPException(status_code=409, detail="Calibration already running on this printer")
+    p = _bambu_printer(printer_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="Bambu printer not found")
+    statuses = await _printer_status_map()
+    status = statuses.get(printer_id)
+    if not _printer_idle_for_calibration(status):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Printer is {status.get('state') if status else 'unknown'}; wait until idle before calibrating",
+        )
+    opts = options or _default_calibration_options(status)
+    if not any(opts.values()):
+        raise HTTPException(status_code=422, detail="Select at least one calibration option")
+    try:
+        await asyncio.to_thread(p.start_calibration, **opts)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    _calibration_sessions[printer_id] = {
+        "started_at": time.monotonic(),
+        "pending_job_id": pending_job_id,
+        "options": opts,
+        "active": False,
+    }
+    summary = _calibration_option_summary(opts)
+    db.log_decision(
+        printer_id,
+        "calibration_start",
+        summary + (f" before job #{pending_job_id}" if pending_job_id else ""),
+        print_id=None,
+    )
+    name = (status or {}).get("custom_name") or printer_id
+    if notify:
+        detail = f"{name} · {summary}"
+        if pending_job_id:
+            job = db.queue_get(pending_job_id)
+            if job:
+                detail += f" · then {job['filename']}"
+        _notify("info", "Calibration started", detail, printer_id=printer_id, link=f"#/printer/{printer_id}/live")
+        asyncio.create_task(_send_ntfy("Calibration started", detail, ["gear"]))
+
+
+async def _finish_bambu_calibration(printer_id: str) -> None:
+    session = _calibration_sessions.pop(printer_id, None)
+    if not session:
+        return
+    statuses = await _printer_status_map()
+    status = statuses.get(printer_id) or {}
+    name = status.get("custom_name") or printer_id
+    summary = _calibration_option_summary(session.get("options") or {})
+    db.log_decision(printer_id, "calibration_complete", summary)
+    job_id = session.get("pending_job_id")
+    if job_id:
+        job = db.queue_get(job_id)
+        job_name = job["filename"] if job else f"job #{job_id}"
+        msg = f"{name} calibrated · starting {job_name} next"
+        _notify("success", "Calibration complete", msg, printer_id=printer_id, link="#/queue")
+        asyncio.create_task(_send_ntfy("Calibration complete", msg, ["white_check_mark"]))
+        if job and job["status"] == "pending":
+            asyncio.create_task(_advance_queue_specific(
+                job_id, printer_id, job["filename"], job["file_path"],
+            ))
+    else:
+        msg = f"{name} · {summary}"
+        _notify("success", "Calibration complete", msg, printer_id=printer_id, link=f"#/printer/{printer_id}/live")
+        asyncio.create_task(_send_ntfy("Calibration complete", msg, ["white_check_mark"]))
+
+
+def _check_calibration_sessions(data: list[dict]) -> None:
+    now = time.monotonic()
+    for p in data:
+        pid = p["id"]
+        session = _calibration_sessions.get(pid)
+        if not session:
+            continue
+        state = str(p.get("state") or "").lower()
+        substage = p.get("substage")
+        if state in {"printing", "paused"}:
+            if _is_calibration_substage(substage) or not session.get("active"):
+                session["active"] = True
+            continue
+        if session.get("active") and state in _CALIBRATION_IDLE_STATES:
+            asyncio.create_task(_finish_bambu_calibration(pid))
+        elif not session.get("active") and now - float(session.get("started_at") or now) > 120:
+            _calibration_sessions.pop(pid, None)
+            db.log_decision(pid, "calibration_timeout", "Calibration did not start within 120s")
+        elif now - float(session.get("started_at") or now) > 3600:
+            _calibration_sessions.pop(pid, None)
+
+
+async def _maybe_calibrate_before_queue(printer_id: str, job: dict) -> bool:
+    """Start calibration for a queued job. Returns True if dispatch should wait."""
+    if not bool(job.get("calibrate_before_start")):
+        return False
+    if _bambu_printer(printer_id) is None:
+        return False
+    if printer_id in _calibration_sessions:
+        return True
+    try:
+        await _begin_bambu_calibration(
+            printer_id,
+            pending_job_id=int(job["id"]),
+            notify=True,
+        )
+    except HTTPException as exc:
+        detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
+        db.log_decision(printer_id, "calibration_blocked", f"Job #{job['id']}: {detail}")
+        log.warning("queue calibration blocked on %s job #%s: %s", printer_id, job["id"], detail)
+    return True
+
+
+@app.post("/api/printers/{printer_id}/calibration")
+async def start_printer_calibration(printer_id: str, req: CalibrationRequest):
+    await _begin_bambu_calibration(
+        printer_id,
+        options=req.model_dump(),
+        notify=True,
+    )
+    return {"ok": True}
+
+
+@app.get("/api/printers/{printer_id}/calibration/defaults")
+async def printer_calibration_defaults(printer_id: str):
+    statuses = await _printer_status_map()
+    status = statuses.get(printer_id)
+    if not status:
+        raise HTTPException(status_code=404, detail="printer not found")
+    if _bambu_printer(printer_id) is None:
+        raise HTTPException(status_code=422, detail="Calibration is only available for Bambu printers")
+    return _default_calibration_options(status)
+
+
 @app.post("/api/printers/{printer_id}/ams/unload")
 async def unload_ams_filament(printer_id: str, req: AmsFilamentActionRequest):
     for p in _bambu:
@@ -3121,14 +4411,16 @@ async def get_printer_camera(printer_id: str):
             "rotation": camera.rotation,
         }
     if isinstance(camera, AdaptiveCamera):
+        fps = _adaptive_camera_fps(camera, printer_id)
         return {
-            "url": f"/api/camera/{printer_id}/snapshot",
-            "type": "adaptive",
+            "url": f"/api/camera/{printer_id}/stream",
+            "type": "mjpeg",
+            "snapshot_url": camera.snapshot_url,
             "active_fps": camera.active_fps,
             "idle_fps": camera.idle_fps,
-            "refresh_ms": max(100, int(1000 / _adaptive_camera_fps(camera, printer_id))),
+            "refresh_ms": max(100, int(1000 / fps)),
             "fleet_url": f"/api/camera/{printer_id}/snapshot",
-            "fleet_refresh_ms": max(1000, int(1000 / _adaptive_camera_fps(camera, printer_id))),
+            "fleet_refresh_ms": max(1000, int(1000 / fps)),
             "rotation": camera.rotation,
         }
     if isinstance(camera, WebrtcCamera):
@@ -3157,41 +4449,30 @@ async def camera_snapshot(printer_id: str):
     try:
         if isinstance(camera, (AdaptiveCamera, WebrtcCamera)) and camera.snapshot_url:
             content, content_type = await asyncio.to_thread(_fetch_http_image_sync, camera.snapshot_url, 5.0)
-            return Response(
-                content=content,
-                media_type=content_type,
-                headers={
-                    "Cache-Control": "no-cache, no-store, must-revalidate",
-                    "Pragma": "no-cache",
-                    "Expires": "0",
-                },
-            )
+            return Response(content=content, media_type=content_type, headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+                "Expires": "0",
+            })
         if isinstance(camera, MjpegDirectCamera):
             if camera.snapshot_url:
                 content, content_type = await asyncio.to_thread(_fetch_http_image_sync, camera.snapshot_url, 5.0)
             else:
                 content, content_type = await asyncio.to_thread(_fetch_mjpeg_frame_sync, camera.stream_url)
-            return Response(
-                content=content,
-                media_type=content_type,
-                headers={
-                    "Cache-Control": "no-cache, no-store, must-revalidate",
-                    "Pragma": "no-cache",
-                    "Expires": "0",
-                },
-            )
+            return Response(content=content, media_type=content_type, headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+                "Expires": "0",
+            })
+
         if isinstance(camera, BambuRtspCamera):
             content = await _grab_snapshot(printer_id)
             if content:
-                return Response(
-                    content=content,
-                    media_type="image/jpeg",
-                    headers={
-                        "Cache-Control": "no-cache, no-store, must-revalidate",
-                        "Pragma": "no-cache",
-                        "Expires": "0",
-                    },
-                )
+                return Response(content=content, media_type="image/jpeg", headers={
+                    "Cache-Control": "no-cache, no-store, must-revalidate",
+                    "Pragma": "no-cache",
+                    "Expires": "0",
+                })
             return _camera_unavailable_response(printer_id)
     except Exception as exc:
         log.warning("camera snapshot failed for %s: %s", printer_id, exc)
@@ -3200,6 +4481,7 @@ async def camera_snapshot(printer_id: str):
     if _simulated_entry(printer_id):
         return await simulated_camera(printer_id)
     raise HTTPException(status_code=404, detail="snapshot not configured")
+
 
 def _simulated_camera_svg(printer_id: str, model_name: str, custom_name: str, icon: str, profile: str, scenario: str) -> str:
     status = simulated.status(printer_id, model_name, custom_name, icon, profile, scenario)
@@ -3326,6 +4608,7 @@ async def _mjpeg_direct_response(url: str) -> StreamingResponse:
 
 
 def _adaptive_camera_fps(camera: AdaptiveCamera, printer_id: str) -> float:
+    """Poll the snapshot URL fast while printing and slowly while idle."""
     status = _latest_printers.get(printer_id) or {}
     active = str(status.get("state") or "").lower() in {"printing", "paused", "error", "finished"}
     raw = camera.active_fps if active else camera.idle_fps
@@ -3351,25 +4634,30 @@ def _fetch_adaptive_snapshot_sync(url: str) -> tuple[bytes, str]:
 
 
 async def _adaptive_camera_response(camera: AdaptiveCamera, printer_id: str) -> StreamingResponse:
+    """Turn a snapshot-only camera into an MJPEG stream whose rate follows the printer state."""
+
     def cache_busted_url(url: str) -> str:
         sep = "&" if "?" in url else "?"
         return f"{url}{sep}_fd_ts={int(time.time() * 1000)}"
 
-    async def fetch_snapshot(client: httpx.AsyncClient) -> tuple[Optional[bytes], str]:
+    async def fetch_snapshot() -> tuple[Optional[bytes], str]:
         content, content_type = await asyncio.to_thread(_fetch_adaptive_snapshot_sync, cache_busted_url(camera.snapshot_url))
         if not content:
             return None, "image/jpeg"
         return content, content_type
 
+    def frame_bytes(frame: bytes, content_type: str) -> bytes:
+        return (
+            b"--frame\r\n"
+            + f"Content-Type: {content_type}\r\n".encode()
+            + b"Content-Length: " + str(len(frame)).encode() + b"\r\n\r\n"
+            + frame + b"\r\n"
+        )
+
     first_frame: Optional[bytes] = None
     first_content_type = "image/jpeg"
     try:
-        async with httpx.AsyncClient(
-            timeout=httpx.Timeout(connect=3.0, read=8.0, write=3.0, pool=3.0),
-            follow_redirects=True,
-            trust_env=False,
-        ) as client:
-            first_frame, first_content_type = await fetch_snapshot(client)
+        first_frame, first_content_type = await fetch_snapshot()
     except Exception as exc:
         log.warning("adaptive camera initial snapshot failed for %s: %s", printer_id, exc)
 
@@ -3377,42 +4665,35 @@ async def _adaptive_camera_response(camera: AdaptiveCamera, printer_id: str) -> 
         last_frame = first_frame
         last_content_type = first_content_type
         if last_frame:
-            yield (
-                b"--frame\r\n"
-                + f"Content-Type: {last_content_type}\r\n".encode()
-                + b"Content-Length: " + str(len(last_frame)).encode() + b"\r\n\r\n"
-                + last_frame + b"\r\n"
-            )
-        async with httpx.AsyncClient(
-            timeout=httpx.Timeout(connect=3.0, read=8.0, write=3.0, pool=3.0),
-            follow_redirects=True,
-            trust_env=False,
-        ) as client:
-            while True:
-                fps = _adaptive_camera_fps(camera, printer_id)
-                try:
-                    frame, content_type = await fetch_snapshot(client)
-                    if frame:
-                        last_frame = frame
-                        last_content_type = content_type
-                except asyncio.CancelledError:
-                    raise
-                except Exception as exc:
-                    log.debug("adaptive camera snapshot failed for %s: %s", printer_id, exc)
-                if last_frame:
-                    yield (
-                        b"--frame\r\n"
-                        + f"Content-Type: {last_content_type}\r\n".encode()
-                        + b"Content-Length: " + str(len(last_frame)).encode() + b"\r\n\r\n"
-                        + last_frame + b"\r\n"
-                    )
-                await asyncio.sleep(1.0 / fps)
+            yield frame_bytes(last_frame, last_content_type)
+        while True:
+            fps = _adaptive_camera_fps(camera, printer_id)
+            try:
+                frame, content_type = await fetch_snapshot()
+                if frame:
+                    last_frame = frame
+                    last_content_type = content_type
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                log.debug("adaptive camera snapshot failed for %s: %s", printer_id, exc)
+            if last_frame:
+                yield frame_bytes(last_frame, last_content_type)
+            await asyncio.sleep(1.0 / fps)
 
     return StreamingResponse(
         chunks(),
         media_type="multipart/x-mixed-replace; boundary=frame",
-        headers={"Cache-Control": "no-cache, no-store"},
+        headers=_camera_stream_headers(),
     )
+
+
+@app.get("/api/camera/{printer_id}/health")
+async def camera_health(printer_id: str):
+    proxy = _cam_proxies.get(printer_id)
+    if proxy is None:
+        raise HTTPException(status_code=404, detail="no camera configured")
+    return proxy.health()
 
 
 @app.get("/api/camera/{printer_id}/stream")
@@ -3503,7 +4784,7 @@ async def get_history_day(printer_id: str, date: str):
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date):
         raise HTTPException(status_code=400, detail="date must be YYYY-MM-DD")
     _assert_printer(printer_id)
-    return db.get_prints_for_day(printer_id, date)
+    return [_enrich_print_timelapse_meta(item) for item in db.get_prints_for_day(printer_id, date)]
 
 
 @app.get("/api/print-memory")
@@ -3536,6 +4817,22 @@ async def get_print_memory_detail(print_id: int):
     if not item:
         raise HTTPException(status_code=404, detail="print not found")
     return item
+
+
+@app.post("/api/print-memory/{print_id}/repair-filament")
+async def repair_print_memory_filament(print_id: int):
+    result = db.repair_print_filament_metadata(print_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="print not found")
+    if result.get("error") == "already_has_metadata":
+        raise HTTPException(status_code=409, detail="Print already has filament metadata")
+    if result.get("error") == "metadata_not_found":
+        raise HTTPException(
+            status_code=404,
+            detail="No filament metadata found on relay logs or printer storage. Assign manually.",
+        )
+    item = db.get_print_by_id(print_id)
+    return {"ok": True, "print": item, **result}
 
 
 @app.get("/api/print-memory-score")
@@ -4185,7 +5482,22 @@ class SupportBundleRequest(BaseModel):
 
 @app.get("/api/settings")
 async def get_settings():
-    return db.get_all_settings()
+    settings = dict(db.get_all_settings())
+    token = str(settings.get("bambu_cloud_token") or "").strip()
+    if token:
+        settings["bambu_cloud_token"] = ""
+        settings["bambu_cloud_token_configured"] = "true"
+        settings["bambu_cloud_token_hint"] = makerworld._token_hint(token)
+    else:
+        settings["bambu_cloud_token_configured"] = "false"
+        settings["bambu_cloud_token_hint"] = ""
+    browser_password = str(settings.get("orcaslicer_browser_password") or "").strip()
+    if browser_password:
+        settings["orcaslicer_browser_password"] = ""
+        settings["orcaslicer_browser_password_configured"] = "true"
+    else:
+        settings["orcaslicer_browser_password_configured"] = "false"
+    return settings
 
 
 @app.put("/api/settings/{key}")
@@ -4194,7 +5506,837 @@ async def put_setting(key: str, body: SettingUpdate):
     if key == "print_vault_path":
         value = "" if not value.strip() else str(_validate_print_library_path(value))
     db.set_setting(key, value)
+    if key == "bambu_cloud_token":
+        token = str(value or "").strip()
+        return {
+            "ok": True,
+            "value": "",
+            "configured": bool(token),
+            "hint": makerworld._token_hint(token),
+        }
+    if key == "orcaslicer_browser_password":
+        password = str(value or "").strip()
+        return {"ok": True, "value": "", "configured": bool(password)}
     return {"ok": True, "value": value}
+
+
+class CostingOverhead(BaseModel):
+    id: str = ""
+    name: str = ""
+    amount: float = 0
+
+
+class CostingUpdate(BaseModel):
+    overheads: list[CostingOverhead] = []
+    expected_hours: float = 40
+    markup_pct: float = 35
+    labour_per_hour: float = 0
+    electricity_rate_per_kwh: float = 0.30
+    power_watts: dict[str, float] = {}
+    pricing_strategy: str = "shop"
+    fail_pct: float = 8
+    batch_multiplier: float = 5
+    machine_hour_rate: float = 0
+    value_multiplier: float = 10
+    design_per_hour: float = 50
+
+
+class CostingQuoteRequest(BaseModel):
+    hours: float = 0
+    grams: float = 0
+    material: str = ""
+    brand: str = ""
+    filament_cost: Optional[float] = None
+
+
+def _costing_printer_meta() -> list[dict]:
+    rows: list[dict] = []
+    for p in _bambu:
+        rows.append({
+            "id": p.id,
+            "model_name": p.model_name,
+            "custom_name": p.custom_name,
+            "kind": "bambu",
+        })
+    for pid, model_name, custom_name, _icon, _url, kind, _toolhead_count in _moonraker:
+        rows.append({
+            "id": pid,
+            "model_name": model_name,
+            "custom_name": custom_name,
+            "kind": kind,
+        })
+    for pid, model_name, custom_name, _icon, profile, _scenario in _simulated:
+        rows.append({
+            "id": pid,
+            "model_name": model_name,
+            "custom_name": custom_name,
+            "kind": profile,
+        })
+    return rows
+
+
+@app.get("/api/costing")
+async def get_costing():
+    return db.get_costing_settings()
+
+
+@app.put("/api/costing")
+async def put_costing(body: CostingUpdate):
+    return db.set_costing_settings(body.model_dump())
+
+
+@app.post("/api/costing/quote")
+async def post_costing_quote(body: CostingQuoteRequest):
+    return db.quote_print_cost(
+        hours=body.hours,
+        grams=body.grams,
+        material=body.material,
+        brand=body.brand,
+        filament_cost=body.filament_cost,
+    )
+
+
+@app.get("/api/costing/power")
+async def get_costing_power(month: Optional[str] = None):
+    """Estimate electricity from History print hours × wiki average watts × tariff."""
+    return db.estimate_power_month(month, printers=_costing_printer_meta())
+
+
+_PROJECTS_VAULT_ROOT = "Projects"
+
+
+def _project_folder_slug(name: str) -> str:
+    safe = re.sub(r"[^A-Za-z0-9._ -]+", "_", str(name or "").strip())[:60].strip(" ._")
+    return safe or "Project"
+
+
+def _project_dir(vault_folder: str, *, missing_ok: bool = False) -> Path:
+    root = _print_library_path().resolve()
+    parts = [p for p in str(vault_folder or "").replace("\\", "/").split("/") if p and p not in {".", ".."}]
+    if not parts:
+        raise HTTPException(status_code=400, detail="Project folder missing")
+    return _safe_join_under(root, *parts, missing_ok=missing_ok)
+
+
+def _unique_project_folder(name: str) -> str:
+    slug = _project_folder_slug(name)
+    root = _print_library_path().resolve()
+    claimed = {str(p.get("vault_folder") or "") for p in db.list_projects()}
+
+    def exists(rel: str) -> bool:
+        return _safe_join_under(root, *rel.split("/"), missing_ok=True).exists()
+
+    candidates = [f"{_PROJECTS_VAULT_ROOT}/{slug}"]
+    candidates.extend(f"{_PROJECTS_VAULT_ROOT}/{slug}_{n}" for n in range(2, 51))
+    # Prefer an existing orphan folder first, then a free new name.
+    for folder in candidates:
+        if folder not in claimed and exists(folder):
+            return folder
+    for folder in candidates:
+        if folder not in claimed and not exists(folder):
+            return folder
+    return f"{_PROJECTS_VAULT_ROOT}/{slug}_{int(time.time())}"
+
+
+def _adopt_orphan_project_folders() -> None:
+    """Re-register Print Vault Projects/* folders that lost their DB rows."""
+    root = _print_library_path().resolve()
+    projects_root = _safe_join_under(root, _PROJECTS_VAULT_ROOT, missing_ok=True)
+    if not projects_root.exists() or not projects_root.is_dir():
+        return
+    claimed = {str(p.get("vault_folder") or "") for p in db.list_projects()}
+    dismissed = db.get_dismissed_project_folders()
+    for child in sorted(projects_root.iterdir()):
+        if not child.is_dir():
+            continue
+        rel = child.relative_to(root).as_posix()
+        if rel in claimed or rel in dismissed:
+            continue
+        try:
+            has_files = any(p.is_file() for p in child.rglob("*"))
+        except OSError:
+            has_files = False
+        if not has_files:
+            continue
+        db.create_project(child.name, rel, notes="Recovered from Print Vault folder")
+
+
+def _project_source_needs_slice(filename: str, meta: Optional[dict] = None) -> bool:
+    name = str(filename or "").lower()
+    if name.endswith(".gcode.3mf") or name.endswith(".gcode.gz") or name.endswith(".gcode") or name.endswith(".ufp"):
+        return False
+    ext = _queue_file_extension(filename)
+    if ext in {".step", ".stp"}:
+        return False
+    if ext not in _SOURCE_MODEL_EXT:
+        return False
+    return not bool((meta or {}).get("sliced"))
+
+
+def _guess_3mf_printer_blob(data: bytes) -> str:
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            for name in zf.namelist():
+                n = name.replace("\\", "/").lower()
+                if n.endswith("project_settings.config"):
+                    return zf.read(name).decode("utf-8", "ignore")[:8000]
+    except Exception:
+        return ""
+    return ""
+
+
+def _project_slice_targets() -> list[dict]:
+    settings = db.get_all_settings()
+    rows = []
+    for meta in _costing_printer_meta():
+        pid = str(meta.get("id") or "")
+        if not pid:
+            continue
+        profiles = {
+            "printer": (settings.get(_slicer_profile_key(pid, "printer"), "") or "").strip(),
+            "process": (settings.get(_slicer_profile_key(pid, "process"), "") or "").strip(),
+            "filament": (settings.get(_slicer_profile_key(pid, "filament"), "") or "").strip(),
+        }
+        rows.append({
+            "id": pid,
+            "label": str(meta.get("custom_name") or meta.get("model_name") or pid),
+            "model_name": str(meta.get("model_name") or ""),
+            "kind": str(meta.get("kind") or ""),
+            "has_defaults": all(profiles.values()),
+        })
+    rows.sort(key=lambda r: (not r["has_defaults"], 0 if r["kind"] == "bambu" else 1, r["label"].lower()))
+    return rows
+
+
+def _pick_project_slice_printer(row: dict, filename: str, data: bytes) -> dict:
+    targets = [t for t in _project_slice_targets() if t.get("has_defaults")]
+    if not targets:
+        raise HTTPException(
+            status_code=422,
+            detail="Set slicer defaults on a printer in Settings → Slicer before auto-quoting unsliced files.",
+        )
+    wanted = str(row.get("quote_printer_id") or "").strip()
+    if wanted:
+        match = next((t for t in targets if t["id"] == wanted), None)
+        if match:
+            return match
+    blob = _guess_3mf_printer_blob(data).upper() if str(filename or "").lower().endswith(".3mf") else ""
+    compact_blob = re.sub(r"[^A-Z0-9]+", "", blob)
+    if compact_blob:
+        scored = []
+        for t in targets:
+            model = re.sub(r"[^A-Z0-9]+", "", str(t.get("model_name") or "").upper())
+            if model and model in compact_blob:
+                scored.append(t)
+        if scored:
+            return scored[0]
+    bambu = next((t for t in targets if t.get("kind") == "bambu"), None)
+    return bambu or targets[0]
+
+
+def _project_matching_slice(folder: Path, source_name: str) -> Optional[str]:
+    key = _file_archive_key(source_name)
+    if not key or not folder.exists():
+        return None
+    try:
+        names = [p.name for p in folder.iterdir() if p.is_file()]
+    except OSError:
+        return None
+    for name in names:
+        lower = name.lower()
+        if name == source_name:
+            continue
+        if not (lower.endswith(".gcode.3mf") or lower.endswith(".gcode") or lower.endswith(".gcode.gz")):
+            continue
+        other = _file_archive_key(name)
+        if other == key or other.startswith(f"{key}_") or key.startswith(f"{other}_"):
+            return name
+    return None
+
+
+def _http_error_detail(exc: Exception) -> str:
+    if isinstance(exc, HTTPException):
+        detail = exc.detail
+        if isinstance(detail, str) and detail.strip():
+            return detail.strip()
+        return str(detail)
+    return str(exc).strip() or "Slice failed"
+
+
+def _queue_project_file_slice(project_id: int, dest: Path, row: dict, data: bytes) -> None:
+    root = _print_library_path().resolve()
+    rel = dest.relative_to(root).as_posix()
+    existing = _project_slice_jobs.get(rel) or {}
+    if existing.get("status") == "slicing":
+        return
+    meta = slice_meta.parse_slice_totals(dest.name, data)
+    if not _project_source_needs_slice(dest.name, meta):
+        return
+    matched = _project_matching_slice(dest.parent, dest.name)
+    if matched:
+        _project_slice_jobs[rel] = {
+            "status": "sliced_source",
+            "status_detail": f"Using existing sliced file {matched}",
+            "output": matched,
+            "project_id": project_id,
+        }
+        return
+    _project_slice_jobs[rel] = {
+        "status": "slicing",
+        "status_detail": "Slicing for quote…",
+        "project_id": project_id,
+        "source": dest.name,
+    }
+    asyncio.create_task(_run_project_file_slice(project_id, dest, rel, row, data))
+
+
+async def _run_project_file_slice(project_id: int, dest: Path, rel: str, row: dict, data: bytes) -> None:
+    try:
+        target = _pick_project_slice_printer(row, dest.name, data)
+        printer_id = target["id"]
+        kind = _printer_kind(printer_id) or "bambu"
+        output_ext = ".gcode.3mf" if kind == "bambu" else ".gcode"
+        output_name = f"{_file_archive_key(dest.name) or dest.stem}_{printer_id}{output_ext}"
+        _project_slice_jobs[rel] = {
+            "status": "slicing",
+            "status_detail": f"Slicing on {target.get('label') or printer_id}…",
+            "project_id": project_id,
+            "printer_id": printer_id,
+            "source": dest.name,
+        }
+        _, sliced_data, profiles, slice_options = await _slice_model_to_bytes(
+            filename=dest.name,
+            data=data,
+            printer_id=printer_id,
+            output_filename=output_name,
+            all_plates=dest.name.lower().endswith(".3mf") and not dest.name.lower().endswith(".gcode.3mf"),
+        )
+        out_path = dest.parent / output_name
+        out_path.write_bytes(sliced_data)
+        db.touch_project(project_id)
+        db.log_decision(printer_id, "project_slice", json.dumps({
+            "project_id": project_id,
+            "source": dest.name,
+            "output": out_path.name,
+            "profiles": profiles,
+            "slice_options": slice_options,
+        }))
+        _project_slice_jobs[rel] = {
+            "status": "sliced_source",
+            "status_detail": f"Quoted from {out_path.name}",
+            "output": out_path.name,
+            "project_id": project_id,
+            "printer_id": printer_id,
+        }
+    except Exception as exc:
+        log.exception("Project auto-slice failed for %s", dest)
+        _project_slice_jobs[rel] = {
+            "status": "error",
+            "status_detail": _http_error_detail(exc),
+            "project_id": project_id,
+            "source": dest.name,
+        }
+
+
+def _scan_project_files(vault_folder: str) -> list[dict]:
+    folder = _project_dir(vault_folder, missing_ok=True)
+    if not folder.exists() or not folder.is_dir():
+        return []
+    rows = []
+    root = _print_library_path().resolve()
+    for path in sorted(folder.rglob("*")):
+        if not path.is_file():
+            continue
+        try:
+            stat = path.stat()
+            data = path.read_bytes()
+        except OSError:
+            continue
+        meta = slice_meta.parse_slice_totals(path.name, data)
+        rel = path.relative_to(root).as_posix()
+        job = _project_slice_jobs.get(rel) or {}
+        status = job.get("status") or meta.get("status") or ("sliced" if meta.get("sliced") else "not_sliced")
+        detail = job.get("status_detail") or meta.get("status_detail") or ("Sliced" if meta.get("sliced") else "Not sliced yet")
+        rows.append({
+            "name": path.name,
+            "path": rel,
+            "kind": _file_kind(path.name),
+            "size": stat.st_size,
+            "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+            "sliced": bool(meta.get("sliced")),
+            "seconds": meta.get("seconds"),
+            "grams": meta.get("grams"),
+            "material": meta.get("material"),
+            "plate_count": int(meta.get("plate_count") or 0),
+            "status": status,
+            "status_detail": detail,
+            "output": job.get("output"),
+        })
+        if len(rows) >= 80:
+            break
+    return rows
+
+
+def _project_quote(files: list[dict], parallel_printers: int = 1) -> dict:
+    grams = sum(float(f.get("grams") or 0) for f in files)
+    seconds = sum(int(f.get("seconds") or 0) for f in files)
+    longest = max((int(f.get("seconds") or 0) for f in files), default=0)
+    printer_hours = seconds / 3600.0 if seconds else 0.0
+    longest_hours = longest / 3600.0 if longest else 0.0
+    n = max(1, min(int(parallel_printers or 1), 12))
+    elapsed_hours = max(longest_hours, printer_hours / n) if printer_hours else 0.0
+    materials = [str(f.get("material") or "").strip() for f in files if f.get("material")]
+    material = materials[0] if len({m.upper() for m in materials}) == 1 else ""
+    fleet = db.quote_print_cost(hours=printer_hours, grams=grams, material=material)
+    elapsed = db.quote_print_cost(hours=elapsed_hours, grams=grams, material=material)
+    sliced = sum(1 for f in files if f.get("sliced"))
+    slicing = sum(1 for f in files if f.get("status") == "slicing")
+    return {
+        "file_count": len(files),
+        "sliced_count": sliced,
+        "unsliced_count": len(files) - sliced,
+        "slicing_count": slicing,
+        "grams": round(grams, 1) if grams else None,
+        "printer_hours": round(printer_hours, 2),
+        "elapsed_hours": round(elapsed_hours, 2),
+        "longest_hours": round(longest_hours, 2),
+        "parallel_printers": n,
+        "material": material or None,
+        "filament_cost": fleet.get("filament_cost"),
+        "filament_source": fleet.get("filament_source"),
+        "fleet": {
+            "hours": fleet.get("hours"),
+            "time_cost": fleet.get("time_cost"),
+            "labour_cost": fleet.get("labour_cost"),
+            "floor_price": fleet.get("floor_price"),
+            "suggested_price": fleet.get("suggested_price"),
+        },
+        "elapsed": {
+            "hours": elapsed.get("hours"),
+            "time_cost": elapsed.get("time_cost"),
+            "labour_cost": elapsed.get("labour_cost"),
+            "floor_price": elapsed.get("floor_price"),
+            "suggested_price": elapsed.get("suggested_price"),
+        },
+        "quote_floor": elapsed.get("floor_price"),
+        "quote_suggested": elapsed.get("suggested_price"),
+        "pricing_strategy": elapsed.get("pricing_strategy"),
+        "shop_price": elapsed.get("shop_price"),
+        "batch_price": elapsed.get("batch_price"),
+        "machine_price": elapsed.get("machine_price"),
+        "value_price": elapsed.get("value_price"),
+        "shop_rate": fleet.get("shop_rate"),
+        "markup_pct": fleet.get("markup_pct"),
+    }
+
+
+def _project_payload(row: dict) -> dict:
+    files = _scan_project_files(row.get("vault_folder") or "")
+    quote = _project_quote(files, row.get("parallel_printers") or 1)
+    slicing = any(f.get("status") == "slicing" for f in files)
+    return {
+        **row,
+        "files": files,
+        "quote": quote,
+        "slicing": slicing,
+        "slice_targets": _project_slice_targets(),
+    }
+
+
+class ProjectCreateRequest(BaseModel):
+    name: str
+    notes: str = ""
+    parallel_printers: int = 1
+
+
+class ProjectUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    notes: Optional[str] = None
+    parallel_printers: Optional[int] = None
+    quote_printer_id: Optional[str] = None
+
+
+@app.get("/api/projects")
+async def api_list_projects():
+    _adopt_orphan_project_folders()
+    rows = []
+    for row in db.list_projects():
+        files = _scan_project_files(row.get("vault_folder") or "")
+        quote = _project_quote(files, row.get("parallel_printers") or 1)
+        rows.append({
+            **row,
+            "file_count": quote["file_count"],
+            "sliced_count": quote["sliced_count"],
+            "slicing": quote.get("slicing_count", 0) > 0,
+            "quote": quote,
+        })
+    return {"items": rows}
+
+
+@app.post("/api/projects", status_code=201)
+async def api_create_project(body: ProjectCreateRequest):
+    folder = _unique_project_folder(body.name)
+    dest = _project_dir(folder, missing_ok=True)
+    dest.mkdir(parents=True, exist_ok=True)
+    db.undismiss_project_folder(folder)
+    row = db.create_project(
+        body.name,
+        folder,
+        notes=body.notes,
+        parallel_printers=body.parallel_printers,
+    )
+    return _project_payload(row)
+
+
+@app.get("/api/projects/{project_id}")
+async def api_get_project(project_id: int):
+    row = db.get_project_row(project_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return _project_payload(row)
+
+
+@app.put("/api/projects/{project_id}")
+async def api_update_project(project_id: int, body: ProjectUpdateRequest):
+    row = db.update_project(
+        project_id,
+        name=body.name,
+        notes=body.notes,
+        parallel_printers=body.parallel_printers,
+        quote_printer_id=body.quote_printer_id,
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return _project_payload(row)
+
+
+@app.delete("/api/projects/{project_id}")
+async def api_delete_project(project_id: int):
+    row = db.get_project_row(project_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Project not found")
+    folder = str(row.get("vault_folder") or "")
+    if not db.delete_project(project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    # Keep vault files, but don't auto-resurrect this folder on the next list.
+    db.dismiss_project_folder(folder)
+    return {"ok": True, "vault_folder": folder}
+
+
+@app.post("/api/projects/{project_id}/files", status_code=201)
+async def api_upload_project_file(project_id: int, file: UploadFile = File(...)):
+    row = db.get_project_row(project_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Project not found")
+    raw_name = _safe_basename(file.filename, "model")
+    ext = _queue_file_extension(raw_name)
+    if raw_name.lower().endswith(".gcode.3mf"):
+        allowed = _ALLOWED_BAMBU_EXT
+    else:
+        allowed = _ALLOWED_BAMBU_EXT | _ALLOWED_MOONRAKER_EXT | _SOURCE_MODEL_EXT
+    if ext not in allowed:
+        raise HTTPException(status_code=422, detail="Unsupported file type")
+    data = await _read_upload_bytes(file, label="Project upload")
+    folder = _project_dir(row["vault_folder"], missing_ok=True)
+    folder.mkdir(parents=True, exist_ok=True)
+    dest = folder / raw_name
+    if dest.exists():
+        stem = dest.stem
+        suffix = "".join(dest.suffixes) or ext
+        dest = folder / f"{stem}_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}{suffix}"
+    dest.write_bytes(data)
+    db.touch_project(project_id)
+    fresh = db.get_project_row(project_id) or row
+    _queue_project_file_slice(project_id, dest, fresh, data)
+    return _project_payload(fresh)
+
+
+@app.post("/api/projects/{project_id}/slice")
+async def api_slice_project(project_id: int):
+    row = db.get_project_row(project_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Project not found")
+    folder = _project_dir(row["vault_folder"], missing_ok=True)
+    started = 0
+    if folder.exists():
+        for path in sorted(folder.iterdir()):
+            if not path.is_file():
+                continue
+            try:
+                data = path.read_bytes()
+            except OSError:
+                continue
+            before = (_project_slice_jobs.get(path.relative_to(_print_library_path().resolve()).as_posix()) or {}).get("status")
+            _queue_project_file_slice(project_id, path, row, data)
+            after = (_project_slice_jobs.get(path.relative_to(_print_library_path().resolve()).as_posix()) or {}).get("status")
+            if after == "slicing" and before != "slicing":
+                started += 1
+    payload = _project_payload(row)
+    payload["started"] = started
+    return payload
+
+
+class MakerWorldResolveRequest(BaseModel):
+    url: str
+
+
+class MakerWorldImportRequest(BaseModel):
+    url: str
+    profile_id: int
+
+
+class MakerWorldImportAllRequest(BaseModel):
+    url: str
+    only_missing: bool = False
+
+
+def _db_setting(key: str) -> str:
+    return str(db.get_all_settings().get(key) or "").strip()
+
+
+@app.get("/api/makerworld/status")
+async def makerworld_status():
+    token = _db_setting("bambu_cloud_token")
+    return {
+        "has_token": bool(token),
+        "token_hint": makerworld._token_hint(token),
+        "import_dir": makerworld.IMPORT_SUBDIR,
+    }
+
+
+@app.post("/api/makerworld/resolve")
+async def makerworld_resolve(body: MakerWorldResolveRequest):
+    token = _db_setting("bambu_cloud_token")
+    try:
+        return makerworld.resolve_url(
+            body.url.strip(),
+            token,
+            DATA_DIR,
+            library_root=_print_library_path().resolve(),
+            safe_join_under=_safe_join_under,
+        )
+    except makerworld.MakerWorldError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc))
+
+
+@app.post("/api/makerworld/import")
+async def makerworld_import(body: MakerWorldImportRequest):
+    token = _db_setting("bambu_cloud_token")
+    try:
+        return makerworld.import_plate(
+            url=body.url.strip(),
+            profile_id=int(body.profile_id),
+            token=token,
+            data_dir=DATA_DIR,
+            library_root=_print_library_path().resolve(),
+            safe_basename=_safe_basename,
+            safe_join_under=_safe_join_under,
+            enforce_file_size=_enforce_file_size,
+        )
+    except makerworld.MakerWorldError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc))
+
+
+@app.post("/api/makerworld/import-all")
+async def makerworld_import_all(body: MakerWorldImportAllRequest):
+    token = _db_setting("bambu_cloud_token")
+    try:
+        return makerworld.import_all_plates(
+            url=body.url.strip(),
+            token=token,
+            data_dir=DATA_DIR,
+            library_root=_print_library_path().resolve(),
+            safe_basename=_safe_basename,
+            safe_join_under=_safe_join_under,
+            enforce_file_size=_enforce_file_size,
+            only_missing=body.only_missing,
+        )
+    except makerworld.MakerWorldError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc))
+
+
+@app.get("/api/makerworld/recent")
+async def makerworld_recent(limit: int = 10):
+    return {"imports": makerworld.recent_imports(DATA_DIR, limit)}
+
+
+@app.post("/api/makerworld/recent/clear")
+async def makerworld_recent_clear():
+    cleared = makerworld.clear_imports(DATA_DIR)
+    return {"ok": True, "cleared": cleared}
+
+
+@app.get("/api/makerworld/thumbnail")
+async def makerworld_thumbnail(url: str):
+    try:
+        data, content_type = makerworld.fetch_thumbnail(url)
+    except makerworld.MakerWorldError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc))
+    return Response(content=data, media_type=content_type)
+
+
+@app.post("/api/painter/inbox", status_code=201)
+async def painter_inbox(file: UploadFile = File(...)):
+    raw_name = _safe_basename(file.filename, "model.stl")
+    lower = raw_name.lower()
+    if lower.endswith(".gcode.3mf"):
+        raise HTTPException(status_code=422, detail="STL Painter takes the model, not a sliced plate")
+    ext = _queue_file_extension(raw_name)
+    if ext not in {".stl", ".obj", ".3mf"}:
+        raise HTTPException(status_code=422, detail="STL Painter takes an STL, OBJ, or 3MF")
+    data = await _read_upload_bytes(file, label="STL Painter")
+    token = uuid.uuid4().hex
+    folder = (DATA_DIR / "painter-inbox" / token)
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / raw_name).write_bytes(data)
+    return {
+        "ok": True,
+        "token": token,
+        "name": raw_name,
+        "url": f"/api/painter/inbox/{token}",
+    }
+
+
+@app.get("/api/painter/inbox/{token}")
+async def painter_inbox_file(token: str):
+    if not re.fullmatch(r"[0-9a-f]{32}", token):
+        raise HTTPException(status_code=404, detail="Not found")
+    folder = _safe_join_under(DATA_DIR / "painter-inbox", token)
+    chosen = next((path for path in folder.iterdir() if path.is_file()), None)
+    if chosen is None:
+        raise HTTPException(status_code=404, detail="Not found")
+    return FileResponse(chosen, filename=chosen.name)
+
+
+@app.post("/api/makerdeck/exports", status_code=201)
+async def makerdeck_save_export(request: Request):
+    max_bytes = _MAX_PRINT_FILE_BYTES
+    try:
+        form = await request.form(max_part_size=max_bytes)
+    except Exception as exc:
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
+
+    upload = form.get("file")
+    if upload is None or not hasattr(upload, "read"):
+        raise HTTPException(status_code=422, detail="Missing export file")
+    raw_name = _safe_basename(getattr(upload, "filename", None), "makerdeck-export")
+    ext = _queue_file_extension(raw_name)
+    if ext not in {".stl", ".3mf"}:
+        raise HTTPException(status_code=422, detail="Only STL and 3MF exports are supported")
+    data = await _read_upload_bytes(upload, label="MakerDeck export")
+
+    thumb_field = form.get("thumbnail")
+    thumb_data = b""
+    if thumb_field is not None and hasattr(thumb_field, "read"):
+        thumb_data = await thumb_field.read()
+
+    trace_field = form.get("trace_image")
+    trace_data = b""
+    if trace_field is not None and hasattr(trace_field, "read"):
+        trace_data = await trace_field.read()
+
+    meta_field = form.get("meta")
+    meta = meta_field if isinstance(meta_field, str) else ""
+
+    try:
+        return makerdeck_library.save_export(
+            library_root=_print_library_path().resolve(),
+            data_dir=DATA_DIR,
+            filename=raw_name,
+            file_bytes=data,
+            meta_json=meta,
+            safe_join_under=_safe_join_under,
+            safe_basename=_safe_basename,
+            thumbnail_bytes=thumb_data or None,
+            trace_image_bytes=trace_data or None,
+        )
+    except makerdeck_library.MakerDeckLibraryError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc))
+
+
+@app.post("/api/makerdeck/designs", status_code=201)
+async def makerdeck_save_design(request: Request):
+    try:
+        form = await request.form(max_part_size=_MAX_MAKERDECK_DESIGN_PART_BYTES)
+    except Exception as exc:
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
+
+    thumb_field = form.get("thumbnail")
+    thumb_data = b""
+    if thumb_field is not None and hasattr(thumb_field, "read"):
+        thumb_data = await thumb_field.read()
+
+    trace_field = form.get("trace_image")
+    trace_data = b""
+    if trace_field is not None and hasattr(trace_field, "read"):
+        trace_data = await trace_field.read()
+
+    meta_field = form.get("meta")
+    meta = meta_field if isinstance(meta_field, str) else ""
+
+    try:
+        return makerdeck_library.save_design(
+            library_root=_print_library_path().resolve(),
+            data_dir=DATA_DIR,
+            meta_json=meta,
+            safe_join_under=_safe_join_under,
+            thumbnail_bytes=thumb_data or None,
+            trace_image_bytes=trace_data or None,
+        )
+    except makerdeck_library.MakerDeckLibraryError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc))
+
+
+@app.get("/api/makerdeck/designs")
+async def makerdeck_list_designs(limit: int = 50, folder: str | None = None):
+    makerdeck_library.ensure_compact_manifest(DATA_DIR, _print_library_path().resolve(), _safe_join_under)
+    return {"designs": makerdeck_library.recent_designs(DATA_DIR, limit, folder)}
+
+
+@app.get("/api/makerdeck/folders")
+async def makerdeck_list_folders():
+    makerdeck_library.ensure_compact_manifest(DATA_DIR, _print_library_path().resolve(), _safe_join_under)
+    return {"folders": makerdeck_library.list_folders(DATA_DIR)}
+
+
+@app.get("/api/makerdeck/designs/{design_id}/thumbnail")
+async def makerdeck_design_thumbnail(design_id: str):
+    try:
+        data, media = makerdeck_library.design_thumbnail(
+            DATA_DIR,
+            _print_library_path().resolve(),
+            design_id,
+            _safe_join_under,
+        )
+    except makerdeck_library.MakerDeckLibraryError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc))
+    return Response(content=data, media_type=media, headers={"Cache-Control": "no-store, max-age=0"})
+
+
+@app.get("/api/makerdeck/designs/{design_id}/params")
+async def makerdeck_design_params(design_id: str):
+    try:
+        return makerdeck_library.design_params(
+            DATA_DIR,
+            _print_library_path().resolve(),
+            design_id,
+            _safe_join_under,
+        )
+    except makerdeck_library.MakerDeckLibraryError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc))
+
+
+@app.delete("/api/makerdeck/designs/{design_id}")
+async def makerdeck_delete_design(design_id: str):
+    deleted = makerdeck_library.delete_design(
+        DATA_DIR,
+        _print_library_path().resolve(),
+        design_id,
+        _safe_join_under,
+    )
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Design not found")
+    return {"ok": True}
 
 
 _ORCA_PROFILE_VENDORS = ["BBL", "Sovol", "Voron", "Prusa", "Anycubic", "Creality"]
@@ -4483,6 +6625,12 @@ def _orca_executable() -> Path | None:
     if env_exe:
         candidates.append(Path(env_exe))
     if os.name == "nt":
+        local_app = os.environ.get("LOCALAPPDATA")
+        if local_app:
+            candidates.extend([
+                Path(local_app) / "Programs" / "OrcaSlicer" / "orca-slicer.exe",
+                Path(local_app) / "Programs" / "OrcaSlicer" / "OrcaSlicer.exe",
+            ])
         for base in (os.environ.get("ProgramFiles"), os.environ.get("ProgramFiles(x86)")):
             if base:
                 candidates.append(Path(base) / "OrcaSlicer" / "orca-slicer.exe")
@@ -4644,14 +6792,52 @@ def _friendly_slicer_error(detail: str) -> str:
             "Slicer could not map the selected filament to the target printer. "
             "Try the slicer API sidecar, or choose matching printer/process/filament profiles."
         )
-    if "unknown file format" in lowered and ".step" in lowered:
-        return "Orca background slicing cannot import STEP files. Use Open Orca/Download model, or export the source as STL/3MF first."
+    if "param values in 3mf/config" in lowered:
+        return (
+            "Orca CLI rejected Bambu inherit-settings in this 3MF "
+            "(Param values in 3mf/config). Flightdeck strips those sentinels automatically — "
+            "hit Slice unsliced to retry."
+        )
+    noise = (
+        "slic3r::cli::run found error",
+        "run found error, return",
+        "run found error, exit",
+        "mesa opengl",
+        "system opengl library",
+        "cli_callback_mgr",
+        "update: percent=",
+        "update: m_total_progress",
+    )
     lines = [line.strip() for line in text.splitlines() if line.strip()]
+    useful = [line for line in lines if not any(token in line.lower() for token in noise)]
+    preferred_needles = (
+        "parsing error",
+        "failed to generate g-code",
+        "invalid custom g-code",
+        "not a variable name",
+        "param values",
+        "not in range",
+        "unknown file format",
+        "failed slicing",
+    )
+    preferred = [
+        line for line in useful
+        if any(needle in line.lower() for needle in preferred_needles)
+    ]
+    if preferred:
+        extras = []
+        for idx, line in enumerate(useful):
+            if "not a variable name" in line.lower() and idx + 1 < len(useful):
+                snippet = useful[idx + 1]
+                if snippet not in preferred and len(snippet) < 240:
+                    extras.append(snippet)
+        summary = " ".join((preferred + extras)[-8:]).strip()
+        return summary[-700:] if summary else text[-500:]
     important = [
-        line for line in lines
+        line for line in useful
         if "[error]" in line.lower() or "error" in line.lower() or "failed" in line.lower()
     ]
-    picked = important[-3:] if important else lines[-4:]
+    picked = important[-4:] if important else useful[-6:] or lines[-4:]
     summary = " ".join(picked).strip()
     return summary[-500:] if summary else text[-500:]
 
@@ -4699,7 +6885,9 @@ _SLICE_SUPPORT_MODES = {
 _SLICE_BRIM_MODES = {
     "profile": "Profile default",
     "off": "No brim",
+    "auto": "Auto brim",
     "outer": "Outer brim",
+    "mouse_ears": "Mouse ears",
 }
 
 
@@ -4737,7 +6925,8 @@ def _normalise_slicer_profile_type(profile_data: bytes, category: str) -> bytes:
         raise HTTPException(status_code=422, detail=f"Selected {category} profile is not a valid Orca profile")
     if profile.get("type") != profile_type:
         profile["type"] = profile_type
-    return json.dumps(profile, ensure_ascii=False, indent=4).encode("utf-8")
+    encoded = json.dumps(profile, ensure_ascii=False, indent=4).encode("utf-8")
+    return slice_meta.sanitize_profile_gcode_placeholders(encoded)
 
 
 def _apply_slice_process_overrides(process_data: bytes, *, support_mode: str | None = "profile", brim_mode: str | None = "profile") -> bytes:
@@ -4770,13 +6959,48 @@ def _apply_slice_process_overrides(process_data: bytes, *, support_mode: str | N
         profile["support_style"] = "tree_strong"
 
     if brim == "off":
+        profile["enable_brim"] = "0"
         profile["brim_type"] = "no_brim"
+    elif brim == "auto":
+        profile["enable_brim"] = "1"
+        profile["brim_type"] = "auto_brim"
     elif brim == "outer":
+        profile["enable_brim"] = "1"
         profile["brim_type"] = "outer_only"
         profile.setdefault("brim_width", "5")
         profile.setdefault("brim_object_gap", "0.1")
+    elif brim == "mouse_ears":
+        profile["enable_brim"] = "1"
+        profile["brim_type"] = "brim_ears"
+        profile["brim_ears"] = "1"
+        profile.setdefault("brim_ears_max_angle", "125")
+        profile.setdefault("brim_ears_detection_length", "1")
 
     return json.dumps(profile, ensure_ascii=False, indent=4).encode("utf-8")
+
+
+def _slicer_output_feature_counts(data: bytes, filename: str = "") -> dict:
+    names_and_blobs: list[tuple[str, bytes]] = []
+    lower_name = (filename or "").lower()
+    if lower_name.endswith(".3mf") or lower_name.endswith(".gcode.3mf"):
+        try:
+            with zipfile.ZipFile(io.BytesIO(data)) as archive:
+                for name in archive.namelist():
+                    if name.lower().endswith(".gcode"):
+                        names_and_blobs.append((name, archive.read(name)))
+        except Exception:
+            return {}
+    elif lower_name.endswith(".gcode"):
+        names_and_blobs.append((filename, data))
+
+    counts: dict[str, int] = {}
+    for _name, blob in names_and_blobs:
+        text = blob.decode("utf-8", "ignore")
+        for match in re.finditer(r"^\s*;\s*FEATURE:\s*(.+?)\s*$", text, re.MULTILINE):
+            feature = match.group(1).strip()
+            if feature:
+                counts[feature] = counts.get(feature, 0) + 1
+    return counts
 
 
 def _run_orca_slice_sidecar(
@@ -4800,20 +7024,17 @@ def _run_orca_slice_sidecar(
     filament_name, filament_data = _slicer_profile_blob(str(profiles.get("filament") or ""), "filament", exe)
     machine_data = _normalise_slicer_profile_type(machine_data, "machine")
     process_data = _apply_slice_process_overrides(process_data, support_mode=support_mode, brim_mode=brim_mode)
+    process_data = slice_meta.sanitize_profile_gcode_placeholders(process_data)
     filament_data = _normalise_slicer_profile_type(filament_data, "filament")
 
     safe_source = _safe_basename(filename, "flightdeck-model.stl")
+    if safe_source.lower().endswith(".3mf") and not safe_source.lower().endswith(".gcode.3mf"):
+        data = slice_meta.sanitize_3mf_cli_sentinels(data)
     requested = _safe_basename(output_filename, f"{_file_archive_key(safe_source)}.gcode.3mf")
     sidecar_url = sidecar_url.strip().rstrip("/")
     if not sidecar_url:
         raise HTTPException(status_code=422, detail="Slicer API URL is not set")
 
-    files = [
-        ("file", (safe_source, data, _slicer_model_mime(safe_source))),
-        ("printerProfile", (machine_name, machine_data, "application/json")),
-        ("presetProfile", (process_name, process_data, "application/json")),
-        ("filamentProfile", (filament_name, filament_data, "application/json")),
-    ]
     form = {
         "plate": "0" if all_plates else str(plate or "1"),
         "exportType": "3mf" if output_kind == "gcode.3mf" else "gcode",
@@ -4821,24 +7042,60 @@ def _run_orca_slice_sidecar(
         "bedType": (bed_type or "Textured PEI Plate").strip() or "Textured PEI Plate",
         "requestId": f"flightdeck-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S%f')}",
     }
+    detail = ""
     try:
-        with httpx.Client(timeout=httpx.Timeout(connect=10.0, read=900.0, write=60.0, pool=10.0)) as client:
-            response = client.post(f"{sidecar_url}/slice", data=form, files=files)
+        with httpx.Client(timeout=httpx.Timeout(connect=4.0, read=900.0, write=60.0, pool=4.0)) as client:
+            response = None
+            for _attempt in range(6):
+                files = [
+                    ("file", (safe_source, data, _slicer_model_mime(safe_source))),
+                    ("printerProfile", (machine_name, machine_data, "application/json")),
+                    ("presetProfile", (process_name, process_data, "application/json")),
+                    ("filamentProfile", (filament_name, filament_data, "application/json")),
+                ]
+                response = client.post(f"{sidecar_url}/slice", data=form, files=files)
+                if response.status_code < 400:
+                    break
+                try:
+                    payload = response.json()
+                    detail = (
+                        payload.get("details")
+                        or payload.get("detail")
+                        or payload.get("error")
+                        or payload.get("message")
+                        or json.dumps(payload)
+                    )
+                except Exception:
+                    detail = response.text
+                extra_vars = slice_meta.parse_unknown_gcode_vars(
+                    str(detail or ""),
+                    [machine_data, process_data, filament_data, data],
+                )
+                if not extra_vars:
+                    break
+                machine_data = slice_meta.sanitize_profile_gcode_placeholders(machine_data, extra_vars)
+                process_data = slice_meta.sanitize_profile_gcode_placeholders(process_data, extra_vars)
+                filament_data = slice_meta.sanitize_profile_gcode_placeholders(filament_data, extra_vars)
+                if safe_source.lower().endswith(".3mf"):
+                    data = slice_meta.sanitize_3mf_cli_sentinels(data, extra_gcode_names=extra_vars)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Slicer API unreachable: {exc}") from exc
 
+    if response is None:
+        raise HTTPException(status_code=502, detail="Slicer API returned no response")
     if response.status_code >= 400:
-        try:
-            payload = response.json()
-            detail = (
-                payload.get("details")
-                or payload.get("detail")
-                or payload.get("error")
-                or payload.get("message")
-                or json.dumps(payload)
-            )
-        except Exception:
-            detail = response.text
+        if not detail:
+            try:
+                payload = response.json()
+                detail = (
+                    payload.get("details")
+                    or payload.get("detail")
+                    or payload.get("error")
+                    or payload.get("message")
+                    or json.dumps(payload)
+                )
+            except Exception:
+                detail = response.text
         if _h2d_loose_mesh_requires_sidecar(safe_source, profiles):
             raw = str(detail or "").strip()
             lowered = raw.lower()
@@ -4879,7 +7136,7 @@ def _run_orca_slice_sidecar(
     if not response.content:
         raise HTTPException(status_code=502, detail="Slicer API returned an empty file")
     _enforce_file_size(len(response.content), label="Sliced output")
-    return name, response.content, f"Slicer API {response.status_code}"
+    return requested, response.content, f"Slicer API {response.status_code}"
 
 
 def _run_orca_slice_local(
@@ -4902,6 +7159,8 @@ def _run_orca_slice_local(
     filament = _orca_profile_file(str(profiles.get("filament") or ""), "filament", exe)
 
     safe_source = _safe_basename(filename, "flightdeck-model")
+    if safe_source.lower().endswith(".3mf") and not safe_source.lower().endswith(".gcode.3mf"):
+        data = slice_meta.sanitize_3mf_cli_sentinels(data)
     suffixes = "".join(Path(safe_source).suffixes)
     suffix = suffixes if suffixes.lower() in {".stl", ".obj", ".step", ".stp", ".3mf"} else ".stl"
     requested = _safe_basename(output_filename, f"{_file_archive_key(safe_source)}.gcode.3mf")
@@ -4913,7 +7172,9 @@ def _run_orca_slice_local(
         process_for_slice = tmp / "flightdeck-process.json"
         filament_for_slice = tmp / "flightdeck-filament.json"
         machine_for_slice.write_bytes(_normalise_slicer_profile_type(machine.read_bytes(), "machine"))
-        process_for_slice.write_bytes(_apply_slice_process_overrides(process.read_bytes(), support_mode=support_mode, brim_mode=brim_mode))
+        process_for_slice.write_bytes(slice_meta.sanitize_profile_gcode_placeholders(
+            _apply_slice_process_overrides(process.read_bytes(), support_mode=support_mode, brim_mode=brim_mode)
+        ))
         filament_for_slice.write_bytes(_normalise_slicer_profile_type(filament.read_bytes(), "filament"))
         args = [str(exe)]
         datadir = _orca_datadir()
@@ -4940,18 +7201,29 @@ def _run_orca_slice_local(
         proc = subprocess.run(args, text=True, capture_output=True, timeout=900)
         if proc.returncode not in (0, None):
             detail = (proc.stderr or proc.stdout or f"OrcaSlicer exited {proc.returncode}").strip()
-            source_ext = _queue_file_extension(safe_source)
-            friendly = _friendly_slicer_error(detail)
-            if (
-                _looks_like_h2d_slice_profile(profiles)
-                and source_ext in {".stl", ".obj"}
-                and "slic3r::cli::run found error" in detail.lower()
-            ):
-                friendly = (
-                    "Orca local CLI can slice this STL for single-toolhead printers, but this Orca build rejects "
-                    "the H2D loose STL slice profile. Open Orca for this H2D STL or start the Orca slicer API sidecar."
-                )
-            raise HTTPException(status_code=502, detail=friendly)
+            extra = slice_meta.parse_3mf_cli_param_keys(detail)
+            if extra and suffix.lower() == ".3mf":
+                retried = slice_meta.sanitize_3mf_cli_sentinels(data, extra_keys=extra)
+                if retried != data:
+                    source_path.write_bytes(retried)
+                    proc = subprocess.run(args, text=True, capture_output=True, timeout=900)
+                    if proc.returncode in (0, None):
+                        detail = ""
+                    else:
+                        detail = (proc.stderr or proc.stdout or f"OrcaSlicer exited {proc.returncode}").strip()
+            if proc.returncode not in (0, None):
+                source_ext = _queue_file_extension(safe_source)
+                friendly = _friendly_slicer_error(detail)
+                if (
+                    _looks_like_h2d_slice_profile(profiles)
+                    and source_ext in {".stl", ".obj"}
+                    and "slic3r::cli::run found error" in detail.lower()
+                ):
+                    friendly = (
+                        "Orca local CLI can slice this STL for single-toolhead printers, but this Orca build rejects "
+                        "the H2D loose STL slice profile. Open Orca for this H2D STL or start the Orca slicer API sidecar."
+                    )
+                raise HTTPException(status_code=502, detail=friendly)
         if output_kind != "gcode.3mf" and not output_path.exists():
             generated = sorted(tmp.glob("*.gcode"), key=lambda p: p.stat().st_mtime, reverse=True)
             if generated:
@@ -5137,13 +7409,18 @@ _SAFE_UPDATE_DIRTY_FILENAMES = {
 
 
 def _git_dirty_entries() -> list[str]:
-    raw = _git_text(["status", "--porcelain"], "")
+    # Porcelain columns include a leading space for unstaged changes. The
+    # general Git text helper strips it and truncates the first filename.
+    try:
+        proc = _run_git(["status", "--porcelain"])
+        raw = proc.stdout if proc.returncode == 0 else ""
+    except Exception:
+        raw = ""
     entries: list[str] = []
     for line in raw.splitlines():
-        line = line.strip()
-        if not line:
+        if not line.strip():
             continue
-        path = line[3:].strip() if len(line) > 3 else line
+        path = line[3:].strip() if len(line) > 3 else line.strip()
         if " -> " in path:
             path = path.split(" -> ", 1)[1].strip()
         entries.append(path.replace("\\", "/"))
@@ -5976,9 +8253,17 @@ async def keep_scale_awake():
     }
 
 
+async def _read_scale_stable_async(timeout_s: float = 12.0):
+    try:
+        return await asyncio.wait_for(asyncio.to_thread(_scale.read_stable), timeout=timeout_s)
+    except asyncio.TimeoutError:
+        _scale.last_error = f"Scale read timed out after {timeout_s:.0f}s"
+        return None
+
+
 @app.get("/api/scale/read")
 async def read_scale():
-    reading = _scale.read_stable()
+    reading = await _read_scale_stable_async()
     if not reading:
         message = _scale.last_error or "Scale unavailable"
         db.log_decision("system", "scale_unavailable", message)
@@ -6008,6 +8293,79 @@ async def print_spool_label(spool_id: int):
     return {"ok": True}
 
 
+@app.post("/api/label_printer/print/{spool_id}/compact")
+async def print_compact_spool_label(spool_id: int):
+    spool = db.get_spool(spool_id)
+    if not spool:
+        raise HTTPException(status_code=404, detail="Spool not found")
+    ok = await asyncio.to_thread(_label_printer.print_compact_spool_label, _label_spool(spool), _label_base_url())
+    if not ok:
+        message = _label_printer.last_error or "Label printer unavailable"
+        db.log_decision("system", "label_print_failed", f"Compact spool #{spool_id}: {message}")
+        _notify("warn", "Label print failed", f"Spool #{spool_id}: {message}", link="#/settings/hardware")
+        raise HTTPException(status_code=503, detail=message)
+    db.log_decision("system", "label_printed", f"Compact spool #{spool_id}")
+    return {"ok": True}
+
+
+@app.post("/api/label_printer/location/{location_id}")
+async def print_location_label(location_id: int):
+    location = next((loc for loc in db.get_spool_locations(include_archived=True) if int(loc["id"]) == int(location_id)), None)
+    if not location:
+        raise HTTPException(status_code=404, detail="Location not found")
+    ok = await asyncio.to_thread(_label_printer.print_location_label, location, _label_base_url())
+    if not ok:
+        message = _label_printer.last_error or "Label printer unavailable"
+        db.log_decision("system", "label_print_failed", f"Location {location.get('name') or location_id}: {message}")
+        _notify("warn", "Label print failed", f"{location.get('name') or location_id}: {message}", link="#/settings/hardware")
+        raise HTTPException(status_code=503, detail=message)
+    db.log_decision("system", "label_printed", f"Location {location.get('name') or location_id}")
+    return {"ok": True}
+
+
+@app.post("/api/label_printer/home/{location_id}")
+async def print_home_slot_label(location_id: int):
+    location = next((loc for loc in db.get_spool_locations(include_archived=True) if int(loc["id"]) == int(location_id)), None)
+    if not location:
+        raise HTTPException(status_code=404, detail="Location not found")
+    ok = await asyncio.to_thread(_label_printer.print_home_slot_label, location)
+    if not ok:
+        message = _label_printer.last_error or "Label printer unavailable"
+        db.log_decision("system", "label_print_failed", f"Home {location.get('name') or location_id}: {message}")
+        _notify("warn", "Label print failed", f"{location.get('name') or location_id}: {message}", link="#/settings/hardware")
+        raise HTTPException(status_code=503, detail=message)
+    db.log_decision("system", "label_printed", f"Home {location.get('name') or location_id}")
+    return {"ok": True}
+
+
+@app.post("/api/label_printer/drawer/{drawer}")
+async def print_drawer_banner(drawer: int):
+    if drawer < 1 or drawer > 6:
+        raise HTTPException(status_code=400, detail="Drawer must be 1–6")
+    ok = await asyncio.to_thread(_label_printer.print_drawer_banner, drawer)
+    if not ok:
+        message = _label_printer.last_error or "Label printer unavailable"
+        db.log_decision("system", "label_print_failed", f"Drawer D{drawer}: {message}")
+        _notify("warn", "Label print failed", f"D{drawer}: {message}", link="#/settings/hardware")
+        raise HTTPException(status_code=503, detail=message)
+    db.log_decision("system", "label_printed", f"Drawer D{drawer} banner")
+    return {"ok": True}
+
+
+@app.post("/api/label_printer/drawer/{drawer}/row/{row}")
+async def print_drawer_row_label(drawer: int, row: int):
+    if drawer < 1 or drawer > 6 or row < 1 or row > 3:
+        raise HTTPException(status_code=400, detail="Drawer must be 1–6 and row 1–3")
+    ok = await asyncio.to_thread(_label_printer.print_drawer_row_label, drawer, row)
+    if not ok:
+        message = _label_printer.last_error or "Label printer unavailable"
+        db.log_decision("system", "label_print_failed", f"D{drawer} R{row}: {message}")
+        _notify("warn", "Label print failed", f"D{drawer} R{row}: {message}", link="#/settings/hardware")
+        raise HTTPException(status_code=503, detail=message)
+    db.log_decision("system", "label_printed", f"D{drawer} R{row} row label")
+    return {"ok": True}
+
+
 @app.post("/api/label_printer/test")
 async def print_test_label():
     ok = await asyncio.to_thread(_label_printer.print_test_label)
@@ -6026,6 +8384,32 @@ class CostUpdate(BaseModel):
     cost_per_gram: float
     comment: Optional[str] = None
     empty_spool_weight_g: Optional[float] = None
+
+
+class ColourMatchTarget(BaseModel):
+    id: Optional[str] = None
+    hex: str
+    label: Optional[str] = None
+
+
+class ColourMatchRequest(BaseModel):
+    hex: Optional[str] = None
+    targets: Optional[list[ColourMatchTarget]] = None
+    material: Optional[str] = "low"
+    brand: Optional[str] = None
+    limit: int = 12
+    include_inventory: bool = True
+    prefer_inventory_pct: float = 2.0
+
+
+class EmptySpoolProfileUpdate(BaseModel):
+    brand: str = ""
+    material: Optional[str] = None
+    profile_name: str
+    empty_spool_weight_g: float
+    source: Optional[str] = "manual"
+    notes: Optional[str] = None
+    is_default: bool = False
 
 
 OPEN_FILAMENT_CSV_BASES = [
@@ -6397,6 +8781,416 @@ async def search_filament_catalog(q: str = "", brand: str = "", material: str = 
     return db.search_filament_catalog(q=q, brand=brand, material=material, limit=limit)
 
 
+_HEX_MAX_DIST = (3 * 255 * 255) ** 0.5  # ~441.67
+# LAB + chroma/hue score ceiling used only by Colour Match % display.
+_COLOUR_MATCH_MAX_DIST = 80.0
+
+
+def _catalogue_traits(raw: object) -> dict:
+    if isinstance(raw, dict):
+        return raw
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(str(raw))
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        return {}
+
+
+def _match_pct(delta: float) -> int:
+    """Map Colour Match distance → 0–100% (LAB/chroma score, not raw RGB)."""
+    if _COLOUR_MATCH_MAX_DIST <= 0:
+        return 0
+    return max(0, min(100, int(round(100.0 * (1.0 - float(delta) / _COLOUR_MATCH_MAX_DIST)))))
+
+
+def _srgb_to_linear(c: float) -> float:
+    c = float(c) / 255.0
+    return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+
+
+def _hex_to_lab(hex_value: str) -> Optional[tuple[float, float, float]]:
+    hx = _norm_hex(hex_value)
+    if not hx:
+        return None
+    r, g, b = (int(hx[i:i + 2], 16) for i in (1, 3, 5))
+    rl, gl, bl = _srgb_to_linear(r), _srgb_to_linear(g), _srgb_to_linear(b)
+    x = rl * 0.4124564 + gl * 0.3575761 + bl * 0.1804375
+    y = rl * 0.2126729 + gl * 0.7151522 + bl * 0.0721750
+    z = rl * 0.0193339 + gl * 0.1191920 + bl * 0.9503041
+    xr, yr, zr = x / 0.95047, y / 1.00000, z / 1.08883
+
+    def _f(t: float) -> float:
+        return t ** (1 / 3) if t > 0.008856 else (7.787 * t) + (16 / 116)
+
+    fx, fy, fz = _f(xr), _f(yr), _f(zr)
+    return ((116 * fy) - 16, 500 * (fx - fy), 200 * (fy - fz))
+
+
+def _colour_match_dist(target_hex: str, candidate_hex: str) -> float:
+    """Perceptual distance for filament matching.
+
+    RGB Euclidean distance collapses dark reds toward black. Use CIE Lab ΔE
+    plus chroma/hue penalties so blood-red stays red, not Hatchbox Black.
+    Lower is better.
+    """
+    tlab = _hex_to_lab(target_hex)
+    clab = _hex_to_lab(candidate_hex)
+    if not tlab or not clab:
+        return 999.0
+    de = (
+        (tlab[0] - clab[0]) ** 2
+        + (tlab[1] - clab[1]) ** 2
+        + (tlab[2] - clab[2]) ** 2
+    ) ** 0.5
+    tc = (tlab[1] ** 2 + tlab[2] ** 2) ** 0.5
+    cc = (clab[1] ** 2 + clab[2] ** 2) ** 0.5
+    if tc >= 8:
+        chroma_pen = max(0.0, (tc - cc) * 1.35)
+        if cc < 6:
+            chroma_pen += 18.0
+        th = (math.degrees(math.atan2(tlab[2], tlab[1])) + 360.0) % 360.0
+        ch = (math.degrees(math.atan2(clab[2], clab[1])) + 360.0) % 360.0
+        dh = abs(th - ch)
+        dh = min(dh, 360.0 - dh)
+        hue_w = min(1.0, cc / max(tc, 1e-6))
+        hue_pen = (dh / 180.0) * 28.0 * max(0.25, hue_w) if cc >= 4 else 12.0
+    else:
+        chroma_pen = abs(tc - cc) * 0.35
+        hue_pen = 0.0
+    return de + chroma_pen + hue_pen
+
+
+def _colour_match_label(color: Optional[str]) -> str:
+    """Human label that keeps dark chromatic colours (e.g. blood red) off 'Black'."""
+    lab = _hex_to_lab(color or "")
+    if not lab:
+        return "Unknown colour"
+    L, a, b = lab
+    chroma = (a * a + b * b) ** 0.5
+    hue = (math.degrees(math.atan2(b, a)) + 360.0) % 360.0
+    if chroma < 8:
+        if L <= 20:
+            return "Black"
+        if L >= 85:
+            return "White"
+        return "Grey"
+    if L <= 35 and chroma >= 12:
+        if 15 <= hue <= 70:
+            return "Blood red" if a >= 12 else "Dark brown"
+        if hue >= 330 or hue <= 15:
+            return "Blood red"
+    # Fall back to nearest named swatch in Lab space.
+    best_name, best_d = "Colour", 1e9
+    for name, ref in _COLOUR_NAMES:
+        rlab = _hex_to_lab(ref)
+        if not rlab:
+            continue
+        d = ((L - rlab[0]) ** 2 + (a - rlab[1]) ** 2 + (b - rlab[2]) ** 2) ** 0.5
+        if d < best_d:
+            best_name, best_d = name, d
+    return best_name if best_d <= 45 else (_norm_hex(color) or "Colour")
+
+
+# Colour Match never mixes low-temp with high-temp (PLA/PETG vs ABS/ASA).
+_COLOUR_MATCH_LOW_TEMP = frozenset({"PLA", "PLA+", "PETG"})
+_COLOUR_MATCH_HIGH_TEMP = frozenset({"ABS", "ASA"})
+
+
+def _colour_match_material_filter(material: Optional[str]) -> tuple[str, list[str], str]:
+    """Resolve UI material → (key, allowed materials, human label).
+
+    Low-temp (PLA / PLA+ / PETG) may share a print. High-temp (ABS / ASA) stay together.
+    Cross-family mixes are blocked. Bare "all" falls back to low-temp.
+    """
+    raw = (material or "").strip()
+    key = raw.lower().replace("_", " ").replace("-", " ")
+    if key in {"", "all", "*", "low", "low temp", "lowtemp"}:
+        mats = sorted(_COLOUR_MATCH_LOW_TEMP)
+        return "low", mats, "Low temp (PLA / PETG)"
+    if key in {"high", "high temp", "hightemp"}:
+        mats = sorted(_COLOUR_MATCH_HIGH_TEMP)
+        return "high", mats, "High temp (ABS / ASA)"
+    mat = raw.upper()
+    if mat in _COLOUR_MATCH_LOW_TEMP or mat == "PLA+":
+        # PLA / PETG selections search the whole low-temp family so substitutes
+        # stay printable together — never pull in ABS/ASA.
+        mats = sorted(_COLOUR_MATCH_LOW_TEMP)
+        return "low", mats, "Low temp (PLA / PETG)"
+    if mat in _COLOUR_MATCH_HIGH_TEMP:
+        mats = sorted(_COLOUR_MATCH_HIGH_TEMP)
+        return "high", mats, "High temp (ABS / ASA)"
+    return mat.lower(), [mat], mat
+
+
+def _colour_match_catalog_rows(target: str, catalog_rows: list, top_n: int) -> list[dict]:
+    matches: list[dict] = []
+    for row in catalog_rows:
+        candidate = _norm_hex(row.get("color_hex"))
+        if not candidate:
+            continue
+        delta = _colour_match_dist(target, candidate)
+        traits = _catalogue_traits(row.get("traits"))
+        price = traits.get("price_aud")
+        try:
+            price_aud = float(price) if price not in (None, "") else None
+        except (TypeError, ValueError):
+            price_aud = None
+        matches.append({
+            "brand": row.get("brand") or "",
+            "material": row.get("material") or "",
+            "product": row.get("product"),
+            "subtype": row.get("subtype"),
+            "color_name": row.get("color_name") or "",
+            "color_hex": candidate,
+            "filament_weight_g": row.get("filament_weight_g"),
+            "empty_spool_weight_g": row.get("empty_spool_weight_g"),
+            "delta": round(float(delta), 2),
+            "match_pct": _match_pct(delta),
+            "product_url": traits.get("product_url") or None,
+            "price_aud": price_aud,
+            "sku": traits.get("sku") or None,
+            "source": row.get("source") or "",
+        })
+    matches.sort(key=lambda item: (item["delta"], item.get("brand") or "", item.get("color_name") or ""))
+    return matches[:top_n]
+
+
+def _colour_match_inventory_rows(
+    target: str,
+    spools: list,
+    materials: Optional[list],
+    brand: str,
+    top_n: int,
+) -> list[dict]:
+    mat_ok = {str(m).strip().upper() for m in (materials or []) if str(m).strip()} or None
+    if mat_ok and "PLA" in mat_ok:
+        mat_ok.add("PLA+")
+    matches: list[dict] = []
+    for spool in spools:
+        spool_mat = str(spool.get("material") or "").upper()
+        if mat_ok is not None and spool_mat not in mat_ok:
+            continue
+        if brand and brand.lower() not in str(spool.get("brand") or "").lower():
+            continue
+        candidate = _norm_hex(spool.get("color_hex"))
+        if not candidate:
+            continue
+        delta = _colour_match_dist(target, candidate)
+        matches.append({
+            "id": spool.get("id"),
+            "display_id": spool.get("display_id"),
+            "brand": spool.get("brand") or "",
+            "material": spool.get("material") or "",
+            "subtype": spool.get("subtype"),
+            "color_name": spool.get("color_name") or "",
+            "color_hex": candidate,
+            "remaining_g": spool.get("remaining_g"),
+            "location_printer_id": spool.get("location_printer_id"),
+            "location_slot": spool.get("location_slot"),
+            "storage_location_name": spool.get("storage_location_name"),
+            "delta": round(float(delta), 2),
+            "match_pct": _match_pct(delta),
+        })
+    matches.sort(key=lambda item: (item["delta"], -(item.get("remaining_g") or 0)))
+    return matches[:top_n]
+
+
+def _colour_match_recommendation(
+    inventory_matches: list[dict],
+    catalog_matches: list[dict],
+    prefer_inventory_pct: float = 2.0,
+) -> dict:
+    """Prefer truest colour; use shelf when within prefer_inventory_pct of best buy."""
+    inv = inventory_matches[0] if inventory_matches else None
+    cat = catalog_matches[0] if catalog_matches else None
+    prefer = max(0.0, float(prefer_inventory_pct or 0))
+    if inv and cat:
+        gap = float(cat.get("match_pct") or 0) - float(inv.get("match_pct") or 0)
+        if gap <= prefer:
+            return {
+                "action": "use_inventory",
+                "reason": (
+                    f"Shelf is only {gap:.0f}% under the closest buy — use what you have"
+                    if gap > 0
+                    else "Shelf match is as close or closer than the best buy"
+                ),
+                "gap_pct": round(gap, 1),
+                "prefer_inventory_pct": prefer,
+                "inventory": inv,
+                "catalog": cat,
+            }
+        return {
+            "action": "order",
+            "reason": f"Best buy is {gap:.0f}% closer than shelf — order for a truer colour",
+            "gap_pct": round(gap, 1),
+            "prefer_inventory_pct": prefer,
+            "inventory": inv,
+            "catalog": cat,
+        }
+    if inv:
+        return {
+            "action": "use_inventory",
+            "reason": "Closest match is already on the shelf",
+            "gap_pct": 0.0,
+            "prefer_inventory_pct": prefer,
+            "inventory": inv,
+            "catalog": None,
+        }
+    if cat:
+        return {
+            "action": "order",
+            "reason": "No inventory match — order the closest catalogue colour",
+            "gap_pct": None,
+            "prefer_inventory_pct": prefer,
+            "inventory": None,
+            "catalog": cat,
+        }
+    return {
+        "action": "none",
+        "reason": "No inventory or catalogue matches",
+        "gap_pct": None,
+        "prefer_inventory_pct": prefer,
+        "inventory": None,
+        "catalog": None,
+    }
+
+
+def _colour_match_payload(
+    hex_value: Optional[str] = None,
+    material: Optional[str] = None,
+    brand: Optional[str] = None,
+    limit: int = 12,
+    include_inventory: bool = True,
+    targets: Optional[list] = None,
+    prefer_inventory_pct: float = 2.0,
+) -> dict:
+    target_items: list[dict] = []
+    for raw in targets or []:
+        if isinstance(raw, dict):
+            hx = raw.get("hex")
+            tid = raw.get("id")
+            label = raw.get("label")
+        else:
+            hx = getattr(raw, "hex", None)
+            tid = getattr(raw, "id", None)
+            label = getattr(raw, "label", None)
+        norm = _norm_hex(hx)
+        if not norm:
+            continue
+        target_items.append({
+            "id": tid or f"t-{len(target_items) + 1}",
+            "hex": norm,
+            "label": (label or "").strip() or f"Pick {len(target_items) + 1}",
+        })
+
+    primary = _norm_hex(hex_value) or (target_items[0]["hex"] if target_items else "")
+    if not primary:
+        raise HTTPException(status_code=422, detail="Invalid hex colour (expected #RRGGBB)")
+
+    mat_key, mat_list, mat_label = _colour_match_material_filter(material)
+    br = (brand or "").strip()
+    if br.lower() in {"", "all", "*"}:
+        br = ""
+    top_n = max(1, min(int(limit or 12), 40))
+    prefer = max(0.0, min(float(prefer_inventory_pct or 0), 20.0))
+
+    catalog_rows = db.list_filament_catalog_for_colour_match(
+        brand=br, materials=mat_list, limit=8000
+    )
+    spools = db.get_spools(include_archived=False) if include_inventory else []
+
+    catalog_matches = _colour_match_catalog_rows(primary, catalog_rows, top_n)
+    inventory_matches = (
+        _colour_match_inventory_rows(primary, spools, mat_list, br, top_n) if include_inventory else []
+    )
+    recommendation = _colour_match_recommendation(inventory_matches, catalog_matches, prefer)
+
+    palette: list[dict] = []
+    for item in target_items:
+        inv_rows = (
+            _colour_match_inventory_rows(item["hex"], spools, mat_list, br, top_n)
+            if include_inventory else []
+        )
+        cat_rows = _colour_match_catalog_rows(item["hex"], catalog_rows, top_n)
+        rec = _colour_match_recommendation(inv_rows, cat_rows, prefer)
+        palette.append({
+            "id": item["id"],
+            "hex": item["hex"],
+            "label": item["label"],
+            "colour_label": _colour_match_label(item["hex"]),
+            "recommendation": rec,
+            "inventory_best": inv_rows[0] if inv_rows else None,
+            "catalog_best": cat_rows[0] if cat_rows else None,
+        })
+
+    use_count = sum(1 for p in palette if p["recommendation"]["action"] == "use_inventory")
+    order_count = sum(1 for p in palette if p["recommendation"]["action"] == "order")
+
+    status = {
+        "sources": [
+            db.get_filament_catalog_status("open_filament_database"),
+            db.get_filament_catalog_status("siddament"),
+        ]
+    }
+    catalog_count = sum(int(s.get("count") or 0) for s in status["sources"])
+    return {
+        "ok": True,
+        "hex": primary,
+        "material": mat_key,
+        "material_label": mat_label,
+        "materials": mat_list,
+        "brand": br or None,
+        "label": _colour_match_label(primary),
+        "catalog_matches": catalog_matches,
+        "inventory_matches": inventory_matches,
+        "recommendation": recommendation,
+        "prefer_inventory_pct": prefer,
+        "palette": palette,
+        "palette_summary": {
+            "total": len(palette),
+            "use_inventory": use_count,
+            "order": order_count,
+            "none": len(palette) - use_count - order_count,
+        },
+        "catalog_count": catalog_count,
+        "catalog_status": status,
+    }
+
+
+@app.get("/api/filament/colour-match")
+async def get_filament_colour_match(
+    hex: str = "",
+    material: str = "low",
+    brand: str = "",
+    limit: int = 12,
+    include_inventory: bool = True,
+    prefer_inventory_pct: float = 2.0,
+):
+    return _colour_match_payload(
+        hex_value=hex,
+        material=material,
+        brand=brand,
+        limit=limit,
+        include_inventory=include_inventory,
+        prefer_inventory_pct=prefer_inventory_pct,
+    )
+
+
+@app.post("/api/filament/colour-match")
+async def post_filament_colour_match(body: ColourMatchRequest):
+    return _colour_match_payload(
+        hex_value=body.hex,
+        material=body.material,
+        brand=body.brand,
+        limit=body.limit,
+        include_inventory=body.include_inventory,
+        targets=body.targets,
+        prefer_inventory_pct=body.prefer_inventory_pct,
+    )
+
+
 @app.put("/api/filament/costs/{material}/{brand}")
 async def put_filament_cost(material: str, brand: str, body: CostUpdate):
     db.set_material_cost(material, brand, body.cost_per_gram, body.comment, body.empty_spool_weight_g)
@@ -6405,6 +9199,51 @@ async def put_filament_cost(material: str, brand: str, body: CostUpdate):
 @app.delete("/api/filament/costs/{material}/{brand}")
 async def delete_filament_cost(material: str, brand: str):
     db.delete_material_cost(material, brand)
+    return {"ok": True}
+
+@app.get("/api/empty-spool-profiles")
+async def get_empty_spool_profiles(include_archived: bool = False):
+    return db.get_empty_spool_profiles(include_archived=include_archived)
+
+@app.post("/api/empty-spool-profiles")
+async def create_empty_spool_profile(body: EmptySpoolProfileUpdate):
+    try:
+        item = db.create_empty_spool_profile(
+            body.brand,
+            body.material,
+            body.profile_name,
+            body.empty_spool_weight_g,
+            body.source,
+            body.notes,
+            body.is_default,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return item
+
+@app.put("/api/empty-spool-profiles/{profile_id}")
+async def update_empty_spool_profile(profile_id: int, body: EmptySpoolProfileUpdate):
+    try:
+        item = db.update_empty_spool_profile(
+            profile_id,
+            body.brand,
+            body.material,
+            body.profile_name,
+            body.empty_spool_weight_g,
+            body.source,
+            body.notes,
+            body.is_default,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    if not item:
+        raise HTTPException(status_code=404, detail="Empty spool profile not found")
+    return item
+
+@app.delete("/api/empty-spool-profiles/{profile_id}")
+async def delete_empty_spool_profile(profile_id: int):
+    if not db.archive_empty_spool_profile(profile_id):
+        raise HTTPException(status_code=404, detail="Empty spool profile not found")
     return {"ok": True}
 
 @app.get("/api/filament/summary")
@@ -6487,6 +9326,16 @@ class SpoolUsageReconcile(BaseModel):
     reading_g: Optional[float] = None
     empty_spool_weight_g: Optional[float] = None
 
+class SpoolUsageCorrection(BaseModel):
+    to_spool_id: int
+    grams: Optional[float] = None
+    note: Optional[str] = None
+
+class SpoolUsageAssignment(BaseModel):
+    spool_id: int
+    grams: Optional[float] = None
+    note: Optional[str] = None
+
 class IncomingStockLine(BaseModel):
     quantity: int = 1
     material: str
@@ -6509,6 +9358,8 @@ class IncomingStockOrderCreate(BaseModel):
     lines: list[IncomingStockLine]
 
 class IncomingStockReceive(BaseModel):
+    restock_spool_id: Optional[int] = None
+    restock_display_id: Optional[int] = None
     storage_location_id: Optional[int] = None
     remaining_g: Optional[float] = None
     label_weight_g: Optional[float] = None
@@ -6609,14 +9460,19 @@ async def get_incoming_stock_roll_qr(token: str):
 
 @app.post("/api/stock-in/rolls/{token}/receive")
 async def receive_incoming_stock_roll(token: str, body: IncomingStockReceive):
-    result = db.receive_incoming_stock_roll(
-        token,
-        storage_location_id=body.storage_location_id,
-        remaining_g=body.remaining_g,
-        label_weight_g=body.label_weight_g,
-        empty_spool_weight_g=body.empty_spool_weight_g,
-        notes=body.notes,
-    )
+    try:
+        result = db.receive_incoming_stock_roll(
+            token,
+            restock_spool_id=body.restock_spool_id,
+            restock_display_id=body.restock_display_id,
+            storage_location_id=body.storage_location_id,
+            remaining_g=body.remaining_g,
+            label_weight_g=body.label_weight_g,
+            empty_spool_weight_g=body.empty_spool_weight_g,
+            notes=body.notes,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if not result:
         raise HTTPException(status_code=404, detail="Incoming roll not found")
     label_printed = False
@@ -6626,12 +9482,55 @@ async def receive_incoming_stock_roll(token: str, body: IncomingStockReceive):
         ok = await asyncio.to_thread(_label_printer.print_spool_label, _label_spool(spool), _label_base_url())
         if ok:
             label_printed = True
-            db.log_decision("system", "label_printed", f"Spool #{spool['id']} stock-in receive")
+            db.log_decision("system", "label_printed", f"Spool #{spool.get('display_id') or spool['id']} stock-in receive")
         else:
             label_error = _label_printer.last_error or "Label printer unavailable"
-            db.log_decision("system", "label_print_failed", f"Spool #{spool['id']}: {label_error}")
-            _notify("warn", "Label print failed", f"Spool #{spool['id']}: {label_error}", link="#/settings/hardware")
+            db.log_decision("system", "label_print_failed", f"Spool #{spool.get('display_id') or spool['id']}: {label_error}")
+            _notify("warn", "Label print failed", f"Spool #{spool.get('display_id') or spool['id']}: {label_error}", link="#/settings/hardware")
     return {**result, "label_printed": label_printed, "label_error": label_error}
+
+@app.post("/api/spools/{spool_id}/restock")
+async def restock_spool(spool_id: int, body: SpoolCreate):
+    target = db.get_spool(spool_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="Spool not found")
+    if not target.get("archived_at"):
+        raise HTTPException(status_code=409, detail="Only reserved archived spool lines can be restocked")
+    remaining = body.remaining_g if body.remaining_g is not None else body.label_weight_g
+    try:
+        ok = db.restock_spool_line(
+            spool_id,
+            material=body.material,
+            brand=body.brand,
+            color_hex=body.color_hex,
+            label_weight_g=body.label_weight_g,
+            remaining_g=remaining,
+            subtype=body.subtype,
+            color_name=body.color_name,
+            color_hex_2=body.color_hex_2,
+            color_hex_3=body.color_hex_3,
+            color_scheme=body.color_scheme or "solid",
+            storage_location_id=body.storage_location_id,
+            notes=body.notes,
+            empty_spool_weight_g=body.empty_spool_weight_g,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if not ok:
+        raise HTTPException(status_code=404, detail="Spool not found")
+    spool = db.get_spool(spool_id)
+    label_printed = False
+    label_error = None
+    if db.get_all_settings().get("label_auto_print") == "true" and spool:
+        ok = await asyncio.to_thread(_label_printer.print_spool_label, _label_spool(spool), _label_base_url())
+        if ok:
+            label_printed = True
+            db.log_decision("system", "label_printed", f"Spool #{spool.get('display_id') or spool_id} restock")
+        else:
+            label_error = _label_printer.last_error or "Label printer unavailable"
+            db.log_decision("system", "label_print_failed", f"Spool #{spool.get('display_id') or spool_id}: {label_error}")
+            _notify("warn", "Label print failed", f"Spool #{spool.get('display_id') or spool_id}: {label_error}", link="#/settings/hardware")
+    return {"ok": True, "spool": spool, "label_printed": label_printed, "label_error": label_error}
 
 @app.get("/api/spools/by-printer/{printer_id}")
 async def get_spools_by_printer(printer_id: str):
@@ -6640,6 +9539,10 @@ async def get_spools_by_printer(printer_id: str):
 @app.get("/api/spools")
 async def get_spools(include_archived: bool = False):
     return db.get_spools(include_archived=include_archived)
+
+@app.get("/api/spools/all")
+async def get_all_spools():
+    return db.get_spools(include_archived=True)
 
 @app.get("/api/spool-locations")
 async def get_spool_locations(include_archived: bool = False):
@@ -6669,10 +9572,32 @@ async def update_spool_location(location_id: int, body: SpoolLocationBody):
     return {"ok": True}
 
 @app.delete("/api/spool-locations/{location_id}")
-async def archive_spool_location(location_id: int):
-    if not db.archive_spool_location(location_id):
+async def archive_spool_location(location_id: int, archive_spools: bool = False):
+    usage = db.get_spool_location_usage(location_id)
+    if not usage["exists"]:
         raise HTTPException(status_code=404, detail="Location not found")
-    return {"ok": True}
+    if usage["active_stored_count"] and not archive_spools:
+        count = usage["active_stored_count"]
+        label = "spool" if count == 1 else "spools"
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": f"{usage['name']} still has {count} active stored {label}.",
+                "active_stored_count": count,
+                "active_home_count": usage["active_home_count"],
+                "location_name": usage["name"],
+            },
+        )
+    if not db.archive_spool_location(location_id, archive_spools=archive_spools):
+        raise HTTPException(status_code=404, detail="Location not found")
+    return {"ok": True, "archived_spools": usage["active_stored_count"] if archive_spools else 0}
+
+@app.get("/api/spools/by-number/{display_id}")
+async def get_spool_by_number(display_id: int, include_archived: bool = True):
+    s = db.get_spool_by_display_id(display_id, include_archived=include_archived)
+    if not s:
+        raise HTTPException(status_code=404, detail="Spool not found")
+    return s
 
 @app.get("/api/spools/{spool_id}")
 async def get_spool(spool_id: int):
@@ -6695,7 +9620,7 @@ async def create_spool(body: SpoolCreate):
         conflict = db.get_spool_at_slot(body.location_printer_id, body.location_slot)
         if conflict:
             raise HTTPException(status_code=409,
-                detail={"message": f"Slot occupied by spool #{conflict['id']}", "conflict_spool_id": conflict["id"]})
+                detail={"message": f"Slot occupied by spool #{conflict.get('display_id') or conflict['id']}", "conflict_spool_id": conflict["id"]})
     try:
         spool_id = db.create_spool(
             material=body.material, brand=body.brand, color_hex=body.color_hex,
@@ -6718,16 +9643,17 @@ async def create_spool(body: SpoolCreate):
         spool = db.get_spool(spool_id)
         ok = await asyncio.to_thread(_label_printer.print_spool_label, _label_spool(spool), _label_base_url())
         if ok:
-            db.log_decision("system", "label_printed", f"Spool #{spool_id} auto-print")
+            db.log_decision("system", "label_printed", f"Spool #{spool.get('display_id') if spool else spool_id} auto-print")
         else:
             message = _label_printer.last_error or "Label printer unavailable"
-            db.log_decision("system", "label_print_failed", f"Spool #{spool_id}: {message}")
-            _notify("warn", "Label print failed", f"Spool #{spool_id}: {message}", link="#/settings/hardware")
+            db.log_decision("system", "label_print_failed", f"Spool #{spool.get('display_id') if spool else spool_id}: {message}")
+            _notify("warn", "Label print failed", f"Spool #{spool.get('display_id') if spool else spool_id}: {message}", link="#/settings/hardware")
     ams_sync = None
     if body.location_printer_id and body.location_slot is not None:
         spool = db.get_spool(spool_id)
         ams_sync = await _sync_bambu_ams_slot(body.location_printer_id, body.location_slot, spool)
-    return {"id": spool_id, "ams_sync": ams_sync}
+    spool = db.get_spool(spool_id)
+    return {"id": spool_id, "display_id": spool.get("display_id") if spool else spool_id, "ams_sync": ams_sync}
 
 @app.put("/api/spools/{spool_id}")
 async def update_spool(spool_id: int, body: SpoolUpdate):
@@ -6778,7 +9704,7 @@ async def correct_spool_weight(spool_id: int, body: SpoolWeightCorrection):
     elif body.reading_g is not None:
         remaining = float(body.reading_g) - float(empty_g or 0)
     else:
-        reading = _scale.read_stable()
+        reading = await _read_scale_stable_async()
         if not reading:
             message = _scale.last_error or "Scale unavailable"
             db.log_decision("system", "scale_unavailable", message)
@@ -6817,7 +9743,7 @@ async def reconcile_print_spool_usage(print_id: int, spool_id: int, body: SpoolU
     elif body.reading_g is not None:
         remaining = float(body.reading_g) - float(empty_g or 0)
     else:
-        reading = _scale.read_stable()
+        reading = await _read_scale_stable_async()
         if not reading:
             message = _scale.last_error or "Scale unavailable"
             db.log_decision("system", "scale_unavailable", message)
@@ -6838,6 +9764,879 @@ async def reconcile_print_spool_usage(print_id: int, spool_id: int, body: SpoolU
     if not result:
         raise HTTPException(status_code=404, detail="Print usage not found")
     return {"ok": True, **result}
+
+@app.post("/api/prints/{print_id}/spool_usage/{spool_id}/correct")
+async def correct_print_spool_usage(print_id: int, spool_id: int, body: SpoolUsageCorrection):
+    if not db.get_spool(spool_id):
+        raise HTTPException(status_code=404, detail="Original spool not found")
+    if not db.get_spool(body.to_spool_id):
+        raise HTTPException(status_code=404, detail="Correct spool not found")
+    result = db.correct_print_spool_attribution(
+        print_id,
+        spool_id,
+        body.to_spool_id,
+        grams=body.grams,
+        note=body.note,
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail="Print usage correction not available")
+    return {"ok": True, **result}
+
+@app.post("/api/prints/{print_id}/spool_usage/assign")
+async def assign_print_spool_usage(print_id: int, body: SpoolUsageAssignment):
+    if not db.get_spool(body.spool_id):
+        raise HTTPException(status_code=404, detail="Spool not found")
+    result = db.assign_print_spool_usage(
+        print_id,
+        body.spool_id,
+        grams=body.grams,
+        note=body.note,
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail="Print or spool not found")
+    if result.get("error") == "already_assigned":
+        raise HTTPException(status_code=409, detail="Print already has spool usage recorded")
+    if result.get("error") == "no_grams":
+        raise HTTPException(status_code=422, detail="Print has no filament grams to deduct")
+    return {"ok": True, **result}
+
+
+def _timelapse_media_type(path: Path) -> str:
+    suffix = path.suffix.lower()
+    if suffix == ".webm":
+        return "video/webm"
+    if suffix == ".mov":
+        return "video/quicktime"
+    if suffix == ".avi":
+        return "video/x-msvideo"
+    return "video/mp4"
+
+
+def _timelapse_suffix(filename: str) -> str:
+    suffix = Path(filename or "").suffix.lower()
+    return suffix if suffix in _FLIGHT_RECORDER_EXTS else ""
+
+
+def _timelapse_safe_output_path(printer_id: str, print_id: int, print_filename: str, suffix: str) -> Path:
+    safe_printer = re.sub(r"[^a-zA-Z0-9_.-]+", "-", printer_id).strip("-") or "printer"
+    safe_name = re.sub(r"[^a-zA-Z0-9_.-]+", "-", Path(print_filename or "print").stem).strip("-")[:80] or "print"
+    out_dir = FLIGHT_RECORDER_DIR / safe_printer
+    out_dir.mkdir(parents=True, exist_ok=True)
+    return out_dir / f"{print_id}-{safe_name}{suffix}"
+
+
+def _timelapse_path_from_record(record: dict) -> Path:
+    raw = Path(str(record.get("timelapse_path") or ""))
+    if raw.is_absolute():
+        raise HTTPException(status_code=404, detail="timelapse path unavailable")
+    path = FLIGHT_RECORDER_DIR / raw
+    try:
+        resolved = path.resolve()
+        base = FLIGHT_RECORDER_DIR.resolve()
+        resolved.relative_to(base)
+        return resolved
+    except Exception as exc:
+        raise HTTPException(status_code=404, detail="timelapse path unavailable") from exc
+
+
+def _mp4_needs_faststart(path: Path) -> bool:
+    """True when moov is after mdat — browsers must download the whole file before play."""
+    if path.suffix.lower() != ".mp4" or not path.is_file():
+        return False
+    try:
+        size = path.stat().st_size
+        peek = min(size, 256 * 1024)
+        with path.open("rb") as fh:
+            head = fh.read(peek)
+        moov = head.find(b"moov")
+        mdat = head.find(b"mdat")
+        if moov >= 0 and (mdat < 0 or moov < mdat):
+            return False
+        return True
+    except OSError:
+        return False
+
+
+async def _faststart_timelapse(path: Path) -> None:
+    """Rewrite MP4 so the index is at the front. Copy-only; skip if already faststart."""
+    if not _mp4_needs_faststart(path):
+        return
+    tmp = path.with_name(path.stem + ".faststart" + path.suffix)
+    proc = await asyncio.create_subprocess_exec(
+        "ffmpeg",
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-i",
+        str(path),
+        "-c",
+        "copy",
+        "-movflags",
+        "+faststart",
+        str(tmp),
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    _, err = await proc.communicate()
+    if proc.returncode == 0 and tmp.is_file() and tmp.stat().st_size > 1024:
+        tmp.replace(path)
+        return
+    try:
+        tmp.unlink(missing_ok=True)
+    except OSError:
+        pass
+    log.warning(
+        "flight recorder faststart remux failed for %s: %s",
+        path.name,
+        (err or b"").decode("utf-8", "ignore").strip()[:240],
+    )
+
+
+def _timelapse_realtime_factor() -> float:
+    interval = float(os.getenv("FLIGHTDECK_TIMELAPSE_INTERVAL", "8"))
+    fps = float(os.getenv("FLIGHTDECK_TIMELAPSE_FPS", "30"))
+    return max(1.0, interval * fps)
+
+
+def _ffprobe_video_duration(path: Path) -> Optional[float]:
+    if not path.is_file() or path.stat().st_size < 1024:
+        return None
+    try:
+        proc = subprocess.run(
+            [
+                "ffprobe",
+                "-v", "error",
+                "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                str(path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=12,
+            check=False,
+        )
+        if proc.returncode != 0:
+            return None
+        return float(proc.stdout.strip())
+    except (ValueError, subprocess.TimeoutExpired, OSError):
+        return None
+
+
+def _timelapse_native_coverage(item: dict, video_seconds: float) -> float:
+    print_sec = float(item.get("duration_seconds") or 0)
+    if print_sec <= 0 or video_seconds <= 0:
+        return 1.0
+    expected = print_sec / _timelapse_realtime_factor()
+    if expected <= 0:
+        return 1.0
+    return min(1.0, video_seconds / expected)
+
+
+def _timelapse_should_upgrade(item: dict) -> bool:
+    source = str(item.get("timelapse_source") or "")
+    if "ipcam" in source:
+        return True
+    if not source.startswith("flightdeck-native"):
+        return False
+    try:
+        path = _timelapse_path_from_record(item)
+    except HTTPException:
+        return True
+    video_seconds = _ffprobe_video_duration(path)
+    if video_seconds is None:
+        return True
+    return _timelapse_native_coverage(item, video_seconds) < 0.45
+
+
+def _timelapse_coverage_meta(item: dict) -> Optional[dict]:
+    if not item.get("has_timelapse"):
+        return None
+    print_sec = float(item.get("duration_seconds") or 0)
+    if print_sec <= 0:
+        return None
+    try:
+        path = _timelapse_path_from_record(item)
+    except HTTPException:
+        return None
+    video_seconds = _ffprobe_video_duration(path)
+    if video_seconds is None:
+        return None
+    source = str(item.get("timelapse_source") or "")
+    if source.startswith("flightdeck-native"):
+        coverage = _timelapse_native_coverage(item, video_seconds)
+        expected_video = print_sec / _timelapse_realtime_factor()
+    else:
+        coverage = min(1.0, video_seconds / print_sec) if print_sec > 0 else 1.0
+        expected_video = print_sec
+    return {
+        "video_seconds": round(video_seconds, 1),
+        "print_seconds": round(print_sec),
+        "coverage": round(coverage, 3),
+        "low_coverage": coverage < 0.45,
+        "expected_video_seconds": round(expected_video, 1),
+    }
+
+
+def _enrich_print_timelapse_meta(item: dict) -> dict:
+    out = dict(item)
+    coverage = _timelapse_coverage_meta(item)
+    if coverage:
+        out["timelapse_coverage"] = coverage
+        out["timelapse_should_upgrade"] = _timelapse_should_upgrade(item)
+    return out
+
+
+def _normalise_timelapse_key(value: str) -> str:
+    text = Path(value or "").stem.lower()
+    text = re.sub(r"\.gcode$", "", text)
+    text = re.sub(r"[^a-z0-9]+", "", text)
+    return text
+
+
+_TIMELAPSE_FILENAME_TS = re.compile(
+    r"(?:video|ipcam-record)[._](?P<date>\d{4}-\d{2}-\d{2})[_-](?P<hour>\d{2})[-:](?P<minute>\d{2})[-:](?P<second>\d{2})",
+    re.IGNORECASE,
+)
+
+
+def _parse_timelapse_filename_time(value: str) -> Optional[datetime]:
+    """Parse Bambu-style recorder filenames like video_2026-07-02_07-18-05.mp4."""
+    text = str(value or "")
+    match = _TIMELAPSE_FILENAME_TS.search(text)
+    if not match:
+        return None
+    try:
+        dt = datetime.strptime(
+            f"{match.group('date')} {match.group('hour')}:{match.group('minute')}:{match.group('second')}",
+            "%Y-%m-%d %H:%M:%S",
+        )
+        return dt.replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+def _parse_timelapse_modified(value) -> Optional[datetime]:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        try:
+            return datetime.fromtimestamp(float(value), tz=timezone.utc)
+        except Exception:
+            return None
+    raw = str(value).strip()
+    if not raw:
+        return None
+    for fmt in ("%Y%m%d%H%M%S", "%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%S"):
+        try:
+            dt = datetime.strptime(raw, fmt)
+            return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+        except ValueError:
+            pass
+    try:
+        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+def _timelapse_candidate_time(candidate: dict) -> Optional[datetime]:
+    modified = _parse_timelapse_modified(candidate.get("modified"))
+    if modified:
+        return modified
+    name = str(candidate.get("name") or candidate.get("path") or "")
+    return _parse_timelapse_filename_time(name)
+
+
+def _print_time_window(item: dict) -> tuple[Optional[datetime], Optional[datetime]]:
+    def parse(value) -> Optional[datetime]:
+        if not value:
+            return None
+        if isinstance(value, datetime):
+            return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+        try:
+            dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+            return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+        except ValueError:
+            return None
+    return parse(item.get("started_at")), parse(item.get("ended_at"))
+
+
+def _timelapse_has_name_match(item: dict, candidate: dict) -> bool:
+    filename_key = _normalise_timelapse_key(item.get("filename") or "")
+    subtask_key = _normalise_timelapse_key(item.get("subtask_name") or "")
+    candidate_key = _normalise_timelapse_key(candidate.get("name") or candidate.get("path") or "")
+    if not candidate_key:
+        return False
+    if filename_key and (filename_key in candidate_key or candidate_key in filename_key):
+        return True
+    if subtask_key and (subtask_key in candidate_key or candidate_key in subtask_key):
+        return True
+    return False
+
+
+def _timelapse_store_source(candidate: dict) -> str:
+    source = str(candidate.get("source") or "printer-media")
+    origin = str(candidate.get("path") or candidate.get("name") or "").replace("\\", "/").lstrip("/")
+    if origin and source.startswith("bambu"):
+        return f"{source}|{origin}"[:64]
+    return source[:64]
+
+
+def _timelapse_candidate_reserved(item: dict, candidate: dict, claimed_paths: set[str], claimed_origins: set[str]) -> bool:
+    print_id = int(item.get("id") or 0)
+    name = Path(str(candidate.get("local_path") or candidate.get("name") or candidate.get("path") or "")).name
+    owned = _ATTACHED_TIMELAPSE_NAME_RE.match(name)
+    if owned and int(owned.group(1)) != print_id:
+        return True
+
+    rel_path = str(candidate.get("path") or "").replace("\\", "/").lstrip("/")
+    if rel_path and rel_path in claimed_paths:
+        return True
+    if rel_path and rel_path in claimed_origins:
+        return True
+
+    local_path = str(candidate.get("local_path") or "")
+    if local_path:
+        try:
+            rel = Path(local_path).resolve().relative_to(FLIGHT_RECORDER_DIR.resolve())
+            if str(rel).replace("\\", "/") in claimed_paths:
+                return True
+        except Exception:
+            pass
+    return False
+
+
+def _timelapse_candidate_score(item: dict, candidate: dict) -> float:
+    filename_key = _normalise_timelapse_key(item.get("filename") or "")
+    subtask_key = _normalise_timelapse_key(item.get("subtask_name") or "")
+    candidate_key = _normalise_timelapse_key(candidate.get("name") or candidate.get("path") or "")
+    score = 0.0
+    print_id = int(item.get("id") or 0)
+    owned = _ATTACHED_TIMELAPSE_NAME_RE.match(
+        Path(str(candidate.get("local_path") or candidate.get("name") or "")).name
+    )
+    if owned and int(owned.group(1)) == print_id:
+        score += 220
+    if filename_key and (filename_key in candidate_key or candidate_key in filename_key):
+        score += 80
+    if subtask_key and (subtask_key in candidate_key or candidate_key in subtask_key):
+        score += 100
+
+    started, ended = _print_time_window(item)
+    modified = _timelapse_candidate_time(candidate)
+    if modified and (started or ended):
+        anchor = ended or started
+        if anchor:
+            delta = (modified - anchor).total_seconds()
+            abs_delta = abs(delta)
+            # Bambu timelapses usually land near print end; allow a short pre-end window too.
+            if -20 * 60 <= delta <= 6 * 3600:
+                score += max(0.0, 95.0 - (abs_delta / 120.0))
+            elif abs_delta <= 8 * 3600:
+                score += max(0.0, 35.0 - (abs_delta / 900.0))
+        if started and modified >= started - timedelta(minutes=10):
+            score += 10
+        if started and ended and started - timedelta(minutes=10) <= modified <= ended + timedelta(hours=2):
+            score += 45
+
+    path = str(candidate.get("path") or candidate.get("name") or "").lower().replace("\\", "/")
+    if path.startswith("timelapse/") or "/timelapse/" in path:
+        score += 45
+    elif path.startswith("ipcam/") or "/ipcam/" in path or "ipcam-record" in path:
+        score -= 80
+        if not _timelapse_has_name_match(item, candidate):
+            score -= 40
+
+    size = candidate.get("size")
+    if score > 0 and isinstance(size, int) and size > 0:
+        score += min(10.0, size / (25 * 1024 * 1024))
+    return score
+
+
+def _pick_timelapse_candidate(item: dict, candidates: list[dict]) -> Optional[dict]:
+    print_id = int(item.get("id") or 0)
+    claimed_paths = db.get_claimed_timelapse_paths(exclude_print_id=print_id)
+    claimed_origins = db.get_claimed_timelapse_origins(exclude_print_id=print_id)
+    viable = []
+    for candidate in candidates:
+        if _timelapse_candidate_reserved(item, candidate, claimed_paths, claimed_origins):
+            continue
+        suffix = _timelapse_suffix(candidate.get("name") or candidate.get("path") or "")
+        if not suffix:
+            continue
+        size = candidate.get("size")
+        if isinstance(size, int) and size > _MAX_FLIGHT_RECORDER_BYTES:
+            continue
+        scored = dict(candidate)
+        scored["_score"] = _timelapse_candidate_score(item, candidate)
+        viable.append(scored)
+    if not viable:
+        return None
+    viable.sort(key=lambda c: (float(c.get("_score") or 0), c.get("modified") or "", c.get("size") or 0), reverse=True)
+    best = viable[0]
+    if float(best.get("_score") or 0) <= 0:
+        return None
+    if not _timelapse_has_name_match(item, best):
+        started, ended = _print_time_window(item)
+        modified = _timelapse_candidate_time(best)
+        if not (started and ended and modified):
+            return None
+        delta = abs((modified - ended).total_seconds())
+        if delta > 25 * 60:
+            return None
+    return best
+
+
+def _local_recorder_search_roots() -> list[Path]:
+    roots: list[Path] = []
+
+    def add(path: Path | str | None) -> None:
+        if not path:
+            return
+        try:
+            resolved = Path(path).expanduser().resolve()
+        except Exception:
+            return
+        if resolved not in roots:
+            roots.append(resolved)
+
+    add(FLIGHT_RECORDER_DIR)
+    for name in _LOCAL_RECORDER_SEARCH_NAMES:
+        add(DATA_DIR / name)
+        add(PRINT_LIBRARY_DIR / name)
+    add(DATA_DIR)
+
+    env_value = os.getenv("FLIGHTDECK_RECORDER_SEARCH_DIRS", "")
+    for raw in re.split(r"[;\n]", env_value):
+        raw = raw.strip()
+        if raw:
+            add(raw)
+    return roots
+
+
+def _list_local_recorder_candidates() -> list[dict]:
+    rows: list[dict] = []
+    seen: set[Path] = set()
+    for root in _local_recorder_search_roots():
+        if not root.exists() or not root.is_dir():
+            continue
+        try:
+            base = root.resolve()
+            paths = root.rglob("*")
+            for idx, path in enumerate(paths):
+                if idx > 3000 or len(rows) >= 600:
+                    break
+                if not path.is_file() or not _timelapse_suffix(path.name):
+                    continue
+                try:
+                    resolved = path.resolve()
+                    if resolved in seen:
+                        continue
+                    rel = resolved.relative_to(base)
+                    stat = resolved.stat()
+                except Exception:
+                    continue
+                seen.add(resolved)
+                rows.append({
+                    "name": path.name,
+                    "path": str(rel).replace("\\", "/"),
+                    "local_path": str(resolved),
+                    "size": int(stat.st_size),
+                    "modified": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+                    "source": "flightdeck-pi",
+                    "root": str(base),
+                })
+        except Exception as exc:
+            log.debug("Flight Recorder local scan failed for %s: %s", root, exc)
+    return rows
+
+
+async def _list_bambu_recorder_candidates(printer) -> list[dict]:
+    from .printers.bambu_ftp import list_bambu_files
+    roots = [""] + list(_BAMBU_RECORDER_ROOTS)
+    seen: set[str] = set()
+    rows: list[dict] = []
+
+    async def scan(root: str, depth: int = 0) -> None:
+        if root in seen or depth > 2:
+            return
+        seen.add(root)
+        try:
+            files = await asyncio.to_thread(list_bambu_files, printer._ip, printer._access_code, root)
+        except Exception as exc:
+            log.debug("Bambu recorder scan failed for %s:%s: %s", printer.id, root or "/", exc)
+            return
+        for file in files[:200]:
+            path = str(file.get("path") or file.get("name") or "").lstrip("/")
+            if not path:
+                continue
+            kind = file.get("kind")
+            if kind == "dir":
+                if depth < 2:
+                    await scan(path, depth + 1)
+                continue
+            if _timelapse_suffix(path):
+                rows.append({**file, "path": path, "source": "bambu-sd"})
+
+    for root in roots:
+        await scan(root)
+    return rows
+
+
+async def _list_moonraker_recorder_candidates(base_url: str) -> list[dict]:
+    rows: list[dict] = []
+    for root in _MOONRAKER_RECORDER_ROOTS:
+        try:
+            files = await _moonraker_files_root(base_url, root)
+        except Exception as exc:
+            log.debug("Moonraker recorder scan failed for %s: %s", root, exc)
+            continue
+        for file in files:
+            if file.get("kind") == "dir":
+                continue
+            path = str(file.get("path") or file.get("name") or "").lstrip("/")
+            if _timelapse_suffix(path):
+                rows.append({**file, "path": path, "root": root, "source": "moonraker"})
+    return rows
+
+
+async def _discover_print_timelapse(printer_id: str, item: dict) -> tuple[dict, bytes]:
+    local_best = _pick_timelapse_candidate(item, _list_local_recorder_candidates())
+    if local_best:
+        path = Path(str(local_best.get("local_path") or ""))
+        try:
+            resolved = path.resolve()
+            root = Path(str(local_best.get("root") or FLIGHT_RECORDER_DIR)).resolve()
+            resolved.relative_to(root)
+        except Exception as exc:
+            raise HTTPException(status_code=404, detail="local recorder clip unavailable") from exc
+        return local_best, await asyncio.to_thread(resolved.read_bytes)
+
+    bambu = _find_bambu(printer_id)
+    if bambu:
+        candidates = await _list_bambu_recorder_candidates(bambu)
+        best = _pick_timelapse_candidate(item, candidates)
+        if not best:
+            raise HTTPException(status_code=404, detail="no matching Bambu recorder clip found")
+        from .printers.bambu_ftp import download_bambu_file
+        data = await asyncio.to_thread(download_bambu_file, bambu._ip, bambu._access_code, best["path"])
+        return best, data
+
+    mr_url = _find_moonraker_url(printer_id)
+    if mr_url:
+        raise HTTPException(status_code=404, detail="automatic printer-storage discovery is Bambu-tested for beta; use Add video for this printer")
+
+    raise HTTPException(status_code=404, detail="printer does not support recorder discovery")
+
+
+def _bambu_ftp_paths_from_mqtt_timelapse(mqtt_path: str) -> list[str]:
+    """Map Bambu MQTT timelapse paths onto FTPS paths we can actually download."""
+    raw = str(mqtt_path or "").strip().replace("\\", "/")
+    if not raw:
+        return []
+    stripped = raw.lstrip("/")
+    for prefix in ("userdata/media/", "userdata/"):
+        if stripped.startswith(prefix):
+            stripped = stripped[len(prefix):]
+            break
+    candidates: list[str] = []
+    seen: set[str] = set()
+
+    def add(path: str) -> None:
+        clean = path.strip().lstrip("/")
+        if clean and clean not in seen:
+            seen.add(clean)
+            candidates.append(clean)
+
+    if stripped:
+        add(stripped)
+        name = Path(stripped).name
+        if name:
+            for root in _BAMBU_RECORDER_ROOTS:
+                add(f"{root}/{name}")
+    return candidates
+
+
+async def _save_and_attach_timelapse(
+    printer_id: str,
+    print_id: int,
+    item: dict,
+    candidate: dict,
+    data: bytes,
+    *,
+    source: str,
+    decision_event: str = "flight_recorder_discovered",
+) -> dict:
+    if not data:
+        raise HTTPException(status_code=422, detail="recorder clip is empty")
+    if len(data) > _MAX_FLIGHT_RECORDER_BYTES:
+        raise HTTPException(status_code=413, detail="recorder clip too large")
+    suffix = _timelapse_suffix(candidate.get("name") or candidate.get("path") or "")
+    if not suffix:
+        raise HTTPException(status_code=422, detail="recorder clip type is unsupported")
+    out_path = _timelapse_safe_output_path(printer_id, print_id, item.get("filename") or "print", suffix)
+    out_path.write_bytes(data)
+    await _faststart_timelapse(out_path)
+    if not db.attach_print_timelapse(print_id, out_path, source=source):
+        raise HTTPException(status_code=404, detail="print not found")
+    detail = candidate.get("path") or candidate.get("name") or out_path.name
+    db.log_decision(
+        printer_id,
+        decision_event,
+        f"Attached {source} clip {detail}",
+        print_id=print_id,
+    )
+    updated = db.get_print_by_id(print_id) or item
+    updated["timelapse_url"] = f"/api/printers/{urllib.parse.quote(printer_id)}/prints/{print_id}/timelapse"
+    updated["recorder_candidate"] = {
+        "source": source,
+        "path": candidate.get("path"),
+        "size": candidate.get("size") or len(data),
+        "score": candidate.get("_score"),
+    }
+    return updated
+
+
+async def _try_harvest_bambu_mqtt_timelapse(
+    printer_id: str,
+    print_id: int,
+    item: dict,
+    mqtt_path: str,
+) -> bool:
+    bambu = _find_bambu(printer_id)
+    if not bambu or not mqtt_path:
+        return False
+    from .printers.bambu_ftp import download_bambu_file
+    for ftp_path in _bambu_ftp_paths_from_mqtt_timelapse(mqtt_path):
+        try:
+            data = await asyncio.to_thread(download_bambu_file, bambu._ip, bambu._access_code, ftp_path)
+        except Exception as exc:
+            log.debug("MQTT timelapse download failed for %s:%s: %s", printer_id, ftp_path, exc)
+            continue
+        if not data:
+            continue
+        suffix = _timelapse_suffix(ftp_path)
+        if not suffix:
+            continue
+        candidate = {
+            "name": Path(ftp_path).name,
+            "path": ftp_path,
+            "source": "bambu-mqtt",
+            "size": len(data),
+        }
+        await _save_and_attach_timelapse(
+            printer_id,
+            print_id,
+            item,
+            candidate,
+            data,
+            source="bambu-mqtt",
+            decision_event="flight_recorder_auto_mqtt",
+        )
+        return True
+    return False
+
+
+async def _auto_harvest_flight_recorder(
+    printer_id: str,
+    print_id: int,
+    mqtt_hint: Optional[str] = None,
+) -> None:
+    """Best-effort recorder harvest after a print ends. Retries while printer media catches up."""
+    key = (printer_id, print_id)
+    if key in _flight_recorder_harvest_pending:
+        return
+    _flight_recorder_harvest_pending.add(key)
+    try:
+        delays = (0,) + _FLIGHT_RECORDER_AUTO_RETRY_DELAYS
+        last_detail = "no matching recorder clip found"
+        for attempt, delay in enumerate(delays):
+            if delay:
+                await asyncio.sleep(delay)
+            item = db.get_print_by_id(print_id)
+            if not item or item.get("printer_id") != printer_id:
+                return
+            if item.get("has_timelapse") and not _timelapse_should_upgrade(item):
+                return
+            try:
+                if mqtt_hint and await _try_harvest_bambu_mqtt_timelapse(printer_id, print_id, item, mqtt_hint):
+                    log.info("flight recorder auto-attached via MQTT hint: %s print_id=%s", printer_id, print_id)
+                    return
+                candidate, data = await _discover_print_timelapse(printer_id, item)
+                await _save_and_attach_timelapse(
+                    printer_id,
+                    print_id,
+                    item,
+                    candidate,
+                    data,
+                    source=_timelapse_store_source(candidate),
+                    decision_event="flight_recorder_auto_discovered",
+                )
+                log.info("flight recorder auto-attached via discovery: %s print_id=%s", printer_id, print_id)
+                return
+            except HTTPException as exc:
+                last_detail = str(exc.detail or exc)
+                if exc.status_code not in {404, 422}:
+                    log.warning("flight recorder auto-harvest stopped for %s print_id=%s: %s", printer_id, print_id, last_detail)
+                    return
+            except Exception as exc:
+                log.warning("flight recorder auto-harvest failed for %s print_id=%s: %s", printer_id, print_id, exc)
+                return
+        db.log_decision(
+            printer_id,
+            "flight_recorder_auto_miss",
+            f"No recorder clip after {len(delays)} attempts ({last_detail})",
+            print_id=print_id,
+        )
+    finally:
+        _flight_recorder_harvest_pending.discard(key)
+
+
+@app.get("/api/printers/{printer_id}/prints/{print_id}/timelapse")
+async def get_print_timelapse(printer_id: str, print_id: int):
+    _assert_printer(printer_id)
+    record = db.get_print_timelapse(print_id)
+    if not record or record.get("printer_id") != printer_id:
+        raise HTTPException(status_code=404, detail="no timelapse")
+    path = _timelapse_path_from_record(record)
+    if not path.exists() or not path.is_file():
+        raise HTTPException(status_code=404, detail="timelapse file missing")
+    return FileResponse(
+        path,
+        media_type=_timelapse_media_type(path),
+        headers={"Cache-Control": "public, max-age=31536000, immutable"},
+    )
+
+
+@app.get("/api/printers/{printer_id}/prints/{print_id}/timelapse/debug")
+async def debug_print_timelapse(printer_id: str, print_id: int):
+    _assert_printer(printer_id)
+    item = db.get_print_by_id(print_id)
+    if not item or item.get("printer_id") != printer_id:
+        raise HTTPException(status_code=404, detail="print not found")
+
+    statuses = await _printer_status_map()
+    status = statuses.get(printer_id) or {}
+    mqtt_hint = str(status.get("_last_timelapse_path") or "")
+    ftp_hint_paths = _bambu_ftp_paths_from_mqtt_timelapse(mqtt_hint)
+
+    local_candidates = _list_local_recorder_candidates()
+    local_best = _pick_timelapse_candidate(item, local_candidates)
+
+    bambu_candidates: list[dict] = []
+    bambu_best = None
+    bambu_error = None
+    bambu = _find_bambu(printer_id)
+    if bambu:
+        try:
+            bambu_candidates = await _list_bambu_recorder_candidates(bambu)
+            bambu_best = _pick_timelapse_candidate(item, bambu_candidates)
+        except Exception as exc:
+            bambu_error = str(exc)
+
+    def summarise(candidate: dict) -> dict:
+        return {
+            "name": candidate.get("name"),
+            "path": candidate.get("path"),
+            "source": candidate.get("source"),
+            "size": candidate.get("size"),
+            "modified": candidate.get("modified"),
+            "score": candidate.get("_score"),
+        }
+
+    return {
+        "print_id": print_id,
+        "printer_id": printer_id,
+        "has_timelapse": bool(item.get("has_timelapse")),
+        "timelapse_path": item.get("timelapse_path"),
+        "timelapse_source": item.get("timelapse_source"),
+        "printer_state": status.get("state"),
+        "last_finished_print_id": status.get("_last_finished_print_id"),
+        "mqtt_timelapse_hint": mqtt_hint or None,
+        "mqtt_ftp_hint_paths": ftp_hint_paths,
+        "local_candidate_count": len(local_candidates),
+        "local_best": summarise(local_best) if local_best else None,
+        "local_samples": [summarise(c) for c in local_candidates[:8]],
+        "bambu_candidate_count": len(bambu_candidates),
+        "bambu_best": summarise(bambu_best) if bambu_best else None,
+        "bambu_samples": [summarise(c) for c in bambu_candidates[:8]],
+        "bambu_error": bambu_error,
+        "timelapse_coverage": _timelapse_coverage_meta(item),
+        "timelapse_should_upgrade": _timelapse_should_upgrade(item),
+    }
+
+
+@app.post("/api/printers/{printer_id}/prints/{print_id}/timelapse")
+async def upload_print_timelapse(printer_id: str, print_id: int, file: UploadFile = File(...)):
+    _assert_printer(printer_id)
+    item = db.get_print_by_id(print_id)
+    if not item or item.get("printer_id") != printer_id:
+        raise HTTPException(status_code=404, detail="print not found")
+    suffix = _timelapse_suffix(file.filename or "")
+    if not suffix:
+        raise HTTPException(status_code=400, detail="upload an mp4, webm, mov, or avi timelapse")
+    out_path = _timelapse_safe_output_path(printer_id, print_id, item.get("filename") or "print", suffix)
+    total = 0
+    with out_path.open("wb") as fh:
+        while True:
+            chunk = await file.read(_UPLOAD_READ_CHUNK_BYTES)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > _MAX_FLIGHT_RECORDER_BYTES:
+                fh.close()
+                try:
+                    out_path.unlink()
+                except OSError:
+                    pass
+                raise HTTPException(status_code=413, detail="timelapse upload too large")
+            fh.write(chunk)
+    if total <= 0:
+        try:
+            out_path.unlink()
+        except OSError:
+            pass
+        raise HTTPException(status_code=400, detail="empty timelapse upload")
+    await _faststart_timelapse(out_path)
+    if not db.attach_print_timelapse(print_id, out_path, source="upload"):
+        raise HTTPException(status_code=404, detail="print not found")
+    db.log_decision(printer_id, "flight_recorder_attached", f"Attached timelapse {out_path.name}", print_id=print_id)
+    updated = db.get_print_by_id(print_id) or item
+    updated["timelapse_url"] = f"/api/printers/{urllib.parse.quote(printer_id)}/prints/{print_id}/timelapse"
+    return updated
+
+
+@app.post("/api/printers/{printer_id}/prints/{print_id}/timelapse/discover")
+async def discover_print_timelapse(printer_id: str, print_id: int):
+    _assert_printer(printer_id)
+    item = db.get_print_by_id(print_id)
+    if not item or item.get("printer_id") != printer_id:
+        raise HTTPException(status_code=404, detail="print not found")
+    if item.get("has_timelapse") and not _timelapse_should_upgrade(item):
+        updated = db.get_print_by_id(print_id) or item
+        updated["timelapse_url"] = f"/api/printers/{urllib.parse.quote(printer_id)}/prints/{print_id}/timelapse"
+        return updated
+
+    if item.get("has_timelapse") and _timelapse_should_upgrade(item):
+        try:
+            old_path = _timelapse_path_from_record(item)
+            if old_path.exists():
+                old_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+    candidate, data = await _discover_print_timelapse(printer_id, item)
+    updated = await _save_and_attach_timelapse(
+        printer_id,
+        print_id,
+        item,
+        candidate,
+        data,
+        source=_timelapse_store_source(candidate),
+        decision_event="flight_recorder_upgraded" if item.get("has_timelapse") else "flight_recorder_discovered",
+    )
+    return updated
 
 @app.post("/api/spools/{spool_id}/move")
 async def move_spool(spool_id: int, body: SpoolMove):
@@ -6983,13 +10782,31 @@ def _is_queue_source_model(filename: str) -> bool:
 
 
 async def _printer_status_map() -> dict[str, dict]:
-    if not _latest_printers:
-        await _gather_all()
+    # Never block the queue UI on a slow printer poll — serve last snapshot.
+    if _latest_printers:
+        return dict(_latest_printers)
+    try:
+        await asyncio.wait_for(_gather_all(), timeout=5.0)
+    except asyncio.TimeoutError:
+        log.warning("printer status map: cold gather timed out")
     return dict(_latest_printers)
 
 
 def _norm_material(value: Optional[str]) -> str:
     return re.sub(r"[^a-z0-9]+", "", (value or "").lower())
+
+
+def _canon_brand(value: Optional[str]) -> str:
+    normalised = _norm_material(value)
+    return "bambulab" if normalised in {"bambu", "bambulab"} else normalised
+
+
+def _canon_profile(value: Optional[str]) -> str:
+    """Normalise a profile string for brand-agnostic comparison. Bambu's own profile
+    names say 'Bambu' (e.g. 'Bambu PLA Pure') while Flightdeck stores the brand as
+    'Bambu Lab' — collapse 'bambu lab' -> 'bambu' so they compare equal."""
+    text = re.sub(r"\bbambu\s+lab\b", "bambu", (value or "").lower())
+    return re.sub(r"[^a-z0-9]+", "", text)
 
 
 def _spool_matches_material(spool: dict, material: str) -> bool:
@@ -7044,8 +10861,8 @@ def _generic_profile_rejects_spool(slot: dict, spool: dict) -> bool:
 
 
 def _reported_brand_matches_spool(reported_brand: str, spool: dict) -> bool:
-    reported = _norm_material(reported_brand)
-    spool_brand = _norm_material(spool.get("brand") or "")
+    reported = _canon_brand(reported_brand)
+    spool_brand = _canon_brand(spool.get("brand") or "")
     if not reported or reported == "generic" or reported == spool_brand:
         return True
     spool_profile = _norm_material(" ".join([
@@ -7080,10 +10897,48 @@ def _queue_filament_colors(job: dict) -> list[dict]:
         return []
 
 
-def _queue_colour_requirements(job: dict) -> list[dict]:
+def _queue_filament_colors_for_preflight(job: dict, printer_status: Optional[dict]) -> list[dict]:
+    """Prefer stored filament/nozzle metadata; only re-parse when nozzles are missing.
+
+    Historically this re-read the full 3MF (including gcode object geometry) on
+    every H2D queue preflight — a 16MB job froze the whole API at ~80% CPU.
+    """
+    colors = _queue_filament_colors(job)
+    if not _is_h2d_printer_status(printer_status):
+        return colors
+    if colors and all(
+        isinstance(c, dict) and c.get("nozzle") is not None
+        for c in colors
+    ):
+        return colors
+    filename = str(job.get("filename") or "")
+    if _queue_file_extension(filename) != ".3mf":
+        return colors
+    file_path = job.get("file_path")
+    if not file_path:
+        job_id = job.get("id")
+        if job_id is not None:
+            full = db.queue_get(int(job_id))
+            file_path = (full or {}).get("file_path")
+    if not file_path:
+        return colors
+    try:
+        data = Path(file_path).read_bytes()
+    except OSError:
+        return colors
+    try:
+        refreshed = _queue_filament_colors(
+            {"filament_colors": _queue_file_metadata(filename, data).get("filament_colors")}
+        )
+    except Exception:
+        return colors
+    return refreshed or colors
+
+
+def _queue_colour_requirements(job: dict, printer_status: Optional[dict] = None) -> list[dict]:
     material = _norm_material(job.get("filament_type"))
     grouped: dict[tuple[str, str], dict] = {}
-    for item in _queue_filament_colors(job):
+    for item in _queue_filament_colors_for_preflight(job, printer_status):
         color = _norm_hex(item.get("color"))
         if not color:
             continue
@@ -7092,6 +10947,28 @@ def _queue_colour_requirements(job: dict) -> list[dict]:
         req = grouped.setdefault(key, {"material": item_material, "color": color, "used_g": 0.0})
         req["used_g"] += float(item.get("used_g") or 0)
     return list(grouped.values())
+
+
+def _queue_nozzle_requirements(job: dict, printer_status: Optional[dict] = None) -> list[dict]:
+    material = _norm_material(job.get("filament_type"))
+    out = []
+    for item in _queue_filament_colors_for_preflight(job, printer_status):
+        try:
+            nozzle = int(item.get("nozzle"))
+        except (TypeError, ValueError):
+            continue
+        if nozzle not in (0, 1):
+            continue
+        color = _norm_hex(item.get("color"))
+        item_material = _norm_material(item.get("type")) or material
+        if color or item_material:
+            out.append({
+                "material": item_material,
+                "color": color,
+                "used_g": float(item.get("used_g") or 0),
+                "nozzle": nozzle,
+            })
+    return out
 
 
 def _norm_hex(value: Optional[str]) -> str:
@@ -7136,27 +11013,276 @@ def _colour_label(color: Optional[str]) -> str:
     return name if dist <= 115 else color
 
 
+def _colour_family(color: Optional[str]) -> str:
+    color = _norm_hex(color)
+    if not color:
+        return ""
+    rgb = [int(color[i:i + 2], 16) for i in (1, 3, 5)]
+    spread = max(rgb) - min(rgb)
+    avg = sum(rgb) / 3
+    if spread <= 45:
+        if avg <= 45:
+            return "black"
+        if avg >= 220:
+            return "white"
+        return "grey_silver"
+    return _colour_label(color).lower().replace(" ", "_")
+
+
+def _colour_matches(actual: Optional[str], expected: Optional[str]) -> bool:
+    if not expected:
+        return True
+    if _hex_dist(actual, expected) <= 95:
+        return True
+    actual_family = _colour_family(actual)
+    expected_family = _colour_family(expected)
+    return bool(actual_family and actual_family == expected_family == "grey_silver")
+
+
+def _queue_nozzle_label(nozzle: Optional[int]) -> str:
+    return "left nozzle" if nozzle == 0 else "right nozzle" if nozzle == 1 else "unknown nozzle"
+
+
+def _is_h_series_printer_status(printer_status: Optional[dict]) -> bool:
+    return str((printer_status or {}).get("model_name") or "").upper().startswith("H")
+
+
+def _is_h2_printer_status(printer_status: Optional[dict]) -> bool:
+    return str((printer_status or {}).get("model_name") or "").upper().startswith("H2")
+
+
+def _is_h2d_printer_status(printer_status: Optional[dict]) -> bool:
+    return str((printer_status or {}).get("model_name") or "").upper() == "H2D"
+
+
+# Queue safety: PLA/PETG/TPU left in the nozzle while the next job heats for
+# ABS/ASA/PA/PC will cook the soft filament. Broader than Colour Match families.
+def _filament_temp_family(material: Optional[str]) -> Optional[str]:
+    """Classify filament as 'low' / 'high' for nozzle unload safety. None = unknown."""
+    n = _norm_material(material)
+    if not n:
+        return None
+    if any(n == token or n.startswith(token) for token in ("pla", "petg", "pctg", "tpu", "pva", "bvoh")):
+        return "low"
+    if n == "pet" or n.startswith("pet"):
+        return "low"
+    if any(n == token or n.startswith(token) for token in ("abs", "asa", "nylon", "pacf", "pagf", "pps", "ppa")):
+        return "high"
+    if n == "pc" or (n.startswith("pc") and not n.startswith("pct")):
+        return "high"
+    # PA / nylon family — after PLA so "pla*" is never treated as PA.
+    if n == "pa" or (n.startswith("pa") and not n.startswith("pla")):
+        return "high"
+    return None
+
+
+def _job_high_temp_nozzle_targets(job: dict, printer_status: Optional[dict]) -> set[Optional[int]]:
+    """Nozzles that will print high-temp for this job.
+
+    Empty set = job is not high-temp. {None} = high-temp but path unknown
+    (treat as any/all paths). {0}/{1}/both = H2D path-aware.
+    """
+    nozzles: set[Optional[int]] = set()
+    for req in _queue_nozzle_requirements(job, printer_status):
+        if _filament_temp_family(req.get("material")) == "high":
+            nozzles.add(req.get("nozzle"))
+    if nozzles:
+        return nozzles
+    for req in _queue_colour_requirements(job, printer_status):
+        if _filament_temp_family(req.get("material")) == "high":
+            nozzles.add(None)
+    if nozzles:
+        return nozzles
+    if _filament_temp_family(job.get("filament_type")) == "high":
+        nozzles.add(None)
+    return nozzles
+
+
+def _h_series_nozzle_low_temp_conflict(job: dict, printer_status: Optional[dict]) -> Optional[dict]:
+    """Detect H-series high-temp job with low-temp filament still at the nozzle.
+
+    Uses AMS tray_now (last-used when idle) as the nozzle filament signal.
+    Always treat low-temp at tray_now as a conflict before any high-temp job —
+    H2D L/R path metadata is often inconsistent with AMS HT mapping, and
+    skipping "other path" missed real PETG-loaded-then-ASA-print cases.
+    """
+    if not _is_h_series_printer_status(printer_status):
+        return None
+    if not _job_high_temp_nozzle_targets(job, printer_status):
+        return None
+    active = _reported_active_slot(printer_status)
+    if not active or active.get("empty"):
+        return None
+    active_mat = _reported_slot_material_text(active)
+    if _filament_temp_family(active_mat) != "low":
+        return None
+    try:
+        active_nozzle = int(active["nozzle"]) if active.get("nozzle") is not None else None
+    except (TypeError, ValueError):
+        active_nozzle = None
+    label = active.get("label") or "AMS"
+    return {
+        "material": active_mat,
+        "label": label,
+        "flat_slot": active.get("flat_slot"),
+        "nozzle": active_nozzle,
+        "message": (
+            f"Will auto-unload {label} ({active_mat or 'low-temp'}) "
+            f"before high-temp print — nozzle still loaded"
+        ),
+    }
+
+
+def _reported_ams_path_slots(printer_status: Optional[dict]) -> list[dict]:
+    if not printer_status or not _is_h2d_printer_status(printer_status):
+        return []
+    slots = []
+    for unit in printer_status.get("ams") or []:
+        try:
+            unit_id = int(unit.get("unit") or 0)
+        except (TypeError, ValueError):
+            continue
+        # H-series nozzle IDs are 0=left, 1=right. H2D regular AMS feeds
+        # the left path, while AMS HT feeds the right path.
+        nozzle = 1 if unit_id >= 128 else 0
+        bay = "AMS HT" if unit_id >= 128 else f"AMS {unit_id + 1}"
+        for slot in unit.get("slots") or []:
+            if slot.get("empty"):
+                continue
+            try:
+                slot_idx = int(slot.get("idx") or 0)
+            except (TypeError, ValueError):
+                slot_idx = 0
+            slots.append({
+                "unit": unit_id,
+                "idx": slot_idx,
+                "label": bay if unit_id >= 128 else f"{bay} slot {slot_idx + 1}",
+                "nozzle": nozzle,
+                "material": _norm_material(slot.get("type")),
+                "color": _norm_hex(slot.get("color")),
+            })
+    return slots
+
+
+def _h2d_nozzle_mapping_issues(job: dict, printer_status: Optional[dict]) -> list[dict]:
+    requirements = _queue_nozzle_requirements(job, printer_status)
+    if not requirements:
+        return []
+    slots = _reported_ams_path_slots(printer_status)
+    if not slots:
+        return []
+    issues = []
+    for req in requirements:
+        material_matches = [
+            s for s in slots
+            if req["material"] and (
+                req["material"] == s["material"]
+                or req["material"] in s["material"]
+                or s["material"] in req["material"]
+            )
+        ] or slots
+        same_path = [s for s in material_matches if s["nozzle"] == req["nozzle"]]
+        same_path_match = [
+            s for s in same_path
+            if _colour_matches(s.get("color"), req.get("color"))
+        ]
+        if same_path_match:
+            continue
+        other_path_match = [
+            s for s in material_matches
+            if s["nozzle"] != req["nozzle"] and _colour_matches(s.get("color"), req.get("color"))
+        ]
+        wanted = " ".join(p for p in [req.get("material"), _colour_label(req.get("color"))] if p).strip()
+        target = _queue_nozzle_label(req["nozzle"])
+        if other_path_match:
+            issues.append({
+                "level": "block",
+                "message": (
+                    f"H2D nozzle/AMS mismatch: job is sliced for {target}, but matching {wanted} "
+                    f"is loaded in {other_path_match[0]['label']} ({_queue_nozzle_label(other_path_match[0]['nozzle'])}). "
+                    "Move the filament to the matching nozzle path or re-slice for the loaded AMS path."
+                ),
+            })
+        elif same_path:
+            issues.append({
+                "level": "block",
+                "message": f"H2D nozzle/AMS mismatch: job needs {wanted} on {target}, but that nozzle path has no matching colour loaded.",
+            })
+        else:
+            issues.append({
+                "level": "block",
+                "message": f"H2D nozzle/AMS mismatch: job needs {wanted} on {target}, but no AMS tray feeding that nozzle is loaded.",
+            })
+    return issues
+
+
 def _coverage_label(coverage: dict) -> str:
-    brands = sorted({
-        str(s.get("brand") or "").strip()
-        for s in coverage.get("spools") or []
-        if str(s.get("brand") or "").strip()
-    })
-    brand_text = ", ".join(brands[:2])
-    if len(brands) > 2:
-        brand_text += f" +{len(brands) - 2}"
-    if not brand_text:
+    spools = coverage.get("spools") or []
+    spool_bits = []
+    for spool in spools[:2]:
+        sid = db._spool_number(spool)
+        colour = str(spool.get("color_name") or "").strip()
+        brand = str(spool.get("brand") or "").strip()
+        label = " ".join(p for p in [f"#{sid}" if sid and sid != "-" else "", colour] if p).strip()
+        if brand:
+            label = f"{label} ({brand})" if label else brand
+        if label:
+            spool_bits.append(label)
+    if len(spools) > 2:
+        spool_bits.append(f"+{len(spools) - 2} more")
+    if spool_bits:
+        brand_text = ", ".join(spool_bits)
+    else:
         brand_text = "no loaded spool"
+    requested = _colour_label(coverage["color"])
+    spool_label = f"{requested} via {brand_text}" if spools else f"{requested} ({brand_text})"
     return (
-        f"{_colour_label(coverage['color'])} ({brand_text}) "
+        f"{spool_label} "
         f"{coverage['available_g']:.0f}g/{coverage['used_g']:.0f}g"
     )
 
+def _spool_h2d_nozzle(spool: dict) -> Optional[int]:
+    try:
+        slot = int(spool.get("location_slot"))
+    except (TypeError, ValueError):
+        return None
+    # H2D/H-series path numbering is 0=left, 1=right. Regular AMS units feed
+    # the left path; AMS HT virtual slots (128+) feed the right path.
+    return 1 if slot >= 128 else 0
+
+
+def _queue_nozzle_coverage(requirements: list[dict], spools: list[dict], required_g: Optional[float]) -> list[dict]:
+    reqs = [dict(req) for req in requirements]
+    if required_g is not None and len(reqs) == 1 and float(reqs[0].get("used_g") or 0) <= 0:
+        reqs[0]["used_g"] = float(required_g)
+
+    coverage = []
+    for req in reqs:
+        matching = [
+            s for s in spools
+            if _spool_h2d_nozzle(s) == req.get("nozzle")
+            and _spool_matches_material(s, req["material"])
+            and _spool_matches_color(s, req["color"])
+        ]
+        available = sum(float(s.get("remaining_g") or 0) for s in matching)
+        coverage.append({
+            **req,
+            "available_g": available,
+            "spools": matching,
+            "ok": available + 0.1 >= float(req.get("used_g") or 0),
+        })
+    return coverage
+
+
+def _nozzle_coverage_label(coverage: dict) -> str:
+    base = _coverage_label(coverage)
+    return f"{_queue_nozzle_label(coverage.get('nozzle'))} {base}"
+
 
 def _spool_matches_color(spool: dict, color: Optional[str]) -> bool:
-    if not color:
+    if str(spool.get("color_scheme") or "").lower() in {"rainbow", "multicolor", "multi", "gradient"}:
         return True
-    return _hex_dist(spool.get("color_hex"), color) <= 95
+    return _colour_matches(spool.get("color_hex"), color)
 
 
 def _queue_colour_coverage(requirements: list[dict], spools: list[dict]) -> list[dict]:
@@ -7210,7 +11336,7 @@ def _reported_slot_matches_requirement(slot: dict, req: dict) -> bool:
             {"material": _reported_slot_material_text(slot), "subtype": "", "brand": ""},
             req["material"],
         )
-        and _hex_dist(slot.get("color"), req["color"]) <= 95
+        and _colour_matches(slot.get("color"), req["color"])
     )
 
 
@@ -7234,15 +11360,15 @@ def _reported_slot_mismatch(spool: Optional[dict], slot: Optional[dict]) -> str:
     if _generic_profile_rejects_spool(slot, spool):
         expected = " ".join(str(spool.get(k) or "") for k in ("brand", "material", "subtype")).strip()
         return f"Profile mismatch: printer {_reported_profile_text(slot) or 'Generic'}, Flightdeck {expected}"
-    if _hex_dist(slot.get("color"), spool.get("color_hex")) > 95:
+    if not _colour_matches(slot.get("color"), spool.get("color_hex")):
         return f"Colour mismatch: printer {_colour_label(slot.get('color'))}, Flightdeck {_colour_label(spool.get('color_hex'))}"
 
-    reported_brand = _norm_material(slot.get("brand") or "")
-    spool_brand = _norm_material(spool.get("brand") or "")
+    reported_brand = _canon_brand(slot.get("brand") or "")
+    spool_brand = _canon_brand(spool.get("brand") or "")
     if reported_brand and spool_brand and not _reported_brand_matches_spool(str(slot.get("brand") or ""), spool):
         return f"Brand mismatch: printer {slot.get('brand')}, Flightdeck {spool.get('brand')}"
-    reported_profile = _norm_material(slot.get("profile_name") or "")
-    spool_profile = _norm_material(" ".join([
+    reported_profile = _canon_profile(slot.get("profile_name") or "")
+    spool_profile = _canon_profile(" ".join([
         str(spool.get("brand") or ""),
         str(spool.get("material") or ""),
         str(spool.get("subtype") or ""),
@@ -7333,9 +11459,29 @@ def _queue_preflight(job: dict, printer_status: Optional[dict]) -> dict:
     if not printer_status:
         issues.append({"level": "wait", "message": "Waiting for printer telemetry"})
     elif state in ("offline", "error", "estop"):
-        issues.append({"level": "block", "message": f"Printer is {state}"})
+        printer_error = str((printer_status or {}).get("error") or "").strip()
+        if state == "error":
+            message = f"Printer error: {printer_error}" if printer_error else "Printer reports an error; clear the printer screen or Bambu app, then retry."
+        elif state == "estop":
+            message = "Emergency stop is active"
+        else:
+            message = "Printer is offline"
+        issues.append({"level": "block", "message": message})
     elif state not in ("idle", "ready", "standby", "finished"):
         issues.append({"level": "wait", "message": f"Printer is {state}"})
+        has_block = any(i["level"] == "block" for i in issues)
+        return {
+            "status": "blocked" if has_block else "waiting",
+            "label": "Blocked" if has_block else "Waiting",
+            "can_start": False,
+            "issues": issues,
+        }
+
+    printer_id = job["printer_id"]
+    if printer_id in _calibration_sessions or bool((printer_status or {}).get("calibration", {}).get("active")):
+        issues.append({"level": "wait", "message": "Printer calibrating — dispatch waits until complete"})
+    elif bool(job.get("calibrate_before_start")) and _bambu_printer(printer_id):
+        issues.append({"level": "info", "message": "Will run calibration before dispatch"})
 
     due_maintenance = [m for m in db.get_maintenance_items(job["printer_id"]) if m.get("is_due")]
     if due_maintenance:
@@ -7345,17 +11491,27 @@ def _queue_preflight(job: dict, printer_status: Optional[dict]) -> dict:
 
     required_g = job.get("filament_weight_g")
     material = job.get("filament_type")
-    color_reqs = _queue_colour_requirements(job)
+    color_reqs = _queue_colour_requirements(job, printer_status)
+    nozzle_reqs = _queue_nozzle_requirements(job, printer_status)
     loaded = db.get_spools_by_printer(job["printer_id"])
     loaded_spools = list(loaded.values())
     material_matches = [s for s in loaded_spools if _spool_matches_material(s, material)]
     color_coverage = _queue_colour_coverage(color_reqs, loaded_spools) if color_reqs else []
+    use_nozzle_path_checks = _is_h2d_printer_status(printer_status)
+    nozzle_coverage = (
+        _queue_nozzle_coverage(nozzle_reqs, loaded_spools, required_g)
+        if use_nozzle_path_checks and nozzle_reqs else []
+    )
     color_matches = [
         s for s in material_matches
         if any(_spool_matches_color(s, c["color"]) for c in color_reqs)
     ] if color_reqs else material_matches
     active_reported = _reported_active_slot(printer_status)
     ams_mismatches = _printer_ams_mismatches(printer_status, loaded_spools)
+    issues.extend(_h2d_nozzle_mapping_issues(job, printer_status))
+    nozzle_conflict = _h_series_nozzle_low_temp_conflict(job, printer_status)
+    if nozzle_conflict:
+        issues.append({"level": "info", "message": nozzle_conflict["message"]})
     impacted_mismatches = [m for m in ams_mismatches if _ams_mismatch_impacts_job(m, material, color_reqs)]
     if impacted_mismatches:
         detail = "; ".join(f"{m['label']}: {m['message']}" for m in impacted_mismatches[:2])
@@ -7376,7 +11532,10 @@ def _queue_preflight(job: dict, printer_status: Optional[dict]) -> dict:
                 "level": "block" if strict_colour else "warn",
                 "message": f"No loaded spool matches required colour {wanted}",
             })
-        elif len(color_reqs) == 1 and active_reported:
+        elif len(color_reqs) == 1 and active_reported and state in {"printing", "paused"}:
+            # Only check the active slot mid-print. When idle, tray_now reflects
+            # the last-used slot, not the slot the next job will use — the AMS
+            # mapping in the print command handles slot selection at dispatch time.
             req = color_reqs[0]
             if not _reported_slot_matches_requirement(active_reported, req):
                 actual = " ".join(
@@ -7394,7 +11553,21 @@ def _queue_preflight(job: dict, printer_status: Optional[dict]) -> dict:
         issues.append({"level": "warn", "message": "No material metadata; material check skipped"})
 
     if required_g is not None:
-        if color_reqs:
+        if nozzle_coverage:
+            missing = [c for c in nozzle_coverage if not c["ok"]]
+            if missing:
+                detail = "; ".join(_nozzle_coverage_label(c) for c in missing)
+                issues.append({
+                    "level": "block" if strict_colour else "warn",
+                    "message": f"Loaded nozzle-path stock short: {detail}",
+                })
+            elif any(c["available_g"] < float(c["used_g"] or 0) * 1.15 for c in nozzle_coverage):
+                detail = "; ".join(_nozzle_coverage_label(c) for c in nozzle_coverage)
+                issues.append({
+                    "level": "warn",
+                    "message": f"Low nozzle-path margin: {detail}",
+                })
+        elif color_reqs:
             missing = [c for c in color_coverage if not c["ok"]]
             if missing:
                 detail = "; ".join(_coverage_label(c) for c in missing)
@@ -7426,6 +11599,19 @@ def _queue_preflight(job: dict, printer_status: Optional[dict]) -> dict:
     else:
         issues.append({"level": "warn", "message": "No filament weight metadata; stock check skipped"})
 
+    # Optional override: allow start when stock is short (operator will swap rolls mid-print).
+    if job.get("allow_short_filament"):
+        stock_short_re = re.compile(
+            r"filament short|colour coverage short|nozzle-path stock short|No inventory spool available",
+            re.I,
+        )
+        for issue in issues:
+            if issue.get("level") == "block" and stock_short_re.search(str(issue.get("message") or "")):
+                issue["level"] = "warn"
+                msg = str(issue.get("message") or "")
+                if not msg.lower().startswith("override:"):
+                    issue["message"] = f"Override: {msg}"
+
     has_block = any(i["level"] == "block" for i in issues)
     has_wait = any(i["level"] == "wait" for i in issues)
     has_warn = any(i["level"] == "warn" for i in issues)
@@ -7447,17 +11633,312 @@ def _apply_queue_preflight(jobs: list[dict], statuses: dict[str, dict]) -> list[
     return jobs
 
 
+def _queue_printer_error(status: Optional[dict]) -> str:
+    if not status:
+        return ""
+    error = str(status.get("error") or "").strip()
+    if not error:
+        return ""
+    state = str(status.get("state") or "").lower()
+    if state in {"error", "estop"}:
+        return error
+    if state == "paused" and "ams mapping" in error.lower():
+        return error
+    return ""
+
+
+def _queue_active_age_seconds(job: dict) -> Optional[float]:
+    raw = job.get("started_at") or job.get("created_at")
+    if not raw:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return max(0.0, (datetime.utcnow() - dt).total_seconds())
+
+
+def _queue_name_matches_print(job: dict, print_row: Optional[dict]) -> bool:
+    """True when an active queue row looks like the printer's last finished print."""
+    if not print_row:
+        return False
+    job_name = str(job.get("filename") or "").strip().lower()
+    if not job_name:
+        return False
+    candidates = {
+        str(print_row.get("filename") or "").strip().lower(),
+        str(print_row.get("subtask_name") or "").strip().lower(),
+    }
+    candidates = {c for c in candidates if c}
+    if job_name in candidates:
+        return True
+    job_base = job_name.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+    for c in candidates:
+        c_base = c.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+        if job_base == c_base or job_base in c_base or c_base in job_base:
+            return True
+    return False
+
+
+def _reconcile_queue_active_state(jobs: list[dict], statuses: dict[str, dict]) -> tuple[bool, list[str]]:
+    changed = False
+    cleared_printers: list[str] = []
+    active_by_printer: dict[str, list[dict]] = {}
+    for job in jobs:
+        if job.get("status") in {"printing", "uploading"}:
+            active_by_printer.setdefault(str(job.get("printer_id") or ""), []).append(job)
+
+    for printer_id, active in active_by_printer.items():
+        printer_error = _queue_printer_error(statuses.get(printer_id))
+        if printer_error:
+            changed = db.queue_fail_active(printer_id, printer_error) > 0 or changed
+            continue
+        state = str((statuses.get(printer_id) or {}).get("state") or "").lower()
+        if state in {"idle", "ready", "standby", "finished", "cancelled", "failed"}:
+            ages = [
+                age for age in (_queue_active_age_seconds(row) for row in active)
+                if age is not None
+            ]
+            if ages and min(ages) < _QUEUE_ACTIVE_STALE_GRACE_SECONDS:
+                continue
+
+            # Successful finish often lands here if we missed printing→finished.
+            # Prefer DONE over a scary CANCELLED when history says the print completed.
+            last = db.get_last_print(printer_id)
+            last_finished = str((last or {}).get("final_state") or "").upper() == "FINISHED"
+            matched_finish = last_finished and any(
+                _queue_name_matches_print(row, last) for row in active
+            )
+            if state == "finished" or _recently_finished(printer_id) or matched_finish:
+                finished = db.queue_finish_active(printer_id)
+                changed = finished > 0 or changed
+                if finished:
+                    db.log_decision(
+                        printer_id,
+                        "queue_active_finished",
+                        f"Printer is {state or 'idle'}; completed active queue job after successful print",
+                    )
+                    cleared_printers.append(printer_id)
+                continue
+
+            detail = f"Printer is {state or 'not printing'}; stale active queue job cleared"
+            cleared = db.queue_cancel_active(
+                printer_id,
+                "cancelled",
+                "Cleared stale queue state after printer returned to idle",
+            )
+            changed = cleared > 0 or changed
+            if cleared:
+                db.log_decision(printer_id, "queue_active_cleared", detail)
+                cleared_printers.append(printer_id)
+            continue
+        if len(active) <= 1:
+            continue
+        keep = max(
+            active,
+            key=lambda row: (
+                str(row.get("started_at") or ""),
+                int(row.get("id") or 0),
+            ),
+        )
+        changed = db.queue_fail_active_except(
+            printer_id,
+            int(keep["id"]),
+            "Superseded by newer active queue job",
+        ) > 0 or changed
+    return changed, cleared_printers
+
+
+def _reconcile_queue_from_printer_state(jobs: list[dict], statuses: dict[str, dict]) -> bool:
+    changed = False
+    active_printers = {
+        str(row.get("printer_id") or "")
+        for row in jobs
+        if row.get("status") in {"printing", "uploading"}
+    }
+    for printer_id, status in statuses.items():
+        state = str((status or {}).get("state") or "").lower()
+        if state not in {"printing", "paused"} or printer_id in active_printers:
+            continue
+        restored = db.queue_reopen_stale_cleared_active(printer_id)
+        if restored:
+            changed = True
+            db.log_decision(
+                printer_id,
+                "queue_active_restored",
+                f"Restored stale-cleared queue job #{restored['id']} {restored['filename']} after printer reported {state}",
+            )
+    return changed
+
+
+_QUEUE_PRINTER_BUSY_STATES = {"printing", "paused"}
+_QUEUE_ADVANCE_LOCKS: dict[str, asyncio.Lock] = {}
+
+
+def _queue_printer_ids() -> list[str]:
+    return [pid for pid, *_ in _moonraker] + [p.id for p in _bambu]
+
+
+def _queue_advance_lock(printer_id: str) -> asyncio.Lock:
+    lock = _QUEUE_ADVANCE_LOCKS.get(printer_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _QUEUE_ADVANCE_LOCKS[printer_id] = lock
+    return lock
+
+
+def _printer_available_for_queue_dispatch(status: Optional[dict], printer_id: Optional[str] = None) -> bool:
+    pid = printer_id or str((status or {}).get("id") or "")
+    if pid and pid in _calibration_sessions:
+        return False
+    state = str((status or {}).get("state") or "").lower()
+    if state in _QUEUE_PRINTER_BUSY_STATES or state in {"error", "estop"}:
+        return False
+    return True
+
+
+async def _maybe_auto_advance_queue(printer_id: str, *, trigger: str = "unknown") -> None:
+    """Send the next pending queue job when the printer has no active queue row."""
+    if db.queue_has_active(printer_id) or not db.queue_next_pending(printer_id):
+        return
+    statuses = await _printer_status_map()
+    if not _printer_available_for_queue_dispatch(statuses.get(printer_id), printer_id):
+        return
+    lock = _queue_advance_lock(printer_id)
+    if lock.locked():
+        return
+    async with lock:
+        if db.queue_has_active(printer_id):
+            return
+        job = db.queue_next_pending(printer_id)
+        if not job:
+            return
+        statuses = await _printer_status_map()
+        status = statuses.get(printer_id)
+        if not _printer_available_for_queue_dispatch(status, printer_id):
+            return
+        preflight = _queue_preflight(job, status)
+        if not preflight["can_start"]:
+            log.info(
+                "queue auto-dispatch skipped on %s trigger=%s: %s",
+                printer_id,
+                trigger,
+                preflight.get("status"),
+            )
+            return
+        db.log_decision(
+            printer_id,
+            "queue_auto_dispatch",
+            f"Job #{job['id']} {job['filename']} ({trigger})",
+        )
+        await _advance_queue(printer_id)
+
+
+async def _scan_idle_queue_dispatch() -> None:
+    for printer_id in _queue_printer_ids():
+        await _maybe_auto_advance_queue(printer_id, trigger="idle_poll")
+
+
+async def _boot_queue_auto_dispatch() -> None:
+    await asyncio.sleep(10)
+    for printer_id in _queue_printer_ids():
+        await _maybe_auto_advance_queue(printer_id, trigger="startup")
+
+
+async def _ensure_low_temp_unloaded_for_high_temp(printer_id: str, job: dict) -> bool:
+    """Unload low-temp filament before an H-series high-temp queue job.
+
+    Returns True when dispatch may proceed. Returns False when the job was
+    failed (unload refused / timed out / printer fault).
+    """
+    p = _bambu_printer(printer_id)
+    if p is None:
+        return True
+
+    async def _fresh_status() -> Optional[dict]:
+        try:
+            status = await asyncio.to_thread(p.status)
+        except Exception as exc:
+            log.warning("queue: high-temp unload status failed on %s: %s", printer_id, exc)
+            return None
+        return asdict(status)
+
+    status = await _fresh_status()
+    if status is None:
+        status = (await _printer_status_map()).get(printer_id)
+    conflict = _h_series_nozzle_low_temp_conflict(job, status)
+    if not conflict:
+        return True
+
+    job_id = job.get("id")
+    label = conflict.get("label") or "AMS"
+    mat = conflict.get("material") or "low-temp"
+    note = f"Job #{job_id}: unloading {label} ({mat}) before high-temp print"
+    log.info("queue: %s on %s", note, printer_id)
+    db.log_decision(printer_id, "ams_unload_before_high_temp", note)
+
+    try:
+        ok = await asyncio.to_thread(p.unload_ams_filament, None)
+    except Exception as exc:
+        reason = f"Failed to unload {label} ({mat}) before high-temp print: {exc}"
+        log.error("queue: %s on %s", reason, printer_id)
+        if job_id is not None:
+            db.queue_update_status(int(job_id), "failed", reason)
+        db.log_decision(printer_id, "ams_unload_before_high_temp_failed", reason)
+        return False
+    if not ok:
+        reason = f"Printer refused unload of {label} ({mat}) before high-temp print"
+        if job_id is not None:
+            db.queue_update_status(int(job_id), "failed", reason)
+        db.log_decision(printer_id, "ams_unload_before_high_temp_failed", reason)
+        return False
+
+    deadline = time.monotonic() + 300.0
+    while time.monotonic() < deadline:
+        await asyncio.sleep(3.0)
+        status = await _fresh_status()
+        if status is None:
+            continue
+        state = str(status.get("state") or "").lower()
+        if state in {"offline", "error", "estop"}:
+            reason = f"Printer {state} while unloading {mat} before high-temp print"
+            if job_id is not None:
+                db.queue_update_status(int(job_id), "failed", reason)
+            db.log_decision(printer_id, "ams_unload_before_high_temp_failed", reason)
+            return False
+        if not _h_series_nozzle_low_temp_conflict(job, status):
+            db.log_decision(
+                printer_id,
+                "ams_unload_before_high_temp_done",
+                f"Job #{job_id}: nozzle clear after unloading {mat}",
+            )
+            return True
+
+    reason = f"Timed out waiting for unload of {label} ({mat}) before high-temp print"
+    if job_id is not None:
+        db.queue_update_status(int(job_id), "failed", reason)
+    db.log_decision(printer_id, "ams_unload_before_high_temp_failed", reason)
+    return False
+
+
 async def _advance_queue(printer_id: str) -> None:
     job = db.queue_next_pending(printer_id)
     if not job:
         return
     job_id, filename, file_path = job["id"], job["filename"], job["file_path"]
+    plate_number = job.get("plate_number")
     statuses = await _printer_status_map()
     preflight = _queue_preflight(job, statuses.get(printer_id))
     if not preflight["can_start"]:
         reason = "; ".join(i["message"] for i in preflight["issues"] if i["level"] in ("block", "wait"))
         log.info("queue: preflight blocked job %d on %s: %s", job_id, printer_id, reason)
         db.log_decision(printer_id, "queue_preflight_blocked", f"Job #{job_id} {filename}: {reason}")
+        return
+    if await _maybe_calibrate_before_queue(printer_id, job):
+        return
+    if not await _ensure_low_temp_unloaded_for_high_temp(printer_id, job):
         return
     db.queue_update_status(job_id, "uploading")
     try:
@@ -7469,9 +11950,11 @@ async def _advance_queue(printer_id: str) -> None:
                 return
         for p in _bambu:
             if p.id == printer_id:
-                await asyncio.to_thread(p.send_file, file_path, filename)
+                await asyncio.to_thread(p.send_file, file_path, filename, plate_number)
                 db.queue_set_started(job_id)
-                log.info("queue: started job %d on %s (%s)", job_id, printer_id, filename)
+                await _wait_for_bambu_physical_start(p, job_id, filename)
+                log.info("queue: started job %d on %s (%s plate %s)",
+                         job_id, printer_id, filename, plate_number or 1)
                 return
         db.queue_update_status(job_id, "failed", "Printer not found")
     except Exception as exc:
@@ -7481,7 +11964,7 @@ async def _advance_queue(printer_id: str) -> None:
 
 async def _on_print_finished_queue(printer_id: str) -> None:
     db.queue_finish_active(printer_id)
-    await _advance_queue(printer_id)
+    await _maybe_auto_advance_queue(printer_id, trigger="print_finished")
 
 
 @app.get("/api/queue/summary")
@@ -7491,13 +11974,26 @@ async def get_queue_summary():
 
 @app.get("/api/queue")
 async def get_queue(printer_id: Optional[str] = None):
-    jobs = db.queue_list(printer_id)
     statuses = await _printer_status_map()
+    jobs = db.queue_list(printer_id)
+    restored = _reconcile_queue_from_printer_state(jobs, statuses)
+    if restored:
+        jobs = db.queue_list(printer_id)
+    cleared, cleared_printers = _reconcile_queue_active_state(jobs, statuses)
+    if restored or cleared:
+        jobs = db.queue_list(printer_id)
+    for pid in cleared_printers:
+        asyncio.create_task(_maybe_auto_advance_queue(pid, trigger="stale_cleared"))
     return _apply_queue_preflight(jobs, statuses)
 
 
 @app.post("/api/queue/upload", status_code=201)
-async def queue_upload(printer_id: str = Form(...), file: UploadFile = File(...)):
+async def queue_upload(
+    printer_id: str = Form(...),
+    file: UploadFile = File(...),
+    calibrate_before_start: bool = Form(False),
+    dispatch: str = Form("true"),
+):
     kind = _printer_kind(printer_id)
     if kind is None:
         raise HTTPException(status_code=404, detail="printer not found")
@@ -7521,17 +12017,20 @@ async def queue_upload(printer_id: str = Form(...), file: UploadFile = File(...)
     with open(file_path, "wb") as f:
         f.write(data)
 
-    meta = _queue_file_metadata(raw_name, data)
-
-    job_id = db.queue_add(
-        printer_id, raw_name, file_path, len(data),
-        preview_png=meta["preview_png"],
-        estimated_seconds=meta["estimated_seconds"],
-        filament_weight_g=meta["filament_weight_g"],
-        filament_type=meta["filament_type"],
-        filament_colors=meta["filament_colors"],
+    job_ids = _enqueue_print_file(
+        printer_id, raw_name, file_path, data,
+        calibrate_before_start=bool(calibrate_before_start and kind == "bambu"),
+        split_plates=kind == "bambu",
     )
-    return {"id": job_id}
+    # The queue button in the app may start a waiting printer. A voice "queue it"
+    # passes dispatch=false. Pending jobs are still picked up by the idle poll,
+    # so those rows are marked held until Chris sends them.
+    if str(dispatch).strip().lower() not in {"0", "false", "no", "off"}:
+        asyncio.create_task(_maybe_auto_advance_queue(printer_id, trigger="queue_upload"))
+    else:
+        for job_id in job_ids:
+            db.queue_update_status(int(job_id), "held")
+    return _queue_enqueue_response(job_ids)
 
 
 @app.get("/api/queue/{job_id}/preview")
@@ -7569,8 +12068,57 @@ async def delete_queue_job(job_id: int):
     return {"ok": True}
 
 
+@app.post("/api/queue/{job_id}/release")
+async def release_queue_job(job_id: int):
+    """Drop a queue row from Flightdeck only. Does not cancel or stop the printer."""
+    job = db.queue_get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    deleted, file_path = db.queue_release(job_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if file_path:
+        try:
+            Path(file_path).unlink(missing_ok=True)
+        except Exception:
+            pass
+    db.log_decision(
+        job["printer_id"],
+        "queue_released",
+        f"Released queue job #{job_id} {job.get('filename') or ''} (Flightdeck only)",
+    )
+    asyncio.create_task(_maybe_auto_advance_queue(job["printer_id"], trigger="queue_release"))
+    return {"ok": True, "printer_id": job["printer_id"], "filename": job.get("filename")}
+
+
 class QueueReorderRequest(BaseModel):
     direction: str  # "up" | "down"
+
+
+@app.post("/api/queue/{job_id}/calibrate-before")
+async def set_queue_calibrate_before(job_id: int, body: QueueCalibrateRequest):
+    job = db.queue_get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job["status"] != "pending":
+        raise HTTPException(status_code=409, detail="Only pending jobs can change calibration setting")
+    if _bambu_printer(job["printer_id"]) is None and body.calibrate_before_start:
+        raise HTTPException(status_code=422, detail="Calibrate-before-start is only available for Bambu printers")
+    if not db.queue_set_calibrate_before(job_id, body.calibrate_before_start):
+        raise HTTPException(status_code=409, detail="Could not update queue job")
+    return {"ok": True, "calibrate_before_start": body.calibrate_before_start}
+
+
+@app.post("/api/queue/{job_id}/allow-short-filament")
+async def set_queue_allow_short_filament(job_id: int, body: QueueAllowShortFilamentRequest):
+    job = db.queue_get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job["status"] != "pending":
+        raise HTTPException(status_code=409, detail="Only pending jobs can change filament override")
+    if not db.queue_set_allow_short_filament(job_id, body.allow_short_filament):
+        raise HTTPException(status_code=409, detail="Could not update queue job")
+    return {"ok": True, "allow_short_filament": body.allow_short_filament}
 
 
 @app.post("/api/queue/{job_id}/reorder")
@@ -7584,9 +12132,27 @@ async def reorder_queue_job(job_id: int, body: QueueReorderRequest):
 
 @app.post("/api/queue/{job_id}/retry")
 async def retry_queue_job(job_id: int):
+    job = db.queue_get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
     if not db.queue_retry(job_id):
         raise HTTPException(status_code=404, detail="Job not found or not retryable")
+    asyncio.create_task(_maybe_auto_advance_queue(job["printer_id"], trigger="queue_retry"))
     return {"ok": True}
+
+
+@app.post("/api/printers/{printer_id}/queue/reprint-last")
+async def reprint_last_queue_job(printer_id: str):
+    cfg = load()
+    if not any(p.id == printer_id for p in cfg.printers):
+        raise HTTPException(status_code=404, detail="printer not found")
+    job = db.queue_latest_reprintable(printer_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="No completed queue file found for this printer")
+    if not db.queue_retry(int(job["id"])):
+        raise HTTPException(status_code=409, detail="Last completed queue file could not be reprinted")
+    db.log_decision(printer_id, "queue_reprint_last", f"Reprint last queued file: job #{job['id']} {job['filename']}")
+    return {"ok": True, "job_id": job["id"], "filename": job["filename"]}
 
 
 @app.delete("/api/queue/completed")
@@ -7600,12 +12166,17 @@ async def clear_completed_jobs(printer_id: str):
     return {"ok": True, "deleted": len(file_paths)}
 
 
+@app.delete("/api/queue/completed/clear")
+async def clear_completed_jobs_alias(printer_id: str):
+    return await clear_completed_jobs(printer_id)
+
+
 @app.post("/api/queue/{job_id}/send")
 async def send_queue_job(job_id: int):
     job = db.queue_get(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    if job["status"] != "pending":
+    if job["status"] not in {"pending", "held"}:
         raise HTTPException(status_code=409, detail=f"Job status is '{job['status']}', must be pending")
     statuses = await _printer_status_map()
     preflight = _queue_preflight(job, statuses.get(job["printer_id"]))
@@ -7627,7 +12198,12 @@ async def _advance_queue_specific(job_id: int, printer_id: str,
             log.info("queue send: preflight blocked job %d on %s: %s", job_id, printer_id, reason)
             db.log_decision(printer_id, "queue_preflight_blocked", f"Job #{job_id} {filename}: {reason}")
             return
+    if job and await _maybe_calibrate_before_queue(printer_id, job):
+        return
+    if job and not await _ensure_low_temp_unloaded_for_high_temp(printer_id, job):
+        return
     db.queue_update_status(job_id, "uploading")
+    plate_number = (job or {}).get("plate_number")
     try:
         for (pid, _, _, _, url, _kind, _toolhead_count) in _moonraker:
             if pid == printer_id:
@@ -7636,13 +12212,85 @@ async def _advance_queue_specific(job_id: int, printer_id: str,
                 return
         for p in _bambu:
             if p.id == printer_id:
-                await asyncio.to_thread(p.send_file, file_path, filename)
+                await asyncio.to_thread(p.send_file, file_path, filename, plate_number)
                 db.queue_set_started(job_id)
+                await _wait_for_bambu_physical_start(p, job_id, filename)
                 return
         db.queue_update_status(job_id, "failed", "Printer not found")
     except Exception as exc:
         log.error("queue send: job %d failed: %s", job_id, exc)
         db.queue_update_status(job_id, "failed", str(exc))
+
+
+def _bambu_physical_start_confirmed(status: PrinterStatus) -> bool:
+    if (status.state or "").lower() not in {"printing", "paused"}:
+        return False
+    if any(float((r.target if r else 0) or 0) > 0 for r in status.temps.values()):
+        return True
+    if status.job and float(status.job.progress or 0) > 0.001:
+        return True
+    return False
+
+
+def _block_printer_dispatch(printer_id: str, note: str) -> None:
+    db.set_printer_printing_enabled(printer_id, False)
+    db.set_printer_printing_note(printer_id, note)
+    if printer_id in _latest_printers:
+        _latest_printers[printer_id]["print_enabled"] = False
+        _latest_printers[printer_id]["print_enabled_note"] = note
+
+
+async def _wait_for_bambu_physical_start(p: BambuPrinter, job_id: int, filename: str) -> bool:
+    # H-series / AMS preparation can legitimately take several minutes.  Do not
+    # treat an unrelated or stale HMS entry as evidence that project_file failed.
+    started_at = time.monotonic()
+    deadline = started_at + 360.0
+    last_state = "unknown"
+    while time.monotonic() < deadline:
+        await asyncio.sleep(3.0)
+        try:
+            status_obj = await asyncio.to_thread(p.status)
+        except Exception as exc:
+            last_state = f"status error: {exc}"
+            continue
+        last_state = str(status_obj.state or "unknown").lower()
+        if _bambu_physical_start_confirmed(status_obj):
+            db.log_decision(
+                p.id,
+                "queue_bambu_start_confirmed",
+                f"Job #{job_id} {filename}: physical start confirmed",
+            )
+            return True
+
+        # Only the printer's actual runtime state is authoritative for a
+        # start failure. HMS telemetry can contain advisory/stale entries.
+        if last_state in {"error", "estop"}:
+            detail = str(status_obj.error or f"Printer reported {last_state} before physical start")
+            db.queue_update_status(job_id, "failed", detail)
+            try:
+                hms = await asyncio.to_thread(p.hms_summary)
+            except Exception:
+                hms = None
+            log_detail = f"Job #{job_id} {filename}: {detail}"
+            if hms:
+                log_detail += f"; HMS advisory: {hms}"
+            db.log_decision(p.id, "queue_bambu_start_failed", log_detail)
+            return False
+
+    # A start that never produces physical evidence is still a failure, but
+    # report that fact directly instead of blaming whichever HMS happened to
+    # be present in the MQTT snapshot.
+    detail = f"Printer did not confirm physical start within 360 seconds (last state: {last_state})"
+    db.queue_update_status(job_id, "failed", detail)
+    try:
+        hms = await asyncio.to_thread(p.hms_summary)
+    except Exception:
+        hms = None
+    log_detail = f"Job #{job_id} {filename}: {detail}"
+    if hms:
+        log_detail += f"; HMS advisory: {hms}"
+    db.log_decision(p.id, "queue_bambu_start_unconfirmed", log_detail)
+    return False
 
 
 # ── OrcaSlicer relay ──────────────────────────────────────────────────────

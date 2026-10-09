@@ -1,6 +1,9 @@
 param(
     [int]$Port = 8000,
     [string]$DataArchive = "",
+    [ValidateSet("auto", "yes", "no")]
+    [string]$BrowserSlicers = "auto",
+    [switch]$InstallDockerDesktop,
     [switch]$NoStartup,
     [switch]$NoDesktopShortcut
 )
@@ -68,6 +71,15 @@ function Install-WithWinget {
     & winget install --id $PackageId --exact --source winget --accept-package-agreements --accept-source-agreements
     if ($LASTEXITCODE -ne 0) {
         throw "$Name install failed. Install it manually, then run this installer again."
+    }
+}
+
+function Find-DockerDesktop {
+    $Docker = Find-CommandPath @("docker")
+    $DockerDesktop = Join-Path $env:ProgramFiles "Docker\Docker\Docker Desktop.exe"
+    return @{
+        Docker = $Docker
+        Desktop = if (Test-Path $DockerDesktop) { $DockerDesktop } else { $null }
     }
 }
 
@@ -151,12 +163,44 @@ Write-Step "Installing Flightdeck"
 $InstallScript = Join-Path $ScriptDir "install-windows.ps1"
 $Args = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $InstallScript, "-Port", $Port, "-PythonCommand", $PythonCommand)
 if ($DataArchive) { $Args += @("-DataArchive", $DataArchive) }
+if ($BrowserSlicers -ne "no") { $Args += "-ConfigureBrowserSlicerSettings" }
 if ($NoStartup) { $Args += "-NoStartup" }
 if ($NoDesktopShortcut) { $Args += "-NoDesktopShortcut" }
 
 & powershell.exe @Args
 if ($LASTEXITCODE -ne 0) {
     throw "Flightdeck install script failed."
+}
+
+Write-Step "Checking browser slicers"
+$DockerInfo = Find-DockerDesktop
+if (-not $DockerInfo.Docker -and ($InstallDockerDesktop -or $BrowserSlicers -eq "yes")) {
+    Install-WithWinget -PackageId "Docker.DockerDesktop" -Name "Docker Desktop"
+    $env:PATH = [Environment]::GetEnvironmentVariable("PATH", "Machine") + ";" + [Environment]::GetEnvironmentVariable("PATH", "User")
+    $DockerInfo = Find-DockerDesktop
+}
+
+$ShouldStartBrowserSlicers = $false
+if ($BrowserSlicers -eq "yes") {
+    $ShouldStartBrowserSlicers = $true
+} elseif ($BrowserSlicers -eq "auto" -and ($DockerInfo.Docker -or $DockerInfo.Desktop)) {
+    $ShouldStartBrowserSlicers = $true
+}
+
+if ($ShouldStartBrowserSlicers) {
+    $SlicerScript = Join-Path $ScriptDir "start-slicer-browsers.ps1"
+    try {
+        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SlicerScript
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "Browser slicer setup did not complete. Flightdeck still installed; run Start-Flightdeck-Slicers-Windows.cmd after Docker Desktop is ready." -ForegroundColor Yellow
+        }
+    } catch {
+        Write-Host "Browser slicer setup could not run: $($_.Exception.Message)" -ForegroundColor Yellow
+        Write-Host "Flightdeck still installed; run Start-Flightdeck-Slicers-Windows.cmd after Docker Desktop is ready." -ForegroundColor Yellow
+    }
+} elseif ($BrowserSlicers -ne "no") {
+    Write-Host "Docker Desktop was not found, so browser Orca/Bambu Studio were skipped." -ForegroundColor Yellow
+    Write-Host "Install Docker Desktop later, then run Start-Flightdeck-Slicers-Windows.cmd." -ForegroundColor Yellow
 }
 
 Write-Step "Starting Flightdeck"

@@ -1,0 +1,18 @@
+---
+description: MakerDeck golden baseline — do not regress trace preview or emboss
+globs: makerforge/**/*
+alwaysApply: false
+---
+
+# MakerDeck golden baseline (b284)
+
+Before changing trace or emboss/wrap code, read `makerforge/GOLDEN_BASELINE.md`.
+
+**Locked behaviour:**
+- Trace preview: full cyan ink mask overlay (not centerline strokes). `drawTracePreview` must check raster mask before `strokePaths`.
+- Emboss: b278 `features.js` paths — no `mergeWrapSolidLogoGroups`, no b279–b282 wrap experiments without jar tests first.
+- Auto trace: line art → `outlineRaster` ink mask (b278).
+
+**Test order:** jar + front (coffee bag Auto, knight silhouette) → then cooler wrap.
+
+**Git tag:** `makerdeck-golden-b284`

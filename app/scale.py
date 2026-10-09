@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import errno
+import select
 import struct
 import subprocess
 import time
@@ -52,7 +53,7 @@ class Scale:
             return default
 
     def _candidate_paths(self) -> list[str]:
-        paths = [self.device_path] + [f"/dev/hidraw{i}" for i in range(8)]
+        paths = [f"/dev/hidraw{i}" for i in range(8)] + [self.device_path]
         seen: set[str] = set()
         return [p for p in paths if not (p in seen or seen.add(p))]
 
@@ -78,17 +79,27 @@ class Scale:
         for path in self._candidate_paths():
             if not Path(path).exists():
                 continue
+            fd: Optional[int] = None
             try:
-                with open(path, "rb", buffering=0) as f:
-                    data = f.read(16)
+                fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+                poller = select.poll()
+                poller.register(fd, select.POLLIN | select.POLLERR | select.POLLHUP)
+                events = poller.poll(1500)
+                if not events:
+                    continue
+                data = os.read(fd, 64)
                 reading = self._parse_report(data)
                 if reading and reading.grams > 0:
                     return reading
             except PermissionError:
                 self.last_error = f"Permission denied reading {path}"
                 return None
-            except Exception as exc:
-                self.last_error = str(exc)
+            except OSError as exc:
+                if exc.errno not in (errno.EAGAIN, errno.EWOULDBLOCK):
+                    self.last_error = str(exc)
+            finally:
+                if fd is not None:
+                    os.close(fd)
         self.last_error = self.last_error or "No non-zero scale reading"
         return None
 
@@ -200,7 +211,7 @@ class Scale:
                 devices = hid.enumerate(int(self.VENDOR, 16), 0)
                 return any(f"{device.get('product_id', 0):04x}" in self.PRODUCTS for device in devices)
             except Exception as exc:
-                self.last_error = str(exc)
+                self.last_error = f"Windows HID support unavailable ({exc}); pip install hidapi"
                 return False
         try:
             out = subprocess.check_output(["lsusb"], text=True)
@@ -210,6 +221,7 @@ class Scale:
         return any(f"{self.VENDOR}:{product}" in out for product in self.PRODUCTS)
 
     def _read_windows_once(self, timeout_ms: int = 1000) -> Optional[ScaleReading]:
+        """Read one HID report from the Dymo scale on Windows (needs the hidapi package)."""
         try:
             import hid  # type: ignore
         except Exception as exc:
@@ -243,7 +255,7 @@ class Scale:
         self.last_error = self.last_error or "No non-zero scale reading"
         return None
 
-    def read_stable(self, timeout_s: float = 5.0) -> Optional[ScaleReading]:
+    def read_stable(self, timeout_s: float = 8.0) -> Optional[ScaleReading]:
         deadline = time.time() + timeout_s
         seen: list[int] = []
         while time.time() < deadline:
@@ -251,9 +263,9 @@ class Scale:
             if reading and reading.grams > 0:
                 seen.append(reading.grams)
                 seen = seen[-3:]
-                if len(seen) == 3 and len(set(seen)) == 1:
-                    reading.stable = True
-                    return reading
+                if len(seen) == 3 and max(seen) - min(seen) <= 2:
+                    stable_grams = sorted(seen)[1]
+                    return ScaleReading(grams=stable_grams, unit=reading.unit, stable=True)
             time.sleep(0.25)
         self.last_error = self.last_error or "Reading did not stabilise"
         return None

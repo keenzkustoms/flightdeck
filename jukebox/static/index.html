@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cindy · Vinyl</title>
+  <link rel="shortcut icon" href="/cindy-vinyl-icon.svg">
+  <link rel="icon" type="image/svg+xml" href="/cindy-vinyl-icon.svg">
+  <link rel="icon" href="/static/cindy-vinyl.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#0a090b" id="themeColorMeta">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Cindy">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Libre+Baskerville:ital,wght@0,400;0,700;1,400&family=Source+Sans+3:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css?v=__STYLE_CSS_VER__">
+</head>
+<body data-room="dark">
+  <div class="lamp" aria-hidden="true"></div>
+  <div class="grain" aria-hidden="true"></div>
+
+  <header class="top">
+    <div class="brand">
+      <span class="brand-mark">Cindy</span>
+      <span class="brand-sub">vinyl room</span>
+    </div>
+    <form class="search" id="searchForm" autocomplete="off">
+      <input id="searchInput" type="search" placeholder="Search the crates…" enterkeyhint="search">
+    </form>
+    <div class="top-menu" id="topMenu">
+      <button type="button" class="ghost-btn tiny small-player-btn" id="ribbonBtn" aria-label="Small player" title="Small player" aria-pressed="false">Small player</button>
+      <button type="button" class="menu-btn" id="menuBtn" aria-label="Menu" aria-haspopup="menu" aria-expanded="false">⋯</button>
+      <div class="menu-drop" id="menuDrop" role="menu" hidden>
+        <button type="button" role="menuitem" data-action="ribbon">Small player</button>
+        <button type="button" role="menuitem" data-action="cindy">Show on Cindy</button>
+        <button type="button" role="menuitem" data-action="props">Edit names…</button>
+        <button type="button" role="menuitem" data-action="refresh">Refresh packs</button>
+        <div class="menu-sep" role="separator">Theme</div>
+        <div id="themeMenuSection"></div>
+      </div>
+    </div>
+  </header>
+
+  <main class="stage" id="stage">
+    <div class="rack" id="rack">
+      <div class="rack-col rack-col-deck">
+        <section class="hero" id="hero">
+          <div class="hero-main">
+            <div class="deck-stage" id="deckStage">
+              <img class="deck-photo" src="/static/deck-theme2-rest.jpg" alt="Technics on the Amp Rack">
+              <video
+                id="deckCue"
+                class="deck-cue"
+                muted
+                playsinline
+                preload="auto"
+                aria-hidden="true"
+                hidden
+              ></video>
+              <!-- Colour wash + spinning album label over the platter (covers video label seam) -->
+              <div class="vinyl-tint" id="vinylTint" aria-hidden="true"></div>
+              <div class="platter-live" id="vinyl" aria-hidden="true">
+                <div class="platter-spin">
+                  <div class="label" id="vinylLabel">
+                    <img id="vinylArt" alt="" hidden>
+                    <span id="vinylFallback">C</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="hero-copy">
+              <div class="hero-copy-text">
+                <p class="deck-tag" id="deckTag">Dark · Amp rack</p>
+                <h1 id="nowTitle">Drop the needle</h1>
+                <p id="nowArtist">5.4TB on Cindy — CHECKED · MUSIC · JAMAL</p>
+                <div class="hero-actions">
+                  <button type="button" class="spin-btn" id="spinBtn">SPIN</button>
+                  <button type="button" class="ghost-btn" id="playPauseBtn" disabled>Play</button>
+                  <button type="button" class="ghost-btn tiny" id="addToPlaylistBtn" disabled title="Add to playlist" aria-haspopup="menu" aria-expanded="false">+ Playlist</button>
+                  <button type="button" class="ghost-btn tiny" id="editNowPlayingBtn" disabled title="Edit names / cover for this sleeve">Edit…</button>
+                </div>
+                <p class="hint" id="statusLine">Warming up the tubes…</p>
+                <p class="now-track">Now playing: <span id="nowTrackTitle">—</span></p>
+                <p class="next-track">Next: <span id="nextTrackTitle">—</span></p>
+              </div>
+              <div class="now-cover" id="nowCover">
+                <div class="wall-sleeve" id="wallSleeve" hidden aria-hidden="true">
+                  <img id="wallArt" alt="">
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <aside class="track-panel" id="queueStrip">
+          <div class="track-panel-head">
+            <div class="track-panel-tabs" role="tablist">
+              <button type="button" class="track-panel-tab active" id="tracksTabBtn" data-view="tracks">Tracks</button>
+              <button type="button" class="track-panel-tab" id="playlistTabBtn" data-view="playlist">Playlist</button>
+            </div>
+            <button type="button" class="ghost-btn tiny" id="clearPlaylistBtn" hidden>Clear</button>
+            <span class="track-count" id="trackCount">—</span>
+          </div>
+          <ol id="queueList" class="track-list">
+            <li class="track-empty">Spin a sleeve and the sides show up here.</li>
+          </ol>
+          <ol id="playlistPanelList" class="track-list" hidden>
+            <li class="track-empty">Nothing in your playlist yet — hit “+ Playlist” on the deck.</li>
+          </ol>
+        </aside>
+      </div>
+
+      <div class="rack-col rack-col-crate">
+        <section class="crates" id="cratesSection">
+          <div class="crates-head">
+            <h2>Crates</h2>
+            <div class="crate-tabs" role="tablist">
+              <button type="button" class="crate-tab" data-type="newest">Fresh sleeves</button>
+              <button type="button" class="crate-tab" data-type="random">Shuffle bin</button>
+              <button type="button" class="crate-tab" data-type="frequent">Often spun</button>
+              <button type="button" class="crate-tab active" data-type="alphabeticalByName">A–Z</button>
+              <button type="button" class="crate-tab" data-type="byGenre">Categories</button>
+            </div>
+          </div>
+          <div class="crate-filters" id="crateFilters" hidden>
+            <div class="crate-chip-row" id="genreRow" hidden></div>
+          </div>
+          <div class="crate-carousel" id="crateCarousel" hidden>
+            <button type="button" class="crate-nav prev" id="crateCarouselPrev" aria-label="Previous letter">‹</button>
+            <div class="crate-carousel-frame">
+              <img src="/static/crate-front.png" alt="" class="crate-carousel-photo" id="crateCarouselPhoto">
+              <div class="crate-carousel-letter" id="crateCarouselLetter"></div>
+              <div class="crate-carousel-dropzone" id="crateCarouselDropzone">
+                <div class="crate-carousel-rail" id="crateCarouselRail" tabindex="0"></div>
+              </div>
+            </div>
+            <button type="button" class="crate-nav next" id="crateCarouselNext" aria-label="Next letter">›</button>
+          </div>
+          <div class="crate-page" id="cratePageBar" hidden>
+            <label class="crate-sort" for="crateSortSelect">
+              Sort
+              <select id="crateSortSelect">
+                <option value="artist">Artist, Album</option>
+                <option value="album">Album, Artist</option>
+              </select>
+            </label>
+            <span class="crate-page-hint" id="cratePageHint"></span>
+            <button type="button" class="ghost-btn tiny" id="crateMoreBtn" hidden>More sleeves</button>
+          </div>
+          <div class="crate-rail" id="crateRail" tabindex="0"></div>
+        </section>
+      </div>
+    </div>
+
+    <section class="search-results" id="searchResults" hidden>
+      <h2>Found in the stacks</h2>
+      <div id="searchGrid"></div>
+    </section>
+  </main>
+
+  <div class="ribbon-home" id="ribbonHome" hidden>
+    <p>Playing in the ribbon.</p>
+    <button type="button" class="spin-btn" id="ribbonHomeBtn">Restore vinyl room</button>
+  </div>
+
+  <footer class="transport" id="transport">
+    <div class="deck-art"><img id="deckArt" alt=""></div>
+    <div class="deck-meta">
+      <div id="deckTitle">—</div>
+      <div id="deckArtist">—</div>
+      <div class="seek-row">
+        <span id="timeNow" class="time">0:00</span>
+        <input type="range" id="seek" min="0" max="1000" value="0" aria-label="Seek">
+        <span id="timeDur" class="time">0:00</span>
+      </div>
+    </div>
+    <div class="deck-controls">
+      <button type="button" class="ribbon-only spin-btn" id="ribbonSpinBtn" title="Drop the needle — random sleeve">SPIN</button>
+      <button type="button" class="ribbon-only ghost-btn tiny" id="ribbonPlaylistBtn" title="Add to playlist" aria-haspopup="menu" aria-expanded="false">+ Playlist</button>
+      <button type="button" id="shuffleBtn" aria-label="Shuffle" title="Shuffle queue" aria-pressed="false">🔀</button>
+      <button type="button" id="prevBtn" aria-label="Previous">⏮</button>
+      <button type="button" id="deckPlay" aria-label="Play/Pause">▶</button>
+      <button type="button" id="nextBtn" aria-label="Next">⏭</button>
+      <button type="button" id="muteBtn" aria-label="Mute" title="Mute (M)">🔊</button>
+      <input type="range" id="volume" min="0" max="100" value="85" aria-label="Volume">
+      <button type="button" id="normBtn" aria-label="Loudness normalise" title="Loudness normalise — even out quiet/loud tracks" aria-pressed="false">⌀</button>
+      <button type="button" class="ribbon-expand" id="ribbonExpandBtn" aria-label="Open vinyl room" title="Open vinyl room (use this instead of Windows maximise)">ROOM</button>
+    </div>
+  </footer>
+
+  <audio id="audio" preload="none"></audio>
+
+  <!-- Body-level home for sleeve ⋯ menus — keeps them from being clipped by
+       scrollable/content-visibility ancestors. Positioned in JS. -->
+  <div id="sleeveMenuLayer" aria-hidden="false">
+    <div class="sleeve-menu" id="addToPlaylistMenu" role="menu" hidden>
+      <button type="button" role="menuitem" id="addTrackBtn">Add track</button>
+      <button type="button" role="menuitem" id="addAlbumBtn">Add album</button>
+    </div>
+  </div>
+
+  <div class="modal" id="cindyModal" hidden>
+    <div class="modal-card cindy-card" role="dialog" aria-labelledby="cindyModalTitle">
+      <header class="modal-head">
+        <h2 id="cindyModalTitle">On Cindy</h2>
+        <button type="button" class="modal-close" data-close="cindyModal" aria-label="Close">×</button>
+      </header>
+      <p class="modal-note" id="cindyTrackLabel">—</p>
+      <div class="cindy-live" id="cindyLiveTags" hidden></div>
+      <label class="field">
+        <span>Library path</span>
+        <div class="path-row">
+          <input id="cindyRelPath" type="text" readonly>
+          <button type="button" class="ghost-btn tiny" data-copy="cindyRelPath" title="Copy relative path">Copy</button>
+        </div>
+      </label>
+      <label class="field">
+        <span>File / track (Explorer)</span>
+        <div class="path-row">
+          <input id="cindyUncPath" type="text" readonly>
+          <button type="button" class="ghost-btn tiny" id="cindyOpenFileBtn" data-open-unc="cindyUncPath" data-open-select="1">Open</button>
+        </div>
+      </label>
+      <label class="field">
+        <span>Album folder</span>
+        <div class="path-row">
+          <input id="cindyFolderUnc" type="text" readonly>
+          <button type="button" class="ghost-btn tiny" id="cindyOpenFolderBtn" data-open-unc="cindyFolderUnc">Open</button>
+        </div>
+      </label>
+      <div class="cindy-tracks" id="cindyTracksWrap" hidden>
+        <div class="cindy-tracks-head">
+          <span>Tracks (live tags)</span>
+          <span class="hint" id="cindyTracksHint">Click a row — Open jumps to that file</span>
+        </div>
+        <ol class="cindy-track-list" id="cindyTrackList"></ol>
+      </div>
+      <p class="hint" id="cindyOpenHint">
+        Open launches Explorer on your PC (LAN). If Open flashes and does nothing, re-run the helper:
+        <a href="/static/install-cindy-open.ps1" download="install-cindy-open.ps1">install / update Open helper</a>
+        → right-click → <strong>Run with PowerShell</strong> → then Open again.
+      </p>
+    </div>
+  </div>
+
+  <div class="modal" id="propsModal" hidden>
+    <div class="modal-card" role="dialog" aria-labelledby="propsModalTitle">
+      <header class="modal-head">
+        <h2 id="propsModalTitle">Edit names</h2>
+        <button type="button" class="modal-close" data-close="propsModal" aria-label="Close">×</button>
+      </header>
+      <p class="modal-note">Vinyl display names only — does not rewrite tags on Cindy. Use ⋯ on a crate sleeve to fix Unknown Artist packs.</p>
+      <fieldset class="prop-block">
+        <legend>Album</legend>
+        <label class="field">Name <input id="propAlbumName" type="text"></label>
+        <label class="field">Artist <input id="propAlbumArtist" type="text"></label>
+        <button type="button" class="ghost-btn" id="propSaveAlbum">Save album</button>
+      </fieldset>
+      <fieldset class="prop-block">
+        <legend>Cover</legend>
+        <div class="cover-edit-row">
+          <img id="propCoverPreview" alt="" class="cover-edit-preview">
+          <div class="cover-edit-actions">
+            <label class="ghost-btn tiny" for="propCoverFile">Upload image…</label>
+            <input type="file" id="propCoverFile" accept="image/*" hidden>
+            <button type="button" class="ghost-btn tiny" id="propCoverSearchBtn">Search online</button>
+            <button type="button" class="ghost-btn tiny" id="propCoverRemove" hidden>Remove custom cover</button>
+          </div>
+        </div>
+        <label class="field">Image URL <input id="propCoverUrl" type="text" placeholder="https://…"></label>
+        <button type="button" class="ghost-btn tiny" id="propCoverUrlSave">Use URL</button>
+        <div class="cover-search-results" id="propCoverSearchResults" hidden></div>
+      </fieldset>
+      <fieldset class="prop-block">
+        <legend>Current track</legend>
+        <label class="field">Title <input id="propTrackTitle" type="text"></label>
+        <label class="field">Artist <input id="propTrackArtist" type="text"></label>
+        <label class="field">Album tag <input id="propTrackAlbum" type="text"></label>
+        <button type="button" class="ghost-btn" id="propSaveTrack">Save track</button>
+      </fieldset>
+      <p class="hint" id="propStatus"></p>
+    </div>
+  </div>
+
+  <script src="/static/app.js?v=__APP_JS_VER__"></script>
+</body>
+</html>
