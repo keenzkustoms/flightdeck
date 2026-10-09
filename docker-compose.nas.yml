@@ -40,3 +40,24 @@ services:
     volumes:
       - /volume2/flightdeck-orcaslicer:/config
       - /volume3/flightdeck-vault:/prints
+
+  bambustudio:
+    image: lscr.io/linuxserver/bambustudio:latest
+    container_name: flightdeck-bambustudio
+    restart: unless-stopped
+    security_opt:
+      - seccomp:unconfined
+    environment:
+      PUID: ${BAMBUSTUDIO_PUID:-1000}
+      PGID: ${BAMBUSTUDIO_PGID:-1000}
+      TZ: ${TZ:-Australia/Sydney}
+      CUSTOM_USER: ${BAMBUSTUDIO_USER:-flightdeck}
+      PASSWORD: ${BAMBUSTUDIO_PASSWORD:-change-me-before-use}
+      TITLE: Bambu Studio - Flightdeck
+      FILE_MANAGER_PATH: /prints
+    ports:
+      - "3012:3001"
+    shm_size: "1gb"
+    volumes:
+      - /volume2/flightdeck-bambustudio:/config
+      - /volume3/flightdeck-vault:/prints

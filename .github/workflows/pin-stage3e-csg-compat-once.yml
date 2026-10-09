@@ -1,0 +1,22 @@
+name: Pin Stage 3E CSG compatibility once
+on:
+  push:
+    paths:
+      - '.github/workflows/pin-stage3e-csg-compat-once.yml'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - run: python .github/scripts/pin_stage3e_csg_compat.py
+      - run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add makerforge/meshprep.html
+          git commit -m 'Pin Stage 3E CSG to Three.js-compatible release'
+          git push

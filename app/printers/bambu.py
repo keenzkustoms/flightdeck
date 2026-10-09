@@ -5,6 +5,7 @@ import re
 import threading
 import time
 from datetime import datetime, timezone, timedelta
+from types import SimpleNamespace
 from typing import Optional
 
 import bambulabs_api as bl
@@ -16,9 +17,43 @@ from ..models import PrinterStatus, JobStatus, TempReading
 
 log = logging.getLogger(__name__)
 
-FINISHED_TTL = timedelta(minutes=30)
+FINISHED_TTL = timedelta(minutes=5)
 _BAMBU_PREVIEW_FAILED = object()  # sentinel: FTP failed, don't retry until job changes
 _BAMBU_STALE_REPORT_SECONDS = 45
+
+
+class BambuAmsMappingError(RuntimeError):
+    """Raised when a sliced Bambu job cannot be mapped to the loaded AMS path."""
+
+
+def _preview_metadata(value: object):
+    if value is None or value is _BAMBU_PREVIEW_FAILED:
+        return None
+    return value if hasattr(value, "filament_weight_g") else None
+
+
+def _queue_preview_metadata(printer_id: str):
+    """Return queued 3MF metadata when live FTP preview metadata is unavailable."""
+    row = db.queue_active_job(printer_id)
+    if not row:
+        return None
+    if not any(row.get(k) is not None for k in ("filament_weight_g", "filament_type", "filament_colors")):
+        return None
+    return SimpleNamespace(
+        filament_weight_g=row.get("filament_weight_g"),
+        filament_type=row.get("filament_type"),
+        filament_colors=row.get("filament_colors"),
+    )
+
+
+def _bambu_physical_start_confirmed(job: Optional[JobStatus], temps: dict[str, TempReading]) -> bool:
+    if any(float((reading.target if reading else 0) or 0) > 0 for reading in temps.values()):
+        return True
+    if job and float(job.progress or 0) > 0.001:
+        return True
+    return False
+
+
 _BAMBU_CARE_LABELS = {
     "cr": "Clean carbon rods",
     "ls": "Lubricate lead screws",
@@ -74,6 +109,24 @@ _BAMBU_PROFILE_ALIASES = {
         "nozzle_temp_min": 190,
         "nozzle_temp_max": 250,
     },
+    "GFA01": {
+        "brand": "Bambu Lab",
+        "profile": "Bambu PLA Matte",
+        "material": "PLA",
+        "tray_info_idx": "GFA01",
+        "tray_type": "PLA",
+        "nozzle_temp_min": 190,
+        "nozzle_temp_max": 250,
+    },
+    "GFA19": {
+        "brand": "Bambu Lab",
+        "profile": "Bambu PLA Pure",
+        "material": "PLA",
+        "tray_info_idx": "GFA19",
+        "tray_type": "PLA",
+        "nozzle_temp_min": 190,
+        "nozzle_temp_max": 240,
+    },
     "GFG99": {
         "brand": "Generic",
         "profile": "Generic PETG",
@@ -82,6 +135,15 @@ _BAMBU_PROFILE_ALIASES = {
         "tray_type": "PETG",
         "nozzle_temp_min": 220,
         "nozzle_temp_max": 260,
+    },
+    "GFG98": {
+        "brand": "Generic",
+        "profile": "Generic PETG-CF",
+        "material": "PETG-CF",
+        "tray_info_idx": "GFG98",
+        "tray_type": "PETG-CF",
+        "nozzle_temp_min": 240,
+        "nozzle_temp_max": 270,
     },
     "GFU99": {
         "brand": "Generic",
@@ -138,12 +200,19 @@ class _SequencedMQTTClient(PrinterMQTTClient):
                         ams_mapping: list[int] = [0],
                         skip_objects: list[int] | None = None,
                         flow_calibration: bool = True,
+                        filament_ids: list[int] | None = None,
+                        regular_ams_slots: int = 0,
                         ) -> bool:
         """Start a 3MF with BambuStudio-style AMS mapping fields.
 
         bambulabs_api 2.6.6 only sends the legacy flat ams_mapping. Newer Bambu
         firmware, especially H2D with AMS 2 / AMS HT, expects ams_mapping2 as
         well or it can pause with 0700-8012 "Failed to get AMS mapping table".
+        filament_ids are the sequential slot indices from the 3MF plate JSON
+        (BambuStudio's own tray numbering); they override the default flat
+        ams_mapping values for AMS HT slots so the firmware lookup succeeds.
+        regular_ams_slots is the total slot count across all non-HT AMS units
+        (n_regular_units * 4), used to compute the correct ams_id for AMS HT.
         """
         if skip_objects is not None and not skip_objects:
             skip_objects = None
@@ -153,7 +222,7 @@ class _SequencedMQTTClient(PrinterMQTTClient):
         else:
             plate_location = plate_number
 
-        flat_mapping, detailed_mapping = _build_bambu_ams_mappings(ams_mapping)
+        flat_mapping, detailed_mapping = _build_bambu_ams_mappings(ams_mapping, filament_ids, regular_ams_slots)
         use_ams_flag = bool(use_ams)
         if ams_mapping and use_ams_flag:
             if all(t is None or int(t) < 0 or int(t) >= 254 for t in ams_mapping):
@@ -175,6 +244,35 @@ class _SequencedMQTTClient(PrinterMQTTClient):
                 "ams_mapping": flat_mapping,
                 "ams_mapping2": detailed_mapping,
                 "skip_objects": skip_objects,
+            }
+        })
+
+
+    def start_calibration(
+        self,
+        bed_leveling: bool = False,
+        vibration: bool = False,
+        motor_noise: bool = False,
+        nozzle_offset: bool = False,
+        high_temp_heatbed: bool = False,
+    ) -> bool:
+        option = 0
+        if bed_leveling:
+            option |= 1 << 1
+        if vibration:
+            option |= 1 << 2
+        if motor_noise:
+            option |= 1 << 3
+        if nozzle_offset:
+            option |= 1 << 4
+        if high_temp_heatbed:
+            option |= 1 << 5
+        if option == 0:
+            return False
+        return self._PrinterMQTTClient__publish_command({
+            "print": {
+                "command": "calibration",
+                "option": option,
             }
         })
 
@@ -204,11 +302,14 @@ class BambuPrinter:
         self._cancel_requested = False
         self._estimated_stored = False   # True once slicer estimate written for this job
         self._job_started_at: float = 0.0  # monotonic time when _current_job_key was set
+        self._physical_start_confirmed = False
         self._current_print_id: Optional[int] = None  # prints.id for the active job
         self._error_print_id: Optional[int] = None    # prints.id of the last error (for snapshot)
+        self._last_finished_print_id: Optional[int] = None
+        self._last_timelapse_path: Optional[str] = None
         self._ams_slot_snapshot: dict[int, dict] = {}      # slot_index → slot info at print start
         self._ams_slot_snapshot_print_id: Optional[int] = None  # print_id the snapshot belongs to
-        self._ams_active_slot_at_start: Optional[int] = None    # tray_now at print start for deduction
+        self._ams_active_slot_at_start: Optional[int] = None    # canonical AMS slot at print start
 
     def start(self) -> None:
         self._printer.connect()
@@ -270,6 +371,7 @@ class BambuPrinter:
             bed = self._printer.get_bed_temperature()
             chamber = _read_chamber_temp(dump, self.model_name)
             light_state = _read_light_state(print_data)
+            timelapse_state = _read_bambu_timelapse_state(print_data)
             fan_speeds = _read_fan_speeds(mc)
             if bed is not None:
                 temps["bed"] = TempReading(
@@ -283,8 +385,8 @@ class BambuPrinter:
             filename = self._printer.get_file_name()
             pct = self._printer.get_percentage()
             subtask = self._printer.subtask_name() or None
-            if _is_plate_gcode(filename) and not subtask:
-                subtask = _active_queue_subtask(self.id)
+            if not subtask:
+                subtask = _resolve_bambu_job_subtask(self.id, filename)
             if filename and pct is not None:
                 remaining = self._printer.get_time()
                 eta = int(remaining * 60) if remaining is not None else None
@@ -297,42 +399,70 @@ class BambuPrinter:
                     subtask_name=subtask,
                 )
 
-            state = self._resolve_state(raw_state, job, subtask, alarm_message)
+            state = self._resolve_state(raw_state, job, subtask, alarm_message, temps)
 
             if (state == "printing"
                     and self._current_print_id is not None
                     and self._ams_slot_snapshot_print_id != self._current_print_id):
-                # Proactively fetch preview so filament_weight_g is available at
-                # print-end even if nobody visits the detail page during the print.
-                # get_preview() caches on subtask_name so this is a one-shot FTP call.
-                if subtask and not self._preview_cache:
-                    self.get_preview()
+                # Never FTP on the status poll path — a hung FTPS session wedged the
+                # whole Flightdeck API (queue/printers). Prefer queue metadata; hydrate
+                # via FTP only from explicit preview endpoints / print-end.
+                self._hydrate_print_preview_metadata(self._current_print_id, allow_ftp=False)
                 raw_snap = _snapshot_ams_slots(print_data)
                 self._ams_slot_snapshot = raw_snap
                 self._ams_slot_snapshot_print_id = self._current_print_id
-                # Capture active tray for single-spool deduction attribution
-                ams_raw = print_data.get("ams", {})
-                tray_now = int(ams_raw.get("tray_now", 255))
-                self._ams_active_slot_at_start = None if tray_now == 255 else tray_now
+                active_slots = [slot_idx for slot_idx, slot_data in raw_snap.items() if slot_data.get("active")]
+                self._ams_active_slot_at_start = active_slots[0] if len(active_slots) == 1 else None
                 # Enrich snapshot with current spool assignments and persist to DB
                 enriched: dict[str, dict] = {}
                 for slot_idx, slot_data in raw_snap.items():
                     spool = db.get_spool_at_slot(self.id, slot_idx)
+                    if spool is None:
+                        flat_slot = _safe_int(slot_data.get("flat_slot"))
+                        if flat_slot is not None and flat_slot != slot_idx:
+                            spool = db.get_spool_at_slot(self.id, flat_slot)
                     enriched[str(slot_idx)] = {
                         **slot_data,
                         "spool_id": spool["id"] if spool else None,
                         "remaining_g_at_start": spool["remaining_g"] if spool else None,
                     }
-                    if spool is None:
-                        db.log_decision(self.id, "spool_missing",
-                                       f"No spool assigned to AMS slot {slot_idx}",
-                                       print_id=self._current_print_id)
+                    if spool is None and slot_data.get("active"):
+                        db.log_decision(
+                            self.id,
+                            "spool_missing",
+                            f"No spool assigned to {_ams_slot_decision_label(slot_idx)}",
+                            print_id=self._current_print_id,
+                        )
                 if self._ams_active_slot_at_start is not None:
                     enriched["__meta__"] = {"active_slot": self._ams_active_slot_at_start}
                 db.write_slot_snapshot(self._current_print_id, enriched)
                 log.info("AMS slot snapshot for %s print_id=%d: slots=%s active=%s",
                          self.id, self._current_print_id, list(raw_snap.keys()),
                          self._ams_active_slot_at_start)
+
+            if (state == "printing"
+                    and self._current_print_id is not None
+                    and self._ams_slot_snapshot_print_id == self._current_print_id
+                    and job and job.progress is not None):
+                pv = self._hydrate_print_preview_metadata(self._current_print_id, allow_ftp=False)
+                if pv and pv.filament_weight_g:
+                    try:
+                        db.deduct_spool_usage_progress(
+                            self.id,
+                            self._current_print_id,
+                            pv.filament_weight_g,
+                            job.progress,
+                            active_slot=self._ams_active_slot_at_start,
+                            filament_usage=_preview_filament_requirements(pv.filament_colors, pv.filament_type),
+                        )
+                    except Exception as exc:
+                        log.exception("Bambu live spool deduction failed for %s print_id=%s", self.id, self._current_print_id)
+                        db.log_decision(
+                            self.id,
+                            "spool_deduction_error",
+                            f"Live spool deduction failed without changing printer state: {exc}",
+                            print_id=self._current_print_id,
+                        )
 
             if state == "idle":
                 job = None  # MQTT retains last-print data; don't surface it as active
@@ -343,11 +473,17 @@ class BambuPrinter:
                 if last:
                     idle_info["Last print"] = _fmt_last_print(last)
 
+            extruder_map = _read_ams_extruder_map(print_data)
             try:
-                ams = _parse_ams(print_data)
+                ams = _parse_ams(
+                    print_data,
+                    extruder_map=extruder_map,
+                    model_name=self.model_name,
+                )
             except Exception:
                 ams = []
             maintenance = _parse_care(print_data)
+            toolheads = _parse_h_series_nozzles(print_data, self.model_name)
 
             now = datetime.utcnow()
             self._last_seen = now
@@ -355,7 +491,8 @@ class BambuPrinter:
                 id=self.id, model_name=self.model_name, custom_name=self.custom_name,
                 icon=self.icon, kind="bambu", state=state,
                 temps=temps, job=job, substage=substage,
-                idle_info=idle_info, ams=ams, maintenance=maintenance, light_state=light_state,
+                idle_info=idle_info, ams=ams, toolheads=toolheads,
+                maintenance=maintenance, light_state=light_state, timelapse_state=timelapse_state,
                 fan_speed=fan_speeds.get("part"),
                 fan_speeds=fan_speeds,
                 error=alarm_message if state in ("paused", "error") else None,
@@ -366,8 +503,31 @@ class BambuPrinter:
                                  custom_name=self.custom_name, icon=self.icon,
                                  kind="bambu", state="error", error=str(exc))
 
+    def mqtt_debug_snapshot(self) -> dict:
+        """Return the last raw MQTT dump plus connection metadata.
+
+        This is read-only and intended for H-series field discovery, such as
+        finding where H2C hotend rack state appears in Bambu's MQTT payload.
+        Redaction is applied by the API layer before returning this data.
+        """
+        if not self._connected:
+            raise RuntimeError("Bambu MQTT is not connected")
+        mc = self._printer.mqtt_client
+        return {
+            "id": self.id,
+            "model_name": self.model_name,
+            "custom_name": self.custom_name,
+            "connected": bool(self._connected),
+            "mqtt_connected": bool(mc.is_connected()),
+            "report_age_seconds": mc.report_age_seconds(),
+            "last_report_wall": mc.last_report_wall() or self._last_seen,
+            "snapshot_at": datetime.utcnow(),
+            "mqtt_dump": self._printer.mqtt_dump(),
+        }
+
     def _resolve_state(self, raw: bl.GcodeState, job: Optional[JobStatus],
-                       subtask: Optional[str], alarm_message: Optional[str] = None) -> str:
+                       subtask: Optional[str], alarm_message: Optional[str] = None,
+                       temps: Optional[dict[str, TempReading]] = None) -> str:
         now = datetime.now(timezone.utc)
 
         if raw == bl.GcodeState.FINISH:
@@ -375,9 +535,32 @@ class BambuPrinter:
             self._job_started_at = 0.0
             self._seen_finish_this_session = True
             if self._current_job_key:
+                if not self._physical_start_confirmed:
+                    print_id = db.on_print_ended(
+                        self.id,
+                        self._current_job_key,
+                        final_state="ERROR",
+                        layers_completed=0,
+                        error_message="Printer accepted start command but finished without heating or progressing",
+                    )
+                    if print_id:
+                        db.log_decision(
+                            self.id,
+                            "ghost_start_resolved",
+                            "FINISH seen with no physical start proof; closed as ERROR and skipped spool deduction",
+                            print_id=print_id,
+                        )
+                    self._current_job_key = None
+                    self._current_print_id = None
+                    self._ams_active_slot_at_start = None
+                    self._preview_cache = None
+                    self._physical_start_confirmed = False
+                    return "idle"
                 filament_g = material = filament_usage = None
-                if self._preview_cache:
-                    _, pv = self._preview_cache
+                pv = self._hydrate_print_preview_metadata(self._current_print_id) if self._current_print_id else None
+                if pv is None:
+                    pv = _queue_preview_metadata(self.id)
+                if pv:
                     filament_g = pv.filament_weight_g
                     material = pv.filament_type
                     filament_usage = _preview_filament_requirements(pv.filament_colors, pv.filament_type)
@@ -387,24 +570,53 @@ class BambuPrinter:
                     filament_grams=filament_g,
                     material=material,
                 )
+                if finished_print_id is None and self._current_print_id:
+                    if db.on_print_finished_by_id(
+                        self._current_print_id,
+                        layers_completed=job.layer_current if job else None,
+                        filament_grams=filament_g,
+                        material=material,
+                    ):
+                        finished_print_id = self._current_print_id
+                        db.log_decision(
+                            self.id,
+                            "finish_key_fallback",
+                            f"Closed tracked print by id after finish key mismatch (key={self._current_job_key})",
+                            print_id=finished_print_id,
+                        )
                 if finished_print_id and filament_g:
-                    db.deduct_spool_usage(
-                        self.id, finished_print_id, filament_g,
-                        active_slot=self._ams_active_slot_at_start,
-                        filament_usage=filament_usage,
-                    )
+                    try:
+                        db.deduct_spool_usage(
+                            self.id, finished_print_id, filament_g,
+                            active_slot=self._ams_active_slot_at_start,
+                            filament_usage=filament_usage,
+                        )
+                    except Exception as exc:
+                        log.exception("Bambu finish spool deduction failed for %s print_id=%s", self.id, finished_print_id)
+                        db.log_decision(
+                            self.id,
+                            "spool_deduction_error",
+                            f"Finish spool deduction failed without changing printer state: {exc}",
+                            print_id=finished_print_id,
+                        )
                 elif finished_print_id and self._ams_slot_snapshot_print_id == finished_print_id:
                     db.log_decision(self.id, "spool_no_deduction_cancelled",
                                    "Print finished but filament weight unknown; no spool deduction",
                                    print_id=finished_print_id)
+                self._last_finished_print_id = finished_print_id
+                self._last_timelapse_path = _read_bambu_timelapse_path(self._printer.mqtt_dump())
                 self._current_job_key = None
                 self._current_print_id = None
                 self._ams_active_slot_at_start = None
+                self._preview_cache = None
+                self._physical_start_confirmed = False
             else:
                 # Service restarted during the print; close any open row as FINISHED
                 # rather than leaving it orphaned for the stale-orphan sweep.
                 closed_ids = db.close_open_prints(self.id, final_state="FINISHED")
+                self._last_timelapse_path = _read_bambu_timelapse_path(self._printer.mqtt_dump())
                 for pid in closed_ids:
+                    self._last_finished_print_id = pid
                     db.log_decision(self.id, "job_cleanup",
                                    "FINISH seen at startup with no tracked job; closed open row as FINISHED",
                                    print_id=pid)
@@ -427,12 +639,23 @@ class BambuPrinter:
             self._error_job_key = None
             self._error_print_id = None
             self._error_seen_at = 0.0
+            self._last_finished_print_id = None
+            self._last_timelapse_path = None
             if self._seen_finish_this_session:
+                closed_ids = db.close_open_prints(self.id, final_state="FINISHED")
+                for pid in closed_ids:
+                    db.log_decision(
+                        self.id,
+                        "finish_idle_cleanup",
+                        "IDLE followed a finished state with an open print row; closed as FINISHED before clearing the finish window",
+                        print_id=pid,
+                    )
                 db.clear_finished_at(self.id)
                 self._seen_finish_this_session = False
                 self._current_job_key = None
                 self._current_print_id = None
                 self._cancel_requested = False
+                self._physical_start_confirmed = False
                 return "idle"
             if self._current_job_key:
                 # In-session stop: distinguish user-initiated cancel from unexpected drop.
@@ -480,6 +703,8 @@ class BambuPrinter:
             self._current_job_key = None
             self._current_print_id = None
             self._ams_active_slot_at_start = None
+            self._preview_cache = None
+            self._physical_start_confirmed = False
             finished_at = db.get_finished_at(self.id)
             if finished_at is not None:
                 if (now - finished_at.replace(tzinfo=timezone.utc)) <= FINISHED_TTL:
@@ -493,8 +718,13 @@ class BambuPrinter:
             self._error_job_key = None
             self._error_print_id = None
             self._error_seen_at = 0.0
+            self._last_finished_print_id = None
+            self._last_timelapse_path = None
+            if _bambu_physical_start_confirmed(job, temps or {}):
+                self._physical_start_confirmed = True
             if self._current_job_key is None:
                 self._current_job_key = self._make_job_key(subtask)
+                self._preview_cache = None
                 self._job_started_at = time.monotonic()
                 self._estimated_stored = False
                 print_id, is_reattach = db.on_print_started(
@@ -513,6 +743,18 @@ class BambuPrinter:
                     db.log_decision(self.id, "job_started",
                                    f"New print started key={self._current_job_key}",
                                    print_id=print_id)
+                if print_id:
+                    # Queue metadata only — FTP from status() stalls the whole API.
+                    self._hydrate_print_preview_metadata(print_id, allow_ftp=False)
+            if self._current_print_id and job is not None:
+                live_layer = job.layer_current
+                if live_layer is None and job.layer_total and job.progress is not None:
+                    live_layer = int(max(0.0, min(1.0, job.progress)) * job.layer_total)
+                db.update_print_live_progress(
+                    self._current_print_id,
+                    layers_completed=live_layer,
+                    layers_total=job.layer_total,
+                )
             # Derived slicer estimate: capture once after 60s elapsed.
             # Primary path for Bambu — no metadata API available.
             # Formula: slicer_total = eta_seconds / (1 - progress)
@@ -541,6 +783,7 @@ class BambuPrinter:
             self._estimated_stored = False
             self._job_started_at = 0.0
             db.clear_finished_at(self.id)
+            self._physical_start_confirmed = False
             err_code = self._printer.mqtt_dump().get("print", {}).get("print_error", 0)
 
             if self._current_job_key:
@@ -584,6 +827,7 @@ class BambuPrinter:
                 self._cancel_requested = False
                 self._error_job_key = job_key
                 self._error_print_id = print_id
+                self._last_timelapse_path = _read_bambu_timelapse_path(self._printer.mqtt_dump())
                 self._error_seen_at = time.monotonic()
                 if print_id:
                     db.log_decision(self.id, "error_resolved", err_msg, print_id=print_id)
@@ -594,14 +838,16 @@ class BambuPrinter:
                 # Keep a real error visible, but release a closed, code-free fault
                 # after a short grace period so queue preflight stops blocking.
                 age = time.monotonic() - self._error_seen_at if self._error_seen_at else 999.0
-                if not err_code and age >= 15.0 and db.is_print_closed(self.id, self._error_job_key):
+                operator_cancel = self._cancel_requested or _bambu_failed_is_operator_cancel(err_code, alarm_message)
+                if operator_cancel or (not err_code and age >= 15.0 and db.is_print_closed(self.id, self._error_job_key)):
                     if self._error_print_id:
                         db.log_decision(self.id, "error_cleared",
-                                       "Bambu FAILED state retained with no active error code; live fault cleared",
+                                       "Bambu FAILED state retained after cancel; live fault cleared",
                                        print_id=self._error_print_id)
                     self._error_job_key = None
                     self._error_print_id = None
                     self._error_seen_at = 0.0
+                    self._cancel_requested = False
                     return "idle"
                 # Already showing this in-session error; keep showing it while active.
                 return "error"
@@ -638,6 +884,7 @@ class BambuPrinter:
                     return "idle"
                 self._error_job_key = job_key
                 self._error_print_id = print_id
+                self._last_timelapse_path = _read_bambu_timelapse_path(self._printer.mqtt_dump())
                 self._error_seen_at = time.monotonic()
             return "error"
 
@@ -665,10 +912,43 @@ class BambuPrinter:
     def cancel(self) -> None:
         self._cancel_requested = True
         self._printer.stop_print()
+        self._publish_clean_print_error()
 
     def estop(self) -> None:
         self._cancel_requested = True
         self._printer.stop_print()  # Bambu MQTT has no dedicated e-stop
+        self._publish_clean_print_error()
+
+    def _publish_clean_print_error(self) -> None:
+        """Dismiss a retained FAILED/HMS banner so the printer can go idle."""
+        try:
+            client = self._printer.mqtt_client
+            client._PrinterMQTTClient__publish_command({
+                "print": {"command": "clean_print_error", "sequence_id": "0"},
+            })
+        except Exception:
+            log.debug("Bambu clean_print_error publish failed", exc_info=True)
+
+    def start_calibration(
+        self,
+        *,
+        bed_leveling: bool = True,
+        vibration: bool = True,
+        motor_noise: bool = True,
+        nozzle_offset: bool = False,
+        high_temp_heatbed: bool = False,
+    ) -> None:
+        client = self._printer.mqtt_client
+        if not hasattr(client, "start_calibration"):
+            raise RuntimeError("Calibration not supported for this printer connection")
+        if not client.start_calibration(
+            bed_leveling=bed_leveling,
+            vibration=vibration,
+            motor_noise=motor_noise,
+            nozzle_offset=nozzle_offset,
+            high_temp_heatbed=high_temp_heatbed,
+        ):
+            raise RuntimeError("Bambu calibration command was not accepted")
 
     def light_on(self) -> None:
         self._set_light("on")
@@ -768,12 +1048,26 @@ class BambuPrinter:
         })
 
     def _ams_slot_material(self, slot: Optional[int]) -> str:
-        if slot is None:
-            return ""
-        unit_id, tray_id = _split_ams_slot(slot)
         try:
             dump = self._printer.mqtt_dump().get("print", {})
-            for unit_data in (dump.get("ams", {}) or {}).get("ams", []):
+            ams = dump.get("ams", {}) or {}
+            units = ams.get("ams", [])
+            if slot is None:
+                # Unload-without-slot: heat to whatever tray_now still has loaded.
+                tray_now = int(ams.get("tray_now", 255))
+                if tray_now < 0 or tray_now >= 254:
+                    return ""
+                regular_ams_slots = _regular_ams_slot_count(units)
+                for unit_data in units:
+                    unit_id = int(unit_data.get("id", 0))
+                    for tray_data in unit_data.get("tray", []):
+                        tray_id = int(tray_data.get("id", 0))
+                        slot_index = _bambu_slot_index(unit_id, tray_id)
+                        if tray_now == _bambu_tray_target(slot_index, regular_ams_slots):
+                            return str(tray_data.get("tray_type") or "")
+                return ""
+            unit_id, tray_id = _split_ams_slot(slot)
+            for unit_data in units:
                 if int(unit_data.get("id", 0)) != int(unit_id):
                     continue
                 for tray_data in unit_data.get("tray", []):
@@ -879,14 +1173,14 @@ class BambuPrinter:
         subtask = self._printer.subtask_name()
         filename = self._printer.get_file_name()
         plate_number = _plate_number(filename)
-        if _is_plate_gcode(filename) and not subtask:
-            subtask = _active_queue_subtask(self.id)
+        if not subtask:
+            subtask = _resolve_bambu_job_subtask(self.id, filename)
         if not subtask:
             return None
         cache_key = f"{subtask}|plate:{plate_number or 1}"
         if self._preview_cache and self._preview_cache[0] == cache_key:
             val = self._preview_cache[1]
-            return None if val is _BAMBU_PREVIEW_FAILED else val
+            return _preview_metadata(val)
         try:
             from .bambu_ftp import fetch_bambu_preview
             preview = fetch_bambu_preview(self._ip, self._access_code, subtask, plate_number=plate_number)
@@ -897,6 +1191,41 @@ class BambuPrinter:
             self._preview_cache = (cache_key, _BAMBU_PREVIEW_FAILED)
             return None
 
+    def _hydrate_print_preview_metadata(self, print_id: Optional[int], *, allow_ftp: bool = True):
+        """Attach 3MF preview metadata when a print started outside Flightdeck."""
+        if not print_id:
+            return None
+        pv = _preview_metadata(self._preview_cache[1]) if self._preview_cache else None
+        if pv is None and allow_ftp:
+            pv = _preview_metadata(self.get_preview())
+        if pv is None:
+            pv = _queue_preview_metadata(self.id)
+        if pv and pv.filament_weight_g:
+            db.update_print_filament_metadata(
+                print_id,
+                filament_grams=pv.filament_weight_g,
+                material=pv.filament_type,
+            )
+            return pv
+        if db.try_apply_relay_filament_metadata(
+            print_id,
+            log_event="print_filament_metadata_from_relay",
+        ):
+            prow = db.get_print_by_id(print_id)
+            if prow and prow.get("filament_grams"):
+                return SimpleNamespace(
+                    filament_weight_g=prow.get("filament_grams"),
+                    filament_type=prow.get("material"),
+                    filament_colors=None,
+                )
+        if pv:
+            db.update_print_filament_metadata(
+                print_id,
+                filament_grams=pv.filament_weight_g,
+                material=pv.filament_type,
+            )
+        return pv
+
     def get_objects(self) -> dict:
         """Return skip-object candidates parsed from the current 3MF metadata."""
         preview = self.get_preview()
@@ -906,7 +1235,7 @@ class BambuPrinter:
                 "mode": "bambu_skip_objects",
                 "label": "Bambu skip objects",
                 "objects": [],
-                "detail": "No object metadata found in the active 3MF.",
+                "detail": "No skip-object metadata found. Enable Label objects and Exclude objects in Orca/Bambu Studio, then reslice/send the job.",
             }
 
         skipped = set()
@@ -929,6 +1258,8 @@ class BambuPrinter:
             "objects": objects,
             "excluded_ids": sorted(skipped),
             "plate_bounds": preview.plate_bounds,
+            "bed_bounds": preview.bed_bounds,
+            "bbox_all": preview.bbox_all,
             "plate_image_url": f"/api/printers/{self.id}/thumbnail",
             "plate_top_image_url": f"/api/printers/{self.id}/thumbnail?view=top",
             "map_rotation": 0,
@@ -936,9 +1267,7 @@ class BambuPrinter:
             "map_image_offset_x": 0,
             "map_image_offset_y": 0,
             "map_image_mode": "top_down",
-            "map_mirror_x": False,
-            "map_mirror_y": True,
-            "map_coordinate_rotation": -90,
+            "map_view": "top_down",
             "detail": "Bambu object exclusion uses the printer skip-object list and 3MF object positions.",
         }
 
@@ -958,55 +1287,116 @@ class BambuPrinter:
     def ams_slots(self) -> list[dict]:
         """Return flattened live AMS slots with Bambu's global slot index."""
         dump = self._printer.mqtt_dump()
+        print_data = dump.get("print", {})
+        extruder_map = _read_ams_extruder_map(print_data)
+        units = list(_parse_ams(
+            print_data,
+            extruder_map=extruder_map,
+            model_name=self.model_name,
+        ))
+        # Regular AMS units (unit_id < 128) each occupy 4 sequential print-command slots.
+        # AMS HT (unit_id >= 128) follows sequentially after all regular units.
+        n_regular_units = sum(1 for u in units if int(u.get("unit", 0)) < 128)
+        regular_ams_slots = _regular_ams_slot_count(units)
         slots = []
-        for unit in _parse_ams(dump.get("print", {})):
+        for unit in units:
             unit_id = int(unit.get("unit", 0))
+            nozzle = unit.get("nozzle")
+            if nozzle not in (0, 1):
+                nozzle = extruder_map.get(unit_id)
+            if nozzle is None and self.model_name.upper() == "H2D":
+                # H-series nozzle IDs are 0=left, 1=right. H2D regular AMS
+                # feeds the left path, while AMS HT feeds the right path.
+                nozzle = 1 if unit_id >= 128 else 0
+            if nozzle is None and self.model_name.upper() == "H2C":
+                # H2C regular AMS feeds the right toolhead path; AMS HT feeds left.
+                nozzle = 0 if unit_id >= 128 else 1
             for slot in unit.get("slots") or []:
                 if slot.get("empty"):
                     continue
                 slot_idx = int(slot.get("idx", 0))
                 flat_idx = _bambu_slot_index(unit_id, slot_idx)
-                bambu_tray_id = _bambu_tray_target(flat_idx)
+                bambu_tray_id = _bambu_tray_target(flat_idx, regular_ams_slots)
                 slots.append({
                     **slot,
                     "unit": unit_id,
                     "global_idx": flat_idx,
                     "bambu_tray_id": bambu_tray_id,
+                    **({"nozzle": nozzle} if nozzle in (0, 1) else {}),
                 })
         return slots
 
-    def send_file(self, file_path: str, filename: str) -> None:
+    def send_file(self, file_path: str, filename: str, plate_number: Optional[int] = None) -> None:
         """Upload a .gcode.3mf to the printer via FTPS then send the MQTT print command."""
         from .bambu_ftp import upload_bambu_file
         with open(file_path, "rb") as f:
             data = f.read()
-        preview = upload_bambu_file(self._ip, self._access_code, filename, data)
+        try:
+            requested_plate = int(plate_number) if plate_number is not None else None
+        except (TypeError, ValueError):
+            requested_plate = None
+        preview = upload_bambu_file(
+            self._ip, self._access_code, filename, data, plate_number=requested_plate,
+        )
         subtask_name = filename.removesuffix(".gcode.3mf")
         if preview and preview.image_png:
             self.seed_preview(subtask_name, preview)
 
+        filament_ids = preview.filament_ids if preview else None
+        print_plate_number = requested_plate or (
+            preview.print_plate_number if preview and preview.print_plate_number else 1
+        )
+        slots = self.ams_slots()
         ams_mapping, mapping_note = _derive_bambu_ams_mapping(
             preview.filament_colors if preview else None,
             preview.filament_type if preview else None,
-            self.ams_slots(),
+            slots,
         )
+        # Count regular AMS units from MQTT so we can compute ams_id=128 for AMS HT.
+        ams_raw = (self._printer.mqtt_dump().get("print") or {}).get("ams") or {}
+        regular_ams_slots = _regular_ams_slot_count(ams_raw.get("ams", []))
+        flat_mapping, detailed_mapping = _build_bambu_ams_mappings(ams_mapping, filament_ids, regular_ams_slots)
         db.log_decision(self.id, "queue_bambu_mapping", json.dumps({
             "file": filename,
             "ams_mapping": ams_mapping,
+            "filament_ids": filament_ids,
+            "flat_ams_mapping": flat_mapping,
+            "ams_mapping2": detailed_mapping,
             "mapping_note": mapping_note,
+            "regular_ams_slots": regular_ams_slots,
+            "print_plate_number": print_plate_number,
         }))
-        self._printer.start_print(filename, 1, True, ams_mapping)
+        self.start_uploaded_3mf(filename, ams_mapping, filament_ids=filament_ids,
+                                 regular_ams_slots=regular_ams_slots,
+                                 plate_number=print_plate_number)
+
+    def start_uploaded_3mf(self, filename: str, ams_mapping: list[int],
+                            filament_ids: list[int] | None = None,
+                            regular_ams_slots: int = 0,
+                            plate_number: int = 1) -> bool:
+        """Start an uploaded 3MF using the H2D-safe AMS mapping payload."""
+        return self._printer.mqtt_client.start_print_3mf(
+            filename, plate_number, True, ams_mapping, filament_ids=filament_ids,
+            regular_ams_slots=regular_ams_slots,
+        )
+
+    def hms_summary(self) -> Optional[str]:
+        """Latest HMS warning/error text from MQTT, if any."""
+        try:
+            return bambu_hms_summary(self._printer.mqtt_dump())
+        except Exception:
+            return None
 
 
 def _read_dual_nozzle_temps(mqtt_dump: dict, model_name: str) -> dict[str, "TempReading"]:
-    """Return {hotend_l, hotend_r} TempReadings for dual-nozzle printers (H2D only).
+    """Return {hotend_l, hotend_r} TempReadings for H-series dual-nozzle printers.
 
     H2D extruder encoding in device.extruder.info[]:
       - Primary extruder (id=0, Right): packed (actual<<16)|target  e.g. 17694990=(270<<16)|270
       - Secondary extruder (id=1, Left): plain int when temp>>16==0  e.g. 77 → 77°C
     Assignment confirmed: nozzle_temper tracks extruder[0] (Right); extruder[1] is Left.
     """
-    if model_name != "H2D":
+    if not str(model_name or "").upper().startswith("H"):
         return {}
 
     print_data = mqtt_dump.get("print", {})
@@ -1044,17 +1434,154 @@ def _read_dual_nozzle_temps(mqtt_dump: dict, model_name: str) -> dict[str, "Temp
     return result if len(result) == 2 else {}
 
 
-def _build_bambu_ams_mappings(ams_mapping: list[int] | None) -> tuple[list[int], list[dict]]:
+def _parse_h_series_nozzles(print_data: dict, model_name: str) -> list[dict]:
+    """Return H-series toolhead/rack state from Bambu's device.nozzle payload."""
+    if not str(model_name or "").upper().startswith("H"):
+        return []
+    device = print_data.get("device", {}) if isinstance(print_data, dict) else {}
+    nozzle = device.get("nozzle", {}) if isinstance(device, dict) else {}
+    info = nozzle.get("info", []) if isinstance(nozzle, dict) else []
+    if not isinstance(info, list):
+        return []
+
+    src_id = _safe_int(nozzle.get("src_id"))
+    tar_id = _safe_int(nozzle.get("tar_id"))
+    tools: list[dict] = []
+    for raw in info:
+        if not isinstance(raw, dict):
+            continue
+        nozzle_id = _safe_int(raw.get("id"))
+        if nozzle_id is None:
+            continue
+        serial = str(raw.get("sn") or "").strip()
+        has_physical = bool(serial and serial.upper() != "N/A")
+        colour = _norm_bambu_hex(raw.get("color_m")) or ""
+        filament_id = str(raw.get("fila_id") or "").strip()
+        diameter = _safe_float(raw.get("diameter"))
+        max_temp = _safe_int(raw.get("tm"))
+        usage_raw = _safe_int(raw.get("p_t"))
+
+        if nozzle_id in (0, 1):
+            # H2D uses the opposite toolhead-id sense from extruder temps (0=left).
+            # H2C aligns MQTT toolhead ids with extruder ids: 0=right, 1=left.
+            model_key = str(model_name or "").upper()
+            if model_key == "H2C":
+                position = "right" if nozzle_id == 0 else "left"
+                label = "Right nozzle" if nozzle_id == 0 else "Left nozzle"
+                flightdeck_nozzle = 1 if nozzle_id == 0 else 0
+            else:
+                position = "left" if nozzle_id == 0 else "right"
+                label = "Left nozzle" if nozzle_id == 0 else "Right nozzle"
+                flightdeck_nozzle = nozzle_id
+            zone = "toolhead"
+            slot = nozzle_id
+        elif nozzle_id >= 16:
+            position = "rack"
+            rack_slot = nozzle_id - 15
+            label = f"Rack {rack_slot}"
+            zone = "rack"
+            slot = rack_slot
+        else:
+            position = "unknown"
+            label = f"Nozzle {nozzle_id}"
+            zone = "unknown"
+            slot = nozzle_id
+
+        tools.append({
+            "idx": slot,
+            "id": nozzle_id,
+            "label": label,
+            "position": position,
+            "zone": zone,
+            "loaded": zone == "toolhead" and has_physical,
+            "present": has_physical,
+            "active": nozzle_id in (src_id, tar_id),
+            "serial": serial if has_physical else "",
+            "type": str(raw.get("type") or "").strip(),
+            "diameter": diameter,
+            "max_temp": max_temp,
+            "usage": usage_raw,
+            "color": colour,
+            "filament_id": filament_id,
+            "wear": _safe_int(raw.get("wear")),
+            **({"nozzle": flightdeck_nozzle} if zone == "toolhead" else {}),
+        })
+
+    return sorted(tools, key=lambda item: (0 if item.get("zone") == "toolhead" else 1, item.get("idx") or 0))
+
+
+def _read_ams_extruder_map(print_data: dict) -> dict[int, int]:
+    """Return AMS unit -> H-series nozzle target where 0=left and 1=right."""
+    ams_raw = print_data.get("ams", {}) if isinstance(print_data, dict) else {}
+    candidates = [
+        print_data.get("ams_extruder_map") if isinstance(print_data, dict) else None,
+        ams_raw.get("ams_extruder_map") if isinstance(ams_raw, dict) else None,
+    ]
+    for candidate in candidates:
+        if not candidate:
+            continue
+        if isinstance(candidate, str):
+            try:
+                candidate = json.loads(candidate)
+            except Exception:
+                pairs = re.findall(r"(\d+)\s*[:=]\s*(\d+)", candidate)
+                if pairs:
+                    return {int(k): int(v) for k, v in pairs if int(v) in (0, 1)}
+                continue
+        if isinstance(candidate, dict):
+            out = {}
+            for key, value in candidate.items():
+                try:
+                    nozzle = int(value)
+                    if nozzle in (0, 1):
+                        out[int(key)] = nozzle
+                except (TypeError, ValueError):
+                    continue
+            if out:
+                return out
+        if isinstance(candidate, list):
+            out = {}
+            for row in candidate:
+                if not isinstance(row, dict):
+                    continue
+                unit = row.get("ams_id", row.get("id", row.get("unit")))
+                nozzle = row.get("extruder", row.get("nozzle", row.get("target")))
+                try:
+                    nozzle_i = int(nozzle)
+                    if nozzle_i in (0, 1):
+                        out[int(unit)] = nozzle_i
+                except (TypeError, ValueError):
+                    continue
+            if out:
+                return out
+    return {}
+
+
+def _build_bambu_ams_mappings(
+    ams_mapping: list[int] | None,
+    filament_ids: list[int] | None = None,
+    regular_ams_slots: int = 0,
+) -> tuple[list[int], list[dict]]:
     """Return legacy flat ams_mapping plus detailed ams_mapping2.
 
-    For regular AMS, Bambu's flat tray ID is unit*4+slot. For AMS HT, the
-    flat tray ID is the unit ID itself (128, 129, ...), not unit*4. External
-    virtual trays are represented as -1 in the flat array and resolved through
-    ams_mapping2.
+    The H2D gcode uses T[project_filament_idx] and M620 S[project_filament_idx]A.
+    The firmware resolves these by looking up ams_mapping[project_filament_idx].
+    When filament_ids is provided (the 0-based project filament indices used on
+    the plate, from plate_N.json), the output is expanded to a project-indexed
+    array so ams_mapping[filament_ids[i]] = physical tray for plate slot i.
+    Unused project filament slots are filled with -1 / {255,255}.
+
+    Without filament_ids (X1C / single-AMS prints), the output is plate-indexed
+    and matches the existing behaviour where ams_mapping[plate_slot_i] = tray.
+
+    regular_ams_slots: total number of slots across all regular (non-HT) AMS
+    units, i.e. n_regular_units * 4.  When non-zero, flat tray IDs that equal
+    or exceed this value are treated as AMS HT slots and get ams_id=128 in
+    ams_mapping2, matching the unit_id the firmware reports in MQTT status.
     """
     flat: list[int] = []
     detailed: list[dict] = []
-    for raw_id in ams_mapping or []:
+    for raw_id in (ams_mapping or []):
         tray_id = int(raw_id) if raw_id is not None else -1
         if tray_id < 0:
             flat.append(-1)
@@ -1062,12 +1589,27 @@ def _build_bambu_ams_mappings(ams_mapping: list[int] | None) -> tuple[list[int],
         elif tray_id >= 254:
             flat.append(-1)
             detailed.append({"ams_id": 255, "slot_id": 0})
-        elif tray_id >= 128:
-            flat.append(tray_id)
-            detailed.append({"ams_id": tray_id, "slot_id": 0})
         else:
             flat.append(tray_id)
-            detailed.append({"ams_id": tray_id // 4, "slot_id": tray_id % 4})
+            if regular_ams_slots > 0 and tray_id >= regular_ams_slots:
+                # AMS HT slot: ams_id matches the MQTT unit_id (128), slot_id
+                # is the offset within the HT unit.
+                detailed.append({"ams_id": 128, "slot_id": tray_id - regular_ams_slots})
+            else:
+                # Regular AMS: sequential unit numbering within 4-slot units.
+                detailed.append({"ams_id": tray_id // 4, "slot_id": tray_id % 4})
+
+    # When filament_ids are present, remap from plate-slot-indexed to
+    # project-filament-indexed so the firmware can look up T4 as ams_mapping[4].
+    if filament_ids and len(filament_ids) == len(flat):
+        size = max(filament_ids) + 1
+        proj_flat = [-1] * size
+        proj_detailed: list[dict] = [{"ams_id": 255, "slot_id": 255}] * size
+        for i, proj_idx in enumerate(filament_ids):
+            proj_flat[proj_idx] = flat[i]
+            proj_detailed[proj_idx] = detailed[i]
+        return proj_flat, proj_detailed
+
     return flat, detailed
 
 
@@ -1093,6 +1635,26 @@ def _active_queue_subtask(printer_id: str) -> Optional[str]:
     return name.removesuffix(".gcode.3mf").removesuffix(".3mf").removesuffix(".gcode") or None
 
 
+def _bambu_subtask_from_filename(filename: Optional[str]) -> Optional[str]:
+    if not filename or _is_plate_gcode(filename):
+        return None
+    name = str(filename).strip().split("?", 1)[0].rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+    if not name or name in {".", ".."}:
+        return None
+    lower = name.lower()
+    for suffix in (".gcode.3mf", ".3mf", ".gcode.gz", ".gcode"):
+        if lower.endswith(suffix):
+            name = name[: -len(suffix)]
+            break
+    return name.strip() or None
+
+
+def _resolve_bambu_job_subtask(printer_id: str, filename: Optional[str]) -> Optional[str]:
+    if _is_plate_gcode(filename):
+        return _active_queue_subtask(printer_id)
+    return _bambu_subtask_from_filename(filename) or _active_queue_subtask(printer_id)
+
+
 def _norm_bambu_hex(value: Optional[str]) -> str:
     h = str(value or "").strip().lstrip("#")[:6].upper()
     return f"#{h}" if re.fullmatch(r"[0-9A-F]{6}", h) else ""
@@ -1105,6 +1667,42 @@ def _bambu_hex_dist(a: Optional[str], b: Optional[str]) -> float:
     va = [int(ha[i:i + 2], 16) for i in (1, 3, 5)]
     vb = [int(hb[i:i + 2], 16) for i in (1, 3, 5)]
     return sum((x - y) ** 2 for x, y in zip(va, vb)) ** 0.5
+
+
+def _bambu_colour_family(color: Optional[str]) -> str:
+    color = _norm_bambu_hex(color)
+    if not color:
+        return ""
+    rgb = [int(color[i:i + 2], 16) for i in (1, 3, 5)]
+    spread = max(rgb) - min(rgb)
+    avg = sum(rgb) / 3
+    if spread <= 45:
+        if avg <= 45:
+            return "black"
+        if avg >= 220:
+            return "white"
+        return "grey_silver"
+    return ""
+
+
+def _bambu_colour_matches(actual: Optional[str], expected: Optional[str]) -> bool:
+    if not expected:
+        return True
+    if _bambu_hex_dist(actual, expected) <= 95:
+        return True
+    return bool(_bambu_colour_family(actual) == _bambu_colour_family(expected) == "grey_silver")
+
+
+def _bambu_nozzle_label(nozzle: Optional[int]) -> str:
+    return "left nozzle" if nozzle == 0 else "right nozzle" if nozzle == 1 else "unknown nozzle"
+
+
+def _bambu_slot_label(slot: dict) -> str:
+    unit = int(slot.get("unit") or 0)
+    slot_idx = int(slot.get("idx") or 0)
+    bay = "AMS HT" if unit >= 128 else f"AMS {unit + 1} slot {slot_idx + 1}"
+    nozzle = slot.get("nozzle")
+    return f"{bay} / {_bambu_nozzle_label(nozzle)}"
 
 
 def _norm_bambu_material(value: Optional[str]) -> str:
@@ -1128,7 +1726,14 @@ def _preview_filament_requirements(filament_colors, fallback_type: Optional[str]
         color = _norm_bambu_hex(row.get("color"))
         material = _norm_bambu_material(row.get("type") or fallback_type)
         if color or material:
-            out.append({"color": color, "material": material, "used_g": row.get("used_g")})
+            item = {"color": color, "material": material, "used_g": row.get("used_g")}
+            try:
+                nozzle = int(row.get("nozzle"))
+                if nozzle in (0, 1):
+                    item["nozzle"] = nozzle
+            except (TypeError, ValueError):
+                pass
+            out.append(item)
     return out
 
 
@@ -1162,6 +1767,41 @@ def _derive_bambu_ams_mapping(
                 or slot["material_norm"] in req["material"]
             )
         ] or available
+        nozzle = req.get("nozzle")
+        enforce_nozzle_path = nozzle in (0, 1) and any("nozzle" in slot for slot in material_matches)
+        if enforce_nozzle_path:
+            nozzle_matches = [slot for slot in material_matches if slot.get("nozzle") == nozzle]
+            if nozzle_matches:
+                colour_matches = [
+                    slot for slot in nozzle_matches
+                    if _bambu_colour_matches(slot.get("color_norm"), req.get("color"))
+                ]
+                if colour_matches:
+                    material_matches = colour_matches
+                else:
+                    other_path = [
+                        slot for slot in material_matches
+                        if slot.get("nozzle") != nozzle
+                        and _bambu_colour_matches(slot.get("color_norm"), req.get("color"))
+                    ]
+                    wanted = " ".join(p for p in [req.get("material"), req.get("color")] if p) or "filament"
+                    if other_path:
+                        raise BambuAmsMappingError(
+                            f"H2D AMS mapping blocked: sliced filament {wanted} is assigned to "
+                            f"{_bambu_nozzle_label(nozzle)}, but the matching loaded tray is "
+                            f"{_bambu_slot_label(other_path[0])}. Move that filament to the correct AMS path "
+                            "or re-slice the job for the nozzle fed by that AMS."
+                        )
+                    raise BambuAmsMappingError(
+                        f"H2D AMS mapping blocked: sliced filament {wanted} is assigned to "
+                        f"{_bambu_nozzle_label(nozzle)}, but no matching loaded tray is available on that AMS path."
+                    )
+            else:
+                wanted = " ".join(p for p in [req.get("material"), req.get("color")] if p) or "filament"
+                raise BambuAmsMappingError(
+                    f"H2D AMS mapping blocked: sliced filament {wanted} is assigned to "
+                    f"{_bambu_nozzle_label(nozzle)}, but Flightdeck cannot see any loaded AMS tray feeding that nozzle."
+                )
         ranked = sorted(
             material_matches,
             key=lambda slot: (
@@ -1175,10 +1815,34 @@ def _derive_bambu_ams_mapping(
         used.add(int(best["bambu_tray_id"]))
         notes.append(
             f"{req.get('material') or 'unknown'} {req.get('color') or ''}"
+            f"{' nozzle=' + ('R' if nozzle == 0 else 'L') if nozzle in (0, 1) else ''}"
             f"->{best['bambu_tray_id']} {best.get('type') or ''} {best.get('color') or ''}"
         )
 
     return mapping or [0], "; ".join(notes)
+
+
+def _read_bambu_timelapse_path(mqtt_dump: dict) -> Optional[str]:
+    """Return the printer-reported timelapse path from Bambu MQTT, if present."""
+    print_data = (mqtt_dump or {}).get("print") or {}
+    device = print_data.get("device") if isinstance(print_data, dict) else {}
+    cam = (device or {}).get("cam") if isinstance(device, dict) else {}
+    if not isinstance(cam, dict):
+        return None
+    for key in ("timelapse_path", "timelapse"):
+        value = cam.get(key)
+        if value and str(value).strip():
+            return str(value).strip()
+    return None
+
+
+def _read_bambu_timelapse_state(print_data: dict) -> Optional[str]:
+    """Return Bambu's live timelapse enable/disable state when reported."""
+    ipcam = print_data.get("ipcam") if isinstance(print_data, dict) else {}
+    if not isinstance(ipcam, dict):
+        return None
+    value = str(ipcam.get("timelapse") or "").strip().lower()
+    return value if value in {"enable", "disable"} else None
 
 
 def _read_chamber_temp(mqtt_dump: dict, model_name: str) -> float | None:
@@ -1250,9 +1914,18 @@ def _read_fan_speeds(mc) -> dict[str, float]:
 
 
 _BAMBU_ALARM_MESSAGES = {
+    "18008012": 'Failed to get AMS mapping table; please select "Resume" to retry.',
     "1E07008012": 'Failed to get AMS mapping table; please select "Resume" to retry.',
     "07008012": 'Failed to get AMS mapping table; please select "Resume" to retry.',
+    "07FF8012": 'Failed to get AMS mapping table; please select "Resume" to retry.',
     "117473298": 'Failed to get AMS mapping table; please select "Resume" to retry.',
+}
+
+# Common HMS codes (attr/code → XXXX-XXXX-XXXX-XXXX) with wiki-style text.
+_BAMBU_HMS_MESSAGES = {
+    "0500-0300-0002-000E": (
+        "Printer HMS 0500-0300-0002-000E (module/firmware compatibility advisory)."
+    ),
 }
 
 
@@ -1294,14 +1967,97 @@ def _bambu_alarm_message(print_data: dict) -> Optional[str]:
     return None
 
 
+def _format_bambu_hms_code(attr, code) -> str:
+    """Decode Bambu HMS attr/code ints into XXXX-XXXX-XXXX-XXXX."""
+    try:
+        a = int(attr)
+        c = int(code)
+    except (TypeError, ValueError):
+        return ""
+    if a == 0 and c == 0:
+        return ""
+    return (
+        f"{(a >> 16) & 0xFFFF:04X}-{(a & 0xFFFF):04X}-"
+        f"{(c >> 16) & 0xFFFF:04X}-{(c & 0xFFFF):04X}"
+    )
+
+
+def _bambu_hms_entries(mqtt_dump: Optional[dict]) -> list[dict]:
+    print_data = (mqtt_dump or {}).get("print") if isinstance(mqtt_dump, dict) else None
+    raw = (print_data or {}).get("hms") if isinstance(print_data, dict) else None
+    if not isinstance(raw, list):
+        return []
+    out: list[dict] = []
+    seen: set[str] = set()
+    for row in raw:
+        if not isinstance(row, dict):
+            continue
+        code = _format_bambu_hms_code(row.get("attr"), row.get("code"))
+        if not code or code in seen:
+            continue
+        seen.add(code)
+        text = _BAMBU_HMS_MESSAGES.get(code) or f"Printer HMS {code}"
+        out.append({"code": code, "message": text})
+    return out
+
+
+def bambu_hms_summary(mqtt_dump: Optional[dict]) -> Optional[str]:
+    """Short user-facing HMS summary for queue/Live errors."""
+    entries = _bambu_hms_entries(mqtt_dump)
+    if not entries:
+        return None
+    parts = []
+    for entry in entries[:3]:
+        code = entry["code"]
+        msg = entry["message"]
+        if msg.startswith("Printer HMS "):
+            parts.append(msg)
+        else:
+            parts.append(f"{msg} [{code}]")
+    extra = len(entries) - len(parts)
+    if extra > 0:
+        parts.append(f"+{extra} more")
+    return "; ".join(parts)
+
+
 def _bambu_failed_is_operator_cancel(err_code, alarm_message: Optional[str]) -> bool:
-    """Bambu reports printer-screen Stop as FAILED, usually without an error code."""
-    return not alarm_message and not _normalise_bambu_alarm_code(err_code)
+    """Bambu reports printer-screen Stop as FAILED; 0300-400C is 'Printing was cancelled'."""
+    code = _normalise_bambu_alarm_code(err_code)
+    if code.endswith("0300400C") or code == "50348044":
+        return True
+    msg = (alarm_message or "").lower()
+    if "0300-400c" in msg or "printing was cancelled" in msg:
+        return True
+    return not alarm_message and not code
 
 
 def _bambu_slot_index(unit_id: int, tray_id: int) -> int:
     """Return Flightdeck's canonical AMS slot index."""
     return int(unit_id) + int(tray_id) if int(unit_id) >= 128 else int(unit_id) * 4 + int(tray_id)
+
+
+def _ams_unit_id(unit_data: dict) -> int:
+    for key in ("id", "unit"):
+        if key in unit_data:
+            try:
+                return int(unit_data.get(key) or 0)
+            except (TypeError, ValueError):
+                return 0
+    return 0
+
+
+def _regular_ams_slot_count(units: list[dict] | None) -> int:
+    """Flat slot boundary before AMS HT trays in project_file mapping.
+
+    Only meaningful when an AMS HT unit (id >= 128) is present. Printers with
+    only regular AMS — including a lone AMS 2 at unit id 1 — must use 0 so
+    trays like 6 map to ams_id 1 / slot 2 instead of being misclassified as HT.
+    """
+    ams_units = units or []
+    if not any(_ams_unit_id(u) >= 128 for u in ams_units):
+        return 0
+    n_regular = sum(1 for u in ams_units if _ams_unit_id(u) < 128)
+    return n_regular * 4
 
 
 def _split_ams_slot(slot: int) -> tuple[int, int]:
@@ -1313,9 +2069,26 @@ def _split_ams_slot(slot: int) -> tuple[int, int]:
     return slot // 4, slot % 4
 
 
-def _bambu_tray_target(slot: int) -> int:
-    unit_id, tray_id = _split_ams_slot(slot)
-    return unit_id + tray_id if unit_id >= 128 else int(slot)
+def _ams_slot_decision_label(slot_idx: int) -> str:
+    """Human-readable AMS bay label for decision-trail messages."""
+    unit, tray = _split_ams_slot(slot_idx)
+    if unit >= 128:
+        return "AMS HT slot 1"
+    return f"AMS {unit + 1} slot {tray + 1}"
+
+
+def _bambu_tray_target(slot: int, regular_ams_slots: int = 0) -> int:
+    """Return the print-command flat tray ID for a canonical AMS slot index.
+
+    Regular AMS (slot < 128): flat ID == canonical slot index (unit*4+slot).
+    AMS HT (slot >= 128): flat ID is sequential after all regular slots,
+    i.e. regular_ams_slots + (slot - 128).  This matches the sequential
+    numbering the H2D firmware and BambuStudio use in ams_mapping.
+    """
+    slot = int(slot)
+    if slot >= 128:
+        return regular_ams_slots + (slot - 128)
+    return slot
 
 
 def _filament_change_temp(material: Optional[str]) -> int:
@@ -1333,11 +2106,46 @@ def _bambu_profile_for_idx(idx: Optional[str]) -> dict:
     return _BAMBU_PROFILE_ALIASES.get(str(idx or "").strip(), {})
 
 
+def _bambu_pla_profile_key(spool: dict) -> Optional[str]:
+    """Named Bambu PLA variants → tray_info_idx. Generic PLA (GFL99) collapses these,
+    so the AMS tray reports 'Generic PLA' and Bambu Studio can't match a PLA Pure job."""
+    material = str(spool.get("material") or "").strip().upper()
+    brand = str(spool.get("brand") or "").strip().lower()
+    if material != "PLA" or "bambu" not in brand:
+        return None
+    label = " ".join(str(spool.get(k) or "") for k in ("subtype", "profile", "name")).lower()
+    if "pure" in label:
+        return "GFA19"
+    if "matte" in label:
+        return "GFA01"
+    if "basic" in label:
+        return "GFA00"
+    return None
+
+
 def _custom_filament_for_spool(spool: dict) -> Optional[AMSFilamentSettings]:
     material = str(spool.get("material") or "").strip().upper()
+    subtype = str(spool.get("subtype") or "").strip().upper()
     brand = str(spool.get("brand") or "").strip().lower()
     if material == "ASA" and "siddament" in brand:
         profile = _BAMBU_PROFILE_ALIASES["P461bccf"]
+        return AMSFilamentSettings(
+            profile["tray_info_idx"],
+            profile["nozzle_temp_min"],
+            profile["nozzle_temp_max"],
+            profile["tray_type"],
+        )
+    pla_key = _bambu_pla_profile_key(spool)
+    if pla_key:
+        profile = _BAMBU_PROFILE_ALIASES[pla_key]
+        return AMSFilamentSettings(
+            profile["tray_info_idx"],
+            profile["nozzle_temp_min"],
+            profile["nozzle_temp_max"],
+            profile["tray_type"],
+        )
+    if "PETG" in material and "CF" in f"{material} {subtype}":
+        profile = _BAMBU_PROFILE_ALIASES["GFG98"]
         return AMSFilamentSettings(
             profile["tray_info_idx"],
             profile["nozzle_temp_min"],
@@ -1349,9 +2157,15 @@ def _custom_filament_for_spool(spool: dict) -> Optional[AMSFilamentSettings]:
 
 def _profile_alias_for_spool(spool: dict) -> dict:
     material = str(spool.get("material") or "").strip().upper()
+    subtype = str(spool.get("subtype") or "").strip().upper()
     brand = str(spool.get("brand") or "").strip().lower()
     if material == "ASA" and "siddament" in brand:
         return _BAMBU_PROFILE_ALIASES["P461bccf"]
+    pla_key = _bambu_pla_profile_key(spool)
+    if pla_key:
+        return _BAMBU_PROFILE_ALIASES[pla_key]
+    if "PETG" in material and "CF" in f"{material} {subtype}":
+        return _BAMBU_PROFILE_ALIASES["GFG98"]
     filament = _filament_for_spool(spool)
     if isinstance(filament, AMSFilamentSettings):
         for alias in _BAMBU_PROFILE_ALIASES.values():
@@ -1541,18 +2355,35 @@ def _filament_for_spool(spool: dict):
     return bl.Filament(key)
 
 
-def _parse_ams(dump: dict) -> list[dict]:
+def _parse_ams(
+    dump: dict,
+    *,
+    extruder_map: dict[int, int] | None = None,
+    model_name: str = "",
+) -> list[dict]:
     """Parse AMS data from mqtt_dump()['print']. Returns JSON-serialisable list."""
     ams_raw = dump.get("ams", {})
     if not ams_raw or ams_raw.get("ams_exist_bits", "0") == "0":
         return []
 
+    extruder_map = extruder_map if extruder_map is not None else _read_ams_extruder_map(dump)
+    model_key = str(model_name or "").upper()
     tray_now = int(ams_raw.get("tray_now", 255))
     _AMS_LABELS = {128: "AMS HT"}
     result = []
+    n_regular_units = sum(1 for u in ams_raw.get("ams", []) if int(u.get("id", 0)) < 128)
+    regular_ams_slots = _regular_ams_slot_count(ams_raw.get("ams", []))
 
     for unit_data in ams_raw.get("ams", []):
         unit_id = int(unit_data.get("id", 0))
+        nozzle = extruder_map.get(unit_id)
+        if nozzle is None and model_key == "H2D":
+            # H-series nozzle IDs are 0=left, 1=right. H2D regular AMS feeds
+            # the left path, while AMS HT feeds the right path.
+            nozzle = 1 if unit_id >= 128 else 0
+        if nozzle is None and model_key == "H2C":
+            # H2C regular AMS feeds the right toolhead path; AMS HT feeds left.
+            nozzle = 0 if unit_id >= 128 else 1
         dry_setting = unit_data.get("dry_setting") or {}
         dry_time = _safe_int(unit_data.get("dry_time"))
         unit_temp = _safe_float(
@@ -1603,9 +2434,9 @@ def _parse_ams(dump: dict) -> list[dict]:
                 color = ""
 
             slot_index = _bambu_slot_index(unit_id, tray_id)
-            active = (not empty) and (tray_now == _bambu_tray_target(slot_index))
+            active = (not empty) and (tray_now == _bambu_tray_target(slot_index, regular_ams_slots))
 
-            slots.append({
+            slot_payload = {
                 "idx": tray_id,
                 "type": tray_type,
                 "color": color,
@@ -1615,10 +2446,13 @@ def _parse_ams(dump: dict) -> list[dict]:
                 "tray_state": tray_state,
                 "active": active,
                 "empty": empty,
-            })
+            }
+            if nozzle in (0, 1):
+                slot_payload["nozzle"] = nozzle
+            slots.append(slot_payload)
 
         if slots:
-            result.append({
+            unit_payload = {
                 "unit": unit_id,
                 "label": _AMS_LABELS.get(unit_id, f"AMS {unit_id + 1}"),
                 "slots": slots,
@@ -1636,7 +2470,10 @@ def _parse_ams(dump: dict) -> list[dict]:
                     "temperature": dry_temperature,
                     "duration": dry_duration,
                 },
-            })
+            }
+            if nozzle in (0, 1):
+                unit_payload["nozzle"] = nozzle
+            result.append(unit_payload)
 
     return result
 
@@ -1694,16 +2531,24 @@ def _safe_float(value) -> Optional[float]:
 def _snapshot_ams_slots(print_data: dict) -> dict[int, dict]:
     """Capture AMS slot state at print start. Returns {slot_index: slot_info}."""
     ams_raw = print_data.get("ams", {})
-    tray_now = int(ams_raw.get("tray_now", 255))
+    tray_now = _safe_int(ams_raw.get("tray_now"))
+    ams_units = ams_raw.get("ams", [])
+    n_regular_units = sum(
+        1
+        for unit_data in ams_units
+        if (_safe_int(unit_data.get("id")) or 0) < 128
+    )
+    regular_ams_slots = _regular_ams_slot_count(ams_units)
     result: dict[int, dict] = {}
-    for unit_data in ams_raw.get("ams", []):
-        unit_id = int(unit_data.get("id", 0))
+    for unit_data in ams_units:
+        unit_id = _safe_int(unit_data.get("id")) or 0
         for tray_data in unit_data.get("tray", []):
-            tray_id = int(tray_data.get("id", 0))
+            tray_id = _safe_int(tray_data.get("id")) or 0
             tray_type = tray_data.get("tray_type", "")
             if not tray_type:
                 continue
             slot_index = _bambu_slot_index(unit_id, tray_id)
+            flat_slot = _bambu_tray_target(slot_index, regular_ams_slots)
             hex_c = tray_data.get("tray_color", "")
             color = f"#{hex_c[:6].upper()}" if len(hex_c) >= 6 and hex_c.upper() not in ("00000000", "") else ""
             profile_id = str(tray_data.get("tray_info_idx") or "")
@@ -1718,7 +2563,8 @@ def _snapshot_ams_slots(print_data: dict) -> dict[int, dict]:
                 "color": color,
                 "uuid": tray_data.get("tray_uuid", ""),
                 "remain_pct": tray_data.get("remain", -1),
-                "active": tray_now == _bambu_tray_target(slot_index),
+                "flat_slot": flat_slot,
+                "active": tray_now is not None and tray_now in (slot_index, flat_slot),
             }
     return result
 

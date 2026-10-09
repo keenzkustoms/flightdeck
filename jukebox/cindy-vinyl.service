@@ -1,0 +1,23 @@
+[Unit]
+Description=Cindy Vinyl music stack
+Wants=network-online.target
+After=network-online.target docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/home/flightdeck/flightdeck/jukebox
+
+# Cindy is three CIFS mounts below /mnt/cindy, not a mount on /mnt/cindy itself.
+# Retry for up to two minutes to survive slow network/NAS startup after reboot.
+ExecStartPre=/bin/bash -c 'for i in {1..24}; do /home/flightdeck/bin/mount-cindy.sh >/dev/null 2>&1 || true; mountpoint -q /mnt/cindy/MUSIC && mountpoint -q /mnt/cindy/CHECKED && mountpoint -q /mnt/cindy/JAMAL && exit 0; sleep 5; done; echo "Cindy shares did not become ready" >&2; exit 1'
+ExecStartPre=/home/flightdeck/flightdeck/jukebox/scripts/build-cindy-library-view.sh
+
+# Bring the stack up only after the mounts/view are known-good.
+# Navidrome's own server process handles startup/resume scanning; do not restart it
+# again here or an active scan can be cancelled with context canceled.
+ExecStart=/usr/bin/docker compose up -d
+
+[Install]
+WantedBy=multi-user.target

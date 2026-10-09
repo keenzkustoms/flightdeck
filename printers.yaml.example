@@ -66,6 +66,33 @@ printers:
   #     type: mjpeg_direct
   #     stream_url: http://192.168.1.30/webcam/stream.mjpg
   #     snapshot_url: http://192.168.1.30/webcam/snapshot.jpg
+  #     rotation: 0            # any camera type: 0, 90, 180 or 270 (camera mounted sideways)
+
+  # Snapshot-only camera (e.g. FLSUN S1 / other Klipper printers whose MJPEG stream is unreliable).
+  # Flightdeck polls the snapshot and serves it as a stream: active_fps while printing, idle_fps otherwise.
+  # - id: flsuns1
+  #   model_name: FLSUN S1
+  #   custom_name: FLSUN S1
+  #   icon: generic
+  #   build_volume: { x: 320, y: 320, z: 430 }
+  #   connection:
+  #     type: moonraker
+  #     host: 192.168.1.40
+  #     port: 7125
+  #   camera:
+  #     type: adaptive
+  #     snapshot_url: http://192.168.1.40/webcam/?action=snapshot
+  #     active_fps: 2
+  #     idle_fps: 0.25
+  #     rotation: 90
+
+  # Camera served over WebRTC (e.g. go2rtc / camera-streamer); the browser opens stream_url directly.
+  # - id: anyprinter
+  #   ...
+  #   camera:
+  #     type: webrtc
+  #     stream_url: http://192.168.1.50:1984/stream.html?src=cam
+  #     snapshot_url: http://192.168.1.50:1984/api/frame.jpeg?src=cam
 
   # Simulator example:
   # - id: ir3

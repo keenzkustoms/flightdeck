@@ -279,16 +279,115 @@
     const u = new URL(url, location.origin);
     const path = u.pathname;
     const method = (options.method || 'GET').toUpperCase();
+    const jsonBody = () => {
+      try { return JSON.parse(options.body || '{}'); } catch (_) { return {}; }
+    };
+    const sliceOptions = body => {
+      const supports = { off: 'Supports off', normal_auto: 'Normal auto', tree_auto: 'Tree auto', tree_strong: 'Tree strong' };
+      const brims = { off: 'No brim', auto: 'Auto brim', outer: 'Outer brim', mouse_ears: 'Mouse ears' };
+      return {
+        bed_type: body.bed_type || 'Textured PEI Plate',
+        support: supports[body.support_mode] || 'Supports off',
+        brim: brims[body.brim_mode] || 'No brim',
+      };
+    };
 
     if (path === '/api/settings') return jsonResponse({ temp_unit: 'F', time_format: '24h', accent: '#3b82f6' });
     if (path.startsWith('/api/settings/')) return method === 'GET' ? jsonResponse({ value: null }) : jsonResponse({ ok: true, demo: true });
+    if (path === '/api/costing' && method === 'GET') return jsonResponse({
+      overheads: [
+        { id: 'bambu', name: 'Bambu / subscriptions', amount: 40 },
+        { id: 'electricity', name: 'Electricity', amount: 30 },
+        { id: 'other', name: 'Other', amount: 10 },
+      ],
+      expected_hours: 40,
+      markup_pct: 35,
+      labour_per_hour: 0,
+      monthly_total: 80,
+      shop_rate: 2,
+      effective_rate: 2,
+      recent_hours_30d: 36,
+    });
+    if (path === '/api/costing' && method === 'PUT') {
+      const body = jsonBody();
+      const hours = Number(body.expected_hours || 40) || 40;
+      const monthly = (body.overheads || []).reduce((s, r) => s + Number(r.amount || 0), 0);
+      return jsonResponse({
+        ...body,
+        monthly_total: monthly,
+        shop_rate: hours > 0 ? monthly / hours : 0,
+        effective_rate: hours > 0 ? monthly / hours : 0,
+        recent_hours_30d: 36,
+      });
+    }
+    if (path === '/api/costing/quote' && method === 'POST') {
+      const body = jsonBody();
+      const hours = Number(body.hours || 0);
+      const grams = Number(body.grams || 0);
+      const filament = body.filament_cost != null ? Number(body.filament_cost) : grams * 0.03;
+      const time = hours * 2;
+      const floor = filament + time;
+      return jsonResponse({
+        hours, grams,
+        filament_cost: Math.round(filament * 100) / 100,
+        time_cost: Math.round(time * 100) / 100,
+        floor_price: Math.round(floor * 100) / 100,
+        suggested_price: Math.round(floor * 1.35 * 100) / 100,
+        shop_rate: 2,
+        markup_pct: 35,
+      });
+    }
+    if (path === '/api/projects' && method === 'GET') return jsonResponse({ items: [] });
+    if (path === '/api/projects' && method === 'POST') {
+      const body = jsonBody();
+      return jsonResponse({
+        id: 1,
+        name: body.name || 'Demo project',
+        vault_folder: 'Projects/Demo',
+        parallel_printers: 1,
+        files: [],
+        quote: { file_count: 0, grams: null, printer_hours: 0, elapsed_hours: 0, quote_floor: null, quote_suggested: null },
+      });
+    }
+    if (path.startsWith('/api/projects/')) return jsonResponse({ id: 1, name: 'Demo', files: [], quote: {} });
+    if (path === '/api/makerworld/status') return jsonResponse({ has_token: false, token_hint: '', import_dir: 'MakerWorld', demo: true });
+    if (path === '/api/makerworld/recent') return jsonResponse({ imports: [], demo: true });
+    if (path === '/api/makerworld/resolve' && method === 'POST') return jsonResponse({
+      ok: true,
+      demo: true,
+      title: 'Demo MakerWorld model',
+      design_id: 123456,
+      model_id: 'USdemo',
+      summary_text: 'Demo resolve preview only.',
+      cover_url: '',
+      creator: 'Flightdeck Demo',
+      license: 'BY-NC',
+      download_count: 0,
+      print_count: 0,
+      source_url: 'https://makerworld.com/en/models/123456',
+      plates: [{
+        profile_id: 1,
+        title: 'Demo plate',
+        cover_url: '',
+        weight_g: 42,
+        print_time_text: '1h 10m',
+        need_ams: false,
+        filament_colors: 2,
+        is_default: true,
+        already_imported: false,
+      }],
+      can_download: false,
+      token_hint: '',
+    });
+    if (path === '/api/makerworld/import' && method === 'POST') return jsonResponse({ ok: true, demo: true, already_existed: false, name: 'demo.3mf', path: 'MakerWorld/demo.3mf', size: 1024 });
     if (path === '/api/update/status') return jsonResponse({
-      version: '0.4.0',
-      name: 'Windows installer and fleet setup',
+      version: '0.4.0-beta.1',
+      name: 'Bambu beta launch candidate',
       release_notes: [
-        'Windows tray installer with dependency checks',
-        'Setup health, diagnostics, and first-run printer setup',
-        'Live AMS visual loadout and Bambu/Klipper fleet tools',
+        'Bambu-focused beta front door and install docs',
+        'Spool swatch/detail views and QR assignment workflows',
+        'AMS/AMS HT queue, history, and deduction polish',
+        'Windows slicer worker health checks and browser slicer guidance',
       ],
       branch: 'demo',
       commit: 'demo',
@@ -301,8 +400,8 @@
     if (path === '/api/update') return jsonResponse({ ok: true, message: 'Demo mode does not update files.', restart_required: false });
     if (path === '/api/instance') return jsonResponse({
       app: 'flightdeck-demo',
-      version: '0.4.0',
-      version_name: 'Windows installer and fleet setup',
+      version: '0.4.0-beta.1',
+      version_name: 'Bambu beta launch candidate',
       address: 'demo.local',
       hardware: 'Demo Pi 5 8GB',
       runtime: 'standalone demo',
@@ -331,6 +430,11 @@
       });
     }
     if (path === '/api/printers') return jsonResponse(clone(demoPrinters));
+    if (path !== '/api/printers/usage' && path.match(/^\/api\/printers\/[^/]+$/)) {
+      const id = decodeURIComponent(path.split('/')[3]);
+      const printer = demoPrinters.find(p => p.id === id);
+      return printer ? jsonResponse(clone(printer)) : textResponse('Printer not found', 404);
+    }
     if (path.match(/^\/api\/printers\/[^/]+\/camera$/)) {
       const id = decodeURIComponent(path.split('/')[3]);
       return jsonResponse({ url: demoCameraAssets[id] || demoImage(`${id.toUpperCase()} camera`, id === 'h2d' ? '#ef4444' : '#3b82f6') });
@@ -406,11 +510,56 @@
     });
     if (path === '/api/filament/catalog/search') return jsonResponse({ items: [] });
     if (path === '/api/filament/catalog/sync') return jsonResponse({ ok: true, demo: true, imported: 12, results: [{ source: 'siddament', imported: 12 }], errors: [] });
+    if (path === '/api/filament/colour-match') {
+      const inv = { id: 1, display_id: 42, brand: 'Siddament', material: 'PLA', color_name: 'Beige', color_hex: '#D8C6A5', remaining_g: 640, delta: 28.4, match_pct: 94 };
+      const cat = { brand: 'Bambu Lab', material: 'PLA', color_name: 'Desert Tan', color_hex: '#C9A66B', delta: 18.2, match_pct: 96, price_aud: null, product_url: null, source: 'open_filament_database' };
+      const catBuy = { brand: 'Siddament', material: 'PLA', color_name: 'Beige', color_hex: '#D8C6A5', delta: 28.4, match_pct: 94, price_aud: 34.95, product_url: 'https://siddament.com.au/', source: 'siddament' };
+      const recommendation = {
+        action: 'use_inventory',
+        reason: 'Shelf is only 2% under the closest buy — use what you have',
+        gap_pct: 2,
+        prefer_inventory_pct: 2,
+        inventory: inv,
+        catalog: cat,
+      };
+      return jsonResponse({
+        ok: true,
+        hex: '#C4A574',
+        material: 'PLA',
+        brand: null,
+        label: 'Brown',
+        catalog_count: 12,
+        prefer_inventory_pct: 2,
+        catalog_status: { sources: [{ source: 'siddament', count: 12 }] },
+        inventory_matches: [inv],
+        catalog_matches: [cat, catBuy],
+        recommendation,
+        palette: [
+          { id: 't1', hex: '#C4A574', label: 'Pick 1', colour_label: 'Brown', recommendation, inventory_best: inv, catalog_best: cat },
+          {
+            id: 't2', hex: '#6B655D', label: 'Pick 2', colour_label: 'Grey',
+            recommendation: {
+              action: 'order',
+              reason: 'Best buy is 5% closer than shelf — order for a truer colour',
+              gap_pct: 5,
+              prefer_inventory_pct: 2,
+              inventory: { ...inv, color_name: 'Dark Grey', match_pct: 89, color_hex: '#696363' },
+              catalog: { ...catBuy, color_name: 'Stone Grey', match_pct: 94, color_hex: '#6A655E' },
+            },
+            inventory_best: { ...inv, color_name: 'Dark Grey', match_pct: 89, color_hex: '#696363' },
+            catalog_best: { ...catBuy, color_name: 'Stone Grey', match_pct: 94, color_hex: '#6A655E' },
+          },
+        ],
+        palette_summary: { total: 2, use_inventory: 1, order: 1, none: 0 },
+      });
+    }
     if (path === '/api/files') return jsonResponse(filesDemo());
     if (path === '/api/files/reprints') return jsonResponse([]);
     if (path === '/api/files/queue' || path === '/api/files/library/copy') return jsonResponse({ ok: true, demo: true });
     if (path === '/api/files/source/preview') return fetch('/static/demo-assets/can-opener-preview.png', { cache: 'no-store' });
-    if (path === '/api/slicer/plan') return jsonResponse({
+    if (path === '/api/slicer/plan') {
+      const body = jsonBody();
+      return jsonResponse({
       ok: true,
       ready: true,
       can_background_slice: true,
@@ -423,9 +572,12 @@
         process: '0.20mm Balanced Strength @BBL H2D',
         filament: 'Bambu ASA @BBL H2D 0.4 nozzle',
       },
-      slice_options: { bed_type: 'Textured PEI Plate', support: 'Profile default', brim: 'Profile default' },
+      slice_options: sliceOptions(body),
     });
-    if (path === '/api/slicer/run') return jsonResponse({
+    }
+    if (path === '/api/slicer/run') {
+      const body = jsonBody();
+      return jsonResponse({
       ok: true,
       filename: 'HULA_H2D_feet_h2d_demo.gcode.3mf',
       path: 'HULA_H2D_feet_h2d_demo.gcode.3mf',
@@ -438,8 +590,9 @@
         process: '0.20mm Balanced Strength @BBL H2D',
         filament: 'Bambu ASA @BBL H2D 0.4 nozzle',
       },
-      slice_options: { bed_type: 'Textured PEI Plate', support: 'Profile default', brim: 'Profile default' },
+      slice_options: sliceOptions(body),
     });
+    }
     if (path === '/api/slicer/check') return jsonResponse({ ok: true, kind: 'demo', status: 200, version: 'demo reachable' });
     if (path.match(/^\/api\/files\/bambu\/[^/]+\/clear$/)) return jsonResponse({ ok: true, demo: true });
     if (path === '/api/queue') return jsonResponse(clone(demoQueue));
@@ -456,7 +609,7 @@
     if (path.startsWith('/api/notifications/')) return jsonResponse({ ok: true, demo: true });
     if (path === '/api/scale/status') return jsonResponse({ ok: true, available: true, label: 'Dymo M10 USB scale', detail: 'Demo scale ready' });
     if (path === '/api/scale/read') return jsonResponse({ ok: true, grams: 536, stable: true });
-    if (path === '/api/label_printer/status') return jsonResponse({ ok: true, available: true, model: 'Brother QL-700', label_size: 'DK-22212 62mm continuous', backend: 'brother_ql', printer_name: 'usb://0x04f9:0x2042' });
+    if (path === '/api/label_printer/status') return jsonResponse({ ok: true, available: true, label: 'Brother QL-700', detail: 'Demo label printer ready' });
     if (path.startsWith('/api/label_printer')) return jsonResponse({ ok: true, demo: true });
     if (path === '/api/config/printers') return jsonResponse(clone(demoPrinters));
     if (path.startsWith('/api/config/printers')) return jsonResponse({ ok: true, demo: true });

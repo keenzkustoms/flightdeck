@@ -1,0 +1,67 @@
+# Mora (Synology) host for Cindy Vinyl + Navidrome.
+# Data on volume2 SSD. library-view symlinks point at /share/{Cindy,Checked,Jamal},
+# so those shares are mounted into Navidrome at the same paths.
+#
+# Usage on Mora:
+#   cd /volume2/cindy-vinyl/compose
+#   docker compose -f docker-compose.mora.yml up -d --build
+
+services:
+  navidrome:
+    image: deluan/navidrome:latest
+    container_name: cindy-navidrome
+    restart: unless-stopped
+    user: "1001:100"
+    ports:
+      - "4533:4533"
+    environment:
+      ND_SCANSCHEDULE: "1h"
+      # Shares must be up before scanning — never mark the library missing on boot.
+      ND_SCANONSTARTUP: "false"
+      ND_LOGLEVEL: info
+      ND_SESSIONTIMEOUT: "24h"
+      ND_BASEURL: ""
+      ND_PORT: "4533"
+      ND_MUSICFOLDER: /music
+      ND_DATAFOLDER: /data
+      ND_ENABLESHARING: "false"
+      ND_DEFAULTTHEME: Dark
+      ND_ENABLEFAVOURITES: "true"
+      ND_ENABLESTARRATING: "true"
+      ND_IGNOREFILERULES: "(\\.tmp|\\.part|Thumbs\\.db|desktop\\.ini|\\.DS_Store)"
+      ND_SCANNER_PURGEMISSING: "full"
+      ND_COVERARTPRIORITY: "embedded, cover.*, folder.*, front.*, *.jpg, *.jpeg, *.png, *.webp"
+    volumes:
+      # library-view symlinks use these absolute targets. Without them inside
+      # the container every stream is a broken link.
+      - /share/Cindy:/share/Cindy:ro
+      - /share/Checked:/share/Checked:ro
+      - /share/Jamal:/share/Jamal:ro
+      # SSD symlink view (MUSIC/CHECKED/JAMAL layout matching migrated DB paths)
+      - /volume2/cindy-vinyl/library-view:/music:ro
+      - /volume2/cindy-vinyl/navidrome-data:/data
+
+  vinyl:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: cindy-vinyl
+    restart: unless-stopped
+    ports:
+      # LAN: http://192.168.4.77:4541 — do not also bind :4540 on the host;
+      # Tailscale serve already owns 4540 on Mora.
+      - "4541:4540"
+    environment:
+      NAVIDROME_URL: http://navidrome:4533
+      NAVIDROME_DB: /data/navidrome.db
+      JUKEBOX_USER: ${JUKEBOX_USER:-jukebox}
+      JUKEBOX_PASSWORD: ${JUKEBOX_PASSWORD:?set JUKEBOX_PASSWORD in .env}
+      JUKEBOX_HOST: 0.0.0.0
+      JUKEBOX_PORT: "4540"
+      VINYL_DATA: /vinyl-data
+      CINDY_SMB_HOST: ${CINDY_SMB_HOST:-192.168.4.53}
+    volumes:
+      - /volume2/cindy-vinyl/navidrome-data:/data:ro
+      - /volume2/cindy-vinyl/vinyl-data:/vinyl-data
+    depends_on:
+      - navidrome

@@ -1,0 +1,3279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="theme-color" content="#020617" />
+  <title>Amy</title>
+  <link rel="icon" type="image/png" href="/amy-icon.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #020617;
+      --panel: rgba(2, 12, 28, 0.88);
+      --ink: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #22d3ee;
+      --line: rgba(34, 211, 238, 0.28);
+      --glow: 0 0 22px rgba(34, 211, 238, 0.35);
+      --ok: #4ade80;
+      --warn: #fbbf24;
+      --hud-w: 260px;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; height: 100%; overflow: hidden; color: var(--ink);
+      background:
+        radial-gradient(1100px 650px at 72% 18%, rgba(8, 47, 73, 0.5), transparent 60%),
+        radial-gradient(800px 480px at 18% 82%, rgba(14, 116, 144, 0.18), transparent 55%),
+        var(--bg);
+      font-family: "IBM Plex Sans", system-ui, sans-serif;
+    }
+    #graph { position: absolute; inset: 0; }
+    #stars { position: absolute; inset: 0; pointer-events: none; opacity: 0.7; }
+    #vignette {
+      position: absolute; inset: 0; pointer-events: none; z-index: 2;
+      background: radial-gradient(ellipse at center, transparent 42%, rgba(2, 6, 23, 0.78) 100%);
+    }
+
+    #brand {
+      position: absolute; top: 16px; left: 16px; z-index: 8;
+      padding: 10px 14px; border-radius: 14px;
+      background: var(--panel); border: 1px solid var(--line);
+      backdrop-filter: blur(12px); box-shadow: var(--glow);
+    }
+    #brand strong {
+      display: block; font-family: Orbitron, sans-serif; letter-spacing: 0.16em;
+      font-size: 0.72rem; color: var(--accent);
+    }
+    #brand span { font-size: 0.82rem; color: var(--muted); }
+    #mode-chip {
+      display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+      margin: 0 auto 2px; width: fit-content;
+      border: 1px solid var(--line); background: rgba(2, 12, 28, 0.92);
+      color: var(--muted); border-radius: 999px; padding: 4px 12px;
+      font-family: Orbitron, sans-serif; font-size: 0.62rem; letter-spacing: 0.14em;
+      cursor: pointer; user-select: none;
+    }
+    #mode-chip:hover { border-color: var(--accent); color: var(--accent); }
+    #mode-chip[data-mode="print"] {
+      color: #fbbf24; border-color: rgba(251, 191, 36, 0.45);
+      background: rgba(120, 53, 15, 0.28); box-shadow: 0 0 14px rgba(251, 191, 36, 0.18);
+    }
+    #mode-chip[data-mode="casual"] {
+      color: var(--accent); border-color: rgba(34, 211, 238, 0.4);
+    }
+
+    #topbar {
+      position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
+      z-index: 8; width: min(380px, calc(100vw - 340px));
+    }
+    #search {
+      width: 100%; border-radius: 999px; border: 1px solid var(--line);
+      background: rgba(2, 12, 28, 0.8); color: var(--ink);
+      padding: 10px 18px; font: inherit; outline: none;
+      box-shadow: var(--glow); backdrop-filter: blur(12px);
+    }
+    #search::placeholder { color: #67e8f87a; }
+    #search:focus { border-color: var(--accent); }
+
+    /* Compact Flightdeck-style live pill — sits LEFT of Amy HUD (she owns top-right) */
+    #share-dot {
+      display: none;
+      position: absolute;
+      top: 18px;
+      right: calc(var(--hud-w) + 20px);
+      left: auto;
+      z-index: 10;
+      align-items: center;
+      gap: 7px;
+      background: rgba(2, 8, 18, 0.92);
+      color: #cbd5e1;
+      border: 1px solid rgba(148, 163, 184, 0.35);
+      border-radius: 999px;
+      padding: 4px 10px 4px 8px;
+      font-size: 0.62rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      white-space: nowrap;
+      box-shadow: 0 0 12px rgba(0, 0, 0, 0.35);
+      pointer-events: none;
+    }
+    #share-dot::before {
+      content: "";
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #22c55e;
+      box-shadow: 0 0 8px rgba(34, 197, 94, 0.85);
+      flex-shrink: 0;
+    }
+    #share-dot.is-on,
+    #share-dot[style*="inline-flex"] { display: inline-flex !important; }
+    /* Compact: face is centred — keep pill bottom-left so it never covers her */
+    body.compact #share-dot {
+      top: auto;
+      bottom: 12px;
+      left: 12px;
+      right: auto;
+    }
+
+    /* Right HUD column — never overlaps note card */
+    #hud {
+      position: absolute; top: 16px; right: 16px; width: var(--hud-w); z-index: 9;
+      display: flex; flex-direction: column; gap: 10px; align-items: stretch;
+    }
+    .face-card {
+      background: var(--panel); border: 1px solid var(--line); border-radius: 18px;
+      padding: 28px 18px 12px; backdrop-filter: blur(12px); box-shadow: var(--glow);
+      display: grid; justify-items: center; gap: 8px;
+      overflow: visible;
+    }
+    .face-wrap {
+      position: relative;
+      width: 168px; height: 168px;
+      display: grid; place-items: center;
+      margin-bottom: 14px; /* keep voice rings off the AMY label */
+      overflow: visible;
+    }
+    .face {
+      width: 168px; height: 168px; position: relative; z-index: 2;
+      border-radius: 18px;
+      overflow: hidden;
+      border: 2px solid rgba(103, 232, 248, 0.75);
+      box-shadow: 0 0 0 3px rgba(8, 145, 178, 0.25), 0 0 24px rgba(34, 211, 238, 0.45);
+      background: #020617;
+      filter: drop-shadow(0 0 14px rgba(34, 211, 238, 0.35));
+    }
+    .face video {
+      width: 100%; height: 100%; object-fit: cover; display: block;
+      /* Centre her face in the square; QR sits top-right of source so scale+mask kills it */
+      object-position: 46% 48%;
+      transform: scale(1.38);
+      transform-origin: center center;
+    }
+    /* Paint out Tripo QR corner if any remains */
+    .face::after {
+      content: "";
+      position: absolute;
+      top: 0; right: 0;
+      width: 42%; height: 32%;
+      background: linear-gradient(225deg, #020617 42%, transparent 68%);
+      pointer-events: none;
+      z-index: 3;
+    }
+    .hud-rings {
+      pointer-events: none;
+      position: absolute;
+      /* Less bleed under the face so AMY stays readable */
+      top: -14px; right: -14px; bottom: -4px; left: -14px;
+      z-index: 1;
+      opacity: 0; transition: opacity 0.2s ease;
+    }
+    .face-wrap[data-mode="speaking"] .hud-rings,
+    .face-wrap[data-mode="listening"] .hud-rings { opacity: 1; }
+    .hud-ring, .hud-arc {
+      position: absolute; inset: 0; border-radius: 22px;
+      border: 1.5px solid transparent;
+    }
+    .hud-ring.r1 {
+      inset: 10px 10px 14px 10px;
+      border-radius: 18px;
+      border-color: rgba(34, 211, 238, 0.55);
+      box-shadow: 0 0 12px rgba(34, 211, 238, 0.25);
+    }
+    .hud-ring.r2 {
+      inset: 2px 2px 8px 2px;
+      border-radius: 20px;
+      border-color: rgba(103, 232, 248, 0.35);
+      border-style: dashed;
+    }
+    .hud-ring.r3 {
+      inset: -8px -8px -2px -8px;
+      border-radius: 24px;
+      border-color: rgba(34, 211, 238, 0.22);
+    }
+    .hud-arc.a1 {
+      inset: 6px 6px 12px 6px;
+      border-radius: 18px;
+      border-top-color: #67e8f8;
+      border-right-color: transparent;
+      border-bottom-color: transparent;
+      border-left-color: rgba(34, 211, 238, 0.15);
+      border-width: 2px;
+    }
+    .hud-arc.a2 {
+      inset: -4px -4px 0 -4px;
+      border-radius: 22px;
+      border-bottom-color: #22d3ee;
+      border-left-color: transparent;
+      border-top-color: transparent;
+      border-right-color: rgba(103, 232, 248, 0.2);
+      border-width: 2px;
+    }
+    .hud-ticks {
+      position: absolute; inset: 0 0 6px 0; border-radius: 20px;
+    }
+    .hud-ticks::before, .hud-ticks::after {
+      content: ""; position: absolute; left: 50%; width: 2px; height: 7px;
+      margin-left: -1px; background: #67e8f8;
+      box-shadow: 0 0 8px rgba(34, 211, 238, 0.8);
+    }
+    .hud-ticks::before { top: 0; }
+    .hud-ticks::after { bottom: 0; display: none; /* bottom tick was eating into AMY */ }
+    .face-wrap[data-mode="speaking"] .hud-ring.r1 { animation: jarvis-pulse 0.7s ease-in-out infinite; }
+    .face-wrap[data-mode="speaking"] .hud-ring.r2 { animation: jarvis-pulse 1.1s ease-in-out infinite reverse; }
+    .face-wrap[data-mode="speaking"] .hud-ring.r3 { animation: jarvis-pulse 0.95s ease-in-out infinite; }
+    .face-wrap[data-mode="speaking"] .hud-arc.a1,
+    .face-wrap[data-mode="speaking"] .hud-arc.a2 { animation: jarvis-pulse 0.8s ease-in-out infinite; }
+    .face-wrap[data-mode="speaking"] .hud-ticks { animation: jarvis-vibrate 0.18s linear infinite; }
+    .face-wrap[data-mode="listening"] .hud-ring.r1 {
+      border-color: rgba(74, 222, 128, 0.55);
+      animation: jarvis-pulse 1.6s ease-in-out infinite;
+    }
+    .face-wrap[data-mode="listening"] .hud-ring.r2 {
+      border-color: rgba(74, 222, 128, 0.3);
+      animation: jarvis-pulse 2.2s ease-in-out infinite reverse;
+    }
+    .face-wrap[data-mode="listening"] .hud-arc.a1,
+    .face-wrap[data-mode="listening"] .hud-arc.a2 { border-top-color: #4ade80; border-bottom-color: #4ade80; }
+    .face[data-mode="listening"] {
+      border-color: #4ade80;
+      box-shadow: 0 0 0 3px rgba(74, 222, 128, 0.25), 0 0 28px rgba(74, 222, 128, 0.45);
+    }
+    .face[data-mode="speaking"] {
+      border-color: #22d3ee;
+      box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.35), 0 0 32px rgba(34, 211, 238, 0.55);
+    }
+    .face[data-mode="thinking"] {
+      border-color: #fbbf24;
+      box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.25), 0 0 28px rgba(251, 191, 36, 0.35);
+    }
+    .face[data-mode="thinking"] video { filter: saturate(0.85) brightness(0.92); }
+    .face-wrap[data-mode="asleep"] .hud-rings { opacity: 0 !important; }
+    .face[data-mode="asleep"] {
+      border-color: rgba(51, 65, 85, 0.7);
+      box-shadow: none;
+      filter: grayscale(0.85) brightness(0.28);
+      transition: filter 0.6s ease, border-color 0.6s ease, box-shadow 0.6s ease;
+    }
+    .face[data-mode="asleep"] video { opacity: 0.35; }
+    .face-wrap[data-mode="asleep"] + .face-name,
+    .face-card:has(.face-wrap[data-mode="asleep"]) .face-name {
+      color: #475569; text-shadow: none;
+    }
+    .face-card:has(.face-wrap[data-mode="asleep"]) .face-state { color: #334155; }
+
+    /* Lights-out: CSS always; optional GIF at /sounds/amy-sleep.gif */
+    #lights-out {
+      position: absolute; inset: 0; z-index: 8;
+      pointer-events: none; opacity: 0;
+      transition: opacity 0.9s ease;
+      display: flex; align-items: center; justify-content: center;
+      overflow: hidden; border-radius: 18px;
+    }
+    body.asleep #lights-out { opacity: 1; }
+    #lights-out .shade {
+      position: absolute; inset: 0;
+      background:
+        radial-gradient(circle at 50% 42%, rgba(2, 6, 23, 0.15) 0%, rgba(2, 6, 23, 0.72) 52%, rgba(0, 0, 0, 0.92) 100%);
+      animation: lights-dim 1.4s ease forwards;
+    }
+    #lights-out .iris {
+      position: absolute; inset: -20%;
+      border-radius: 50%;
+      box-shadow: inset 0 0 0 0 rgba(0, 0, 0, 0.92);
+      animation: lights-iris 1.35s ease forwards;
+    }
+    #lights-out img.sleep-gif {
+      position: relative; z-index: 2;
+      max-width: 72%; max-height: 72%;
+      object-fit: contain;
+      filter: drop-shadow(0 0 12px rgba(34, 211, 238, 0.25));
+      display: none;
+    }
+    #lights-out.has-gif img.sleep-gif { display: block; }
+    #lights-out.has-gif .zzz-wrap { display: none; }
+    #lights-out.has-gif .shade,
+    #lights-out.has-gif .iris { display: none; }
+    #lights-out .zzz-wrap {
+      position: relative; z-index: 2;
+      width: 100%; height: 100%;
+      pointer-events: none;
+    }
+    #lights-out .zzz {
+      position: absolute;
+      font-family: Orbitron, sans-serif;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      color: rgba(103, 232, 248, 0.55);
+      text-shadow: 0 0 10px rgba(34, 211, 238, 0.35);
+      animation: zzz-drift 2.8s ease-in-out infinite;
+    }
+    #lights-out .zzz.z1 { top: 18%; right: 22%; font-size: 1.1rem; animation-delay: 0s; }
+    #lights-out .zzz.z2 { top: 10%; right: 12%; font-size: 0.85rem; animation-delay: 0.45s; opacity: 0.7; }
+    #lights-out .zzz.z3 { top: 28%; right: 8%; font-size: 0.7rem; animation-delay: 0.9s; opacity: 0.5; }
+    body.asleep #stars { opacity: 0.28; filter: brightness(0.45); transition: opacity 1s ease, filter 1s ease; }
+    body.asleep #graph { opacity: 0.18; transition: opacity 1s ease; }
+    body.asleep #brand { opacity: 0.4; transition: opacity 1s ease; }
+    body.asleep #topbar { opacity: 0.35; transition: opacity 1s ease; }
+    body.asleep #dock { filter: brightness(0.72); transition: filter 1s ease; }
+    @keyframes lights-dim {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+    @keyframes lights-iris {
+      from { box-shadow: inset 0 0 0 0 rgba(0, 0, 0, 0.9); }
+      to { box-shadow: inset 0 0 0 120px rgba(0, 0, 0, 0.88); }
+    }
+    @keyframes zzz-drift {
+      0% { transform: translate(0, 8px) scale(0.85); opacity: 0; }
+      20% { opacity: 0.75; }
+      70% { opacity: 0.55; }
+      100% { transform: translate(-10px, -28px) scale(1.15); opacity: 0; }
+    }
+    @keyframes jarvis-pulse {
+      0%,100% { transform: scale(1); opacity: 0.85; }
+      50% { transform: scale(1.03); opacity: 1; }
+    }
+    @keyframes jarvis-vibrate {
+      0% { transform: scale(1); opacity: 0.9; }
+      50% { transform: scale(1.02); opacity: 1; }
+      100% { transform: scale(1); opacity: 0.9; }
+    }
+    .face-name {
+      position: relative; z-index: 4;
+      font-family: Orbitron, sans-serif; letter-spacing: 0.22em; font-size: 0.95rem;
+      color: var(--accent); text-shadow: 0 0 10px rgba(34, 211, 238, 0.7);
+    }
+    .face-state {
+      position: relative; z-index: 4;
+      font-size: 0.68rem; letter-spacing: 0.12em; color: var(--muted); text-transform: uppercase;
+    }
+
+    .chips { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
+    .chip {
+      border-radius: 999px; border: 1px solid var(--line); background: rgba(2, 12, 28, 0.9);
+      color: var(--accent); padding: 6px 10px; font-size: 0.65rem; font-weight: 700; letter-spacing: 0.05em;
+    }
+    .chip.live { border-color: var(--accent); box-shadow: var(--glow); background: rgba(8, 145, 178, 0.28); }
+    .chip.model { color: #e0f2fe; }
+    button.chip {
+      font: inherit; cursor: pointer;
+    }
+    button.chip:hover { border-color: var(--accent); }
+
+    .modes, .organs {
+      display: grid; gap: 6px; width: 100%;
+    }
+    .modes { grid-template-columns: repeat(3, 1fr); }
+    .organs { grid-template-columns: repeat(2, 1fr); }
+    .modes button, .organs button {
+      border: 1px solid var(--line); background: rgba(2, 12, 28, 0.8); color: #94a3b8;
+      border-radius: 10px; padding: 8px 4px; font: inherit; font-size: 0.65rem; font-weight: 700;
+      letter-spacing: 0.08em; cursor: pointer;
+    }
+    .modes button.active, .organs button.active {
+      color: var(--accent); border-color: var(--accent); box-shadow: var(--glow);
+      background: rgba(8, 145, 178, 0.22);
+    }
+    .organs button:disabled { opacity: 0.4; cursor: default; }
+    .organs button.active {
+      border-color: var(--accent);
+      box-shadow: var(--glow);
+      color: var(--accent);
+    }
+
+    /* Compact / "go small" — centred column; organs/modes stay; mic unchanged */
+    body.compact #graph,
+    body.compact #stars,
+    body.compact #vignette,
+    body.compact #brand,
+    body.compact #topbar,
+    body.compact #side { display: none !important; }
+    body.compact {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      overflow-x: hidden;
+      overflow-y: auto;
+      padding: 8px 10px 0;
+    }
+    body.compact #hud,
+    body.compact #dock {
+      position: relative;
+      top: auto; right: auto; left: auto; bottom: auto;
+      transform: none;
+      inset: auto;
+      width: 100%;
+      max-width: 340px;
+      margin-left: auto;
+      margin-right: auto;
+      box-sizing: border-box;
+      overflow: visible;
+    }
+    body.compact #hud {
+      align-items: center;
+      gap: 6px;
+    }
+    /* Sleep in FOCUS: keep small window, calm the chrome, leave the talk box usable */
+    body.compact.asleep {
+      overflow: hidden;
+      justify-content: flex-start;
+    }
+    body.compact.asleep .modes,
+    body.compact.asleep .organs {
+      display: none !important;
+    }
+    body.compact.asleep #dock {
+      filter: none;
+    }
+    body.compact.asleep #chat-input {
+      pointer-events: auto;
+    }
+    body.compact .face-card {
+      width: 100%;
+      /* HUD rings sit outside the face (~28–40px) — keep them inside the card */
+      padding: 36px 10px 10px;
+      justify-items: center;
+      overflow: visible;
+    }
+    body.compact .face-wrap {
+      margin: 0 auto;
+    }
+    body.compact .modes,
+    body.compact .organs {
+      display: grid;
+      width: 100%;
+      gap: 5px;
+    }
+    body.compact .modes button,
+    body.compact .organs button {
+      padding: 6px 3px;
+      font-size: 0.6rem;
+    }
+    body.compact #dock {
+      margin-top: 6px;
+      padding: 0 2px 8px;
+      border-radius: 0;
+    }
+    body.compact .face-wrap,
+    body.compact .face {
+      width: min(176px, 46vw);
+      height: min(176px, 46vw);
+    }
+    body.compact .face video {
+      object-fit: cover;
+      object-position: 46% 48%;
+      transform: scale(1.38);
+      transform-origin: center center;
+    }
+    body.compact #answer {
+      max-height: 14vh;
+      overflow: auto;
+      text-align: center;
+      font-size: 0.86rem;
+    }
+    body.compact .row {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 6px;
+      align-items: stretch;
+    }
+    body.compact .row #chat-input {
+      grid-column: 1 / -1;
+      width: 100%;
+      min-width: 0;
+    }
+    body.compact .row button.tool {
+      width: 100%;
+      min-width: 0;
+      padding: 10px 4px;
+      font-size: 0.68rem;
+      letter-spacing: 0.04em;
+    }
+    body.compact #tray { justify-content: center; }
+
+    /* Phone / narrow browser — chat mate layout (no galaxy chrome) */
+    @media (max-width: 720px) {
+      html, body {
+        overflow: auto;
+        min-height: 100%;
+        min-height: 100dvh;
+      }
+      #graph, #stars, #vignette, #brand, #topbar, #side { display: none !important; }
+      #share-dot {
+        top: auto; bottom: 12px; left: 12px; right: auto;
+        font-size: 0.62rem;
+      }
+      #hud, #dock {
+        position: relative !important;
+        left: auto !important; right: auto !important;
+        top: auto !important; bottom: auto !important;
+        width: min(420px, calc(100vw - 20px)) !important;
+        margin: 12px auto;
+        max-height: none;
+      }
+      #hud { z-index: 9; padding-top: env(safe-area-inset-top, 0); }
+      #dock {
+        z-index: 10;
+        padding-bottom: calc(10px + env(safe-area-inset-bottom, 0));
+      }
+      .face-card { width: 100%; }
+      .modes, .organs {
+        display: grid !important;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 6px;
+        width: 100%;
+      }
+      .modes button, .organs button { font-size: 0.62rem; padding: 8px 4px; }
+      .row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
+      .row #chat-input {
+        grid-column: 1 / -1;
+        font-size: 16px; /* iOS zoom guard */
+        min-height: 44px;
+      }
+      .row button.tool { min-height: 44px; width: 100%; }
+      #answer { max-height: 28vh; font-size: 0.92rem; }
+      #tray { padding-bottom: 4px; }
+    }
+
+    /* Note panel — LEFT side, clear of HUD */
+    #side {
+      position: absolute; top: 88px; left: 16px; width: min(320px, calc(100vw - var(--hud-w) - 48px));
+      z-index: 8; max-height: calc(100vh - 220px); overflow: auto;
+      background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+      padding: 12px 14px; backdrop-filter: blur(12px); display: none; box-shadow: var(--glow);
+    }
+    #side h2 { margin: 0 0 6px; font-size: 0.98rem; font-family: Orbitron, sans-serif; letter-spacing: 0.04em; }
+    #side .group { color: var(--accent); font-size: 0.68rem; letter-spacing: 0.1em; text-transform: uppercase; }
+    #side p { margin: 8px 0 0; color: var(--muted); font-size: 0.84rem; line-height: 1.4; white-space: pre-wrap; }
+    #side-close {
+      float: right; border: 0; background: transparent; color: var(--muted); cursor: pointer; font-size: 1rem;
+    }
+
+    #dock {
+      position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%);
+      width: min(720px, calc(100vw - var(--hud-w) - 40px)); z-index: 8; display: grid; gap: 8px;
+    }
+    #secure-hint {
+      display: none; text-align: center; font-size: 0.72rem; color: #fca5a5;
+      background: rgba(127, 29, 29, 0.35); border: 1px solid #ef4444; border-radius: 10px; padding: 8px 10px;
+    }
+    #secure-hint a { color: #fecaca; }
+    #status-line {
+      text-align: center; font-size: 0.7rem; letter-spacing: 0.14em; text-transform: uppercase;
+      color: #64748b; min-height: 1em;
+    }
+    #status-line[data-mode="listening"] { color: var(--ok); }
+    #status-line[data-mode="thinking"] { color: var(--warn); }
+    #status-line[data-mode="speaking"] { color: var(--accent); }
+    #answer {
+      background: rgba(2, 12, 28, 0.9); border: 1px solid var(--line); border-radius: 16px;
+      padding: 12px 16px; min-height: 2.8em; font-size: 0.95rem; line-height: 1.45;
+      box-shadow: var(--glow); backdrop-filter: blur(12px);
+      user-select: text; -webkit-user-select: text; cursor: text; white-space: pre-wrap;
+    }
+    #answer a {
+      color: #7dd3fc; text-decoration: underline; text-underline-offset: 2px;
+      word-break: break-all; cursor: pointer;
+    }
+    #answer a:hover { color: #e0f2fe; }
+    #chat-input, #search {
+      user-select: text; -webkit-user-select: text;
+    }
+    #clip-menu {
+      display: none; position: fixed; z-index: 40; min-width: 140px;
+      background: rgba(2, 12, 28, 0.96); border: 1px solid var(--line); border-radius: 10px;
+      box-shadow: var(--glow); padding: 4px; backdrop-filter: blur(12px);
+    }
+    #clip-menu button {
+      display: block; width: 100%; text-align: left; border: 0; background: transparent;
+      color: var(--ink); font: inherit; font-size: 0.82rem; padding: 8px 12px;
+      border-radius: 8px; cursor: pointer;
+    }
+    #clip-menu button:hover { background: rgba(8, 145, 178, 0.25); color: var(--accent); }
+    .row { display: flex; gap: 8px; align-items: stretch; }
+    #chat-input {
+      flex: 1; border-radius: 14px; border: 1px solid var(--line); background: rgba(2, 12, 28, 0.92);
+      color: var(--ink); padding: 12px 14px; font: inherit; outline: none;
+    }
+    #chat-input:focus { border-color: var(--accent); box-shadow: var(--glow); }
+    button.tool {
+      border: 1px solid var(--line); background: rgba(2, 12, 28, 0.92); color: var(--ink);
+      border-radius: 14px; padding: 0 14px; font: inherit; font-size: 0.75rem; font-weight: 800;
+      letter-spacing: 0.06em; cursor: pointer; white-space: nowrap;
+    }
+    button.tool:hover { border-color: var(--accent); color: var(--accent); }
+    button.tool.active { background: rgba(8, 145, 178, 0.28); border-color: var(--accent); color: var(--accent); box-shadow: var(--glow); }
+    #tray { display: flex; justify-content: center; gap: 10px; }
+    #tray button {
+      width: 38px; height: 38px; border-radius: 50%; border: 1px solid var(--line);
+      background: rgba(2, 12, 28, 0.88); color: var(--accent); cursor: pointer; box-shadow: var(--glow); font-size: 0.95rem;
+    }
+    #drops {
+      display: none; flex-wrap: wrap; gap: 6px;
+    }
+    #drops.show { display: flex; }
+    .drop-chip {
+      display: inline-flex; align-items: center; gap: 6px; max-width: 100%;
+      border: 1px solid var(--line); background: rgba(8, 47, 73, 0.65);
+      color: var(--ink); border-radius: 999px; padding: 4px 10px; font-size: 0.72rem;
+    }
+    .drop-chip button {
+      border: 0; background: transparent; color: var(--muted); cursor: pointer; font-size: 0.85rem; padding: 0;
+    }
+    #drop-overlay {
+      display: none; position: absolute; inset: 0; z-index: 6;
+      border: 2px dashed var(--accent); border-radius: 18px;
+      background: rgba(2, 12, 28, 0.88); color: var(--accent);
+      align-items: center; justify-content: center; text-align: center;
+      font-family: Orbitron, sans-serif; letter-spacing: 0.12em; font-size: 0.78rem;
+      pointer-events: none;
+    }
+    #dock.dragover #drop-overlay { display: flex; }
+  </style>
+  <script src="/vendor/3d-force-graph.min.js"></script>
+  <script src="/graph-data.js"></script>
+</head>
+<body>
+  <canvas id="stars"></canvas>
+  <div id="graph"></div>
+  <div id="vignette"></div>
+
+  <div id="brand"><strong>AMY</strong><span id="brand-sub">booting…</span></div>
+  <div id="share-dot">SCREEN SHARE LIVE</div>
+  <div id="topbar"><input id="search" type="search" placeholder="Search notes / printers…" autocomplete="off" /></div>
+
+  <aside id="hud">
+    <div class="face-card">
+      <div class="face-wrap" id="amy-face-wrap" data-mode="idle">
+        <div class="hud-rings" aria-hidden="true">
+          <span class="hud-ring r3"></span>
+          <span class="hud-ring r2"></span>
+          <span class="hud-ring r1"></span>
+          <span class="hud-arc a1"></span>
+          <span class="hud-arc a2"></span>
+          <span class="hud-ticks"></span>
+        </div>
+        <div class="face" id="amy-face" data-mode="idle" aria-label="Amy">
+          <video id="amy-face-video" muted playsinline preload="auto" poster="">
+            <source src="/amy-face.webm" type="video/webm" />
+            <source src="/amy-face.mp4" type="video/mp4" />
+          </video>
+          <div id="lights-out" aria-hidden="true">
+            <div class="shade"></div>
+            <div class="iris"></div>
+            <img class="sleep-gif" id="lights-out-gif" alt="" decoding="async" />
+            <div class="zzz-wrap" aria-hidden="true">
+              <span class="zzz z1">Z</span>
+              <span class="zzz z2">z</span>
+              <span class="zzz z3">z</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="face-name">AMY</div>
+      <div class="face-state" id="face-state">STANDBY</div>
+      <div class="chips">
+        <span class="chip" id="speak-chip">● IDLE</span>
+        <span class="chip model" id="model-chip">MODEL</span>
+        <button type="button" class="chip" id="awake-chip" title="How long she stays up when it's quiet. Click to change.">AWAKE 90m</button>
+      </div>
+    </div>
+    <div class="modes" role="tablist" aria-label="Galaxy view">
+      <button type="button" class="active" data-view="ring">RING</button>
+      <button type="button" data-view="cube">CUBE</button>
+      <button type="button" data-view="face">ORBIT</button>
+    </div>
+    <div class="organs" aria-label="Organs">
+      <button type="button" id="eyes-btn" title="Share your screen so Amy can see it">EYES</button>
+      <button type="button" id="watch-btn" title="Webcam — Amy can see you">WATCH</button>
+      <button type="button" id="holo-btn" disabled title="Hologram desk overlay — not built yet">HOLO</button>
+      <button type="button" id="focus-btn" title="Compact face + chat (same as ‘go small’)">FOCUS</button>
+    </div>
+  </aside>
+
+  <aside id="side">
+    <button type="button" id="side-close" aria-label="Close note">×</button>
+    <div class="group" id="side-group"></div>
+    <h2 id="side-title"></h2>
+    <p id="side-body"></p>
+  </aside>
+
+  <div id="dock">
+    <div id="drop-overlay">DROP FILES FOR AMY</div>
+    <div id="secure-hint">Mic needs HTTPS. Open <a id="https-link" href="#">the secure Amy URL</a> — Chrome treats plain HTTP like speakers-only.</div>
+    <button type="button" id="mode-chip" data-mode="casual" title="Click to switch casual ↔ print mode">CASUAL</button>
+    <div id="status-line" data-mode="idle">Ready</div>
+    <div id="answer"></div>
+    <div id="drops" aria-live="polite"></div>
+    <div class="row">
+      <input id="chat-input" type="text" placeholder="Talk to Amy… (or drop files)" autocomplete="off" />
+      <input id="file-input" type="file" multiple hidden accept="image/*,.txt,.md,.json,.csv,.py,.js,.ts,.html,.css,.log,.gcode,.xml,.yml,.yaml,.svg" />
+      <button class="tool" id="file-btn" type="button" title="Attach files">FILE</button>
+      <button class="tool" id="mic-btn" type="button" title="Quiet — click or say talk to open ears">QUIET</button>
+      <button class="tool" id="stop-btn" type="button" title="Stop Amy talking">STOP</button>
+      <button class="tool" id="send-btn" type="button">ASK</button>
+    </div>
+    <div id="tray">
+      <button type="button" id="tray-mic" title="Mic">🎙</button>
+      <button type="button" id="tray-eyes" title="Eyes / screen">👁</button>
+      <button type="button" id="tray-file" title="Drop files">📎</button>
+      <button type="button" id="tray-refresh" title="Refresh graph">↻</button>
+    </div>
+  </div>
+  <div id="clip-menu" role="menu" aria-hidden="true">
+    <button type="button" data-clip="cut">Cut</button>
+    <button type="button" data-clip="copy">Copy</button>
+    <button type="button" data-clip="paste">Paste</button>
+    <button type="button" data-clip="selectAll">Select all</button>
+  </div>
+
+<script>
+const FINISH_MS = 1400;
+const AWAKE_KEY = 'amy-awake-min';
+const AWAKE_DEFAULT = 90;
+const AWAKE_PRESETS = [30, 60, 90, 120, 0];
+const MUTE = new URLSearchParams(location.search).has('mute');
+// Whisper path for the real Amy desktop shell (WebView2 can't use Google SpeechRecognition).
+const DESKTOP_APP = new URLSearchParams(location.search).has('desktop')
+  || !!(window.pywebview)
+  || /WebView/i.test(navigator.userAgent)
+  || (navigator.userAgentData && Array.isArray(navigator.userAgentData.brands)
+      && navigator.userAgentData.brands.some((b) => /WebView/i.test(b.brand || '')));
+let useWhisperMic = DESKTOP_APP;
+const IS_SECURE = window.isSecureContext;
+
+
+const statusEl = document.getElementById('status-line');
+const answerEl = document.getElementById('answer');
+const inputEl = document.getElementById('chat-input');
+const modeChip = document.getElementById('mode-chip');
+let talkMode = 'casual';
+const micBtn = document.getElementById('mic-btn');
+const stopBtn = document.getElementById('stop-btn');
+const sendBtn = document.getElementById('send-btn');
+const eyesBtn = document.getElementById('eyes-btn');
+const side = document.getElementById('side');
+const shareDot = document.getElementById('share-dot');
+const brandSub = document.getElementById('brand-sub');
+const amyFace = document.getElementById('amy-face');
+const amyFaceWrap = document.getElementById('amy-face-wrap');
+const faceState = document.getElementById('face-state');
+const speakChip = document.getElementById('speak-chip');
+const modelChip = document.getElementById('model-chip');
+const searchEl = document.getElementById('search');
+const secureHint = document.getElementById('secure-hint');
+const dockEl = document.getElementById('dock');
+const dropsEl = document.getElementById('drops');
+const fileInput = document.getElementById('file-input');
+const fileBtn = document.getElementById('file-btn');
+
+let pendingFiles = []; // {name, media_type, data}
+let asleep = false;
+let idleTimer = null;
+let nudgedIdle = false;
+let audioCtx = null;
+
+const NUDGE_LINES = [
+  "Getting sleepy over here, Chris… yawn.",
+  "I'm fading a bit, Kidabah. Poke me if you still need me.",
+  "Eyes getting heavy… I'll nap soon if you're quiet.",
+  "Mmm… starting to drift. Say something or I'll snooze.",
+];
+
+let graph = null;
+let shareStream = null;
+let shareVideo = null;
+let visionMode = null; // 'eyes' | 'watch'
+let compactMode = false;
+let unlockedAudio = false;
+let viewMode = 'ring';
+let listening = false;
+let wantListen = false;
+/** Soft quiet: Whisper stays armed but only "talk" / unmute phrases get through. */
+let wakeListen = false;
+let isSpeaking = false;
+let micMutedUntil = 0;
+let recognition = null;
+let pending = '';
+let finishTimer = null;
+let chatAbort = null;
+let speakGen = 0;
+let ttsAbort = null;
+let desktopMic = {
+  stream: null,
+  recorder: null,
+  chunks: [],
+  pcm: [],
+  processor: null,
+  muteGain: null,
+  analysing: false,
+  audioCtx: null,
+  analyser: null,
+  raf: 0,
+  speaking: false,
+  silentMs: 0,
+  lastVoiceAt: 0,
+  utterStart: 0,
+  busy: false,
+};
+
+function micIsDeaf() {
+  // Echo cooldown after she finishes — interrupts are handled separately while speaking.
+  return !isSpeaking && Date.now() < micMutedUntil;
+}
+
+function duckMic() {
+  clearTimeout(finishTimer);
+  finishTimer = null;
+  pending = '';
+  isSpeaking = true;
+  // Chrome barge-in only — WebView Whisper path must not touch SpeechRecognition
+  // (it spams "network" and used to force-unmute / re-arm the mic).
+  if (wantListen && recognition && !useWhisperMic) {
+    try { recognition.start(); } catch (_) {}
+  }
+}
+
+function unduckMic() {
+  isSpeaking = false;
+  // Let speaker echo die before normal listening resumes.
+  micMutedUntil = Date.now() + 900;
+  if (wantListen) {
+    setStatus('listening', useWhisperMic ? 'Listening · Whisper' : 'Listening');
+    if (!useWhisperMic) {
+      setTimeout(() => {
+        if (!wantListen || isSpeaking || !recognition || useWhisperMic) return;
+        try { recognition.start(); } catch (_) {}
+      }, 950);
+    }
+  } else if (statusEl.dataset.mode === 'speaking' || statusEl.dataset.mode === 'thinking') {
+    setStatus('idle', 'Ready');
+  }
+}
+
+function isInterrupt(t) {
+  const s = String(t || '').trim().toLowerCase().replace(/[.,!?]+$/g, '');
+  if (!s) return false;
+  if (/^(amy[, ]+)?(please[, ]+)?(stop|wait|quiet|enough|shh+|hush)( it| talking| amy)?$/i.test(s)) return true;
+  if (/^(stop|wait|quiet|enough) amy$/i.test(s)) return true;
+  if (/^(hang on|hold on)( a (sec|second|minute|moment))?$/i.test(s)) return true;
+  if (/^(hang on|hold on|stop|wait)\b/i.test(s) && s.length <= 36) return true;
+  return false;
+}
+
+function looksLikeInterrupt(t) {
+  if (isInterrupt(t)) return true;
+  if (!isSpeaking) return false;
+  const s = String(t || '').trim().toLowerCase();
+  if (!s || s.length > 48) return false;
+  return /\b(stop|wait|quiet|enough|shh+|hush|hang on|hold on)\b/i.test(s);
+}
+
+function handleInterrupt() {
+  clearTimeout(finishTimer);
+  finishTimer = null;
+  pending = '';
+  inputEl.value = '';
+  try { chatAbort?.abort(); } catch (_) {}
+  chatAbort = null;
+  stopSpeaking();
+  isSpeaking = false;
+  desktopMic.busy = false;
+  desktopMic.speaking = false;
+  desktopMic.silentMs = 0;
+  desktopMic.pcm = [];
+  micMutedUntil = Date.now() + 400;
+  bumpIdle();
+  answerEl.textContent = '(stopped)';
+  try { desktopMic.audioCtx?.resume?.(); } catch (_) {}
+  if (wantListen) {
+    setStatus('listening', useWhisperMic ? 'Listening · Whisper' : 'Listening');
+    syncMicUi();
+    if (!useWhisperMic) {
+      setTimeout(() => {
+        if (!wantListen || isSpeaking || !recognition || useWhisperMic) return;
+        try { recognition.start(); } catch (_) {}
+      }, 200);
+    }
+  } else {
+    setStatus('idle', 'Interrupted');
+  }
+}
+
+function isWakePhrase(t) {
+  const s = String(t || '').trim().toLowerCase().replace(/[.,!?]+$/g, '');
+  if (!s) return false;
+  return /^(wake up( amy)?|amy wake up|hey amy|hi amy|good morning amy|rise and shine)$/i.test(s)
+    || /\bwake(\s+up)?\b.*\bamy\b/i.test(s)
+    || /\bamy\b.*\bwake(\s+up)?\b/i.test(s)
+    || /^(i'?m back|ok amy|okay amy)$/i.test(s);
+}
+
+function isSnoreRibPhrase(t) {
+  const s = String(t || '').trim().toLowerCase().replace(/[.,!?]+$/g, '');
+  if (!s || s.length > 140) return false;
+  if (/\b(snor(e|ing|es)|bear|cave|chainsaw|tractor|diesel|foghorn|lawn\s*mower|sawing\s*(wood|logs)?)\b/.test(s)) return true;
+  if (/\b(growl|growly|loud|noisy|noise|roar|roaring|rumble|rumbling|grumble)\b/.test(s)) return true;
+  if (/\byou sound (like|so|very|a bit|kinda|kind of)\b/.test(s)) return true;
+  if (/\b(keep it down|too loud|less growly|pipe down)\b/.test(s)) return true;
+  if (/^(shh+|hush|quiet( down)?|pipe down|keep it down|stop that|stop snoring)(\s+amy)?$/.test(s)) return true;
+  if (/\b(can you|could you|please)\b.*\b(stop|quiet|hush)\b/.test(s)) return true;
+  return false;
+}
+
+/** While she's snoring, any short non-wake interjection counts as a rib. */
+function shouldHushSnore(t) {
+  if (!asleep) return false;
+  if (isWakePhrase(t)) return false;
+  if (looksLikeWhisperGarbage(t)) return false;
+  if (isSnoreRibPhrase(t)) return true;
+  const s = String(t || '').trim();
+  if (snoring && s.length > 0 && s.length <= 120) return true;
+  return false;
+}
+
+function isWhistlePhrase(t) {
+  let s = String(t || '').trim().toLowerCase()
+    .replace(/['"`]/g, '')
+    .replace(/[.,!?]+$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!s || s.length > 120) return false;
+  // Real questions about the whistle → leave for chat (humour OK)
+  if (/\b(what|why|how|when|where|who|lost|missing|broke|broken|mean|means|hear|heard)\b/.test(s)
+      && !/^(amy[, ]+)?(please[, ]+)?(whistle|sing)\b/.test(s)) {
+    return false;
+  }
+  if (/\b(whistle|whistling)\b/.test(s)) return true;
+  if (/^(amy[, ]+)?(please[, ]+)?sing(\s+for me)?(\s+please)?$/.test(s)) return true;
+  if (/\b(sing for me|give me a (song|tune)|sing a (song|tune))\b/.test(s)) return true;
+  if (/\b(can you|could you|will you|would you)\b.*\b(please\s+)?(whistle|sing)\b/.test(s)) return true;
+  return false;
+}
+
+function isBedtimePhrase(t) {
+  const s = normalizeAmyCmd(t);
+  if (!s) return false;
+  if (/\b(don'?t|do not|never|stop)\b.*\b(sleep|bed|nap|night)\b/.test(s)) return false;
+  return /^(amy[, ]+)?(please[, ]+)?(bedtime|bed time|good\s*night|nighty?\s*night|go to sleep|time for bed|go to bed|sleep well|lights out)( amy)?(,?\s*please)?$/i.test(s)
+    || /^(can you|could you) (please )?(go to sleep|go to bed|say good\s*night)\b/i.test(s)
+    || /\b(good\s*night|bedtime|night night)\b.*\bamy\b/i.test(s)
+    || /\bamy\b.*\b(good\s*night|bedtime|go to sleep)\b/i.test(s);
+}
+
+function normalizeAmyCmd(t) {
+  let s = String(t || '').trim().toLowerCase().replace(/[.,!?]+$/g, '');
+  if (!s) return '';
+  // Whisper loves mangling "Amy go small/large" into nonsense names
+  s = s
+    .replace(/\bigor\s+smol+\b/g, 'amy go small')
+    .replace(/\bigor\s+small\b/g, 'amy go small')
+    .replace(/\beager\s+smol+\b/g, 'amy go small')
+    .replace(/\bi\s*go\s+(smol+|small)\b/g, 'amy go small')
+    .replace(/\bamigo\s+(smol+|small)\b/g, 'amy go small')
+    .replace(/\bamiga\s+(smol+|small|lodge|large)\b/g, (_, w) => {
+      const map = { smol: 'small', smole: 'small', lodge: 'large' };
+      return `amy go ${map[w] || w}`;
+    })
+    .replace(/\bamiga\b/g, 'amy go')
+    .replace(/\ba\s*me\s*go\b/g, 'amy go')
+    .replace(/\bany\s*go\b/g, 'amy go')
+    .replace(/\baimie?\s+go\b/g, 'amy go')
+    .replace(/\bemmy\s+go\b/g, 'amy go')
+    .replace(/\blodge\b/g, 'large')
+    .replace(/\blaunch\b/g, 'large')
+    .replace(/\bsmol+\b/g, 'small')
+    .replace(/\bsmole\b/g, 'small')
+    .replace(/\bsmalls\b/g, 'small')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return s;
+}
+
+function isGoSmallPhrase(t) {
+  const raw = String(t || '').trim().toLowerCase();
+  const s = normalizeAmyCmd(t);
+  if (!s && !raw) return false;
+  // Direct Whisper disasters before / after normalize
+  if (/\bigor\s+smol/.test(raw) || /\bi\s*go\s*r?\s*smol/.test(raw)) return true;
+  if (!s) return false;
+  return /^(amy[, ]+)?(please[, ]+)?(go small|get small|go mini|shrink|compact( mode)?|focus mode|make yourself small|make the window small)(,?\s*please)?$/i.test(s)
+    || /^(can you|could you) (please )?(go small|shrink|get small)\b/i.test(s)
+    || /\b(go|get|be)\s+small\b/i.test(s)
+    || /\bsmall\s+(mode|window|please)\b/i.test(s)
+    || /^amy go small$/i.test(s);
+}
+
+function isGoBigPhrase(t) {
+  const s = normalizeAmyCmd(t);
+  if (!s) return false;
+  return /^(amy[, ]+)?(please[, ]+)?(go big|get big|go large|get large|expand|full( size| screen)?|normal( size)?|uncompact|exit focus)(,?\s*please)?$/i.test(s)
+    || /^(can you|could you) (please )?(go big|go large|expand)\b/i.test(s)
+    || /\b(go|get)\s+(big|large)\b/i.test(s);
+}
+
+function isMinimizePhrase(t) {
+  const s = normalizeAmyCmd(t);
+  if (!s) return false;
+  return /^(amy[, ]+)?(please[, ]+)?(minimise|minimize|minimise yourself|minimize yourself|hide( yourself)?|get out of (the )?way|go to (the )?tray)(,?\s*please)?$/i.test(s)
+    || /^(can you|could you) (please )?(minimise|minimize|hide)\b/i.test(s)
+    || /\b(minimise|minimize)( (the )?(window|yourself))?\b/i.test(s);
+}
+
+function isRestorePhrase(t) {
+  const s = normalizeAmyCmd(t);
+  if (!s) return false;
+  return /^(amy[, ]+)?(please[, ]+)?(come back|restore|unminimise|unminimize|show yourself|bring yourself back|wake up window)(,?\s*please)?$/i.test(s)
+    || /^(can you|could you) (please )?(come back|restore|show)\b/i.test(s);
+}
+
+function isMuteMicPhrase(t) {
+  const s = normalizeAmyCmd(t);
+  if (!s) return false;
+  // Ears off. Bare "quiet"/"hush" = stop talking (interrupt), NOT permanent quiet.
+  // Bare "mute" alone = Spotify (server).
+  return /^(amy[, ]+)?(please[, ]+)?(don'?t talk|do not talk|go quiet|quiet mode|mute( your| the)? (mic|microphone|ears)|mute yourself|mute you|mute amy|stop listening|mic off|microphone off|go deaf|deaf mode)(,?\s*please)?$/i.test(s)
+    || /^(can you|could you) (please )?(go quiet|mute (yourself|your mic|your microphone|amy)|don'?t talk)\b/i.test(s)
+    || /\bmute\s+(your\s+)?(mic|microphone|ears|yourself)\b/i.test(s)
+    || /\bmute\s+(you|amy)\b/i.test(s)
+    || /\b(don'?t talk|do not talk|stop listening|mic off|go deaf|quiet mode|go quiet)\b/i.test(s);
+}
+
+function isUnmuteMicPhrase(t) {
+  const s = normalizeAmyCmd(t);
+  if (!s) return false;
+  // "Talk" / "unmute" — reopen ears (works even in soft quiet because Whisper stays armed).
+  return /^(amy[, ]+)?(please[, ]+)?(talk( to me)?|you can talk|start talking|unmute( your| the)?( mic| microphone| ears)?|unmute yourself|unmute you|unmute amy|start listening|listen again|listen up|mic on|microphone on|hear me)(,?\s*please)?$/i.test(s)
+    || /^(can you|could you) (please )?(talk|unmute (yourself|your mic|amy)|listen)\b/i.test(s)
+    || /\bunmute\s+(your\s+)?(mic|microphone|ears|yourself)\b/i.test(s)
+    || /\bunmute\s+(you|amy)\b/i.test(s)
+    || /\b(start listening|listen again|mic on|hear me)\b/i.test(s);
+}
+
+function micCaptureWanted() {
+  return !!(wantListen || wakeListen);
+}
+
+function isPlayMusicPhrase(t) {
+  const s = normalizeAmyCmd(t)
+    .replace(/\bspotty\b/g, 'spotify')
+    .replace(/\bspot if y\b/g, 'spotify');
+  if (!s) return false;
+  return /\b((open|launch|start|play)\s+(spotify|music|some music)|spotify\s+(and\s+)?play|play\s+spotify|put\s+on\s+(some\s+)?music|music\s+on)\b/i.test(s);
+}
+
+/** Whisper + Spotify bleed often invents Hangul / CJK streamer sign-offs. */
+function looksLikeWhisperGarbage(t) {
+  const s = String(t || '').trim();
+  if (!s) return true;
+  const cjk = (s.match(/[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]/g) || []).join('').length;
+  if (cjk >= 2 && cjk >= s.replace(/\s/g, '').length * 0.35) return true;
+  if (/시청해주셔서|다음에 또 만나요|천만에요|ありがとう|谢谢/.test(s)) return true;
+  const words = s.toLowerCase().split(/\s+/).filter(Boolean);
+  const keep = new Set(['stop', 'quiet', 'talk', 'wait', 'amy', 'no', 'hey']);
+  if (words.length === 1 && s.length < 4 && !keep.has(words[0])) return true;
+  if (words.length > 0 && words.length <= 3 && words.every((w) => w.length <= 2) && !words.some((w) => keep.has(w))) return true;
+  return false;
+}
+
+async function callAmyDesktop(fn, ...args) {
+  try {
+    if (window.pywebview?.api && typeof window.pywebview.api[fn] === 'function') {
+      return await window.pywebview.api[fn](...args);
+    }
+  } catch (_) {}
+  return false;
+}
+
+function escapeAnswerHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
+}
+
+/** Turn http(s) addresses in a reply into links. Other text stays escaped. */
+function linkifyAnswer(text) {
+  const raw = String(text || '');
+  const re = /https?:\/\/[^\s<>"']+/gi;
+  let out = '';
+  let last = 0;
+  let m;
+  while ((m = re.exec(raw))) {
+    out += escapeAnswerHtml(raw.slice(last, m.index));
+    let url = m[0].replace(/[),.;:]+$/, '');
+    const trail = m[0].slice(url.length);
+    out += `<a href="${escapeAnswerHtml(url)}" data-amy-link="1">${escapeAnswerHtml(url)}</a>`;
+    out += escapeAnswerHtml(trail);
+    last = m.index + m[0].length;
+  }
+  out += escapeAnswerHtml(raw.slice(last));
+  return out;
+}
+
+function setAnswer(text) {
+  answerEl.innerHTML = linkifyAnswer(text);
+}
+
+answerEl.addEventListener('click', async (e) => {
+  const a = e.target.closest('a[data-amy-link]');
+  if (!a) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const href = a.getAttribute('href') || '';
+  if (!/^https?:\/\//i.test(href)) return;
+  const opened = await callAmyDesktop('open_url', href);
+  if (!opened) window.open(href, '_blank', 'noopener');
+});
+
+function setTalkModeUI(mode, noteCount) {
+  talkMode = (String(mode || 'casual').toLowerCase() === 'print') ? 'print' : 'casual';
+  if (modeChip) {
+    modeChip.dataset.mode = talkMode;
+    modeChip.textContent = talkMode === 'print' ? 'PRINT' : 'CASUAL';
+    modeChip.title = talkMode === 'print'
+      ? 'Print / workshop mode — click for casual'
+      : 'Casual mode — click for 3D print mode';
+  }
+  if (brandSub && noteCount != null) {
+    brandSub.textContent = `${noteCount} notes · ${talkMode === 'print' ? 'print' : 'casual'}`;
+  } else if (brandSub && /\d+\s+notes/.test(brandSub.textContent || '')) {
+    brandSub.textContent = brandSub.textContent.replace(/·\s*\w+$/, `· ${talkMode === 'print' ? 'print' : 'casual'}`);
+  }
+}
+
+async function toggleTalkModeChip() {
+  try {
+    const r = await fetch('/api/talk_mode', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ talk_mode: 'toggle' }),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'mode switch failed');
+    setTalkModeUI(data.talk_mode);
+    if (data.answer) setAnswer(data.answer);
+  } catch (err) {
+    answerEl.textContent = String(err.message || err);
+  }
+}
+
+async function readSystemClipboard() {
+  try {
+    const viaApi = await callAmyDesktop('clipboard_get');
+    if (typeof viaApi === 'string') return viaApi;
+  } catch (_) {}
+  try {
+    if (navigator.clipboard?.readText) return await navigator.clipboard.readText();
+  } catch (_) {}
+  return '';
+}
+
+async function writeSystemClipboard(text) {
+  const t = String(text ?? '');
+  try {
+    if (await callAmyDesktop('clipboard_set', t)) return true;
+  } catch (_) {}
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(t);
+      return true;
+    }
+  } catch (_) {}
+  return false;
+}
+
+function insertTextAtCursor(el, text) {
+  if (!el) return;
+  const value = String(el.value ?? '');
+  const start = el.selectionStart ?? value.length;
+  const end = el.selectionEnd ?? value.length;
+  el.value = value.slice(0, start) + text + value.slice(end);
+  const pos = start + text.length;
+  try { el.setSelectionRange(pos, pos); } catch (_) {}
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+  el.focus();
+}
+
+function selectedInputText(el) {
+  if (!el || el.selectionStart == null) return '';
+  return String(el.value || '').slice(el.selectionStart, el.selectionEnd);
+}
+
+function hideClipMenu() {
+  const menu = document.getElementById('clip-menu');
+  if (!menu) return;
+  menu.style.display = 'none';
+  menu.setAttribute('aria-hidden', 'true');
+}
+
+function showClipMenu(x, y) {
+  const menu = document.getElementById('clip-menu');
+  if (!menu) return;
+  menu.style.display = 'block';
+  menu.setAttribute('aria-hidden', 'false');
+  const pad = 8;
+  const w = menu.offsetWidth || 140;
+  const h = menu.offsetHeight || 140;
+  menu.style.left = `${Math.max(pad, Math.min(x, window.innerWidth - w - pad))}px`;
+  menu.style.top = `${Math.max(pad, Math.min(y, window.innerHeight - h - pad))}px`;
+}
+
+window.amyClipboard = {
+  async cut() {
+    const el = document.activeElement;
+    if (el === inputEl || el === searchEl) {
+      const sel = selectedInputText(el);
+      if (!sel) return false;
+      await writeSystemClipboard(sel);
+      insertTextAtCursor(el, '');
+      return true;
+    }
+    const sel = String(window.getSelection?.() || '');
+    if (sel) {
+      await writeSystemClipboard(sel);
+      try { document.execCommand('delete'); } catch (_) {}
+      return true;
+    }
+    return false;
+  },
+  async copy() {
+    const el = document.activeElement;
+    if (el === inputEl || el === searchEl) {
+      const sel = selectedInputText(el) || String(el.value || '');
+      if (!sel) return false;
+      return writeSystemClipboard(sel);
+    }
+    const sel = String(window.getSelection?.() || '').trim();
+    if (sel) return writeSystemClipboard(sel);
+    const ans = String(answerEl?.textContent || '').trim();
+    if (ans) return writeSystemClipboard(ans);
+    return false;
+  },
+  async paste() {
+    const text = await readSystemClipboard();
+    if (!text) return false;
+    const el = document.activeElement;
+    if (el === inputEl || el === searchEl) {
+      insertTextAtCursor(el, text);
+      return true;
+    }
+    // Default paste target is the chat box
+    inputEl.focus();
+    insertTextAtCursor(inputEl, text);
+    return true;
+  },
+  selectAll() {
+    const el = document.activeElement;
+    if (el === inputEl || el === searchEl) {
+      el.focus();
+      el.select();
+      return true;
+    }
+    const range = document.createRange();
+    range.selectNodeContents(answerEl);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+    return true;
+  },
+};
+
+/** Explorer/files open behind always-on-top Amy — drop the pin so Chris can see them. */
+async function maybeDropOnTopForReveal(answer) {
+  const s = String(answer || '');
+  if (!/dropped always-on-top|Opened File Explorer\b/i.test(s)) return;
+  await callAmyDesktop('set_on_top', false);
+}
+
+async function setCompactMode(on) {
+  compactMode = !!on;
+  document.body.classList.toggle('compact', compactMode);
+  const focusBtn = document.getElementById('focus-btn');
+  if (focusBtn) focusBtn.classList.toggle('active', compactMode);
+  if (compactMode) await callAmyDesktop('go_small');
+  else await callAmyDesktop('go_big');
+  // Mic keeps running — compact is UI only.
+  if (wantListen) {
+    setStatus('listening', useWhisperMic ? 'Listening · Whisper' : 'Listening');
+  }
+  return compactMode;
+}
+
+function doWhistle() {
+  unlockedAudio = true;
+  unlockSfx();
+  if (asleep) wakeAmy('force');
+  bumpIdle();
+  whistle();
+}
+
+async function doBedtime() {
+  unlockedAudio = true;
+  stopSpeaking();
+  answerEl.textContent = 'Goodnight, Chris…';
+  try {
+    if (!MUTE) await speak('Goodnight, Chris. Sweet dreams.');
+  } catch (_) {}
+  await playSfx('yawn');
+  nudgedIdle = true; // already yawned — don't double in enterSleep
+  enterSleep();
+}
+
+let awakeMin = AWAKE_DEFAULT;
+
+function loadAwakeMin() {
+  try {
+    const raw = localStorage.getItem(AWAKE_KEY);
+    if (raw == null || raw === '') return AWAKE_DEFAULT;
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n < 0) return AWAKE_DEFAULT;
+    if (n === 0) return 0;
+    return Math.min(24 * 60, Math.max(5, Math.round(n)));
+  } catch (_) {
+    return AWAKE_DEFAULT;
+  }
+}
+
+function awakeChipLabel(min) {
+  if (!min) return 'STAY UP';
+  if (min % 60 === 0 && min >= 60) return `AWAKE ${min / 60}h`;
+  return `AWAKE ${min}m`;
+}
+
+function awakeSpoken(min) {
+  if (!min) return 'until you say goodnight';
+  if (min % 60 === 0 && min >= 60) {
+    const h = min / 60;
+    return h === 1 ? 'an hour' : `${h} hours`;
+  }
+  return `${min} minutes`;
+}
+
+function idleNudgeMs() {
+  if (!awakeMin) return 0;
+  return Math.max(10 * 60 * 1000, Math.round(awakeMin * 60 * 1000 * 0.66));
+}
+
+function paintAwakeChip() {
+  const chip = document.getElementById('awake-chip');
+  if (!chip) return;
+  chip.textContent = awakeChipLabel(awakeMin);
+  chip.title = awakeMin
+    ? `Quiet for ${awakeSpoken(awakeMin)}, then she naps. Click to change.`
+    : 'She stays up until you say goodnight. Click to change.';
+}
+
+function setAwakeMin(min) {
+  awakeMin = min ? Math.min(24 * 60, Math.max(5, Math.round(min))) : 0;
+  try { localStorage.setItem(AWAKE_KEY, String(awakeMin)); } catch (_) {}
+  paintAwakeChip();
+  bumpIdle();
+}
+
+function cycleAwake() {
+  const idx = AWAKE_PRESETS.indexOf(awakeMin);
+  const next = AWAKE_PRESETS[(idx + 1) % AWAKE_PRESETS.length];
+  setAwakeMin(next);
+  answerEl.textContent = awakeMin
+    ? `I'll stay up for ${awakeSpoken(awakeMin)} of quiet, then nap.`
+    : `I'll stay up until you say goodnight.`;
+}
+
+function parseAwakeCommand(t) {
+  const s = normalizeAmyCmd(t);
+  if (!s || s.length > 160) return null;
+  if (!/\b(awake|stay up|nap|napping|sleep)\b/.test(s)) return null;
+  if (isBedtimePhrase(t)) return null;
+  if (/\b(you can nap|nap like normal|back to normal)\b/.test(s)) return AWAKE_DEFAULT;
+  const hour = s.match(/\b(\d+)\s*(?:hours?|hrs?)\b/);
+  const mins = s.match(/\b(\d+)\s*(?:minutes?|mins?)\b/);
+  let minutes = null;
+  if (hour) minutes = Number(hour[1]) * 60;
+  else if (/\bhalf an hour\b/.test(s)) minutes = 30;
+  else if (/\b(?:an|one)\s+hours?\b/.test(s)) minutes = 60;
+  else if (mins) minutes = Number(mins[1]);
+  if (minutes != null) return Math.min(24 * 60, Math.max(5, minutes));
+  if (/\b(stay up|stay awake|don'?t (go to )?sleep|do not (go to )?sleep|no napp?ing|stop napp?ing)\b/.test(s)) return 0;
+  return null;
+}
+
+async function applyAwakeCommand(min) {
+  setAwakeMin(min);
+  const line = awakeMin
+    ? `I'll stay up for ${awakeSpoken(awakeMin)} of quiet, then nap.`
+    : `I'll stay up until you say goodnight.`;
+  answerEl.textContent = line;
+  try { if (!MUTE) await speak(line); } catch (_) {}
+  setStatus(wantListen ? 'listening' : 'idle', wantListen ? (useWhisperMic ? 'Listening · Whisper' : 'Listening') : 'Ready');
+}
+
+function bumpIdle() {
+  nudgedIdle = false;
+  if (idleTimer) clearTimeout(idleTimer);
+  idleTimer = null;
+  if (asleep) return;
+  const nudge = idleNudgeMs();
+  if (!nudge) return;
+  idleTimer = setTimeout(onIdleNudge, nudge);
+}
+
+async function onIdleNudge() {
+  if (asleep || isSpeaking || statusEl.dataset.mode === 'thinking') {
+    bumpIdle();
+    return;
+  }
+  if (!awakeMin) return;
+  if (!nudgedIdle) {
+    nudgedIdle = true;
+    try {
+      await playSfx('yawn');
+      if (!MUTE) await speak(NUDGE_LINES[Math.floor(Math.random() * NUDGE_LINES.length)]);
+    } catch (_) {}
+    const rest = Math.max(60 * 1000, awakeMin * 60 * 1000 - idleNudgeMs());
+    idleTimer = setTimeout(enterSleep, rest);
+    return;
+  }
+  enterSleep();
+}
+
+let sfxAudio = null;
+let sfxUnlocked = false;
+let sfxSource = null;
+let snoreSource = null;
+let snoreGain = null;
+let snoring = false;
+let snoreHushed = false;
+let snoreStartTimer = null;
+const sfxBuffers = {};
+const SFX = {
+  whistle: '/sounds/amy-whistle.wav?v=webaudio1',
+  yawn: '/sounds/amy-yawn.wav?v=webaudio1',
+  snore: '/sounds/amy-snore.wav?v=tunetank1',
+};
+
+function unlockSfx() {
+  sfxUnlocked = true;
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+  } catch (_) {}
+  // Prefetch + decode into AudioBuffer (WebView2 is flaky with HTMLAudioElement)
+  ['whistle', 'yawn', 'snore'].forEach((k) => { loadSfxBuffer(k).catch(() => {}); });
+}
+
+async function loadSfxBuffer(kind) {
+  if (sfxBuffers[kind]) return sfxBuffers[kind];
+  const url = SFX[kind] || SFX.whistle;
+  audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+  if (audioCtx.state === 'suspended') await audioCtx.resume();
+  const res = await fetch(url, { cache: 'force-cache' });
+  if (!res.ok) throw new Error(`SFX HTTP ${res.status}`);
+  const ab = await res.arrayBuffer();
+  const buf = await audioCtx.decodeAudioData(ab.slice(0));
+  sfxBuffers[kind] = buf;
+  return buf;
+}
+
+function playSfx(kind) {
+  unlockSfx();
+  return playSfxWebAudio(kind).catch(() => playSfxHtmlAudio(kind)).catch(() => {
+    if (kind === 'whistle') whistleSynth();
+    return false;
+  });
+}
+
+async function playSfxWebAudio(kind) {
+  const buf = await loadSfxBuffer(kind);
+  audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+  if (audioCtx.state === 'suspended') await audioCtx.resume();
+  try { sfxSource?.stop?.(); } catch (_) {}
+  try { sfxAudio?.pause(); } catch (_) {}
+  const src = audioCtx.createBufferSource();
+  const gain = audioCtx.createGain();
+  gain.gain.value = kind === 'yawn' ? 0.95 : 0.92;
+  src.buffer = buf;
+  src.connect(gain);
+  gain.connect(audioCtx.destination);
+  sfxSource = src;
+  src.start(0);
+  return new Promise((resolve) => {
+    const done = () => {
+      if (sfxSource === src) sfxSource = null;
+      resolve(true);
+    };
+    src.onended = done;
+    window.setTimeout(done, Math.ceil(buf.duration * 1000) + 150);
+  });
+}
+
+function playSfxHtmlAudio(kind) {
+  const srcUrl = SFX[kind] || SFX.whistle;
+  return new Promise((resolve, reject) => {
+    try {
+      try { sfxAudio?.pause(); } catch (_) {}
+      const a = new Audio(srcUrl);
+      sfxAudio = a;
+      a.volume = kind === 'yawn' ? 0.9 : 0.85;
+      const fail = (err) => reject(err || new Error('html audio fail'));
+      a.addEventListener('ended', () => {
+        if (sfxAudio === a) sfxAudio = null;
+        resolve(true);
+      }, { once: true });
+      a.addEventListener('error', () => fail(), { once: true });
+      a.play().then(() => {}).catch(fail);
+      window.setTimeout(() => {
+        if (sfxAudio === a && a.paused) fail();
+      }, 800);
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
+
+function whistle() {
+  unlockSfx();
+  playSfx('whistle');
+}
+
+function stopSnoring() {
+  if (snoreStartTimer) {
+    clearTimeout(snoreStartTimer);
+    snoreStartTimer = null;
+  }
+  try { snoreSource?.stop?.(); } catch (_) {}
+  snoreSource = null;
+  snoreGain = null;
+  snoring = false;
+}
+
+/** Pause sawmill when Amy isn't on screen — zombie windows shouldn't haunt the desk. */
+function hushSnoreForHidden() {
+  stopSnoring();
+}
+
+function maybeResumeSnore() {
+  if (!asleep || snoreHushed || snoring) return;
+  if (typeof document !== 'undefined' && document.hidden) return;
+  startSnoring();
+}
+
+async function startSnoring() {
+  if (!asleep || snoreHushed || snoring) return;
+  if (typeof document !== 'undefined' && document.hidden) return;
+  unlockSfx();
+  try {
+    const buf = await loadSfxBuffer('snore');
+    if (!asleep || snoreHushed || snoring) return;
+    if (typeof document !== 'undefined' && document.hidden) return;
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') await audioCtx.resume();
+    stopSnoring();
+    const src = audioCtx.createBufferSource();
+    const gain = audioCtx.createGain();
+    gain.gain.value = 0.48;
+    src.buffer = buf;
+    src.loop = true;
+    src.connect(gain);
+    gain.connect(audioCtx.destination);
+    src.start(0);
+    snoreSource = src;
+    snoreGain = gain;
+    snoring = true;
+  } catch (_) {
+    // Synth fallback — soft looping rumbles
+    try {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state === 'suspended') await audioCtx.resume();
+      const ctx = audioCtx;
+      const gain = ctx.createGain();
+      gain.gain.value = 0.0001;
+      gain.connect(ctx.destination);
+      const osc = ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.value = 72;
+      osc.connect(gain);
+      osc.start();
+      // Pulse the gain forever while snoring
+      const pulse = () => {
+        if (!asleep || snoreHushed) return;
+        if (typeof document !== 'undefined' && document.hidden) return;
+        const t = ctx.currentTime;
+        gain.gain.cancelScheduledValues(t);
+        gain.gain.setValueAtTime(0.0001, t);
+        gain.gain.exponentialRampToValueAtTime(0.12, t + 0.35);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t + 1.1);
+        snoreStartTimer = window.setTimeout(pulse, 1800);
+      };
+      snoreSource = osc;
+      snoreGain = gain;
+      snoring = true;
+      pulse();
+    } catch (__) {}
+  }
+}
+
+function hushSnoring() {
+  if (!asleep) return false;
+  stopSnoring();
+  snoreHushed = true;
+  const lines = [
+    '...mmph. Fine. Quiet.',
+    '…bear in a cave. Rude. Okay, hush.',
+    'Zzz— wait. Fine. No more sawmill.',
+  ];
+  answerEl.textContent = lines[Math.floor(Math.random() * lines.length)];
+  setStatus('asleep', 'Sleeping — (quiet now)');
+  syncMicUi();
+  try { inputEl?.focus?.(); } catch (_) {}
+  return true;
+}
+
+function scheduleSnoring() {
+  stopSnoring();
+  snoreHushed = false;
+  // Let the yawn finish before the sawmill starts
+  snoreStartTimer = window.setTimeout(() => {
+    snoreStartTimer = null;
+    startSnoring();
+  }, 1600);
+}
+
+function whistleSynth() {
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    const ctx = audioCtx;
+    // Fallback tune if the WAV can't load — loud enough to notice.
+    const notes = [
+      { f: 784, d: 0.14 },
+      { f: 880, d: 0.14 },
+      { f: 988, d: 0.18 },
+      { f: 880, d: 0.12 },
+      { f: 1175, d: 0.22 },
+      { f: 988, d: 0.14 },
+      { f: 1319, d: 0.32 },
+      { f: 1175, d: 0.18 },
+      { f: 988, d: 0.28 },
+    ];
+    let t = ctx.currentTime + 0.02;
+    for (const n of notes) {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(n.f, t);
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.exponentialRampToValueAtTime(0.28, t + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + n.d);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(t);
+      osc.stop(t + n.d + 0.02);
+      t += n.d + 0.04;
+    }
+  } catch (_) {}
+}
+
+function enterSleep() {
+  if (asleep) return;
+  asleep = true;
+  if (idleTimer) clearTimeout(idleTimer);
+  idleTimer = null;
+  stopSpeaking();
+  isSpeaking = false;
+  clearTimeout(finishTimer);
+  pending = '';
+  // Soft second yawn as she actually drops off (short path if nudge was skipped).
+  // Stay in FOCUS size if already compact — resizing webview mid-sleep crashes it.
+  if (!nudgedIdle) playSfx('yawn');
+  document.body.classList.add('asleep');
+  armSleepGif();
+  scheduleSnoring();
+  // Keep Whisper ears open for "wake up Amy" (soft quiet or full listen).
+  if (useWhisperMic) {
+    if (!wantListen) wakeListen = true;
+    if (desktopMic.stream && desktopMic.audioCtx && !desktopMic.raf) watchDesktopLevels();
+  }
+  // Stay mic-armed so "wake up amy" / snore ribs work, but ignore normal chat.
+  setStatus('asleep', 'Sleeping — say wake up Amy');
+  syncMicUi();
+  try { inputEl?.focus?.(); } catch (_) {}
+}
+
+function armSleepGif() {
+  const layer = document.getElementById('lights-out');
+  const img = document.getElementById('lights-out-gif');
+  if (!layer || !img) return;
+  // Drop a file at amy/viewer/sounds/amy-sleep.gif to replace the CSS zzz.
+  const src = `/sounds/amy-sleep.gif?v=${Date.now()}`;
+  img.onload = () => layer.classList.add('has-gif');
+  img.onerror = () => {
+    layer.classList.remove('has-gif');
+    img.removeAttribute('src');
+  };
+  img.src = src;
+}
+
+function wakeAmy(reason) {
+  if (!asleep && reason !== 'force') {
+    bumpIdle();
+    return;
+  }
+  stopSnoring();
+  snoreHushed = false;
+  asleep = false;
+  nudgedIdle = false;
+  document.body.classList.remove('asleep');
+  const layer = document.getElementById('lights-out');
+  const img = document.getElementById('lights-out-gif');
+  if (layer) layer.classList.remove('has-gif');
+  if (img) {
+    try { img.removeAttribute('src'); } catch (_) {}
+  }
+  setStatus(wantListen ? 'listening' : 'idle', wantListen ? 'Listening' : 'Ready');
+  bumpIdle();
+  if (wantListen && recognition && !listening && !useWhisperMic) {
+    try { recognition.start(); } catch (_) {}
+  }
+  if (reason === 'voice' || reason === 'click') {
+    speak("I'm up, Chris. What do you need?");
+  }
+}
+
+if (!IS_SECURE) {
+  secureHint.style.display = 'block';
+  const httpsUrl = `https://flightdeck.tail7de73e.ts.net:4700${location.pathname}${location.search}`;
+  document.getElementById('https-link').href = httpsUrl;
+  document.getElementById('https-link').textContent = httpsUrl;
+}
+
+function setStatus(mode, text) {
+  // While asleep, keep SLEEPING chrome — soft-quiet / mute must not flip to STANDBY.
+  if (asleep && mode !== 'asleep') {
+    mode = 'asleep';
+    text = snoreHushed ? 'Sleeping — (quiet now)' : 'Sleeping — say wake up Amy';
+  }
+  statusEl.dataset.mode = mode;
+  statusEl.textContent = text;
+  amyFace.dataset.mode = mode;
+  if (amyFaceWrap) amyFaceWrap.dataset.mode = mode;
+  const labels = { idle: 'STANDBY', listening: 'LISTENING', thinking: 'THINKING', speaking: 'TALKING', asleep: 'SLEEPING' };
+  faceState.textContent = labels[mode] || 'STANDBY';
+  const vid = document.getElementById('amy-face-video');
+  if (vid) {
+    // Tripo clip is a turntable — keep a still frame so Amy doesn't spin.
+    const freeze = () => {
+      try {
+        if (!Number.isFinite(vid.duration) || vid.duration === 0) return;
+        // Pick a flattering mid frame once, then stay put.
+        if (vid.dataset.frozen !== '1') {
+          vid.currentTime = Math.min(0.35, Math.max(0.05, vid.duration * 0.12));
+          vid.dataset.frozen = '1';
+        }
+        vid.pause();
+      } catch (_) {}
+    };
+    if (vid.readyState >= 1) freeze();
+    else vid.addEventListener('loadedmetadata', freeze, { once: true });
+    vid.playbackRate = 1;
+  }
+  if (mode === 'speaking') {
+    speakChip.textContent = '● TALKING';
+    speakChip.classList.add('live');
+  } else if (mode === 'listening') {
+    speakChip.textContent = '● LISTENING';
+    speakChip.classList.add('live');
+  } else if (mode === 'thinking') {
+    speakChip.textContent = '● THINKING';
+    speakChip.classList.add('live');
+  } else if (mode === 'asleep') {
+    speakChip.textContent = '● SLEEP';
+    speakChip.classList.remove('live');
+  } else {
+    speakChip.textContent = '● IDLE';
+    speakChip.classList.remove('live');
+  }
+}
+
+let cachedVoice = null;
+let cachedVoiceName = '';
+let amyAudio = null;
+let ttsMode = 'browser'; // 'laura' | 'openai' | 'browser'
+let ttsVoiceLabel = 'Laura';
+
+function scoreVoice(v) {
+  const name = String(v.name || '');
+  const lang = String(v.lang || '');
+  let score = 0;
+  // Fallback browser voice if ElevenLabs isn't keyed yet.
+  if (/en-GB/i.test(lang)) score += 35;
+  else if (/en-AU/i.test(lang)) score += 32;
+  else if (/en-US/i.test(lang)) score += 20;
+  else if (/^en/i.test(lang)) score += 8;
+  if (/samantha|moira|hazel|susan|sonia|serena|libby|joanna|ivy/i.test(name)) score += 36;
+  if (/catherine|natasha|aria|jenny|sara/i.test(name)) score += 24;
+  if (/karen|zira/i.test(name)) score += 12;
+  if (/microsoft.*natural|neural|online \(natural\)|google.*female/i.test(name)) score += 20;
+  if (/female/i.test(name)) score += 10;
+  if (/male|david|mark|ravi|george|thomas|guy|ryan/i.test(name)) score -= 40;
+  return score;
+}
+
+function pickVoice() {
+  const voices = window.speechSynthesis?.getVoices?.() || [];
+  if (!voices.length) return null;
+  if (cachedVoice && voices.includes(cachedVoice)) return cachedVoice;
+  const ranked = [...voices].sort((a, b) => scoreVoice(b) - scoreVoice(a));
+  cachedVoice = ranked[0] || null;
+  cachedVoiceName = cachedVoice ? cachedVoice.name : '';
+  return cachedVoice;
+}
+
+function stopSpeaking() {
+  speakGen += 1;
+  try { ttsAbort?.abort(); } catch (_) {}
+  ttsAbort = null;
+  const a = amyAudio;
+  amyAudio = null;
+  if (a) {
+    try { a.onended = null; a.onerror = null; } catch (_) {}
+    try { a.pause(); } catch (_) {}
+    try {
+      a.removeAttribute('src');
+      a.src = '';
+      a.load();
+    } catch (_) {}
+  }
+  if (sfxAudio) {
+    try { sfxAudio.pause(); } catch (_) {}
+    sfxAudio = null;
+  }
+  window.speechSynthesis?.cancel();
+}
+
+function speakBrowser(text) {
+  if (!window.speechSynthesis) {
+    unduckMic();
+    return;
+  }
+  const gen = speakGen;
+  window.speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  const voice = pickVoice();
+  if (voice) {
+    u.voice = voice;
+    u.lang = voice.lang || 'en-GB';
+  } else {
+    u.lang = 'en-GB';
+  }
+  u.rate = 0.92;
+  u.pitch = 0.82;
+  setStatus('speaking', cachedVoiceName ? `Talking · ${cachedVoiceName.split(' - ')[0]}` : 'Talking');
+  u.onend = () => { if (gen === speakGen) unduckMic(); };
+  u.onerror = () => { if (gen === speakGen) unduckMic(); };
+  if (gen !== speakGen) return;
+  window.speechSynthesis.speak(u);
+}
+
+async function speakLaura(text) {
+  const gen = speakGen;
+  setStatus('speaking', `Talking · ${ttsVoiceLabel}`);
+  ttsAbort = new AbortController();
+  let r;
+  try {
+    r = await fetch('/tts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+      signal: ttsAbort.signal,
+    });
+  } catch (err) {
+    if (err && err.name === 'AbortError') return;
+    throw err;
+  }
+  if (gen !== speakGen) return;
+  if (!r.ok) {
+    let detail = `TTS HTTP ${r.status}`;
+    try {
+      const j = await r.json();
+      detail = j.detail || detail;
+    } catch (_) {}
+    throw new Error(detail);
+  }
+  const blob = await r.blob();
+  if (gen !== speakGen) return;
+  const url = URL.createObjectURL(blob);
+  // Clear any prior clip without bumping speakGen (that would cancel THIS utterance).
+  const prev = amyAudio;
+  amyAudio = null;
+  if (prev) {
+    try { prev.onended = null; prev.onerror = null; } catch (_) {}
+    try { prev.pause(); } catch (_) {}
+  }
+  const playGen = gen;
+  amyAudio = new Audio(url);
+  await new Promise((resolve) => {
+    const finish = () => {
+      try { URL.revokeObjectURL(url); } catch (_) {}
+      resolve();
+    };
+    amyAudio.onended = finish;
+    amyAudio.onerror = finish;
+    amyAudio.play().catch(() => finish());
+    const iv = setInterval(() => {
+      if (playGen !== speakGen) {
+        clearInterval(iv);
+        finish();
+      }
+    }, 80);
+    amyAudio.addEventListener('ended', () => clearInterval(iv), { once: true });
+    amyAudio.addEventListener('error', () => clearInterval(iv), { once: true });
+  });
+  if (playGen === speakGen) unduckMic();
+}
+
+async function speak(text) {
+  if (MUTE || !text) {
+    unduckMic();
+    return;
+  }
+  duckMic();
+  const gen = speakGen;
+  if (ttsMode === 'laura' || ttsMode === 'openai') {
+    try {
+      await speakLaura(text);
+      return;
+    } catch (err) {
+      if (gen !== speakGen) return;
+      console.warn('Server TTS failed, falling back', err);
+      if (/ElevenLabs|OpenAI|API key|quota|rate|credits/i.test(String(err.message || err))) {
+        answerEl.textContent = `${text}\n\n(${err.message})`;
+      }
+    }
+  }
+  if (gen !== speakGen) return;
+  speakBrowser(text);
+}
+
+function submitChat() {
+  unlockedAudio = true;
+  // Do NOT wake here — ask() handles sleep (hush vs wake phrase).
+  const q = inputEl.value.trim();
+  if (!q && !pendingFiles.length) return;
+  inputEl.value = '';
+  ask(q || 'Have a look at what I dropped.');
+}
+
+function renderDrops() {
+  dropsEl.innerHTML = '';
+  if (!pendingFiles.length) {
+    dropsEl.classList.remove('show');
+    return;
+  }
+  dropsEl.classList.add('show');
+  pendingFiles.forEach((f, idx) => {
+    const chip = document.createElement('span');
+    chip.className = 'drop-chip';
+    const label = document.createElement('span');
+    label.textContent = f.name;
+    const rm = document.createElement('button');
+    rm.type = 'button';
+    rm.textContent = '×';
+    rm.title = 'Remove';
+    rm.addEventListener('click', () => {
+      pendingFiles.splice(idx, 1);
+      renderDrops();
+    });
+    chip.appendChild(label);
+    chip.appendChild(rm);
+    dropsEl.appendChild(chip);
+  });
+}
+
+function fileToAttachment(file) {
+  return new Promise((resolve, reject) => {
+    if (file.size > 8 * 1024 * 1024) {
+      reject(new Error(`${file.name} is over 8MB`));
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = String(reader.result || '');
+      const data = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
+      resolve({
+        name: file.name,
+        media_type: file.type || 'application/octet-stream',
+        data,
+      });
+    };
+    reader.onerror = () => reject(new Error(`Couldn't read ${file.name}`));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function addDroppedFiles(fileList) {
+  const files = [...(fileList || [])].slice(0, 4);
+  if (!files.length) return;
+  try {
+    for (const file of files) {
+      if (pendingFiles.length >= 4) break;
+      const att = await fileToAttachment(file);
+      pendingFiles.push(att);
+    }
+    renderDrops();
+    setStatus('idle', `${pendingFiles.length} file${pendingFiles.length === 1 ? '' : 's'} ready`);
+  } catch (err) {
+    answerEl.textContent = String(err.message || err);
+  }
+}
+
+function openNode(node) {
+  if (!node) return;
+  document.getElementById('side-group').textContent = node.group || 'note';
+  document.getElementById('side-title').textContent = node.label || '';
+  document.getElementById('side-body').textContent = node.excerpt || '';
+  side.style.display = 'block';
+}
+
+document.getElementById('side-close').addEventListener('click', () => { side.style.display = 'none'; });
+
+function highlightNodes(ids) {
+  if (!graph) return;
+  const set = new Set(ids || []);
+  graph.nodeColor(n => set.has(n.id) ? '#fbbf24' : colorForGroup(n.group));
+  graph.nodeVal(n => set.has(n.id) ? 10 : (viewMode === 'face' ? 5 : 3.6));
+}
+
+function colorForGroup(group) {
+  const key = String(group || 'notes');
+  let h = 0;
+  for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) % 360;
+  return `hsl(${h} 80% 62%)`;
+}
+
+function flyToNode(id) {
+  const node = (GRAPH.nodes || []).find(n => n.id === id);
+  if (!node || node.x == null || !graph) return;
+  openNode(node);
+  const dist = viewMode === 'face' ? 55 : 95;
+  graph.cameraPosition({ x: node.x, y: node.y, z: node.z + dist }, node, 1100);
+}
+
+function applySources(payload) {
+  const ids = Array.isArray(payload.nodes) ? payload.nodes : [];
+  if (!payload.move_camera || !ids.length) {
+    if (ids.length >= 4) highlightNodes(ids);
+    return;
+  }
+  highlightNodes(ids);
+  if (ids.length >= 4) return;
+  flyToNode(ids[0]);
+}
+
+async function ask(question) {
+  const q0 = String(question || '').trim();
+  if (asleep) {
+    // Sleep is sealed: only an explicit wake opens chat. Anything else = hush/ignore.
+    if (isWakePhrase(q0)) {
+      wakeAmy('voice');
+      return;
+    }
+    if (q0) hushSnoring();
+    return;
+  }
+  const q = q0;
+  if (!q) return;
+  if (looksLikeInterrupt(q) || isInterrupt(q)) {
+    handleInterrupt();
+    return;
+  }
+  if (isWhistlePhrase(q) && !pendingFiles.length) {
+    doWhistle();
+    answerEl.textContent = '♪';
+    setStatus(wantListen ? 'listening' : 'idle', wantListen ? 'Listening' : 'Ready');
+    return;
+  }
+  if (!pendingFiles.length) {
+    const awakeFor = parseAwakeCommand(q);
+    if (awakeFor !== null) {
+      await applyAwakeCommand(awakeFor);
+      return;
+    }
+  }
+  if (isBedtimePhrase(q) && !pendingFiles.length) {
+    await doBedtime();
+    return;
+  }
+  if (isGoSmallPhrase(q) && !pendingFiles.length) {
+    await setCompactMode(true);
+    answerEl.textContent = 'Going small — still listening.';
+    setStatus(wantListen ? 'listening' : 'idle', wantListen ? (useWhisperMic ? 'Listening · Whisper' : 'Listening') : 'Ready');
+    return;
+  }
+  if (isGoBigPhrase(q) && !pendingFiles.length) {
+    await setCompactMode(false);
+    answerEl.textContent = 'Back to full size.';
+    setStatus(wantListen ? 'listening' : 'idle', wantListen ? (useWhisperMic ? 'Listening · Whisper' : 'Listening') : 'Ready');
+    return;
+  }
+  if (isMinimizePhrase(q) && !pendingFiles.length) {
+    await callAmyDesktop('minimize_window');
+    answerEl.textContent = 'Minimising — say come back when you want me.';
+    setStatus(wantListen ? 'listening' : 'idle', wantListen ? (useWhisperMic ? 'Listening · Whisper' : 'Listening') : 'Ready');
+    return;
+  }
+  if (isRestorePhrase(q) && !pendingFiles.length) {
+    await callAmyDesktop('restore_window');
+    answerEl.textContent = 'Back — staying on top.';
+    setStatus(wantListen ? 'listening' : 'idle', wantListen ? (useWhisperMic ? 'Listening · Whisper' : 'Listening') : 'Ready');
+    return;
+  }
+  if (looksLikeWhisperGarbage(q) && !pendingFiles.length) {
+    answerEl.textContent = "Didn't catch that — Spotify might've bled into the mic. Try again, or say don't talk.";
+    setStatus(wantListen ? 'listening' : 'idle', wantListen ? (useWhisperMic ? 'Listening · Whisper' : 'Listening') : 'Ready');
+    return;
+  }
+  if (isMuteMicPhrase(q) && !pendingFiles.length) {
+    stopSpeaking();
+    muteMic();
+    answerEl.textContent = 'Quiet — say talk or hit TALK when you want me.';
+    return;
+  }
+  if (isUnmuteMicPhrase(q) && !pendingFiles.length) {
+    await startMic();
+    answerEl.textContent = 'Listening — go ahead.';
+    return;
+  }
+  // Play music goes through /chat try_tools (Spotify + play) — fall through.
+  bumpIdle();
+  stopSpeaking();
+  duckMic();
+  inputEl.value = q;
+  answerEl.textContent = '…';
+  setStatus('thinking', 'Thinking');
+  try { chatAbort?.abort(); } catch (_) {}
+  chatAbort = new AbortController();
+  const signal = chatAbort.signal;
+  try {
+    let payload;
+    if (/^(remember that|note to self|don't let me forget|dont let me forget|log this)\b/i.test(q)) {
+      const r = await fetch('/remember', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: q }),
+        signal,
+      });
+      payload = await r.json();
+      if (!r.ok) throw new Error(payload.detail || 'remember failed');
+      if (payload.id != null) {
+        const script = document.createElement('script');
+        script.src = '/graph-data.js?t=' + Date.now();
+        script.onload = () => {
+          graph.graphData(GRAPH);
+          applyViewMode(viewMode);
+          highlightNodes([payload.id]);
+          flyToNode(payload.id);
+        };
+        document.body.appendChild(script);
+      }
+    } else if (wantsVisionFrame(q)) {
+      const frame = await captureShareFrame();
+      if (!frame) {
+        throw new Error(
+          visionMode === 'watch'
+            ? "Camera's on but I couldn't grab a frame yet — give it a sec and ask again."
+            : "Screen share's on but I couldn't grab a frame — try asking again."
+        );
+      }
+      const r = await fetch('/see', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          question: q,
+          image: frame,
+          media_type: 'image/jpeg',
+          vision_mode: visionMode || 'eyes',
+        }),
+        signal,
+      });
+      payload = await r.json();
+      if (!r.ok) throw new Error(payload.detail || 'see failed');
+      payload.move_camera = false;
+    } else {
+      const r = await fetch('/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          question: q,
+          attachments: pendingFiles.map(f => ({
+            name: f.name,
+            media_type: f.media_type,
+            data: f.data,
+          })),
+        }),
+        signal,
+      });
+      payload = await r.json();
+      if (!r.ok) throw new Error(payload.detail || 'chat failed');
+      if (payload.move_camera == null) payload.move_camera = true;
+      pendingFiles = [];
+      renderDrops();
+    }
+    if (signal.aborted) return;
+    inputEl.value = '';
+    setAnswer(payload.answer || '');
+    if (payload.talk_mode) setTalkModeUI(payload.talk_mode);
+    applySources(payload);
+    await maybeDropOnTopForReveal(payload.answer || '');
+    await speak(payload.answer || '');
+  } catch (err) {
+    if (err && (err.name === 'AbortError' || /aborted/i.test(String(err.message || '')))) {
+      unduckMic();
+      return;
+    }
+    inputEl.value = '';
+    answerEl.textContent = String(err.message || err);
+    setStatus('idle', 'Error');
+    await speak(String(err.message || err));
+  } finally {
+    chatAbort = null;
+  }
+}
+
+function wantsVisionFrame(q) {
+  if (!shareStream || !shareStream.active) return false;
+  const s = String(q || '').toLowerCase();
+  if (!s) return false;
+  if (visionMode === 'watch') {
+    // Webcam — any ask about seeing / looking at Chris (not bare "me" — that hits "tell me…")
+    return /\b(see|look|looking|watch(ing)?|camera|webcam|face|selfie|visible|wearing|appearance)\b/i.test(s)
+      || /\b(how do i look|what do (you|i) look|can you see|do you see|look at me|see me|my face|my shirt|my room)\b/i.test(s);
+  }
+  // Screen share (EYES)
+  return /\b(this|screen|desktop|monitor|window|looking|look|see|think of|what('s| is) on)\b/i.test(s);
+}
+
+async function captureShareFrame() {
+  if (!shareStream || !shareStream.active) return null;
+  if (!shareVideo) {
+    shareVideo = document.createElement('video');
+    shareVideo.muted = true;
+    shareVideo.playsInline = true;
+    shareVideo.setAttribute('playsinline', 'true');
+  }
+  if (shareVideo.srcObject !== shareStream) {
+    shareVideo.srcObject = shareStream;
+  }
+  try { await shareVideo.play(); } catch (_) {}
+  // Webcam often reports 0×0 until a couple frames land
+  for (let i = 0; i < 30; i++) {
+    if (shareVideo.videoWidth > 16 && shareVideo.videoHeight > 16) break;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  const w = shareVideo.videoWidth;
+  const h = shareVideo.videoHeight;
+  if (!w || !h) return null;
+  const canvas = document.createElement('canvas');
+  const maxW = 1280;
+  const scale = Math.min(1, maxW / w);
+  canvas.width = Math.max(1, Math.round(w * scale));
+  canvas.height = Math.max(1, Math.round(h * scale));
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+  ctx.drawImage(shareVideo, 0, 0, canvas.width, canvas.height);
+  // Reject totally black frames (common before first real webcam paint)
+  try {
+    const sample = ctx.getImageData(0, 0, Math.min(32, canvas.width), Math.min(32, canvas.height)).data;
+    let lit = 0;
+    for (let i = 0; i < sample.length; i += 16) {
+      if (sample[i] + sample[i + 1] + sample[i + 2] > 24) lit += 1;
+    }
+    if (lit < 2) return null;
+  } catch (_) {}
+  return canvas.toDataURL('image/jpeg', 0.72).split(',')[1];
+}
+
+function bypassWord(t) {
+  return isInterrupt(t);
+}
+
+function armRecognition() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) return null;
+  recognition = new SR();
+  recognition.continuous = true;
+  recognition.interimResults = true;
+  recognition.lang = 'en-AU';
+  recognition.onstart = () => {
+    listening = true;
+    syncMicUi();
+    if (!isSpeaking) setStatus('listening', 'Listening');
+  };
+  recognition.onend = () => {
+    listening = false;
+    // While talking, keep recognition alive for barge-in.
+    if (isSpeaking && wantListen) {
+      setTimeout(() => {
+        if (!wantListen || !isSpeaking || !recognition) return;
+        try { recognition.start(); } catch (_) {}
+      }, 120);
+      syncMicUi();
+      return;
+    }
+    if (micIsDeaf()) {
+      syncMicUi();
+      return;
+    }
+    if (wantListen) {
+      setTimeout(() => {
+        if (!wantListen || isSpeaking || !recognition) return;
+        try { recognition.start(); } catch (_) {}
+      }, 200);
+      syncMicUi();
+      return;
+    }
+    syncMicUi();
+    if (statusEl.dataset.mode === 'listening') setStatus('idle', 'Ready');
+  };
+  recognition.onerror = (ev) => {
+    listening = false;
+    const err = String(ev.error || 'unknown');
+    if (err === 'aborted' || err === 'no-speech') {
+      if (wantListen && (isSpeaking || !micIsDeaf())) {
+        setTimeout(() => {
+          if (!wantListen || !recognition) return;
+          try { recognition.start(); } catch (_) {}
+        }, 120);
+      }
+      syncMicUi();
+      return;
+    }
+    if (isSpeaking && wantListen) {
+      setTimeout(() => {
+        if (!wantListen || !isSpeaking || !recognition) return;
+        try { recognition.start(); } catch (_) {}
+      }, 180);
+      syncMicUi();
+      return;
+    }
+    if (err === 'network' || err === 'audio-capture') {
+      // WebView2 hits this constantly — flip to Whisper, but NEVER force-unmute.
+      useWhisperMic = true;
+      try { recognition?.stop(); } catch (_) {}
+      recognition = null;
+      if (!wantListen) {
+        syncMicUi();
+        return;
+      }
+      syncMicUi();
+      setStatus('listening', 'Listening · Whisper');
+      // Only (re)arm if desktop capture isn't already live.
+      if (!desktopMic.stream) {
+        answerEl.textContent = 'Switching mic to Whisper for this app window…';
+        startDesktopMic().then((ok) => {
+          if (!ok) {
+            wantListen = false;
+            syncMicUi();
+            setStatus('idle', 'Mic error');
+            answerEl.textContent = `Mic hiccup (${err}). Whisper fallback failed — type, or use Chrome.`;
+          }
+        });
+      }
+      return;
+    }
+    wantListen = false;
+    syncMicUi();
+    setStatus('idle', 'Mic error');
+    if (err === 'not-allowed' || err === 'service-not-allowed') {
+      answerEl.textContent = 'Mic blocked in this window. Allow mic for Amy.';
+      secureHint.style.display = 'block';
+    } else {
+      answerEl.textContent = `Mic error (${err}).`;
+    }
+  };
+  recognition.onresult = (event) => {
+    let finalChunk = '';
+    let interimChunk = '';
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      const piece = event.results[i][0].transcript;
+      if (event.results[i].isFinal) finalChunk += piece;
+      else interimChunk += piece;
+    }
+    finalChunk = finalChunk.trim();
+    interimChunk = interimChunk.trim();
+    const forInterrupt = finalChunk || interimChunk;
+    if (forInterrupt && looksLikeInterrupt(forInterrupt)) {
+      handleInterrupt();
+      return;
+    }
+    const chunk = finalChunk;
+    if (!chunk) return;
+    if (asleep) {
+      if (isWakePhrase(chunk)) wakeAmy('voice');
+      else if (chunk) hushSnoring();
+      return;
+    }
+    if (isWakePhrase(chunk)) {
+      bumpIdle();
+      return;
+    }
+    if (isWhistlePhrase(chunk)) {
+      doWhistle();
+      answerEl.textContent = '♪';
+      return;
+    }
+    if (isBedtimePhrase(chunk)) {
+      doBedtime();
+      return;
+    }
+    // While Amy talks (or echo cooldown), ignore normal speech so she doesn't self-answer.
+    if (isSpeaking || micIsDeaf()) return;
+    bumpIdle();
+    pending = (pending ? pending + ' ' : '') + chunk;
+    inputEl.value = pending;
+    clearTimeout(finishTimer);
+    finishTimer = setTimeout(() => {
+      if (asleep || isSpeaking || micIsDeaf()) {
+        pending = '';
+        return;
+      }
+      const q = pending.trim();
+      pending = '';
+      if (q) {
+        inputEl.value = '';
+        ask(q);
+      }
+    }, FINISH_MS);
+  };
+  return recognition;
+}
+
+function syncMicUi() {
+  const on = !!wantListen;
+  micBtn.classList.toggle('active', on);
+  // State label: glowing TALK = ears open. Dim QUIET = soft quiet (say "talk" to return).
+  // (Old "glowing QUIET" looked like she'd been silenced.)
+  micBtn.textContent = on ? 'TALK' : 'QUIET';
+  micBtn.title = on
+    ? "Ears open — click or say don't talk for quiet"
+    : 'Quiet — click or say talk to open ears';
+  const tray = document.getElementById('tray-mic');
+  if (tray) {
+    tray.classList.toggle('active', on);
+    tray.textContent = on ? '🎙' : '🔇';
+    tray.title = on ? "Ears open — click for quiet" : 'Quiet — click to talk';
+  }
+}
+
+function muteMic() {
+  wantListen = false;
+  clearTimeout(finishTimer);
+  finishTimer = null;
+  pending = '';
+  desktopMic.busy = false;
+  desktopMic.speaking = false;
+  desktopMic.pcm = [];
+  if (desktopMic._resetPcmCount) desktopMic._resetPcmCount();
+  desktopMic.silentMs = 0;
+  desktopMic.utterStart = 0;
+
+  if (useWhisperMic && desktopMic.stream && desktopMic.audioCtx) {
+    // Soft quiet: keep Whisper armed so "talk" / unmute actually works.
+    wakeListen = true;
+    if (!desktopMic.raf) watchDesktopLevels();
+  } else {
+    wakeListen = false;
+    stopDesktopMic();
+    if (recognition) {
+      try { recognition.abort?.(); } catch (_) {}
+      try { recognition.stop(); } catch (_) {}
+    }
+  }
+  listening = false;
+  syncMicUi();
+  if (asleep) {
+    setStatus('asleep', snoreHushed ? 'Sleeping — (quiet now)' : 'Sleeping — say wake up Amy');
+    return;
+  }
+  if (!isSpeaking && statusEl.dataset.mode !== 'thinking') {
+    setStatus('idle', wakeListen ? 'Quiet — say talk' : 'Quiet');
+  }
+}
+
+function stopDesktopMic() {
+  if (desktopMic.raf) {
+    clearTimeout(desktopMic.raf);
+    desktopMic.raf = 0;
+  }
+  try { desktopMic.recorder?.stop(); } catch (_) {}
+  desktopMic.recorder = null;
+  desktopMic.chunks = [];
+  desktopMic.pcm = [];
+  desktopMic.analysing = false;
+  desktopMic.speaking = false;
+  desktopMic.silentMs = 0;
+  try { desktopMic.processor?.disconnect(); } catch (_) {}
+  desktopMic.processor = null;
+  try { desktopMic.muteGain?.disconnect(); } catch (_) {}
+  desktopMic.muteGain = null;
+  try { desktopMic.audioCtx?.close(); } catch (_) {}
+  desktopMic.audioCtx = null;
+  desktopMic.analyser = null;
+  if (desktopMic.stream) {
+    desktopMic.stream.getTracks().forEach((t) => t.stop());
+    desktopMic.stream = null;
+  }
+}
+
+function encodeWavFromPcm(floatChunks, sampleRate) {
+  let total = 0;
+  for (const c of floatChunks) total += c.length;
+  if (total < 1600) return null; // ~0.1s @ 16k
+  const samples = new Float32Array(total);
+  let off = 0;
+  for (const c of floatChunks) {
+    samples.set(c, off);
+    off += c.length;
+  }
+  const buffer = new ArrayBuffer(44 + samples.length * 2);
+  const view = new DataView(buffer);
+  const writeStr = (o, s) => {
+    for (let i = 0; i < s.length; i++) view.setUint8(o + i, s.charCodeAt(i));
+  };
+  writeStr(0, 'RIFF');
+  view.setUint32(4, 36 + samples.length * 2, true);
+  writeStr(8, 'WAVE');
+  writeStr(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  writeStr(36, 'data');
+  view.setUint32(40, samples.length * 2, true);
+  let idx = 44;
+  for (let i = 0; i < samples.length; i++) {
+    let s = Math.max(-1, Math.min(1, samples[i]));
+    view.setInt16(idx, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+    idx += 2;
+  }
+  return new Blob([buffer], { type: 'audio/wav' });
+}
+
+async function transcribeDesktopBlob(blob) {
+  if (!blob || blob.size < 800) return '';
+  const mime = blob.type || 'audio/wav';
+  const ext = /wav/i.test(mime) ? 'wav' : /mp4|m4a/i.test(mime) ? 'mp4' : /ogg/i.test(mime) ? 'ogg' : 'webm';
+  const form = new FormData();
+  form.append('file', blob, `speech.${ext}`);
+  const ctrl = new AbortController();
+  const timer = window.setTimeout(() => ctrl.abort(), 25000);
+  let r;
+  try {
+    r = await fetch(`${location.origin}/stt`, { method: 'POST', body: form, signal: ctrl.signal });
+  } catch (err) {
+    if (err && err.name === 'AbortError') throw new Error('STT timed out (25s) — try again closer to the mic');
+    throw new Error(`network (${err && err.message ? err.message : err}) — is Amy still running?`);
+  } finally {
+    clearTimeout(timer);
+  }
+  let payload = {};
+  try { payload = await r.json(); } catch (_) {}
+  if (!r.ok) throw new Error(payload.detail || `STT HTTP ${r.status}`);
+  return String(payload.text || '').trim();
+}
+
+async function flushDesktopUtterance() {
+  // While asleep, still transcribe — but only wake phrases get through (Whisper path
+  // used to discard everything, so "wake up Amy" never worked).
+  if (micIsDeaf() || desktopMic.busy) {
+    desktopMic.pcm = [];
+    return;
+  }
+  if (!asleep && !micCaptureWanted()) {
+    desktopMic.pcm = [];
+    return;
+  }
+  // Asleep still needs an armed mic stream
+  if (asleep && !desktopMic.stream) {
+    desktopMic.pcm = [];
+    return;
+  }
+  const wakeOnly = !wantListen && wakeListen;
+  const sleepWake = !!asleep;
+  const bargeIn = isSpeaking && wantListen && !asleep;
+  desktopMic.busy = true;
+  const chunks = desktopMic.pcm;
+  desktopMic.pcm = [];
+  if (desktopMic._resetPcmCount) desktopMic._resetPcmCount();
+  desktopMic.utterStart = 0;
+  const rate = desktopMic.audioCtx?.sampleRate || 48000;
+  const blob = encodeWavFromPcm(chunks, rate);
+  if (!blob) {
+    desktopMic.busy = false;
+    return;
+  }
+  if (!bargeIn && !wakeOnly && !sleepWake) setStatus('thinking', 'Hearing you…');
+  let text = '';
+  try {
+    text = await transcribeDesktopBlob(blob);
+  } catch (err) {
+    desktopMic.busy = false;
+    if (!bargeIn && !wakeOnly && !sleepWake) {
+      answerEl.textContent = `Desktop mic STT failed (${err.message || err}). Typing still works.`;
+      setStatus(wantListen ? 'listening' : 'idle', wantListen ? 'Listening · Whisper' : 'Mic error');
+    } else if (wakeOnly) {
+      setStatus('idle', 'Quiet — say talk');
+    } else if (sleepWake) {
+      setStatus('asleep', 'Sleeping — say wake up Amy');
+    }
+    return;
+  }
+  desktopMic.busy = false;
+  if (!text) {
+    if (sleepWake) setStatus('asleep', 'Sleeping — say wake up Amy');
+    else if (wantListen && !isSpeaking) setStatus('listening', 'Listening · Whisper');
+    else if (wakeOnly) setStatus('idle', 'Quiet — say talk');
+    return;
+  }
+  if (sleepWake) {
+    if (isWakePhrase(text)) {
+      wakeAmy('voice');
+    } else if (text && !looksLikeWhisperGarbage(text)) {
+      hushSnoring();
+    } else {
+      setStatus('asleep', snoreHushed ? 'Sleeping — (quiet now)' : 'Sleeping — say wake up Amy');
+    }
+    return;
+  }
+  if (wakeOnly) {
+    if (isUnmuteMicPhrase(text)) {
+      wantListen = true;
+      wakeListen = false;
+      syncMicUi();
+      answerEl.textContent = 'Listening — go ahead.';
+      setStatus('listening', 'Listening · Whisper');
+      bumpIdle();
+    } else {
+      setStatus('idle', 'Quiet — say talk');
+    }
+    return;
+  }
+  if (!wantListen || asleep) {
+    if (wantListen && !asleep && !isSpeaking) setStatus('listening', 'Listening · Whisper');
+    return;
+  }
+  if (looksLikeWhisperGarbage(text)) {
+    answerEl.textContent = "Ignored mic noise (Whisper heard gibberish). Music playing? Say don't talk or pause Spotify.";
+    if (wantListen && !asleep && !isSpeaking) setStatus('listening', 'Listening · Whisper');
+    return;
+  }
+  if (bargeIn || isSpeaking) {
+    if (/\b(don'?t talk|do not talk|mute yourself|stop listening|go quiet|quiet mode)\b/i.test(text)) {
+      handleInterrupt();
+      muteMic();
+      answerEl.textContent = 'Quiet — say talk or hit TALK when you want me.';
+      return;
+    }
+    if (isInterrupt(text) || looksLikeInterrupt(text)) handleInterrupt();
+    return;
+  }
+  bumpIdle();
+  try {
+    await ask(text);
+  } finally {
+    if (wantListen && !asleep && !isSpeaking) {
+      if (statusEl.dataset.mode !== 'thinking' && statusEl.dataset.mode !== 'speaking') {
+        setStatus('listening', 'Listening · Whisper');
+      }
+    }
+  }
+}
+
+function armDesktopPcmCapture() {
+  if (!desktopMic.audioCtx || !desktopMic.stream || !micCaptureWanted()) return;
+  const ctx = desktopMic.audioCtx;
+  const src = ctx.createMediaStreamSource(desktopMic.stream);
+  // ScriptProcessor is deprecated but reliable in WebView2 for PCM → Whisper WAV.
+  const proc = ctx.createScriptProcessor(4096, 1, 1);
+  const mute = ctx.createGain();
+  mute.gain.value = 0;
+  const maxSamples = Math.floor((ctx.sampleRate || 48000) * 12); // hard cap ~12s
+  let sampleCount = 0;
+  proc.onaudioprocess = (ev) => {
+    if (!micCaptureWanted() || asleep || micIsDeaf() || desktopMic.busy) return;
+    if (!desktopMic.speaking && desktopMic.pcm.length === 0) return;
+    const input = ev.inputBuffer.getChannelData(0);
+    desktopMic.pcm.push(new Float32Array(input));
+    sampleCount += input.length;
+    // Drop oldest in one pass — avoid O(n²) shift loops that freeze WebView2
+    if (sampleCount > maxSamples) {
+      const keep = [];
+      let kept = 0;
+      for (let i = desktopMic.pcm.length - 1; i >= 0; i--) {
+        const c = desktopMic.pcm[i];
+        if (kept + c.length > maxSamples && keep.length) break;
+        keep.push(c);
+        kept += c.length;
+      }
+      keep.reverse();
+      desktopMic.pcm = keep;
+      sampleCount = kept;
+    }
+  };
+  src.connect(desktopMic.analyser);
+  src.connect(proc);
+  proc.connect(mute);
+  mute.connect(ctx.destination);
+  desktopMic.processor = proc;
+  desktopMic.muteGain = mute;
+  desktopMic._resetPcmCount = () => { sampleCount = 0; };
+}
+
+function watchDesktopLevels() {
+  if (!desktopMic.analyser || !micCaptureWanted()) return;
+  const data = new Uint8Array(desktopMic.analyser.fftSize);
+  const maxUtterMs = 10000; // force flush so music can't hang "Hearing you…"
+  const tick = () => {
+    if (!micCaptureWanted() || !desktopMic.analyser) {
+      desktopMic.raf = 0;
+      return;
+    }
+    // Echo cooldown only — stay live while Amy talks so STOP / “hang on” still work.
+    if (micIsDeaf() || desktopMic.busy) {
+      desktopMic.speaking = false;
+      desktopMic.silentMs = 0;
+      desktopMic.raf = window.setTimeout(tick, 50);
+      return;
+    }
+    desktopMic.analyser.getByteTimeDomainData(data);
+    let sum = 0;
+    for (let i = 0; i < data.length; i++) {
+      const v = (data[i] - 128) / 128;
+      sum += v * v;
+    }
+    const rms = Math.sqrt(sum / data.length);
+    const thresh = isSpeaking ? 0.058 : (wakeListen && !wantListen ? 0.048 : 0.032);
+    if (rms > thresh) {
+      if (!desktopMic.speaking) {
+        desktopMic.pcm = [];
+        if (desktopMic._resetPcmCount) desktopMic._resetPcmCount();
+        desktopMic.utterStart = performance.now();
+      }
+      desktopMic.speaking = true;
+      desktopMic.silentMs = 0;
+      desktopMic.lastVoiceAt = performance.now();
+    } else if (desktopMic.speaking) {
+      desktopMic.silentMs += 50;
+      const need = isSpeaking ? 320 : Math.max(700, FINISH_MS - 400);
+      const tooLong = desktopMic.utterStart && (performance.now() - desktopMic.utterStart) > maxUtterMs;
+      if ((desktopMic.silentMs >= need || tooLong) && !desktopMic.busy) {
+        desktopMic.speaking = false;
+        desktopMic.silentMs = 0;
+        desktopMic.utterStart = 0;
+        flushDesktopUtterance();
+      }
+    } else {
+      desktopMic.utterStart = 0;
+    }
+    desktopMic.raf = window.setTimeout(tick, 50);
+  };
+  tick();
+}
+
+async function startDesktopMic() {
+  stopDesktopMic();
+  if (!navigator.mediaDevices?.getUserMedia) {
+    answerEl.textContent = 'Desktop mic needs getUserMedia.';
+    setStatus('idle', 'Mic error');
+    return false;
+  }
+  try {
+    desktopMic.stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
+    });
+  } catch (err) {
+    answerEl.textContent = `Mic permission denied (${err && err.name ? err.name : err}). Allow microphone for Amy.`;
+    setStatus('idle', 'Mic error');
+    return false;
+  }
+  desktopMic.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  desktopMic.analyser = desktopMic.audioCtx.createAnalyser();
+  desktopMic.analyser.fftSize = 2048;
+  desktopMic.pcm = [];
+  armDesktopPcmCapture();
+  watchDesktopLevels();
+  return true;
+}
+
+async function startMic() {
+  unlockedAudio = true;
+  // While asleep: open ears only — do not wake or leave sleep layout.
+  if (asleep) {
+    wantListen = true;
+    wakeListen = false;
+    useWhisperMic = true;
+    syncMicUi();
+    if (desktopMic.stream && desktopMic.audioCtx && desktopMic.analyser) {
+      if (!desktopMic.raf) watchDesktopLevels();
+    } else {
+      const ok = await startDesktopMic();
+      if (!ok) {
+        wantListen = false;
+        wakeListen = true;
+        syncMicUi();
+        return;
+      }
+    }
+    setStatus('asleep', snoreHushed ? 'Sleeping — (quiet now)' : 'Sleeping — say wake up Amy');
+    return;
+  }
+  if (!IS_SECURE) {
+    answerEl.textContent = 'Chrome won’t give Amy the mic on plain HTTP — use the HTTPS link above.';
+    secureHint.style.display = 'block';
+    return;
+  }
+  // Real desktop app (WebView2): Google SpeechRecognition fails with "network".
+  // Use OpenAI Whisper via /stt instead — keeps the framed Amy window.
+  if (DESKTOP_APP || useWhisperMic) {
+    wantListen = true;
+    wakeListen = false;
+    useWhisperMic = true;
+    syncMicUi();
+    // Soft quiet already has the stream — just reopen ears, don't tear down.
+    if (desktopMic.stream && desktopMic.audioCtx && desktopMic.analyser) {
+      if (!desktopMic.raf) watchDesktopLevels();
+      if (!asleep) setStatus('listening', 'Listening · Whisper');
+      bumpIdle();
+      return;
+    }
+    const ok = await startDesktopMic();
+    if (!ok) {
+      wantListen = false;
+      wakeListen = false;
+      syncMicUi();
+      return;
+    }
+    if (!asleep) setStatus('listening', 'Listening · Whisper');
+    bumpIdle();
+    return;
+  }
+  if (navigator.mediaDevices?.getUserMedia) {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream.getTracks().forEach((t) => t.stop());
+    } catch (err) {
+      answerEl.textContent = `Mic permission denied (${err && err.name ? err.name : err}). In Chrome: padlock → Site settings → Microphone → Allow.`;
+      setStatus('idle', 'Mic error');
+      return;
+    }
+  }
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) {
+    answerEl.textContent = 'SpeechRecognition missing — open with ?desktop=1 for Whisper mic, or use Chrome.';
+    setStatus('idle', 'Mic error');
+    return;
+  }
+  if (!recognition) armRecognition();
+  if (!recognition) {
+    answerEl.textContent = 'Couldn’t arm the mic.';
+    return;
+  }
+  wantListen = true;
+  wakeListen = false;
+  syncMicUi();
+  if (!asleep) setStatus('listening', 'Listening');
+  bumpIdle();
+  try {
+    recognition.start();
+  } catch (err) {
+    answerEl.textContent = `Mic start failed (${err && err.message ? err.message : err}).`;
+    setStatus('idle', 'Mic error');
+    wantListen = false;
+    syncMicUi();
+  }
+}
+
+function toggleMic() {
+  if (wantListen || listening) muteMic();
+  else startMic();
+}
+
+async function stopVision() {
+  if (shareStream) {
+    shareStream.getTracks().forEach((t) => t.stop());
+  }
+  shareStream = null;
+  shareVideo = null;
+  visionMode = null;
+  shareDot.classList.remove('is-on');
+  shareDot.style.display = 'none';
+  eyesBtn.classList.remove('active');
+  const watchBtn = document.getElementById('watch-btn');
+  if (watchBtn) watchBtn.classList.remove('active');
+}
+
+async function toggleEyes() {
+  unlockedAudio = true;
+  if (shareStream && visionMode === 'eyes') {
+    await stopVision();
+    return;
+  }
+  if (shareStream) await stopVision();
+  if (!IS_SECURE) {
+    answerEl.textContent = 'Eyes also need HTTPS for screen share.';
+    secureHint.style.display = 'block';
+    return;
+  }
+  try {
+    shareStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+    visionMode = 'eyes';
+    shareDot.textContent = 'SCREEN SHARE LIVE';
+    shareDot.classList.add('is-on');
+    shareDot.style.display = 'inline-flex';
+    eyesBtn.classList.add('active');
+    shareStream.getVideoTracks()[0].addEventListener('ended', () => { stopVision(); });
+    answerEl.textContent = 'Eyes on — I can see your screen when you ask.';
+  } catch (_) {
+    answerEl.textContent = 'Screen share cancelled.';
+  }
+}
+
+async function toggleWatch() {
+  unlockedAudio = true;
+  const watchBtn = document.getElementById('watch-btn');
+  if (shareStream && visionMode === 'watch') {
+    await stopVision();
+    return;
+  }
+  if (shareStream) await stopVision();
+  if (!IS_SECURE) {
+    answerEl.textContent = 'Watch needs a secure context (desktop app or HTTPS).';
+    secureHint.style.display = 'block';
+    return;
+  }
+  if (!navigator.mediaDevices?.getUserMedia) {
+    answerEl.textContent = 'No camera API in this window.';
+    return;
+  }
+  try {
+    shareStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 15, max: 24 } },
+      audio: false,
+    });
+    visionMode = 'watch';
+    shareDot.textContent = 'CAMERA LIVE';
+    shareDot.classList.add('is-on');
+    shareDot.style.display = 'inline-flex';
+    if (watchBtn) watchBtn.classList.add('active');
+    shareStream.getVideoTracks()[0].addEventListener('ended', () => { stopVision(); });
+    answerEl.textContent = 'Watch on — I can see you when you ask.';
+  } catch (err) {
+    answerEl.textContent = `Camera blocked (${err && err.name ? err.name : err}). Allow camera for Amy.`;
+  }
+}
+
+async function toggleFocus() {
+  unlockedAudio = true;
+  await setCompactMode(!compactMode);
+  answerEl.textContent = compactMode
+    ? 'Focus mode — small Amy, mic still live.'
+    : 'Full workshop view.';
+}
+
+function applyViewMode(mode) {
+  viewMode = mode;
+  document.querySelectorAll('.modes button').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.view === mode);
+  });
+  if (!graph) return;
+  const controls = graph.controls();
+  controls.autoRotate = false;
+  if (mode === 'ring') {
+    graph.cameraPosition({ x: 0, y: 0, z: 280 }, { x: 0, y: 0, z: 0 }, 900);
+  } else if (mode === 'cube') {
+    graph.cameraPosition({ x: 180, y: 140, z: 180 }, { x: 0, y: 0, z: 0 }, 900);
+  } else {
+    graph.cameraPosition({ x: 40, y: 20, z: 120 }, { x: 0, y: 0, z: 0 }, 900);
+  }
+  graph.nodeVal(viewMode === 'face' ? 5 : 3.6);
+  graph.nodeRelSize(viewMode === 'face' ? 7 : 5);
+}
+
+micBtn.addEventListener('click', toggleMic);
+document.getElementById('tray-mic').addEventListener('click', toggleMic);
+if (stopBtn) {
+  const stopNow = (e) => {
+    e.preventDefault();
+    unlockedAudio = true;
+    handleInterrupt();
+  };
+  stopBtn.addEventListener('pointerdown', stopNow);
+  stopBtn.addEventListener('click', stopNow);
+}
+sendBtn.addEventListener('click', submitChat);
+modeChip?.addEventListener('click', () => {
+  unlockedAudio = true;
+  toggleTalkModeChip();
+});
+fileBtn.addEventListener('click', () => fileInput.click());
+document.getElementById('tray-file').addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', () => {
+  addDroppedFiles(fileInput.files);
+  fileInput.value = '';
+});
+;['dragenter', 'dragover'].forEach(evt => {
+  dockEl.addEventListener(evt, (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dockEl.classList.add('dragover');
+  });
+});
+;['dragleave', 'drop'].forEach(evt => {
+  dockEl.addEventListener(evt, (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (evt === 'drop') addDroppedFiles(e.dataTransfer?.files);
+    dockEl.classList.remove('dragover');
+  });
+});
+window.addEventListener('dragover', (e) => e.preventDefault());
+window.addEventListener('drop', (e) => e.preventDefault());
+inputEl.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    e.preventDefault();
+    submitChat();
+  }
+});
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    unlockedAudio = true;
+    handleInterrupt();
+    hideClipMenu();
+    return;
+  }
+  const mod = e.ctrlKey || e.metaKey;
+  if (!mod || e.altKey) return;
+  const key = String(e.key || '').toLowerCase();
+  if (key === 'v') {
+    e.preventDefault();
+    window.amyClipboard.paste();
+  } else if (key === 'c') {
+    e.preventDefault();
+    window.amyClipboard.copy();
+  } else if (key === 'x') {
+    e.preventDefault();
+    window.amyClipboard.cut();
+  } else if (key === 'a') {
+    const ae = document.activeElement;
+    if (ae === answerEl || ae === inputEl || ae === searchEl || answerEl.contains(ae)) {
+      e.preventDefault();
+      window.amyClipboard.selectAll();
+    }
+  }
+});
+document.addEventListener('contextmenu', (e) => {
+  const t = e.target;
+  if (t === inputEl || t === searchEl || t === answerEl || answerEl.contains(t)) {
+    e.preventDefault();
+    showClipMenu(e.clientX, e.clientY);
+  } else {
+    hideClipMenu();
+  }
+});
+document.addEventListener('click', (e) => {
+  const menu = document.getElementById('clip-menu');
+  if (menu && !menu.contains(e.target)) hideClipMenu();
+});
+document.getElementById('clip-menu')?.addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-clip]');
+  if (!btn) return;
+  const act = btn.getAttribute('data-clip');
+  hideClipMenu();
+  if (act && window.amyClipboard[act]) await window.amyClipboard[act]();
+});
+answerEl.addEventListener('dblclick', () => window.amyClipboard.selectAll());
+eyesBtn.addEventListener('click', toggleEyes);
+document.getElementById('tray-eyes').addEventListener('click', toggleEyes);
+document.getElementById('watch-btn')?.addEventListener('click', toggleWatch);
+document.getElementById('focus-btn')?.addEventListener('click', toggleFocus);
+document.getElementById('tray-refresh').addEventListener('click', () => {
+  const script = document.createElement('script');
+  script.src = '/graph-data.js?t=' + Date.now();
+  script.onload = () => {
+    graph.graphData(GRAPH);
+    applyViewMode(viewMode);
+    brandSub.textContent = `${(GRAPH.nodes || []).length} notes · live`;
+  };
+  document.body.appendChild(script);
+});
+document.querySelectorAll('.modes button').forEach(btn => {
+  btn.addEventListener('click', () => applyViewMode(btn.dataset.view));
+});
+searchEl.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter') return;
+  const q = searchEl.value.trim().toLowerCase();
+  if (!q) return;
+  const hit = (GRAPH.nodes || []).find(n =>
+    String(n.label || '').toLowerCase().includes(q) ||
+    String(n.group || '').toLowerCase().includes(q) ||
+    String(n.excerpt || '').toLowerCase().includes(q)
+  );
+  if (hit) { highlightNodes([hit.id]); flyToNode(hit.id); }
+  else ask(searchEl.value.trim());
+});
+
+function paintStars() {
+  const canvas = document.getElementById('stars');
+  const ctx = canvas.getContext('2d');
+  const resize = () => {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    for (let i = 0; i < 320; i++) {
+      const x = Math.random() * canvas.width;
+      const y = Math.random() * canvas.height;
+      const r = Math.random() * 1.6;
+      ctx.fillStyle = `rgba(186,230,253,${0.15 + Math.random() * 0.7})`;
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  };
+  resize();
+  window.addEventListener('resize', resize);
+}
+
+function bootGraph() {
+  if (typeof ForceGraph3D !== 'function') {
+    console.warn('ForceGraph3D missing — galaxy off, voice/chat still work');
+    brandSub.textContent = 'ready (no galaxy)';
+    return;
+  }
+  const data = (typeof GRAPH !== 'undefined') ? GRAPH : { nodes: [], links: [] };
+  graph = ForceGraph3D()(document.getElementById('graph'))
+    .graphData(data)
+    .backgroundColor('#00000000')
+    .showNavInfo(false)
+    .nodeLabel('label')
+    .nodeColor(n => colorForGroup(n.group))
+    .nodeVal(3.6)
+    .nodeRelSize(5)
+    .nodeOpacity(0.95)
+    .linkColor(() => 'rgba(125,211,252,0.28)')
+    .linkWidth(0.55)
+    .linkOpacity(0.55)
+    .onNodeClick(node => {
+      unlockedAudio = true;
+      openNode(node);
+      highlightNodes([node.id]);
+      flyToNode(node.id);
+    });
+  applyViewMode('ring');
+}
+
+async function bootGreeting() {
+  try {
+    const r = await fetch('/api/hello');
+    const data = await r.json();
+    setTalkModeUI(data.talk_mode || 'casual', data.note_count || 0);
+    modelChip.textContent = prettyModel(data.model || 'MODEL');
+    ttsMode = (data.tts === 'laura' || data.tts === 'openai') ? data.tts : 'browser';
+    ttsVoiceLabel = data.tts_voice || (ttsMode === 'openai' ? 'Nova' : 'Laura');
+    if (ttsMode === 'laura') {
+      modelChip.title = `Brain + ElevenLabs ${ttsVoiceLabel}`;
+    } else if (ttsMode === 'openai') {
+      modelChip.title = `Brain + OpenAI ${ttsVoiceLabel}`;
+    }
+    // Unlock audio on first tap — no spoken/written intro.
+    const once = () => {
+      unlockedAudio = true;
+      unlockSfx();
+      window.removeEventListener('pointerdown', once);
+    };
+    window.addEventListener('pointerdown', once, { once: true });
+  } catch (_) {
+    brandSub.textContent = 'offline brain';
+  }
+}
+
+function prettyModel(raw) {
+  return String(raw || 'MODEL').replace(/gpt-?/i, 'GPT ').replace(/-/g, ' ').replace(/\s+/g, ' ').trim().toUpperCase();
+}
+
+paintStars();
+try {
+  bootGraph();
+} catch (err) {
+  console.warn('Galaxy boot failed', err);
+  brandSub.textContent = 'ready (galaxy error)';
+}
+armRecognition();
+if (DESKTOP_APP || useWhisperMic) {
+  // Don't keep a zombie SpeechRecognition in WebView — it only causes network spam.
+  try { recognition?.abort?.(); } catch (_) {}
+  try { recognition?.stop?.(); } catch (_) {}
+  recognition = null;
+}
+bootGreeting();
+awakeMin = loadAwakeMin();
+paintAwakeChip();
+bumpIdle();
+document.getElementById('awake-chip')?.addEventListener('click', cycleAwake);
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) hushSnoreForHidden();
+  else maybeResumeSnore();
+});
+window.addEventListener('pagehide', () => {
+  stopSnoring();
+  try { sfxSource?.stop?.(); } catch (_) {}
+  try { sfxAudio?.pause(); } catch (_) {}
+});
+window.addEventListener('beforeunload', () => {
+  stopSnoring();
+});
+document.getElementById('amy-face-wrap')?.addEventListener('click', () => {
+  unlockedAudio = true;
+  if (asleep) wakeAmy('click');
+  else bumpIdle();
+});
+(function freezeAmyFace() {
+  const vid = document.getElementById('amy-face-video');
+  if (!vid) return;
+  const freeze = () => {
+    try {
+      if (!Number.isFinite(vid.duration) || vid.duration === 0) return;
+      vid.currentTime = Math.min(0.35, Math.max(0.05, vid.duration * 0.12));
+      vid.dataset.frozen = '1';
+      vid.pause();
+    } catch (_) {}
+  };
+  if (vid.readyState >= 1) freeze();
+  else vid.addEventListener('loadedmetadata', freeze, { once: true });
+})();
+window.speechSynthesis?.addEventListener?.('voiceschanged', () => {
+  cachedVoice = null;
+  pickVoice();
+});
+</script>
+</body>
+</html>

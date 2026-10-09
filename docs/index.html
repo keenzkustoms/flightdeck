@@ -3,10 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Flightdeck | 3D print farm control tower</title>
-  <meta name="description" content="Flightdeck is a local-first control tower for mixed 3D printer fleets: Bambu, Voron, Klipper, Snapmaker, AMS, cameras, queue, spools, and Orca handoff.">
-  <meta property="og:title" content="Flightdeck | 3D print farm control tower">
-  <meta property="og:description" content="Run mixed Bambu, Voron, Klipper, and Snapmaker fleets from one local-first dashboard.">
+  <title>Flightdeck | Bambu-focused print operations dashboard</title>
+  <meta name="description" content="Flightdeck is a local-first Bambu-focused print operations dashboard for AMS, AMS HT, cameras, queue, spools, print history, and slicer handoff.">
+  <meta property="og:title" content="Flightdeck | Bambu-focused print operations dashboard">
+  <meta property="og:description" content="Run Bambu-heavy printer rooms from one local-first dashboard with AMS, spools, queue, cameras, history, and slicer handoff.">
   <meta property="og:image" content="assets/flightdeck-live.png">
   <meta property="og:type" content="website">
   <meta name="theme-color" content="#09090d">
@@ -41,13 +41,13 @@
       <div class="hero-shade"></div>
       <div class="hero-copy">
         <img class="hero-mark" src="assets/flightdeck-logo.svg" alt="Flightdeck">
-        <p class="eyebrow">Self-hosted printer ops</p>
+        <p class="eyebrow">Bambu beta · local-first printer ops</p>
         <h1>Flightdeck</h1>
-        <p class="hero-lede">Your local-first control tower for mixed 3D printer fleets.</p>
-        <p class="hero-sublede">Bambu, Voron/Klipper, Snapmaker, AMS, cameras, queue, spools, slicing, and diagnostics in one shop-floor dashboard.</p>
+        <p class="hero-lede">A local-first operations dashboard for Bambu-heavy 3D printer rooms.</p>
+        <p class="hero-sublede">AMS, AMS HT, cameras, queue, spools, print history, reprint, slicer handoff, and diagnostics in one shop-floor dashboard.</p>
         <div class="hero-actions">
           <a class="button primary" href="https://github.com/Kidabah/flightdeck">Get Flightdeck</a>
-          <a class="button ghost" href="https://github.com/Kidabah/flightdeck/blob/main/INSTALL.md">Install guide</a>
+          <a class="button ghost" href="https://github.com/Kidabah/flightdeck/blob/main/docs/INSTALL_PI.md">Pi install guide</a>
           <a class="button ghost" href="https://github.com/Kidabah/flightdeck">View on GitHub</a>
           <a class="button ghost" href="https://ko-fi.com/flightdeck3dprinters">Support on Ko-fi</a>
         </div>
@@ -56,8 +56,8 @@
 
     <section class="intro-band" aria-label="Project status">
       <div>
-        <span class="stat-value">Mixed fleet</span>
-        <span class="stat-label">Bambu, Voron/Klipper, and Snapmaker</span>
+        <span class="stat-value">Bambu beta</span>
+        <span class="stat-label">Tested hardest on X1C, H2D, AMS, and AMS HT</span>
       </div>
       <div>
         <span class="stat-value">Local-first</span>
@@ -65,7 +65,7 @@
       </div>
       <div>
         <span class="stat-value">Open source</span>
-        <span class="stat-label">Built in public from a real print room</span>
+        <span class="stat-label">Built from a real print room, with tester feedback welcome</span>
       </div>
     </section>
 
@@ -95,7 +95,7 @@
         </article>
         <article>
           <h3>Orca handoff</h3>
-          <p>Open source models in managed Orca, apply printer profiles, slice to the vault, then queue or send the result.</p>
+          <p>Open source models in desktop or browser Orca, use printer profiles, slice to the vault, then queue or send the result.</p>
         </article>
         <article>
           <h3>Diagnostics</h3>
@@ -116,7 +116,7 @@
       </div>
       <div class="callout">
         <h3>Built from a real bench</h3>
-        <p>Flightdeck is being shaped by daily testing on Bambu H2D, Bambu X1C, Voron 2.4, and expanding tester fleets.</p>
+        <p>Flightdeck is being shaped by daily testing on Bambu H2D, Bambu X1C, AMS, AMS HT, and expanding tester fleets.</p>
       </div>
     </section>
 
@@ -135,7 +135,7 @@
       <div class="two-column">
         <figure class="screen-card fleet-wide">
           <img src="assets/flightdeck-all-cameras-live.png" alt="Flightdeck all cameras overview with Voron, X1C, and H2D online">
-          <figcaption>Fleet cameras put Voron, X1C, and H2D in one live cross-ecosystem view.</figcaption>
+          <figcaption>Fleet cameras put the active printer room in one live view.</figcaption>
         </figure>
         <figure class="screen-card">
           <img src="assets/flightdeck-spools.png" alt="Flightdeck spool inventory paint-chart view">
@@ -176,7 +176,7 @@
         <article>
           <span>06</span>
           <h3>LAN discovery</h3>
-          <p>Scan for likely Bambu, Moonraker, and Snapmaker printers, then prefill the Add Printer form with the safe details.</p>
+          <p>Scan for likely Bambu and Moonraker printers, then prefill the Add Printer form with the safe details.</p>
         </article>
       </div>
     </section>
@@ -185,11 +185,11 @@
       <div>
         <div class="section-kicker">Why it exists</div>
         <h2>Mixed fleets should not feel like three separate jobs.</h2>
-        <p>Flightdeck started from a real bench: a Bambu H2D, a Bambu X1C, and a Voron 2.4. It is built around the way printers are actually used: cameras, queues, filament, failures, maintenance, and quick decisions from the bench or a phone. The goal is not to replace every slicer or printer UI. The goal is to reduce the daily context switching and make the important signals harder to miss.</p>
+        <p>Flightdeck started from a real bench with Bambu and Voron machines, but this beta is intentionally Bambu-first. It is built around the way printers are actually used: cameras, queues, filament, failures, maintenance, and quick decisions from the bench or a phone. The goal is not to replace every slicer or printer UI. The goal is to reduce the daily context switching and make the important signals harder to miss.</p>
       </div>
       <div class="callout">
         <h3>Current focus</h3>
-        <p>Flightdeck is moving from private homelab build toward open-source feedback. It is already proven on Bambu and Voron, and now needs testers with other printer ecosystems.</p>
+        <p>Flightdeck is moving from private workshop build toward Bambu-focused public beta. Broader printer ecosystems are part of the direction, but this release is for careful Bambu testing first.</p>
       </div>
     </section>
 
@@ -212,7 +212,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\windows\install-windows.ps1</
           <p class="muted">Pi 5 4 GB for small fleets, Pi 5 8 GB as the recommended default, and Pi 5 16 GB for 10+ printers or camera-heavy rooms. Pi 4 can run light installs, but Pi 5 is the main target.</p>
           <p class="muted">Optional hardware: Dymo USB scale and Brother QL-700 label printer.</p>
           <div class="install-actions">
-            <a class="button primary" href="https://github.com/Kidabah/flightdeck/blob/main/INSTALL.md">Open install guide</a>
+            <a class="button primary" href="https://github.com/Kidabah/flightdeck/blob/main/docs/INSTALL_PI.md">Open Pi install guide</a>
             <a class="button ghost" href="https://github.com/Kidabah/flightdeck">Download from GitHub</a>
           </div>
         </div>
@@ -224,8 +224,8 @@ powershell -ExecutionPolicy Bypass -File .\scripts\windows\install-windows.ps1</
       <h2>Ready-to-post copy.</h2>
       <div class="share-panel">
         <div class="share-copy">
-          <p>I'm building Flightdeck, an open-source control tower for mixed 3D printer fleets. It brings Bambu, Voron/Klipper, Snapmaker, cameras, AMS/AMS HT, spool tracking, queue, Orca handoff, diagnostics, and shop-floor dashboards into one local-first interface.</p>
-          <p>It's early, real-world tested, and still moving fast. If you run multiple printers or want to help test it, jump in here:</p>
+          <p>I'm building Flightdeck, an open-source local-first operations dashboard for Bambu-heavy printer rooms. It brings Bambu printers, cameras, AMS/AMS HT, spool tracking, queue, reprint, Orca handoff, diagnostics, and shop-floor dashboards into one interface.</p>
+          <p>It's a Bambu-focused beta, real-world tested, and still moving fast. If you run Bambu printers with AMS/AMS HT and want to help test it, jump in here:</p>
           <p>https://github.com/Kidabah/flightdeck</p>
         </div>
         <div class="share-links">
@@ -274,7 +274,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\windows\install-windows.ps1</
       <div>
         <div class="section-kicker">Support</div>
         <h2>Help keep Flightdeck moving.</h2>
-        <p>Flightdeck is open-source and built from a real mixed-printer workshop. Support helps cover testing hardware, filament, parts, hosting, and the late-night development time that turns shop-floor problems into proper features.</p>
+        <p>Flightdeck is open-source and built from a real printer workshop. Support helps cover testing hardware, filament, parts, hosting, and the late-night development time that turns shop-floor problems into proper features.</p>
       </div>
       <div class="callout support-callout">
         <h3>Buy a coffee</h3>
@@ -297,6 +297,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\windows\install-windows.ps1</
   <footer class="site-footer">
     <span>Flightdeck is an independent open-source project.</span>
     <span>Not affiliated with Bambu Lab, Voron, Klipper, or OrcaSlicer.</span>
+    <span>Code licensed AGPL-3.0-or-later; Flightdeck branding reserved.</span>
   </footer>
 </body>
 </html>

@@ -1,0 +1,22 @@
+name: Fix Stage 3E CSG attributes once
+on:
+  push:
+    paths:
+      - '.github/workflows/fix-stage3e-csg-attributes-once.yml'
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - run: python .github/scripts/fix_stage3e_csg_attributes.py
+      - run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add makerforge/meshprep.html
+          git commit -m 'Fix Stage 3E CSG source attributes'
+          git push

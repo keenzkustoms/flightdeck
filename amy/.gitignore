@@ -1,0 +1,6 @@
+config.json
+notes-index.json
+uploads/
+__pycache__/
+*.pyc
+.DS_Store

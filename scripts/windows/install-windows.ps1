@@ -5,6 +5,7 @@ param(
     [string]$DataArchive = "",
     [string]$SlicerSidecarCommand = "",
     [string]$SlicerSidecarUrl = "http://127.0.0.1:3003",
+    [switch]$ConfigureBrowserSlicerSettings,
     [switch]$NoStartup,
     [switch]$NoDesktopShortcut
 )
@@ -120,6 +121,10 @@ if (-not (Test-Path $PrinterConfig)) {
 $env:FLIGHTDECK_DATA_DIR = $DataDir
 $env:FLIGHTDECK_PRINT_LIBRARY = Join-Path $DataDir "print_library"
 & $VenvPython -c "from app import db; db.init()"
+
+if ($ConfigureBrowserSlicerSettings) {
+    & $VenvPython -c "from app import db; db.init(); db.set_setting('orcaslicer_docker_url', 'https://127.0.0.1:3011'); db.set_setting('bambustudio_docker_url', 'https://127.0.0.1:3012'); db.set_setting('orcaslicer_browser_username', 'flightdeck'); db.set_setting('orcaslicer_browser_password', 'flightdeck'); db.set_setting('slicer_open_mode', 'desktop_orca'); db.set_setting('slicer_use_api', 'false')"
+}
 
 $Launcher = Join-Path $ScriptDir "flightdeck-tray.py"
 $IconPath = Join-Path $AppDir "app\static\flightdeck.ico"

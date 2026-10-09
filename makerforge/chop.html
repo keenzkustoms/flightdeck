@@ -1,0 +1,2236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chop · MakerDeck</title>
+<script type="importmap">
+{ "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.164.1/examples/jsm/"
+} }
+</script>
+<link rel="stylesheet" href="css/makerdeck.css">
+<style>
+:root{--sidebar-w:320px;--footer-h:32px}
+.app{display:grid;height:100vh;grid-template-rows:var(--nav-h) 1fr var(--footer-h);
+  grid-template-columns:var(--sidebar-w) 1fr;grid-template-areas:"nav nav" "sidebar viewport" "footer footer"}
+.sidebar{grid-area:sidebar;background:var(--panel);border-right:1px solid var(--border);
+  overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:14px}
+.viewport{grid-area:viewport;position:relative;background:var(--bg);overflow:hidden}
+.viewport canvas{display:block;width:100%!important;height:100%!important}
+.drop-zone .icon{font-size:28px;margin-bottom:6px}
+.pill{display:inline-flex;align-items:center;min-height:24px;padding:3px 8px;border-radius:999px;
+  border:1px solid var(--border);background:var(--panel-2);font-size:11px;font-weight:700;color:var(--muted)}
+.pill.good{border-color:var(--green);color:var(--green);background:rgba(52,211,153,.08)}
+.pill.warn{border-color:var(--amber);color:var(--amber);background:rgba(251,191,36,.08)}
+.pill.bad{border-color:var(--red);color:var(--red);background:rgba(248,113,113,.08)}
+.dims-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px}
+.dims-row input{width:100%;background:var(--panel-2);color:var(--text);border:1px solid var(--border);
+  border-radius:var(--radius-sm);padding:4px 6px;font:inherit}
+.axis-btns{display:flex;gap:4px}
+.axis-btns button{flex:1}
+.axis-btns button.active,.mode-btns button.active,#moveModelBtn.active{background:var(--accent);color:var(--bg);border-color:var(--accent)}
+.mode-btns{display:flex;gap:4px}
+.mode-btns button{flex:1}
+.piece-list{display:flex;flex-direction:column;gap:6px}
+.piece-row{display:flex;align-items:center;gap:8px;padding:7px 8px;border:1px solid var(--border);
+  border-radius:var(--radius-sm);cursor:pointer;transition:all .15s}
+.piece-row:hover{border-color:var(--accent)}
+.piece-row.selected{border-color:var(--accent);background:var(--accent-dim)}
+.piece-row.merge-selected{outline:2px solid #fbbf24;outline-offset:-2px}
+.piece-row .info{flex:1;min-width:0}
+.piece-row .name{font-weight:600;font-size:12px}
+.piece-row .size{font-size:11px;color:var(--muted);font-family:'JetBrains Mono',monospace}
+.piece-row .actions{display:flex;gap:4px}
+.hint{font-size:11px;color:var(--muted);line-height:1.4}
+</style>
+</head>
+<body>
+<div class="app">
+  <nav class="md-nav"></nav>
+
+  <div class="sidebar">
+    <div>
+      <div class="section-label">1 · Load</div>
+      <div class="drop-zone" id="dropZone">
+        <div class="icon">&#x1F4E6;</div>
+        Drop STL or OBJ, or click to browse
+        <input type="file" id="fileInput" accept=".stl,.obj" hidden>
+      </div>
+      <button class="btn btn-ghost" id="loadFromFolderBtn" style="width:100%;margin-top:8px">Choose Folder…</button>
+      <div class="hint" id="outputFolderStatus" style="margin-top:4px">Saves cuts into a <code>chop</code> subfolder. Downloads if you skip this.</div>
+      <button class="btn btn-ghost" id="chooseFolderBtn" style="display:none">Choose Folder…</button>
+      <button class="btn btn-ghost" id="importAllPiecesBtn" style="width:100%;margin-top:8px;display:none">Import All as Pieces</button>
+      <div class="hint" id="importAllPiecesHint" style="margin-top:4px;display:none">Load every STL/OBJ here as separate pieces (re-inspect a previous cut).</div>
+      <div id="folderFileList" class="piece-list" style="display:none;margin-top:8px"></div>
+      <div id="loadPill" class="pill" style="margin-top:8px;display:none"></div>
+      <button class="btn btn-ghost" id="clearModelBtn" style="width:100%;margin-top:8px;display:none">Clear / Load New</button>
+    </div>
+
+    <div>
+      <div class="section-label">2 · Setup</div>
+      <div class="dims-row" style="margin-bottom:6px">
+        <select id="unitSelect">
+          <option value="mm">mm</option>
+          <option value="cm">cm</option>
+          <option value="m">m</option>
+          <option value="in">in</option>
+        </select>
+        <label class="check-row" style="grid-column:span 2"><input type="checkbox" id="uniformScale" checked> Uniform scale</label>
+      </div>
+      <div class="dims-row">
+        <div>
+          <label class="hint" for="dimX" style="color:#ff6b6b">X</label>
+          <input type="number" id="dimX" step="any" placeholder="X">
+        </div>
+        <div>
+          <label class="hint" for="dimY" style="color:#4ade80">Y</label>
+          <input type="number" id="dimY" step="any" placeholder="Y">
+        </div>
+        <div>
+          <label class="hint" for="dimZ" style="color:#fbbf24">Z</label>
+          <input type="number" id="dimZ" step="any" placeholder="Z">
+        </div>
+      </div>
+      <button class="btn btn-primary" id="applyScaleBtn" style="width:100%;margin-top:8px" disabled>Apply Scale</button>
+      <div class="section-label" style="margin-top:12px;margin-bottom:4px">Print bed</div>
+      <div class="dims-row">
+        <input type="number" id="bedX" step="any" placeholder="Bed X">
+        <input type="number" id="bedY" step="any" placeholder="Bed Y">
+        <input type="number" id="bedZ" step="any" placeholder="Bed Z">
+      </div>
+      <button class="btn btn-ghost" id="moveModelBtn" style="width:100%;margin-top:8px" disabled>Reposition on bed</button>
+      <div class="hint" style="margin-top:4px">Drag in the viewport, then click again to lock. Height stays on the bed.</div>
+    </div>
+
+    <div>
+      <div class="section-label">3 · Cut</div>
+      <select id="cutModeSelect" style="width:100%;background:var(--panel-2);color:var(--text);border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px;font:inherit;margin-bottom:8px">
+        <option value="straight">Straight</option>
+        <option value="angled">Angled</option>
+        <option value="grid">Grid</option>
+        <option value="radial">Radial (Pie-slice)</option>
+        <option value="modular">Modular (Auto-Chop)</option>
+      </select>
+
+      <div id="straightAngledControls">
+        <div id="straightControls">
+          <div class="axis-btns" style="margin-bottom:6px">
+            <button class="btn" id="axisX" data-axis="x">X</button>
+            <button class="btn" id="axisY" data-axis="y">Y</button>
+            <button class="btn active" id="axisZ" data-axis="z">Z</button>
+          </div>
+          <input type="range" id="axisSlider" min="0" max="100" value="50">
+        </div>
+        <div id="angledControls" style="display:none">
+          <div class="mode-btns">
+            <button class="btn active" id="gizmoMove">Move</button>
+            <button class="btn" id="gizmoRotate">Rotate</button>
+          </div>
+          <div class="hint" style="margin-top:6px">Drag the handles in the viewport to place the cut plane.</div>
+        </div>
+        <div class="dims-row" style="grid-template-columns:auto 1fr;align-items:center;gap:8px;margin-top:10px">
+          <label for="numPlanes" style="font-size:12px;color:var(--muted)">Number of planes</label>
+          <input type="number" id="numPlanes" min="1" max="256" step="1" value="1">
+        </div>
+        <div class="hint" style="margin-top:4px">More than 1 lays down that many evenly-spaced parallel planes through the whole piece (shown as a preview below), producing planes+1 pieces in one Commit Cut. Up to 256 planes.</div>
+        <label class="check-row" style="margin-top:8px"><input type="checkbox" id="startAtPlane"> Start planes here, not at the piece's edge</label>
+        <div class="hint" style="margin-top:4px">Splits off everything on the near side of the current plane as one unsplit piece first, so a low-lying disconnected feature (e.g. a tail near the paws) doesn't land in the first slice.</div>
+        <div id="adjustPlaneControls" style="display:none;margin-top:10px">
+          <div class="section-label" style="margin-bottom:4px">Flexi Cut</div>
+          <div class="dims-row" style="grid-template-columns:auto 1fr;align-items:center;gap:8px">
+            <label for="adjustPlaneIndex" style="font-size:12px;color:var(--muted)">Adjust plane</label>
+            <input type="number" id="adjustPlaneIndex" min="1" value="1" step="1">
+          </div>
+          <input type="range" id="adjustPlaneSlider" min="0" max="1000" value="500" step="1" style="margin-top:6px">
+          <div class="hint" style="margin-top:4px">Repositions just this one plane (shown in amber below) along the full length of the piece; the rest stay evenly spaced.</div>
+          <button class="btn btn-ghost" id="resetAdjustPlaneBtn" style="width:100%;margin-top:6px">Reset This Plane</button>
+        </div>
+      </div>
+
+      <div id="gridControls" style="display:none">
+        <div class="dims-row">
+          <div>
+            <label class="hint" for="gridXCount" style="color:#ff6b6b">X divisions</label>
+            <input type="number" id="gridXCount" min="0" max="32" step="1" value="1">
+          </div>
+          <div>
+            <label class="hint" for="gridYCount" style="color:#4ade80">Y divisions</label>
+            <input type="number" id="gridYCount" min="0" max="32" step="1" value="1">
+          </div>
+          <div>
+            <label class="hint" for="gridZCount" style="color:#fbbf24">Z divisions</label>
+            <input type="number" id="gridZCount" min="0" max="32" step="1" value="0">
+          </div>
+        </div>
+        <div class="hint" style="margin-top:6px">Lays down evenly-spaced planes across X, Y and Z together, like a 3D waffle — (X+1) × (Y+1) × (Z+1) pieces in one Commit Cut.</div>
+        <label class="check-row" style="margin-top:8px"><input type="checkbox" id="gridStaggered"> Staggered cut pattern</label>
+        <div class="hint" style="margin-top:4px">Offsets the Y cut every other X row, like a brick course, so seams don't run straight through in a line — needs both X and Y divisions set. Not available together with Adjust Grid Plane overrides.</div>
+        <div id="gridAdjustControls" style="display:none;margin-top:10px">
+          <div class="section-label" style="margin-bottom:4px">Adjust Grid Plane</div>
+          <div class="dims-row" style="grid-template-columns:auto 1fr auto;align-items:center;gap:8px">
+            <label for="gridAdjustAxis" style="font-size:12px;color:var(--muted)">Plane</label>
+            <select id="gridAdjustAxis">
+              <option value="x">X</option>
+              <option value="y">Y</option>
+              <option value="z">Z</option>
+            </select>
+            <input type="number" id="gridAdjustIndex" min="1" value="1" step="1" style="width:60px">
+          </div>
+          <input type="range" id="gridAdjustSlider" min="0" max="100" value="50" style="margin-top:6px">
+          <div class="hint" style="margin-top:4px">Repositions just this one division plane (shown brighter below) along its axis — the model stays exactly where it loaded, and the rest of that axis's planes stay evenly spaced.</div>
+          <button class="btn btn-ghost" id="resetGridAdjustPlaneBtn" style="width:100%;margin-top:6px">Reset This Plane</button>
+        </div>
+      </div>
+
+      <div id="radialControls" style="display:none">
+        <div class="hint" style="margin-bottom:6px">Direction (rotation axis)</div>
+        <div class="axis-btns" style="margin-bottom:8px">
+          <button class="btn" id="radialAxisX" data-axis="x">X</button>
+          <button class="btn" id="radialAxisY" data-axis="y">Y</button>
+          <button class="btn active" id="radialAxisZ" data-axis="z">Z</button>
+        </div>
+        <div class="dims-row" style="grid-template-columns:auto 1fr;align-items:center;gap:8px">
+          <label for="radialCount" style="font-size:12px;color:var(--muted)">Number of cuts</label>
+          <input type="number" id="radialCount" min="0" max="64" step="1" value="4">
+        </div>
+        <div class="dims-row" style="grid-template-columns:auto 1fr;align-items:center;gap:8px;margin-top:6px">
+          <label for="radialStartAngle" style="font-size:12px;color:var(--muted)">Start angle (deg)</label>
+          <input type="number" id="radialStartAngle" step="any" value="0">
+        </div>
+        <div class="dims-row" style="margin-top:8px">
+          <div>
+            <label class="hint" for="radialCenterU">Center U [-1,1]</label>
+            <input type="number" id="radialCenterU" min="-1" max="1" step="0.05" value="0">
+          </div>
+          <div>
+            <label class="hint" for="radialCenterV">Center V [-1,1]</label>
+            <input type="number" id="radialCenterV" min="-1" max="1" step="0.05" value="0">
+          </div>
+        </div>
+        <div class="hint" style="margin-top:6px">Cuts like a pie, through a shared axis — evenly spaced wedges around Direction, starting at Start angle. Center U/V shifts the rotation axis off the piece's own center (0 = centered, ±1 = piece edge) in the two axes perpendicular to Direction.</div>
+      </div>
+
+      <div id="modularControls" style="display:none">
+        <div class="hint">Repeatedly splits the selected piece along its oversized axis until every part fits the bed above.</div>
+      </div>
+
+      <div class="btn-row" style="margin-top:10px">
+        <button class="btn btn-primary" id="commitCutBtn" disabled>Commit Cut</button>
+        <button class="btn btn-ghost" id="resetPlaneBtn">Reset Plane</button>
+        <button class="btn btn-ghost" id="undoBtn" disabled>Undo</button>
+      </div>
+    </div>
+
+    <div>
+      <div class="section-label">4 · Finish</div>
+      <label class="check-row"><input type="checkbox" id="optConnectors" checked> Connectors</label>
+      <label class="check-row"><input type="checkbox" id="optPartNumbers" checked> Part numbers</label>
+      <div class="hint" style="margin-top:4px">Applied automatically after each cut. Part numbers sit in a corner so they don’t hit the connector. Tiny / paper-thin joints stay glue-only.</div>
+      <button class="btn btn-ghost" id="applyFinishBtn" style="width:100%;margin-top:8px" disabled>Apply to current pieces</button>
+    </div>
+
+    <div>
+      <div class="section-label" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer" id="piecesHeader">
+        <span>Pieces</span>
+        <button class="btn btn-icon btn-ghost" id="togglePiecesBtn" title="Show/hide piece list">&#x25B8;</button>
+      </div>
+      <div id="piecesBody" style="display:none">
+        <button class="btn btn-ghost" id="exportAllBtn" style="width:100%;margin-bottom:8px" disabled>Export All</button>
+        <div class="hint" style="margin-bottom:6px">Click pieces to merge, then Merge Selected in the viewport.</div>
+        <div class="piece-list" id="pieceList"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="viewport" id="viewport">
+    <div class="viewport-toolbar">
+      <button id="tbRotateLeft" title="Rotate left">&#x21B6;</button>
+      <button id="tbRotateRight" title="Rotate right">&#x21B7;</button>
+      <button id="tbFrame">Frame</button>
+      <button id="tbWire">Wire</button>
+      <button id="tbExplode" title="Explode view — see where each cut landed (or press E)">Explode</button>
+      <button id="tbRestore" title="Restore assembled view (or press R)">Restore</button>
+      <button id="tbMerge" title="Click pieces in the viewport to pick them, then Merge" style="display:none">Merge Selected</button>
+    </div>
+    <div class="statusbar"><span id="status">Drop an STL or OBJ to begin</span></div>
+  </div>
+
+  <div class="md-footer">
+    <span id="fileName">No model loaded</span>
+    <span>Chop</span>
+  </div>
+</div>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { TransformControls } from 'three/addons/controls/TransformControls.js';
+import './js/nav.js?v=551';
+import { loadMeshFromFile } from './js/mesh-import.js?v=2';
+import { sliceMeshByPlane, parallelPlaneCut, modularCut, gridCut, radialCut, smoothMesh, computeBounds, computeDefaultFlexiPlanes, flexiCut, splitIntoIslands, unionMeshes, subtractMesh, findLargestFlatFace, buildStampMesh, findAdjacentPieces, addConnectorsToPieces, meshThicknessAlong } from './js/mesh-cut.js?v=24';
+import { meshToStl, downloadBlob, countOpenEdges } from './js/stl.js?v=372';
+
+const $ = (id) => document.getElementById(id);
+const setStatus = (msg) => { $('status').textContent = msg; };
+const UNIT_TO_MM = { mm: 1, cm: 10, m: 1000, in: 25.4 };
+const MAX_FLEXI_PLANES = 256;
+const FLEXI_SLIDER_MAX = 1000;
+
+function getNumPlanes() {
+  return Math.min(MAX_FLEXI_PLANES, Math.max(1, Math.round(Number($('numPlanes').value) || 1)));
+}
+
+let pieces = [];       // { id, partNumber, name, mesh:{positions,indices}, openEdgeCount }
+let selectedId = null;
+let mergeSelection = new Set(); // piece ids picked via Ctrl/Cmd/Shift-click, for Merge Selected
+let undoStack = [];
+let connectorRecords = []; // { aId, bId, peg, socket } from last Add Connectors pass
+let baseName = 'model';
+let nextId = 1;
+let cutMode = 'straight'; // 'straight' | 'angled' | 'grid' | 'radial' | 'modular'
+let cutAxis = 'z';
+let radialAxis = 'z';
+let originalAspect = null; // [x,y,z] of the piece as first loaded, for uniform scale
+let outputDirHandle = null; // FileSystemDirectoryHandle, if the user granted one; else fall back to browser downloads
+let planeOverrides = new Map(); // Flexi cut: 1-based plane index -> {t, point, normal}, only for manually-moved planes
+let gridPlaneOverrides = new Map(); // Grid cut: "{axis}{1-based index}" (e.g. "y1") -> {t, point, normal}
+
+// -- Three.js bootstrap ---------------------------------------------------
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x060a10);
+const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 20000);
+// This whole app treats Z as "up" (loaded models rest with their base at
+// Z=0, cut planes, the axis/grid helper, everything) but three.js
+// defaults camera.up to Y -- TransformControls' internal translate-plane
+// math depends on camera.up for disambiguating axis/plane orientation, so
+// leaving the mismatch in place silently broke its drag math (confirmed:
+// pointerdown correctly grabbed the right axis, but the actual position
+// offset it computed during pointermove stayed zero/NaN). OrbitControls
+// tolerates the mismatch fine (still orbits, just not "wrong"), which is
+// why only the Move Model gizmo was ever visibly broken.
+camera.up.set(0, 0, 1);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.localClippingEnabled = true;
+$('viewport').appendChild(renderer.domElement);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 1.6));
+const key = new THREE.DirectionalLight(0xffffff, 1.8);
+key.position.set(80, 120, 160);
+scene.add(key);
+
+const piecesGroup = new THREE.Group();
+scene.add(piecesGroup);
+let wire = null;
+
+const axesGroup = new THREE.Group();
+scene.add(axesGroup);
+
+/** Small canvas-texture sprite reading a single axis letter, always facing the camera. */
+function makeAxisLabel(text, color) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 64; canvas.height = 64;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = color;
+  ctx.font = 'bold 44px sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(text, 32, 34);
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(canvas), depthTest: false, transparent: true }));
+  return sprite;
+}
+
+/**
+ * LuBan-style spatial reference: colored X/Y/Z axis lines (standard
+ * red/green/blue convention) plus a floor grid on the Z=0 plane, matching
+ * where loaded models rest (see loadFile's Z-shift). GridHelper defaults
+ * to the XZ plane (Y up); rotated 90° about X so it lies flat on our XY
+ * ground plane instead (Z up). Sized off the current workspace bounds so
+ * it scales sensibly with whatever's loaded, falling back to a fixed
+ * default when the scene is empty (matches LuBan showing axes even before
+ * a model is loaded).
+ */
+function updateAxesHelper() {
+  while (axesGroup.children.length) {
+    const c = axesGroup.children.pop();
+    if (c.geometry) c.geometry.dispose();
+    if (c.material) { if (c.material.map) c.material.map.dispose(); c.material.dispose(); }
+    axesGroup.remove(c);
+  }
+  const b = combinedBounds();
+  const size = b ? Math.max(b.size[0], b.size[1], b.size[2], 1) : 60;
+  const axisLen = size * 0.75;
+
+  axesGroup.add(new THREE.AxesHelper(axisLen));
+
+  const grid = new THREE.GridHelper(size * 1.6, 16, 0x3a4a5a, 0x1c2733);
+  grid.rotation.x = Math.PI / 2;
+  axesGroup.add(grid);
+
+  const labelDist = axisLen * 1.12;
+  const labelScale = size * 0.09;
+  const labels = [
+    ['X', '#ff5555', [labelDist, 0, 0]],
+    ['Y', '#55ff55', [0, labelDist, 0]],
+    ['Z', '#5588ff', [0, 0, labelDist]],
+  ];
+  for (const [text, color, pos] of labels) {
+    const label = makeAxisLabel(text, color);
+    label.position.set(pos[0], pos[1], pos[2]);
+    label.scale.set(labelScale, labelScale, 1);
+    axesGroup.add(label);
+  }
+}
+updateAxesHelper();
+// Give the camera somewhere to look before any model is loaded (frame()
+// only runs once pieces exist) so the axes/grid aren't staring at (0,0,0)
+// from (0,0,0) -- otherwise nothing renders until the first model loads.
+camera.position.set(0, -90, 60);
+controls.target.set(0, 0, 0);
+controls.update();
+
+const planeTarget = new THREE.Object3D();
+scene.add(planeTarget);
+const planeVisual = new THREE.Mesh(
+  new THREE.PlaneGeometry(1, 1),
+  new THREE.MeshBasicMaterial({ color: 0xfbbf24, transparent: true, opacity: 0.18, side: THREE.DoubleSide, depthWrite: false }),
+);
+planeTarget.add(planeVisual);
+
+const extraPlaneGroup = new THREE.Group();
+scene.add(extraPlaneGroup);
+
+const gizmo = new TransformControls(camera, renderer.domElement);
+gizmo.addEventListener('dragging-changed', (e) => { controls.enabled = !e.value; });
+gizmo.addEventListener('objectChange', updateClipPreview);
+scene.add(gizmo);
+gizmo.visible = false;
+gizmo.enabled = false;
+
+// Separate gizmo (not the cut-plane one above) for repositioning the model
+// itself in X/Y before cutting -- e.g. re-centering when an off-center
+// feature like a tail skews the bounding box and throws off where an
+// "even" Grid/Straight cut lands. Z is locked (showZ=false) since models
+// always rest on the bed at Z=0; only X/Y ever move.
+let moveMode = false;
+const modelGizmo = new TransformControls(camera, renderer.domElement);
+modelGizmo.showZ = false;
+modelGizmo.addEventListener('dragging-changed', (e) => {
+  controls.enabled = !e.value;
+  if (!e.value) { bakeModelMove(); updateGridVisuals(); updateAxesHelper(); } // drag just ended -- fold the offset in
+});
+scene.add(modelGizmo);
+modelGizmo.visible = false;
+modelGizmo.enabled = false;
+
+// The gizmo attaches to this pivot, not the mesh itself -- the mesh's own
+// Object3D.position always stays at (0,0,0) since a move gets baked
+// straight into the piece's raw vertex data (see bakeModelMove) rather than
+// kept as a transform. If the gizmo attached to the mesh directly, it would
+// always render at world (0,0,0), drifting further from the model's actual
+// on-screen position with every past move instead of tracking where the
+// model visually is. Re-centered on the piece's true bounds each time move
+// mode is entered and after every bake.
+const movePivot = new THREE.Object3D();
+scene.add(movePivot);
+let moveOrigin = [0, 0];
+
+// The XY-plane handle (the shaded square between the X/Y arrows) moves
+// both axes at once when dragged -- easy to grab by accident instead of a
+// single arrow, and since it's not gated by showX/showY/showZ (only fully
+// disabled if a whole axis is off), it stays active even with Z locked.
+// Neutered on both the visible and picker groups so only the single-axis
+// X/Y arrows are ever draggable -- no accidental two-axis moves.
+function disablePlaneHandle() {
+  modelGizmo.traverse((child) => {
+    if (child.name === 'XY') {
+      child.visible = false;
+      child.raycast = () => {};
+    }
+  });
+}
+
+function centerMovePivot() {
+  const p = selectedPiece();
+  if (!p) return;
+  const b = pieceBounds(p);
+  const cx = (b.min[0] + b.max[0]) / 2;
+  const cy = (b.min[1] + b.max[1]) / 2;
+  movePivot.position.set(cx, cy, 0);
+  moveOrigin = [cx, cy];
+}
+
+/** Fold the move pivot's accumulated X/Y offset (relative to where it was centered at the start of this drag) into the piece's raw vertex data (same "bake it into positions" convention Apply Scale already uses), then re-center the pivot on the model's new true position. */
+function bakeModelMove() {
+  const p = selectedPiece();
+  const mesh = selectedThreeMesh();
+  if (!p || !mesh) return;
+  const dx = movePivot.position.x - moveOrigin[0];
+  const dy = movePivot.position.y - moveOrigin[1];
+  if (!Number.isFinite(dx) || !Number.isFinite(dy) || (!dx && !dy)) { centerMovePivot(); return; } // never let a bad drag corrupt real vertex data
+  const pos = p.mesh.positions;
+  for (let i = 0; i < pos.length; i += 3) { pos[i] += dx; pos[i + 1] += dy; }
+  // toBufferGeometry() copies positions into a fresh Float32Array at build
+  // time (`new Float32Array(mesh.positions)`), so it's NOT a live view --
+  // updating the raw array above does nothing on screen by itself. Update
+  // the existing GPU buffer in place instead of a full rebuildScene() (which
+  // would tear down the gizmo attachment and force-exit move mode, breaking
+  // multiple drags in a row); normals are untouched since translation alone
+  // can't change them, but the bounding sphere needs recomputing since other
+  // code (frame(), Box3.setFromObject in the axes/grid helpers) reads it.
+  const attr = mesh.geometry.attributes.position;
+  attr.array.set(pos);
+  attr.needsUpdate = true;
+  mesh.geometry.computeBoundingBox();
+  mesh.geometry.computeBoundingSphere();
+  centerMovePivot(); // re-center the gizmo on the model's new true center for the next drag
+}
+
+function exitMoveMode() {
+  if (!moveMode) return;
+  bakeModelMove();
+  modelGizmo.detach();
+  modelGizmo.visible = false; modelGizmo.enabled = false;
+  moveMode = false;
+  $('moveModelBtn').classList.remove('active');
+}
+
+function resize() {
+  const r = $('viewport').getBoundingClientRect();
+  renderer.setSize(r.width, r.height);
+  camera.aspect = r.width / Math.max(1, r.height);
+  camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', resize);
+resize();
+
+function animate() {
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+}
+animate();
+
+function frame() {
+  const box = new THREE.Box3().setFromObject(piecesGroup);
+  if (box.isEmpty()) return;
+  const center = box.getCenter(new THREE.Vector3());
+  const size = box.getSize(new THREE.Vector3());
+  const maxDim = Math.max(size.x, size.y, size.z) || 1;
+  // Angled 3/4 front-elevated view instead of straight top-down, so a
+  // freshly loaded model reads as a recognizable figure right away rather
+  // than a flat silhouette from above. Z is reliably "up" now that loaded
+  // models rest with their base at Z=0.
+  camera.position.set(center.x, center.y - maxDim * 1.4, center.z + maxDim * 0.9);
+  controls.target.copy(center);
+  controls.update();
+}
+
+// -- Mesh <-> Three helpers -------------------------------------------------
+
+function toBufferGeometry(mesh) {
+  const geom = new THREE.BufferGeometry();
+  geom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(mesh.positions), 3));
+  geom.setIndex(mesh.indices);
+  geom.computeVertexNormals();
+  return geom;
+}
+
+function pieceBounds(piece) {
+  return computeBounds(piece.mesh.positions);
+}
+
+function combinedBounds() {
+  let b = null;
+  for (const p of pieces) {
+    const pb = pieceBounds(p);
+    if (!b) { b = pb; continue; }
+    b = {
+      min: [Math.min(b.min[0], pb.min[0]), Math.min(b.min[1], pb.min[1]), Math.min(b.min[2], pb.min[2])],
+      max: [Math.max(b.max[0], pb.max[0]), Math.max(b.max[1], pb.max[1]), Math.max(b.max[2], pb.max[2])],
+    };
+  }
+  if (!b) return null;
+  b.size = [b.max[0] - b.min[0], b.max[1] - b.min[1], b.max[2] - b.min[2]];
+  return b;
+}
+
+function fmt(n) { return Number.isFinite(n) ? n.toLocaleString(undefined, { maximumFractionDigits: 1 }) : '-'; }
+
+// -- Scene rebuild ------------------------------------------------------
+
+// Stable, distinct colors so an exploded view reads as "one color per
+// piece" rather than needing to guess which fragment came from where.
+const PIECE_PALETTE = [
+  0xff6b6b, 0x4ade80, 0xfbbf24, 0x60a5fa, 0xc084fc, 0x2dd4bf, 0xf472b6, 0xa3e635,
+  0xfb923c, 0x38bdf8, 0xe879f9, 0x34d399, 0xfacc15, 0x818cf8, 0xf87171, 0x22d3ee,
+];
+let explodeFactor = 0; // 0 = assembled; increases via the E key / Explode button, R resets to 0
+
+function rebuildScene() {
+  exitMoveMode(); // bake+detach before the mesh it's attached to gets torn down below
+  while (piecesGroup.children.length) piecesGroup.remove(piecesGroup.children[0]);
+  // Only switch to the per-piece palette once there's actually more than one
+  // piece to tell apart -- a single freshly-loaded model keeps the old
+  // plain selected/unselected coloring, since there's nothing to explode yet.
+  const multi = pieces.length > 1;
+  const cb = multi ? combinedBounds() : null;
+  const centerPt = cb ? [(cb.min[0] + cb.max[0]) / 2, (cb.min[1] + cb.max[1]) / 2, (cb.min[2] + cb.max[2]) / 2] : null;
+  const explodeScale = cb ? Math.hypot(...cb.size) * 0.15 : 0;
+  pieces.forEach((p, i) => {
+    const geom = toBufferGeometry(p.mesh);
+    const selected = p.id === selectedId;
+    const merging = mergeSelection.has(p.id);
+    const baseColor = multi ? PIECE_PALETTE[i % PIECE_PALETTE.length] : (selected ? 0x3ecfff : 0x2a3a4a);
+    // Merge-selected takes priority over the normal selected glow (amber,
+    // matching the piece list's merge-selected outline) so it reads clearly
+    // even on top of the per-piece palette colors.
+    const emissive = merging ? 0xfbbf24 : selected ? new THREE.Color(baseColor).multiplyScalar(0.35) : 0x000000;
+    const mat = new THREE.MeshStandardMaterial({
+      color: baseColor, roughness: 0.55, metalness: 0.1,
+      side: THREE.DoubleSide, flatShading: true, transparent: false, opacity: 1,
+      emissive, emissiveIntensity: merging ? 0.55 : 1,
+    });
+    const mesh = new THREE.Mesh(geom, mat);
+    mesh.userData.pieceId = p.id;
+    if (multi && explodeFactor > 0) {
+      const pb = pieceBounds(p);
+      const pc = [(pb.min[0] + pb.max[0]) / 2, (pb.min[1] + pb.max[1]) / 2, (pb.min[2] + pb.max[2]) / 2];
+      const dir = [pc[0] - centerPt[0], pc[1] - centerPt[1], pc[2] - centerPt[2]];
+      const len = Math.hypot(...dir) || 1;
+      mesh.position.set(
+        (dir[0] / len) * explodeFactor * explodeScale,
+        (dir[1] / len) * explodeFactor * explodeScale,
+        (dir[2] / len) * explodeFactor * explodeScale,
+      );
+    }
+    piecesGroup.add(mesh);
+  });
+  updateClipPreview();
+}
+
+/**
+ * Push every piece outward from the combined center by one more step (E),
+ * or reset them all back to assembled (R) -- a quick way to see where each
+ * cut boundary actually landed, especially useful for spotting an
+ * unexpectedly-small sliver piece. Pure view state: doesn't touch any
+ * piece's real vertex data, just an Object3D offset reapplied in
+ * rebuildScene(), so cutting math is completely unaffected regardless of
+ * how exploded the view currently is (press R first if the clip-plane
+ * preview looks off while positioning a Straight/Angled cut -- that
+ * preview is computed in the piece's true, unexploded position).
+ *
+ * Small steps (0.2 per press, capped at 2, against a 0.15x-diagonal base
+ * scale) on purpose -- an early version jumped 0.4 per press against a
+ * 0.5x-diagonal base and flung pieces far off past a screen-filling
+ * distance on the very first press, nothing like LuBan's own gradual
+ * explode/restore. This way it takes several presses to fully separate,
+ * same as LuBan, and pieces stay close enough to recognize their assembled
+ * layout throughout.
+ */
+function setExplodeFactor(factor) {
+  explodeFactor = Math.max(0, Math.min(2, factor));
+  rebuildScene();
+  setStatus(explodeFactor > 0 ? `Exploded view (${explodeFactor.toFixed(1)}) — press R to restore.` : 'Restored to assembled view.');
+}
+window.addEventListener('keydown', (e) => {
+  if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) return;
+  if (pieces.length <= 1) return;
+  if (e.key === 'e' || e.key === 'E') setExplodeFactor(explodeFactor + 0.2);
+  else if (e.key === 'r' || e.key === 'R') setExplodeFactor(0);
+});
+
+function selectedPiece() { return pieces.find((p) => p.id === selectedId) || null; }
+function selectedThreeMesh() { return piecesGroup.children.find((m) => m.userData.pieceId === selectedId) || null; }
+
+// -- Cut plane placement --------------------------------------------------
+
+function resetPlaneToPiece() {
+  const p = selectedPiece();
+  if (!p) return;
+  planeOverrides.clear();
+  gridPlaneOverrides.clear();
+  const b = pieceBounds(p);
+  const center = [(b.min[0] + b.max[0]) / 2, (b.min[1] + b.max[1]) / 2, (b.min[2] + b.max[2]) / 2];
+  const radius = Math.hypot(b.size[0], b.size[1], b.size[2]) || 10;
+  planeVisual.geometry.dispose();
+  planeVisual.geometry = new THREE.PlaneGeometry(radius * 1.4, radius * 1.4);
+  planeTarget.position.set(center[0], center[1], center[2]);
+  planeTarget.quaternion.identity();
+  if (cutMode === 'straight') {
+    $('axisSlider').value = 50;
+    applyAxisToPlane();
+  }
+  updateClipPreview();
+}
+
+function applyAxisToPlane() {
+  const p = selectedPiece();
+  if (!p) return;
+  const b = pieceBounds(p);
+  const axisIdx = { x: 0, y: 1, z: 2 }[cutAxis];
+  const t = Number($('axisSlider').value) / 100;
+  const pos = [
+    (b.min[0] + b.max[0]) / 2,
+    (b.min[1] + b.max[1]) / 2,
+    (b.min[2] + b.max[2]) / 2,
+  ];
+  pos[axisIdx] = b.min[axisIdx] + t * b.size[axisIdx];
+  planeTarget.position.set(pos[0], pos[1], pos[2]);
+  const targetNormal = new THREE.Vector3(0, 0, 0); targetNormal.setComponent(axisIdx, 1);
+  planeTarget.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), targetNormal);
+  updateClipPreview();
+}
+
+function currentPlane() {
+  const normal = new THREE.Vector3(0, 0, 1).applyQuaternion(planeTarget.quaternion).normalize();
+  return { point: [planeTarget.position.x, planeTarget.position.y, planeTarget.position.z], normal: [normal.x, normal.y, normal.z] };
+}
+
+function clearExtraPlaneVisuals() {
+  while (extraPlaneGroup.children.length) {
+    const m = extraPlaneGroup.children.pop();
+    m.geometry.dispose();
+    m.material.dispose();
+    extraPlaneGroup.remove(m);
+  }
+}
+
+/** Shared tMin/tMax span (in the current axis/gizmo's reference frame), used by the multi-plane preview and Adjust Plane controls. */
+function currentPlaneSpan(p) {
+  const b = pieceBounds(p);
+  const { point, normal } = currentPlane();
+  const n = new THREE.Vector3(normal[0], normal[1], normal[2]);
+  const refPoint = new THREE.Vector3(point[0], point[1], point[2]);
+  const corners = [];
+  for (const x of [b.min[0], b.max[0]]) for (const y of [b.min[1], b.max[1]]) for (const z of [b.min[2], b.max[2]]) corners.push(new THREE.Vector3(x, y, z));
+  const projections = corners.map((c) => c.clone().sub(refPoint).dot(n));
+  const tMin = $('startAtPlane').checked ? 0 : Math.min(...projections);
+  const tMax = Math.max(...projections);
+  return { point, normal, n, refPoint, tMin, tMax };
+}
+
+/** Preview every plane a "Number of planes" > 1 cut will actually land on, matching parallelPlaneCut/flexiCut's math. Manually-adjusted planes show in blue, the one currently selected in Adjust Plane in amber. */
+function updatePlaneVisuals() {
+  clearExtraPlaneVisuals();
+  if (cutMode !== 'straight' && cutMode !== 'angled') return; // Grid/Modular have their own preview or none
+  const p = selectedPiece();
+  const planeCount = getNumPlanes();
+  $('adjustPlaneControls').style.display = (p && planeCount > 1) ? '' : 'none';
+  if (!p || planeCount <= 1) return; // single plane already shown via planeVisual
+
+  $('adjustPlaneIndex').max = planeCount;
+  const b = pieceBounds(p);
+  const radius = Math.hypot(b.size[0], b.size[1], b.size[2]) || 10;
+  const { n, refPoint, tMin, tMax } = currentPlaneSpan(p);
+  const activeIdx = Math.min(planeCount, Math.max(1, Math.round(Number($('adjustPlaneIndex').value) || 1)));
+
+  for (let i = 1; i <= planeCount; i++) {
+    const override = planeOverrides.get(i);
+    const t = override ? override.t : tMin + ((tMax - tMin) * i) / (planeCount + 1);
+    const isActive = i === activeIdx;
+    const mesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(radius * 1.4, radius * 1.4),
+      new THREE.MeshBasicMaterial({
+        color: isActive ? 0xfbbf24 : (override ? 0x60a5fa : 0x2dd4bf),
+        transparent: true, opacity: isActive ? 0.28 : 0.16, side: THREE.DoubleSide, depthWrite: false,
+      }),
+    );
+    mesh.position.copy(refPoint).addScaledVector(n, t);
+    mesh.quaternion.copy(planeTarget.quaternion);
+    extraPlaneGroup.add(mesh);
+  }
+}
+
+/** Default tMin/tMax span for a grid axis (world X/Y/Z), matching gridCut's own per-axis math. Shared by the preview, the Adjust Grid Plane slider, and the actual cut. */
+function gridAxisSpan(mesh, axis) {
+  const normal = { x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] }[axis];
+  const { tMin, tMax } = computeDefaultFlexiPlanes(mesh, [0, 0, 0], normal, 1)[0];
+  return { tMin, tMax, normal };
+}
+
+/** The plane list gridCut will actually use for one axis of `mesh`, substituting any manually-adjusted `t` from gridPlaneOverrides in place of the default even spacing. */
+function gridAxisPlanes(mesh, axis, count) {
+  if (count <= 0) return [];
+  const { tMin, tMax, normal } = gridAxisSpan(mesh, axis);
+  const planes = [];
+  for (let i = 1; i <= count; i++) {
+    const override = gridPlaneOverrides.get(axis + i);
+    const t = override ? override.t : tMin + ((tMax - tMin) * i) / (count + 1);
+    planes.push({ t, normal, point: [normal[0] * t, normal[1] * t, normal[2] * t] });
+  }
+  return planes;
+}
+
+/**
+ * Preview Grid cut's 3D waffle of planes before committing — X divisions
+ * in red, Y in green, Z in amber (a standard axis-color convention,
+ * substituting amber for the usual blue since the selected-piece mesh is
+ * already cyan-blue and would blend with it). Each plane is sized to the
+ * model's actual cross-section on that axis (the other two dimensions),
+ * not a uniform diagonal-based square — a full-diagonal square was wildly
+ * oversized for non-cubic models and buried the model under the preview.
+ * Matches gridCut's own math (computeDefaultFlexiPlanes per axis, anchored
+ * at the world origin), and adds a crisp edge outline per plane so the
+ * grid reads clearly instead of as a soft blur of overlapping fills.
+ * Manually-adjusted planes (via Adjust Grid Plane) render with a white
+ * outline instead of the axis color; the plane currently selected there
+ * renders brighter still, matching Flexi's own active/overridden styling.
+ */
+function updateGridVisuals() {
+  clearExtraPlaneVisuals();
+  if (cutMode !== 'grid') return;
+  const p = selectedPiece();
+  if (!p) return;
+  const b = pieceBounds(p);
+  // computeDefaultFlexiPlanes is anchored at the world origin (matching
+  // gridCut's own math), so its returned `t` is only the coordinate along
+  // the cut axis -- the other two coordinates must be filled in separately
+  // with the model's own center, or the plane renders centered on world
+  // (0,0,0) instead of the model. That previously sank X/Y-normal preview
+  // planes well below Z=0 (below the bed) whenever the model's actual
+  // mid-height wasn't 0, even though the real cut (a full-extent Manifold
+  // plane) was never affected -- purely a preview positioning bug.
+  const center = [(b.min[0] + b.max[0]) / 2, (b.min[1] + b.max[1]) / 2, (b.min[2] + b.max[2]) / 2];
+  const margin = 1.15;
+  const planeDims = {
+    x: [b.size[2] * margin, b.size[1] * margin], // X-normal plane spans Z (width) x Y (height)
+    y: [b.size[0] * margin, b.size[2] * margin], // Y-normal plane spans X (width) x Z (height)
+    z: [b.size[0] * margin, b.size[1] * margin], // Z-normal plane spans X (width) x Y (height)
+  };
+  const xCount = Math.max(0, Math.round(Number($('gridXCount').value) || 0));
+  const yCount = Math.max(0, Math.round(Number($('gridYCount').value) || 0));
+  const zCount = Math.max(0, Math.round(Number($('gridZCount').value) || 0));
+  $('gridAdjustControls').style.display = (xCount > 0 || yCount > 0 || zCount > 0) ? '' : 'none';
+  const adjustAxis = $('gridAdjustAxis').value;
+  const adjustIdx = Math.max(1, Math.round(Number($('gridAdjustIndex').value) || 1));
+
+  const addAxisPlanes = (axis, count, axisIdx, dims, color) => {
+    if (count <= 0) return;
+    const { normal } = gridAxisSpan(p.mesh, axis);
+    const targetNormal = new THREE.Vector3(normal[0], normal[1], normal[2]);
+    const quat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), targetNormal);
+    const geom = new THREE.PlaneGeometry(dims[0] || 10, dims[1] || 10);
+    const edgeGeom = new THREE.EdgesGeometry(geom);
+    gridAxisPlanes(p.mesh, axis, count).forEach(({ t }, i) => {
+      const idx1 = i + 1;
+      const isActive = axis === adjustAxis && idx1 === adjustIdx;
+      const isOverride = gridPlaneOverrides.has(axis + idx1);
+      const pos = center.slice();
+      pos[axisIdx] = t;
+      const mesh = new THREE.Mesh(
+        geom,
+        new THREE.MeshBasicMaterial({ color, transparent: true, opacity: isActive ? 0.32 : 0.16, side: THREE.DoubleSide, depthWrite: false }),
+      );
+      mesh.position.set(pos[0], pos[1], pos[2]);
+      mesh.quaternion.copy(quat);
+      extraPlaneGroup.add(mesh);
+      const edges = new THREE.LineSegments(edgeGeom, new THREE.LineBasicMaterial({ color: isOverride ? 0xffffff : color, transparent: true, opacity: isActive ? 1 : 0.7 }));
+      edges.position.copy(mesh.position);
+      edges.quaternion.copy(quat);
+      extraPlaneGroup.add(edges);
+    });
+  };
+  addAxisPlanes('x', xCount, 0, planeDims.x, 0xff6b6b); // red — X divisions
+
+  // Staggered mode shifts Y's cut positions per X-strip (see gridCut's own
+  // doc comment) -- overrides always win if any are set (mutually
+  // exclusive per the UI hint), so this branch only applies to the plain,
+  // no-override case. Each strip gets its own row of Y planes, sized to
+  // just that strip's own width and shifted by half the Y pitch on
+  // alternating strips, so the preview actually reads as a running-bond
+  // pattern instead of full-width planes overlapping in a confusing pile.
+  const staggered = $('gridStaggered').checked && gridPlaneOverrides.size === 0;
+  if (staggered && xCount > 0 && yCount > 0) {
+    const { tMin: xMin, tMax: xMax } = gridAxisSpan(p.mesh, 'x');
+    const xPlaneTs = gridAxisPlanes(p.mesh, 'x', xCount).map((pl) => pl.t).sort((a, b) => a - b);
+    const xBoundaries = [xMin, ...xPlaneTs, xMax];
+    const { tMin: yMin, tMax: yMax, normal: yNormal } = gridAxisSpan(p.mesh, 'y');
+    const yPitch = (yMax - yMin) / (yCount + 1);
+    const targetNormal = new THREE.Vector3(yNormal[0], yNormal[1], yNormal[2]);
+    const quat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), targetNormal);
+    for (let i = 0; i < xBoundaries.length - 1; i++) {
+      const stripCenterX = (xBoundaries[i] + xBoundaries[i + 1]) / 2;
+      const stripWidth = (xBoundaries[i + 1] - xBoundaries[i]) * margin;
+      const geom = new THREE.PlaneGeometry(stripWidth || 10, planeDims.y[1] || 10);
+      const edgeGeom = new THREE.EdgesGeometry(geom);
+      const shift = i % 2 === 1 ? yPitch / 2 : 0;
+      for (let j = 1; j <= yCount; j++) {
+        const pos = center.slice();
+        pos[0] = stripCenterX;
+        pos[1] = yMin + yPitch * j + shift;
+        const mesh = new THREE.Mesh(geom, new THREE.MeshBasicMaterial({ color: 0x4ade80, transparent: true, opacity: 0.16, side: THREE.DoubleSide, depthWrite: false }));
+        mesh.position.set(pos[0], pos[1], pos[2]);
+        mesh.quaternion.copy(quat);
+        extraPlaneGroup.add(mesh);
+        const edges = new THREE.LineSegments(edgeGeom, new THREE.LineBasicMaterial({ color: 0x4ade80, transparent: true, opacity: 0.7 }));
+        edges.position.copy(mesh.position);
+        edges.quaternion.copy(quat);
+        extraPlaneGroup.add(edges);
+      }
+    }
+  } else {
+    addAxisPlanes('y', yCount, 1, planeDims.y, 0x4ade80); // green — Y divisions
+  }
+  addAxisPlanes('z', zCount, 2, planeDims.z, 0xfbbf24); // amber — Z divisions
+}
+
+/** The rotation axis's other two in-plane axis indices, matching radialCut's own right-hand cyclic convention (x->y->z->x). */
+function radialAxisIndices(axis) {
+  const axisIdx = { x: 0, y: 1, z: 2 }[axis];
+  return { axisIdx, uIdx: (axisIdx + 1) % 3, vIdx: (axisIdx + 2) % 3 };
+}
+
+/** The actual rotation center for a radial cut on `mesh`, matching radialCut's own bounds-relative offset math. */
+function radialCenter(mesh, axis, centerU, centerV) {
+  const b = computeBounds(mesh.positions);
+  const { uIdx, vIdx } = radialAxisIndices(axis);
+  const bcenter = [(b.min[0] + b.max[0]) / 2, (b.min[1] + b.max[1]) / 2, (b.min[2] + b.max[2]) / 2];
+  const center = bcenter.slice();
+  center[uIdx] = bcenter[uIdx] + centerU * (b.size[uIdx] / 2);
+  center[vIdx] = bcenter[vIdx] + centerV * (b.size[vIdx] / 2);
+  return { center, bounds: b };
+}
+
+/**
+ * Preview Radial cut's wedge-boundary planes before committing -- one
+ * rectangle per cut angle, matching radialCut's own per-wedge normal math
+ * exactly (see that function's doc comment for why a single plane only
+ * bisects at 180°, and why an even count's opposite-angle planes end up
+ * drawn twice on top of each other -- harmless, and it's exactly why an
+ * even count visually reads as a clean cross/star rather than needing any
+ * special-casing here). Each plane's orientation is built from an explicit
+ * (right, up, normal) basis rather than THREE.Quaternion.setFromUnitVectors
+ * -- that method leaves the roll (rotation about the normal) unspecified,
+ * which is fine when a plane's own footprint is a big enough square to
+ * cover the piece regardless of roll (as Straight/Flexi's preview does),
+ * but here the two dimensions genuinely differ (axis-direction extent vs.
+ * radial reach) and need to land in the right place: "up" is fixed to the
+ * rotation axis itself, so the plane's height dimension always aligns
+ * with it.
+ */
+function updateRadialVisuals() {
+  clearExtraPlaneVisuals();
+  if (cutMode !== 'radial') return;
+  const p = selectedPiece();
+  if (!p) return;
+  const count = Math.max(0, Math.round(Number($('radialCount').value) || 0));
+  if (count < 2) return;
+  const startAngle = Number($('radialStartAngle').value) || 0;
+  const centerU = Math.max(-1, Math.min(1, Number($('radialCenterU').value) || 0));
+  const centerV = Math.max(-1, Math.min(1, Number($('radialCenterV').value) || 0));
+  const { axisIdx, uIdx, vIdx } = radialAxisIndices(radialAxis);
+  const { center, bounds: b } = radialCenter(p.mesh, radialAxis, centerU, centerV);
+  const margin = 1.15;
+  const width = Math.hypot(b.size[uIdx], b.size[vIdx]) * margin; // radial reach -- generous, angle-independent
+  const height = (b.size[axisIdx] || 10) * margin; // extent along the rotation axis itself
+  const geom = new THREE.PlaneGeometry(width || 10, height);
+  const edgeGeom = new THREE.EdgesGeometry(geom);
+  const up = [0, 0, 0]; up[axisIdx] = 1;
+  const upVec3 = new THREE.Vector3(up[0], up[1], up[2]);
+  const angleStep = 360 / count;
+  for (let i = 0; i < count; i++) {
+    const rad = ((startAngle + i * angleStep) * Math.PI) / 180;
+    const n = [0, 0, 0];
+    n[uIdx] = -Math.sin(rad);
+    n[vIdx] = Math.cos(rad);
+    const normalVec3 = new THREE.Vector3(n[0], n[1], n[2]);
+    const rightVec3 = new THREE.Vector3().crossVectors(upVec3, normalVec3).normalize();
+    const basis = new THREE.Matrix4().makeBasis(rightVec3, upVec3, normalVec3);
+    const quat = new THREE.Quaternion().setFromRotationMatrix(basis);
+    const mesh = new THREE.Mesh(geom, new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.16, side: THREE.DoubleSide, depthWrite: false }));
+    mesh.position.set(center[0], center[1], center[2]);
+    mesh.quaternion.copy(quat);
+    extraPlaneGroup.add(mesh);
+    const edges = new THREE.LineSegments(edgeGeom, new THREE.LineBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.7 }));
+    edges.position.copy(mesh.position);
+    edges.quaternion.copy(quat);
+    extraPlaneGroup.add(edges);
+  }
+}
+
+function adjustPlaneSliderChanged() {
+  const p = selectedPiece();
+  if (!p) return;
+  const planeCount = getNumPlanes();
+  const idx = Math.min(planeCount, Math.max(1, Math.round(Number($('adjustPlaneIndex').value) || 1)));
+  const { point, normal, tMin, tMax } = currentPlaneSpan(p);
+  const pct = Number($('adjustPlaneSlider').value) / FLEXI_SLIDER_MAX;
+  const t = tMin + (tMax - tMin) * pct;
+  planeOverrides.set(idx, { t, point: [point[0] + normal[0] * t, point[1] + normal[1] * t, point[2] + normal[2] * t], normal });
+  updatePlaneVisuals();
+}
+
+function loadAdjustPlaneSliderFromIndex() {
+  const p = selectedPiece();
+  if (!p) return;
+  const planeCount = getNumPlanes();
+  const idx = Math.min(planeCount, Math.max(1, Math.round(Number($('adjustPlaneIndex').value) || 1)));
+  $('adjustPlaneIndex').value = idx;
+  const { tMin, tMax } = currentPlaneSpan(p);
+  const override = planeOverrides.get(idx);
+  const t = override ? override.t : tMin + ((tMax - tMin) * idx) / (planeCount + 1);
+  const pct = tMax > tMin ? ((t - tMin) / (tMax - tMin)) * FLEXI_SLIDER_MAX : FLEXI_SLIDER_MAX / 2;
+  $('adjustPlaneSlider').value = Math.min(FLEXI_SLIDER_MAX, Math.max(0, pct));
+  updatePlaneVisuals();
+}
+
+function gridAdjustCount(axis) {
+  return Math.max(0, Math.round(Number($(`grid${axis.toUpperCase()}Count`).value) || 0));
+}
+
+function gridAdjustSliderChanged() {
+  const p = selectedPiece();
+  if (!p) return;
+  const axis = $('gridAdjustAxis').value;
+  const count = gridAdjustCount(axis);
+  if (count <= 0) return;
+  const idx = Math.min(count, Math.max(1, Math.round(Number($('gridAdjustIndex').value) || 1)));
+  const { tMin, tMax, normal } = gridAxisSpan(p.mesh, axis);
+  const pct = Number($('gridAdjustSlider').value) / 100;
+  const t = tMin + (tMax - tMin) * pct;
+  gridPlaneOverrides.set(axis + idx, { t, normal, point: [normal[0] * t, normal[1] * t, normal[2] * t] });
+  updateGridVisuals();
+}
+
+function loadGridAdjustSliderFromIndex() {
+  const p = selectedPiece();
+  if (!p) return;
+  const axis = $('gridAdjustAxis').value;
+  const count = gridAdjustCount(axis);
+  $('gridAdjustIndex').max = Math.max(1, count);
+  const idx = Math.min(Math.max(1, count), Math.max(1, Math.round(Number($('gridAdjustIndex').value) || 1)));
+  $('gridAdjustIndex').value = idx;
+  if (count <= 0) { updateGridVisuals(); return; }
+  const { tMin, tMax } = gridAxisSpan(p.mesh, axis);
+  const override = gridPlaneOverrides.get(axis + idx);
+  const t = override ? override.t : tMin + ((tMax - tMin) * idx) / (count + 1);
+  const pct = tMax > tMin ? ((t - tMin) / (tMax - tMin)) * 100 : 50;
+  $('gridAdjustSlider').value = Math.min(100, Math.max(0, pct));
+  updateGridVisuals();
+}
+
+function updateClipPreview() {
+  updatePlaneVisuals();
+  if (cutMode === 'grid') updateGridVisuals();
+  if (cutMode === 'radial') updateRadialVisuals();
+  const mesh = selectedThreeMesh();
+  if (!mesh) return;
+  if (cutMode !== 'straight' && cutMode !== 'angled') { mesh.material.clippingPlanes = []; return; }
+  const { point, normal } = currentPlane();
+  const n = new THREE.Vector3(normal[0], normal[1], normal[2]);
+  const planeConst = -(n.x * point[0] + n.y * point[1] + n.z * point[2]);
+  mesh.material.clippingPlanes = selectedId ? [new THREE.Plane(n, planeConst)] : [];
+}
+
+// -- Piece list / status --------------------------------------------------
+
+function bedDims() {
+  const x = Number($('bedX').value), y = Number($('bedY').value), z = Number($('bedZ').value);
+  if (!x || !y || !z) return null;
+  return [x, y, z];
+}
+
+function fitsBed(piece) {
+  const bed = bedDims();
+  if (!bed) return null;
+  const b = pieceBounds(piece);
+  return b.size[0] <= bed[0] && b.size[1] <= bed[1] && b.size[2] <= bed[2];
+}
+
+function renumberPieces() {
+  pieces.forEach((p, i) => { p.partNumber = i + 1; p.name = `Piece ${i + 1}`; });
+}
+
+/**
+ * Commit Cut's enabled state depends on the selected mode, not just
+ * whether a piece is selected: Modular additionally needs a bed size set
+ * and a piece that doesn't already fit (matching its old standalone
+ * button's rule), while Straight/Angled/Grid just need a watertight
+ * selected piece. Reset Plane only makes sense for the plane-based modes.
+ */
+function updateCommitButtonState() {
+  const sel = selectedPiece();
+  let disabled = !sel || sel.openEdgeCount > 0;
+  if (!disabled && cutMode === 'modular') disabled = !bedDims() || fitsBed(sel) !== false;
+  $('commitCutBtn').disabled = disabled;
+  $('resetPlaneBtn').disabled = !sel || (cutMode !== 'straight' && cutMode !== 'angled');
+  $('moveModelBtn').disabled = !sel;
+}
+
+function renderPieceList() {
+  const list = $('pieceList');
+  list.innerHTML = '';
+  for (const p of pieces) {
+    const b = pieceBounds(p);
+    const fit = fitsBed(p);
+    const row = document.createElement('div');
+    row.className = 'piece-row' + (p.id === selectedId ? ' selected' : '') + (mergeSelection.has(p.id) ? ' merge-selected' : '');
+    const pillClass = fit === null ? '' : fit ? 'good' : 'bad';
+    const pillText = fit === null ? 'No bed set' : fit ? 'Fits bed' : 'Too big';
+    const openPill = p.openEdgeCount > 0
+      ? `<span class="pill bad" style="margin-top:4px;margin-left:4px">${p.openEdgeCount} open edge${p.openEdgeCount === 1 ? '' : 's'}</span>`
+      : '';
+    row.innerHTML = `
+      <div class="info">
+        <div class="name">${p.name}</div>
+        <div class="size">${fmt(b.size[0])} × ${fmt(b.size[1])} × ${fmt(b.size[2])} mm</div>
+        <span class="pill ${pillClass}" style="margin-top:4px">${pillText}</span>${openPill}
+      </div>
+      <div class="actions">
+        <button class="btn btn-icon btn-ghost" data-act="smooth" title="Smooth (round off low-poly facets)"${p.openEdgeCount > 0 ? ' disabled' : ''}>&#x223F;</button>
+        <button class="btn btn-icon btn-ghost" data-act="export" title="Export STL">&#x2913;</button>
+        <button class="btn btn-icon btn-danger" data-act="delete" title="Delete">&#x2715;</button>
+      </div>`;
+    row.addEventListener('click', (e) => {
+      if (e.target.closest('button')) return;
+      if (e.ctrlKey || e.metaKey || e.shiftKey) {
+        if (mergeSelection.has(p.id)) mergeSelection.delete(p.id);
+        else mergeSelection.add(p.id);
+        renderPieceList();
+        rebuildScene();
+      } else {
+        mergeSelection.clear();
+        selectPiece(p.id);
+      }
+    });
+    row.querySelector('[data-act=smooth]').addEventListener('click', () => smoothPiece(p));
+    row.querySelector('[data-act=export]').addEventListener('click', () => exportPiece(p));
+    row.querySelector('[data-act=delete]').addEventListener('click', () => deletePiece(p.id));
+    list.appendChild(row);
+  }
+  $('undoBtn').disabled = undoStack.length === 0;
+  $('exportAllBtn').disabled = !outputDirHandle || pieces.length === 0;
+  $('applyFinishBtn').disabled = pieces.length === 0;
+  const mergeBtn = $('tbMerge');
+  mergeBtn.style.display = mergeSelection.size >= 2 ? '' : 'none';
+  mergeBtn.textContent = `Merge Selected (${mergeSelection.size})`;
+  updateCommitButtonState();
+}
+
+function selectPiece(id) {
+  selectedId = id;
+  rebuildScene();
+  renderPieceList();
+  resetPlaneToPiece();
+  const p = selectedPiece();
+  updateCommitButtonState();
+  if (p && p.openEdgeCount > 0) {
+    setStatus(`Piece has ${p.openEdgeCount} open edge(s) — repair in Mesh Prep before cutting.`);
+  } else if (p) {
+    setStatus(`Selected ${p.name}. Position the cut plane, then Commit Cut.`);
+  }
+}
+
+async function deletePiece(id) {
+  const deleted = pieces.find((p) => p.id === id);
+  pieces = pieces.filter((p) => p.id !== id);
+  if (selectedId === id) selectedId = pieces[0]?.id ?? null;
+  renumberPieces();
+  rebuildScene();
+  renderPieceList();
+  if (selectedId) resetPlaneToPiece();
+  const saveResult = await syncOutputFolder();
+  if (saveResult && !saveResult.error) {
+    setStatus(`Deleted ${deleted?.name ?? 'piece'}. Saved to ${outputDirHandle.name}/chop/${saveResult.pruned ? ` (removed ${saveResult.pruned} stale file${saveResult.pruned === 1 ? '' : 's'})` : ''}.`);
+  }
+}
+
+/**
+ * Recombine the pieces picked via Ctrl/Cmd/Shift-click into one, via a real
+ * boolean union rather than just concatenating them -- undoes a cut that
+ * landed somewhere undesirable (e.g. straight through an eye) without
+ * having to redo the whole cut by hand. Works regardless of explodeFactor:
+ * merging always operates on the pieces' real vertex data, which explode
+ * never touches (it's a pure view-space Object3D offset), so you can spot
+ * what needs merging while exploded and still get a correct result.
+ */
+function pushUndo() {
+  undoStack.push({
+    pieces: pieces.map((p) => ({ ...p })),
+    connectors: connectorRecords.map((r) => ({ ...r })),
+  });
+}
+
+function popUndo() {
+  const snap = undoStack.pop();
+  if (!snap) return;
+  if (Array.isArray(snap)) {
+    pieces = snap;
+    connectorRecords = [];
+    return;
+  }
+  pieces = snap.pieces;
+  connectorRecords = snap.connectors || [];
+}
+
+async function mergeSelectedPieces() {
+  const targets = pieces.filter((p) => mergeSelection.has(p.id));
+  if (targets.length < 2) return;
+  setStatus(`Merging ${targets.length} pieces…`);
+  const idSet = new Set(targets.map((p) => p.id));
+  const internal = connectorRecords.filter((r) => idSet.has(r.aId) && idSet.has(r.bId));
+  const meshById = new Map(targets.map((p) => [p.id, p.mesh]));
+  let stripped = 0;
+  for (const rec of internal) {
+    try {
+      if (rec.peg) meshById.set(rec.aId, await subtractMesh(meshById.get(rec.aId), rec.peg));
+      if (rec.socket) meshById.set(rec.bId, await unionMeshes([meshById.get(rec.bId), rec.socket]));
+      stripped++;
+    } catch (_) { /* keep going — still merge the rest */ }
+  }
+  let merged;
+  try {
+    merged = await unionMeshes([...meshById.values()]);
+  } catch (e) {
+    setStatus('Merge failed: ' + e.message);
+    return;
+  }
+  pushUndo();
+  const newId = `piece-${nextId++}`;
+  connectorRecords = connectorRecords.filter((r) => !(idSet.has(r.aId) && idSet.has(r.bId)));
+  for (const r of connectorRecords) {
+    if (idSet.has(r.aId)) r.aId = newId;
+    if (idSet.has(r.bId)) r.bId = newId;
+  }
+  const firstIdx = pieces.findIndex((p) => mergeSelection.has(p.id));
+  pieces = pieces.filter((p) => !mergeSelection.has(p.id));
+  const newPiece = { id: newId, mesh: merged, openEdgeCount: merged.openEdgeCount };
+  pieces.splice(firstIdx, 0, newPiece);
+  renumberPieces();
+  mergeSelection.clear();
+  selectedId = newPiece.id;
+  rebuildScene();
+  renderPieceList();
+  resetPlaneToPiece();
+  const saveResult = await syncOutputFolder();
+  const saveNote = saveResult
+    ? saveResult.error
+      ? ` (saved ${saveResult.saved}/${saveResult.total} to ${outputDirHandle.name}/chop/ before failing: ${saveResult.error})`
+      : ` (saved to ${outputDirHandle.name}/chop/${saveResult.pruned ? `, removed ${saveResult.pruned} stale file${saveResult.pruned === 1 ? '' : 's'}` : ''})`
+    : '';
+  const stripNote = stripped ? ` Stripped ${stripped} connector${stripped === 1 ? '' : 's'} between them.` : '';
+  setStatus(`Merged ${targets.length} pieces into ${newPiece.name}${merged.openEdgeCount > 0 ? ` — ${merged.openEdgeCount} open edges, repair in Mesh Prep` : ''}.${stripNote}${saveNote}`);
+}
+$('tbMerge').addEventListener('click', mergeSelectedPieces);
+
+// -- Part numbers ------------------------------------------------------------
+
+/** Rasterize `text` to a plain on/off pixel grid via an offscreen canvas -- the browser's own font rendering stands in for a real vector font, since digits are all we need. */
+function rasterizeDigits(text, pixelHeight = 28, fontFamily = "'Arial Black', Arial, sans-serif") {
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  ctx.font = `bold ${pixelHeight}px ${fontFamily}`;
+  const width = Math.max(1, Math.ceil(ctx.measureText(text).width) + 4);
+  const height = pixelHeight + 8;
+  canvas.width = width;
+  canvas.height = height;
+  ctx.font = `bold ${pixelHeight}px ${fontFamily}`;
+  ctx.fillStyle = '#fff';
+  ctx.textBaseline = 'top';
+  ctx.fillText(text, 2, 2);
+  const img = ctx.getImageData(0, 0, width, height).data;
+  const grid = new Uint8Array(width * height);
+  for (let i = 0; i < grid.length; i++) grid[i] = img[i * 4 + 3] > 128 ? 1 : 0; // alpha threshold
+  return { grid, gridW: width, gridH: height };
+}
+
+/**
+ * Engrave `piece`'s own part number into a corner of its largest flat
+ * face (usually the cut face). Kept modest and off-center so it doesn't
+ * chew through a LuBan connector sitting in the middle of the same face —
+ * that overlap is what produced the jagged "tabs" on auto-finish cuts.
+ */
+async function stampPartNumber(piece, { avoidCenter = false } = {}) {
+  const face = findLargestFlatFace(piece.mesh);
+  if (!face) throw new Error('no flat face found');
+  const faceW = face.uMax - face.uMin, faceH = face.vMax - face.vMin;
+  if (faceW < 6 || faceH < 6) throw new Error('largest flat face is too small to stamp');
+  const text = String(piece.partNumber);
+  const { grid, gridW, gridH } = rasterizeDigits(text);
+  let targetHeight = Math.min(18, Math.max(6, Math.min(faceW, faceH) * 0.18));
+  let targetWidth = targetHeight * (gridW / gridH);
+  const maxW = faceW * 0.45, maxH = faceH * 0.45;
+  if (targetWidth > maxW) {
+    targetWidth = maxW;
+    targetHeight = targetWidth * (gridH / gridW);
+  }
+  if (targetHeight > maxH) {
+    targetHeight = maxH;
+    targetWidth = targetHeight * (gridW / gridH);
+  }
+  const margin = Math.max(2.5, Math.min(faceW, faceH) * 0.06);
+  let centerU = face.uMin + margin + targetWidth / 2;
+  let centerV = face.vMin + margin + targetHeight / 2;
+  centerU = Math.min(Math.max(centerU, face.uMin + margin + targetWidth / 2), face.uMax - margin - targetWidth / 2);
+  centerV = Math.min(Math.max(centerV, face.vMin + margin + targetHeight / 2), face.vMax - margin - targetHeight / 2);
+  if (avoidCenter) {
+    const midU = (face.uMin + face.uMax) / 2;
+    const midV = (face.vMin + face.vMax) / 2;
+    const keepOut = Math.min(faceW, faceH) * 0.28;
+    if (Math.hypot(centerU - midU, centerV - midV) < keepOut) {
+      throw new Error('face too small to stamp beside connector');
+    }
+  }
+  const depth = 0.6; // mm engraved into the surface
+  const boxes = buildStampMesh(face, grid, gridW, gridH, targetWidth, targetHeight, [-depth, 0.3], 1.2, { centerU, centerV });
+  if (!boxes.length) throw new Error('nothing rendered for that number');
+  const stamp = await unionMeshes(boxes);
+  return subtractMesh(piece.mesh, stamp);
+}
+
+/** Stamp every current piece with its own part number. Returns a short summary. */
+async function addPartNumbersToAllPieces({ skipUndo = false, quiet = false } = {}) {
+  if (!pieces.length) return '';
+  if (!skipUndo) pushUndo();
+  let done = 0, skipped = 0;
+  for (const p of pieces) {
+    if (!quiet) setStatus(`Stamping part numbers… ${done + skipped}/${pieces.length}`);
+    try {
+      const stamped = await stampPartNumber(p, { avoidCenter: connectorRecords.length > 0 });
+      p.mesh = stamped;
+      p.openEdgeCount = stamped.openEdgeCount;
+      done++;
+    } catch (e) {
+      skipped++;
+    }
+  }
+  if (!quiet) {
+    rebuildScene();
+    renderPieceList();
+    const saveResult = await syncOutputFolder();
+    const saveNote = saveResult && !saveResult.error ? ` Saved to ${outputDirHandle.name}/chop/.` : '';
+    setStatus(`Stamped ${done} piece${done === 1 ? '' : 's'}${skipped ? `, skipped ${skipped} (no usable flat face)` : ''}.${saveNote}`);
+  }
+  return `part # on ${done}${skipped ? `, ${skipped} skipped` : ''}`;
+}
+
+// -- Connectors ----------------------------------------------------------
+
+/**
+ * LuBan-style connector width: one peg per interface, sized from the
+ * face's smaller in-plane dimension. Hard cap 30mm. Tiny ear-tip faces
+ * (under MIN_CONNECTOR_FACE_MM) stay glue-only; everything else gets a
+ * peg — mid-size joints use a smaller ratio so they still key.
+ */
+const MIN_CONNECTOR_FACE_MM = 22;
+const MIN_CONNECTOR_WALL_MM = 8;
+
+function faceMinDim(face) {
+  return Math.min(face.uMax - face.uMin, face.vMax - face.vMin);
+}
+
+function connectorWidthForFace(face) {
+  const minDim = faceMinDim(face);
+  // Blend 40% → 12% as face grows from ~40mm to ~240mm+
+  const t = Math.min(1, Math.max(0, (minDim - 40) / 200));
+  const ratio = 0.40 * (1 - t) + 0.12 * t;
+  return Math.max(5, Math.min(minDim * ratio, minDim - 4, 30));
+}
+
+/**
+ * Add one LuBan-style peg/socket per shared cut face
+ * in the current piece set, in one pass. `findAdjacentPieces` locates every
+ * real interface up front (against each piece's ORIGINAL mesh); each
+ * interface's `faceA`/`faceB` frames stay geometrically valid afterward
+ * (they describe the flat cut-plane region itself, which peg/socket
+ * material only ever builds outward/inward from, never alters), so a piece
+ * that borders more than one neighbor can correctly pick up a peg on one
+ * face and a socket on another across sequential interface processing --
+ * tracked via a local id->mesh map (not `piece.mesh` directly) so each
+ * interface always builds on the previous one's result rather than the
+ * stale original mesh.
+ */
+async function addConnectorsToAllPieces({ skipUndo = false, quiet = false } = {}) {
+  if (pieces.length < 2) {
+    if (!quiet) setStatus('Need at least 2 pieces to add connectors.');
+    return '';
+  }
+  if (!quiet) setStatus('Finding adjacent cut faces…');
+  const interfaces = findAdjacentPieces(pieces.map((p) => ({ id: p.id, mesh: p.mesh })), { minArea: 25 });
+  if (!interfaces.length) {
+    if (!quiet) setStatus('No adjacent cut faces found to connect.');
+    return 'no connector faces';
+  }
+  if (!skipUndo) pushUndo();
+  connectorRecords = [];
+  const meshById = new Map(pieces.map((p) => [p.id, p.mesh]));
+  let done = 0, totalSites = 0, skipped = 0, skippedTiny = 0;
+  for (const iface of interfaces) {
+    if (!quiet) setStatus(`Adding connectors… ${done + skipped + skippedTiny}/${interfaces.length} interfaces`);
+    try {
+      const minDim = Math.min(faceMinDim(iface.faceA), faceMinDim(iface.faceB));
+      if (minDim < MIN_CONNECTOR_FACE_MM) {
+        skippedTiny++; // ear-tip / sliver joints — glue only
+        continue;
+      }
+      const meshA0 = meshById.get(iface.pieceA);
+      const meshB0 = meshById.get(iface.pieceB);
+      const wall = Math.min(meshThicknessAlong(meshA0, iface.faceA), meshThicknessAlong(meshB0, iface.faceB));
+      if (wall < MIN_CONNECTOR_WALL_MM) {
+        skippedTiny++; // thin shell — peg would punch through
+        continue;
+      }
+      const width = Math.min(connectorWidthForFace(iface.faceA), connectorWidthForFace(iface.faceB));
+      const depth = Math.min(width * 0.6, 18, wall * 0.4);
+      const result = await addConnectorsToPieces(meshA0, meshB0, iface.faceA, iface.faceB, { width, depth, tolerance: 0.2, maxSites: 1 });
+      if (result.count > 0) {
+        meshById.set(iface.pieceA, result.meshA);
+        meshById.set(iface.pieceB, result.meshB);
+        connectorRecords.push({ aId: iface.pieceA, bId: iface.pieceB, peg: result.pegSolid, socket: result.socketSolid });
+        totalSites += result.count;
+        done++;
+      } else {
+        skipped++; // face too small/narrow for even one connector footprint
+      }
+    } catch (e) {
+      skipped++;
+    }
+  }
+  for (const p of pieces) {
+    const m = meshById.get(p.id);
+    if (m !== p.mesh) { p.mesh = m; p.openEdgeCount = m.openEdgeCount; }
+  }
+  if (!quiet) {
+    rebuildScene();
+    renderPieceList();
+    const saveResult = await syncOutputFolder();
+    const saveNote = saveResult && !saveResult.error ? ` Saved to ${outputDirHandle.name}/chop/.` : '';
+    const skipBits = [];
+    if (skippedTiny) skipBits.push(`${skippedTiny} tiny (glue only)`);
+    if (skipped) skipBits.push(`${skipped} unfit`);
+    setStatus(`Added ${totalSites} connector site${totalSites === 1 ? '' : 's'} across ${done} interface${done === 1 ? '' : 's'}${skipBits.length ? `, skipped ${skipBits.join(', ')}` : ''}.${saveNote}`);
+  }
+  const skipBits = [];
+  if (skippedTiny) skipBits.push(`${skippedTiny} tiny`);
+  if (skipped) skipBits.push(`${skipped} unfit`);
+  return `${totalSites} connector${totalSites === 1 ? '' : 's'}${skipBits.length ? ` (${skipBits.join(', ')})` : ''}`;
+}
+
+async function applyFinishOptions({ skipUndo = false, quiet = false } = {}) {
+  const wantConn = $('optConnectors').checked;
+  const wantNums = $('optPartNumbers').checked;
+  if (!wantConn && !wantNums) return '';
+  if (pieces.length < 1) return '';
+  if (!skipUndo) pushUndo();
+  const bits = [];
+  if (wantConn && pieces.length >= 2) {
+    const summary = await addConnectorsToAllPieces({ skipUndo: true, quiet: true });
+    if (summary) bits.push(summary);
+  }
+  if (wantNums) {
+    const summary = await addPartNumbersToAllPieces({ skipUndo: true, quiet: true });
+    if (summary) bits.push(summary);
+  }
+  rebuildScene();
+  renderPieceList();
+  const saveResult = await syncOutputFolder();
+  const saveNote = saveResult && !saveResult.error ? ` Saved to ${outputDirHandle.name}/chop/.` : '';
+  const note = bits.join('; ');
+  if (!quiet) setStatus(`Finish: ${note || 'nothing to apply'}.${saveNote}`);
+  return note;
+}
+
+/**
+ * Round off a piece's low-poly "faceted" look (see mesh-cut.js's
+ * smoothMesh doc comment for why small pieces end up under-triangulated)
+ * without changing its actual shape or size -- mutates this one piece in
+ * place, same convention as Apply Scale, with an undo entry so a bad
+ * result is one click to back out of.
+ */
+async function smoothPiece(piece) {
+  const before = piece.mesh.indices.length / 3;
+  setStatus(`Smoothing ${piece.name}…`);
+  let result;
+  try {
+    result = await smoothMesh(piece.mesh);
+  } catch (e) {
+    setStatus('Smooth failed: ' + e.message);
+    return;
+  }
+  undoStack.push(pieces.slice());
+  piece.mesh = result;
+  piece.openEdgeCount = result.openEdgeCount;
+  rebuildScene();
+  renderPieceList();
+  const after = result.indices.length / 3;
+  setStatus(`Smoothed ${piece.name}: ${before} → ${after} triangles.`);
+}
+
+/** Write a blob into "<outputDirHandle>/chop/<filename>", creating the chop folder if needed. */
+async function writeStlToOutputFolder(blob, filename) {
+  const chopDir = await outputDirHandle.getDirectoryHandle('chop', { create: true });
+  const fileHandle = await chopDir.getFileHandle(filename, { create: true });
+  const writable = await fileHandle.createWritable();
+  await writable.write(blob);
+  await writable.close();
+}
+
+async function exportPiece(piece) {
+  try {
+    const blob = meshToStl(piece.mesh, piece.name);
+    const filename = `${baseName}-piece-${piece.partNumber}.stl`;
+    if (outputDirHandle) {
+      await writeStlToOutputFolder(blob, filename);
+      setStatus(`Saved ${piece.name} to ${outputDirHandle.name}/chop/${filename}.`);
+    } else {
+      downloadBlob(blob, filename);
+      setStatus(`Exported ${piece.name}.`);
+    }
+  } catch (e) {
+    setStatus('Export error: ' + e.message);
+  }
+}
+
+async function exportAllPieces() {
+  if (!outputDirHandle || !pieces.length) return;
+  $('exportAllBtn').disabled = true;
+  const pruned = await pruneStaleOutputFiles();
+  let done = 0;
+  for (const p of pieces) {
+    try {
+      const blob = meshToStl(p.mesh, p.name);
+      await writeStlToOutputFolder(blob, `${baseName}-piece-${p.partNumber}.stl`);
+      done++;
+      setStatus(`Saving pieces… ${done}/${pieces.length}`);
+    } catch (e) {
+      setStatus(`Export failed on ${p.name} (${done}/${pieces.length} saved): ${e.message}`);
+      $('exportAllBtn').disabled = false;
+      return;
+    }
+  }
+  setStatus(`Saved all ${done} piece${done === 1 ? '' : 's'} to ${outputDirHandle.name}/chop/.${pruned ? ` Removed ${pruned} stale file${pruned === 1 ? '' : 's'}.` : ''}`);
+  $('exportAllBtn').disabled = false;
+}
+
+/**
+ * Delete any existing "{baseName}-piece-N.stl" in the output folder that no
+ * longer corresponds to a current piece -- left behind by Merge Selected
+ * shrinking the piece count, Delete removing one, or renumberPieces()
+ * simply shifting numbers around after either. Without this, only ever
+ * ADDING files meant an old, already-merged-away or deleted piece could
+ * sit in the folder indefinitely looking like a current, ready-to-print
+ * part. Returns the number of files removed.
+ */
+async function pruneStaleOutputFiles() {
+  const chopDir = await outputDirHandle.getDirectoryHandle('chop', { create: true });
+  const escapedBaseName = baseName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const piecePattern = new RegExp(`^${escapedBaseName}-piece-\\d+\\.stl$`);
+  const expected = new Set(pieces.map((p) => `${baseName}-piece-${p.partNumber}.stl`));
+  let pruned = 0;
+  for await (const [name, handle] of chopDir.entries()) {
+    if (handle.kind === 'file' && piecePattern.test(name) && !expected.has(name)) {
+      await chopDir.removeEntry(name);
+      pruned++;
+    }
+  }
+  return pruned;
+}
+
+/**
+ * Keep the output folder's piece-*.stl files in exact sync with the
+ * current `pieces` array: prune stale files (see pruneStaleOutputFiles),
+ * then (re)write every current piece fresh. Returns null when no folder is
+ * set (caller falls back to its normal status message), or { saved,
+ * total, pruned, error }.
+ */
+async function syncOutputFolder() {
+  if (!outputDirHandle) return null;
+  const pruned = await pruneStaleOutputFiles();
+  let saved = 0;
+  for (const p of pieces) {
+    try {
+      const blob = meshToStl(p.mesh, p.name);
+      await writeStlToOutputFolder(blob, `${baseName}-piece-${p.partNumber}.stl`);
+      saved++;
+    } catch (e) {
+      return { saved, total: pieces.length, pruned, error: e.message };
+    }
+  }
+  return { saved, total: pieces.length, pruned, error: null };
+}
+
+// -- File loading -----------------------------------------------------------
+
+async function loadFile(file) {
+  try {
+    setStatus('Loading…');
+    const mesh = await loadMeshFromFile(file);
+    // Rest the model on the print bed (base at Z=0), matching LuBan's own
+    // convention — X/Y are left exactly as authored, only Z is shifted.
+    const loadBounds = computeBounds(mesh.positions);
+    const zShift = -loadBounds.min[2];
+    if (zShift !== 0) {
+      for (let i = 2; i < mesh.positions.length; i += 3) mesh.positions[i] += zShift;
+    }
+    const openEdgeCount = countOpenEdges(mesh.positions, mesh.indices);
+    baseName = file.name.replace(/\.(stl|obj)$/i, '');
+    pieces = [{ id: `piece-${nextId++}`, partNumber: 1, name: 'Piece 1', mesh, openEdgeCount }];
+    selectedId = pieces[0].id;
+    undoStack = [];
+    renumberPieces();
+    rebuildScene();
+    frame();
+    updateAxesHelper();
+    resetPlaneToPiece();
+    renderPieceList();
+    updateScaleFieldsFromModel();
+
+    const loadPill = $('loadPill');
+    loadPill.style.display = 'inline-flex';
+    if (openEdgeCount > 0) {
+      loadPill.className = 'pill bad';
+      loadPill.textContent = `${openEdgeCount} open edges`;
+      setStatus(`Loaded ${file.name} — ${openEdgeCount} open edge(s). Repair in Mesh Prep before cutting.`);
+    } else {
+      loadPill.className = 'pill good';
+      loadPill.textContent = 'Watertight';
+      setStatus(`Loaded ${file.name}.`);
+    }
+    $('fileName').textContent = `${file.name} — ${mesh.indices.length / 3} faces`;
+    $('applyScaleBtn').disabled = false;
+    $('clearModelBtn').style.display = '';
+  } catch (e) {
+    setStatus('Error: ' + e.message);
+  }
+}
+
+/**
+ * Re-import a folder of already-cut STL/OBJ files as separate pieces —
+ * for inspecting a completed cut (with Explode/colors) rather than loading
+ * a fresh model. Unlike loadFile(), this does NOT shift each file to
+ * Z=0 — that would destroy their correct relative positions from the
+ * original cut — and it keeps each file's own name instead of the
+ * generic "Piece N" renumberPieces() would assign.
+ */
+async function loadPiecesFromFolder(dirHandle, modelFiles) {
+  try {
+    setStatus(`Loading ${modelFiles.length} pieces from "${dirHandle.name}"…`);
+    const loaded = [];
+    let totalOpenEdges = 0;
+    for (const { name, handle } of modelFiles) {
+      const file = await handle.getFile();
+      const mesh = await loadMeshFromFile(file);
+      const openEdgeCount = countOpenEdges(mesh.positions, mesh.indices);
+      totalOpenEdges += openEdgeCount;
+      loaded.push({
+        id: `piece-${nextId++}`,
+        partNumber: loaded.length + 1,
+        name: name.replace(/\.(stl|obj)$/i, ''),
+        mesh,
+        openEdgeCount,
+      });
+    }
+    baseName = dirHandle.name;
+    pieces = loaded;
+    selectedId = pieces[0].id;
+    undoStack = [];
+    rebuildScene();
+    frame();
+    updateAxesHelper();
+    resetPlaneToPiece();
+    renderPieceList();
+    updateScaleFieldsFromModel();
+    setOutputFolder(dirHandle);
+
+    const loadPill = $('loadPill');
+    loadPill.style.display = 'inline-flex';
+    if (totalOpenEdges > 0) {
+      loadPill.className = 'pill bad';
+      loadPill.textContent = `${totalOpenEdges} open edges`;
+      setStatus(`Loaded ${pieces.length} pieces from "${dirHandle.name}" — ${totalOpenEdges} open edge(s) total. Press E to explode, R to restore.`);
+    } else {
+      loadPill.className = 'pill good';
+      loadPill.textContent = 'Watertight';
+      setStatus(`Loaded ${pieces.length} pieces from "${dirHandle.name}". Press E to explode, R to restore.`);
+    }
+    $('fileName').textContent = `${pieces.length} pieces from "${dirHandle.name}"`;
+    $('applyScaleBtn').disabled = false;
+    $('clearModelBtn').style.display = '';
+
+    $('folderFileList').style.display = 'none';
+    $('folderFileList').innerHTML = '';
+    $('importAllPiecesBtn').style.display = 'none';
+    $('importAllPiecesHint').style.display = 'none';
+  } catch (e) {
+    setStatus('Error: ' + e.message);
+  }
+}
+
+/** Wipe the whole workspace back to the pre-load state — bed dims and output folder are left alone since those carry over sensibly to the next model. */
+function clearModel() {
+  pieces = [];
+  selectedId = null;
+  undoStack = [];
+  connectorRecords = [];
+  planeOverrides.clear();
+  gridPlaneOverrides.clear();
+  baseName = 'model';
+  nextId = 1;
+  originalAspect = null;
+  rebuildScene();
+  updateAxesHelper();
+  renderPieceList();
+  gizmo.detach();
+  gizmo.visible = false; gizmo.enabled = false;
+  clearExtraPlaneVisuals();
+  $('loadPill').style.display = 'none';
+  $('clearModelBtn').style.display = 'none';
+  $('fileName').textContent = 'No model loaded';
+  $('applyScaleBtn').disabled = true;
+  $('dimX').value = ''; $('dimY').value = ''; $('dimZ').value = '';
+  $('commitCutBtn').disabled = true;
+  setStatus('Drop an STL or OBJ to begin');
+}
+$('clearModelBtn').addEventListener('click', clearModel);
+
+// Pieces panel starts collapsed; opens after a cut.
+function setPiecesOpen(open) {
+  $('piecesBody').style.display = open ? '' : 'none';
+  $('togglePiecesBtn').innerHTML = open ? '&#x25BE;' : '&#x25B8;';
+}
+$('piecesHeader').addEventListener('click', () => {
+  setPiecesOpen($('piecesBody').style.display === 'none');
+});
+
+$('dropZone').addEventListener('click', () => $('fileInput').click());
+$('fileInput').addEventListener('change', (e) => { const f = e.target.files[0]; if (f) loadFile(f); });
+$('dropZone').addEventListener('dragover', (e) => { e.preventDefault(); $('dropZone').classList.add('dragover'); });
+$('dropZone').addEventListener('dragleave', () => $('dropZone').classList.remove('dragover'));
+$('dropZone').addEventListener('drop', (e) => {
+  e.preventDefault(); $('dropZone').classList.remove('dragover');
+  const f = e.dataTransfer.files[0]; if (f) loadFile(f);
+});
+
+// -- Scale ------------------------------------------------------------------
+
+function updateScaleFieldsFromModel() {
+  const b = combinedBounds();
+  if (!b) return;
+  originalAspect = b.size.slice();
+  const unit = $('unitSelect').value;
+  const factor = UNIT_TO_MM[unit];
+  $('dimX').value = (b.size[0] / factor).toFixed(2);
+  $('dimY').value = (b.size[1] / factor).toFixed(2);
+  $('dimZ').value = (b.size[2] / factor).toFixed(2);
+}
+
+function onDimInput(axis) {
+  if (!$('uniformScale').checked || !originalAspect) return;
+  const unit = $('unitSelect').value;
+  const factor = UNIT_TO_MM[unit];
+  const fields = { x: $('dimX'), y: $('dimY'), z: $('dimZ') };
+  const axisIdx = { x: 0, y: 1, z: 2 }[axis];
+  const newMm = Number(fields[axis].value) * factor;
+  if (!newMm || !originalAspect[axisIdx]) return;
+  const ratio = newMm / originalAspect[axisIdx];
+  for (const [a, idx] of [['x', 0], ['y', 1], ['z', 2]]) {
+    if (a === axis) continue;
+    fields[a].value = ((originalAspect[idx] * ratio) / factor).toFixed(2);
+  }
+}
+$('dimX').addEventListener('input', () => onDimInput('x'));
+$('dimY').addEventListener('input', () => onDimInput('y'));
+$('dimZ').addEventListener('input', () => onDimInput('z'));
+$('unitSelect').addEventListener('change', updateScaleFieldsFromModel);
+
+$('applyScaleBtn').addEventListener('click', () => {
+  const b = combinedBounds();
+  if (!b || !pieces.length) return;
+  const unit = $('unitSelect').value;
+  const factor = UNIT_TO_MM[unit];
+  const targetMm = [Number($('dimX').value) * factor, Number($('dimY').value) * factor, Number($('dimZ').value) * factor];
+  const scale = targetMm.map((v, i) => (b.size[i] > 1e-9 ? v / b.size[i] : 1));
+  const center = [(b.min[0] + b.max[0]) / 2, (b.min[1] + b.max[1]) / 2, (b.min[2] + b.max[2]) / 2];
+  for (const p of pieces) {
+    const pos = p.mesh.positions;
+    for (let i = 0; i < pos.length; i += 3) {
+      pos[i] = center[0] + (pos[i] - center[0]) * scale[0];
+      pos[i + 1] = center[1] + (pos[i + 1] - center[1]) * scale[1];
+      pos[i + 2] = center[2] + (pos[i + 2] - center[2]) * scale[2];
+    }
+  }
+  rebuildScene();
+  frame();
+  updateAxesHelper();
+  resetPlaneToPiece();
+  renderPieceList();
+  updateScaleFieldsFromModel();
+  setStatus('Scale applied.');
+});
+
+$('moveModelBtn').addEventListener('click', () => {
+  if (moveMode) {
+    exitMoveMode();
+    updateGridVisuals();
+    updateAxesHelper();
+    setStatus('Model position locked in.');
+    return;
+  }
+  const mesh = selectedThreeMesh();
+  if (!mesh) return;
+  moveMode = true;
+  centerMovePivot();
+  modelGizmo.attach(movePivot);
+  modelGizmo.setMode('translate');
+  disablePlaneHandle();
+  modelGizmo.visible = true; modelGizmo.enabled = true;
+  $('moveModelBtn').classList.add('active');
+  setStatus('Drag the model in the viewport to reposition it, then click Reposition again to lock it in.');
+});
+
+// -- Output folder ----------------------------------------------------------
+
+if (!window.showDirectoryPicker) {
+  $('chooseFolderBtn').disabled = true;
+  $('loadFromFolderBtn').disabled = true;
+  $('outputFolderStatus').textContent = 'Folder saving needs Chrome or Edge — exports will go to your Downloads instead.';
+}
+
+function setOutputFolder(handle) {
+  outputDirHandle = handle;
+  $('outputFolderStatus').textContent = `Saving exports into "${outputDirHandle.name}/chop/".`;
+  renderPieceList();
+}
+
+$('chooseFolderBtn').addEventListener('click', async () => {
+  try {
+    const handle = await window.showDirectoryPicker({ mode: 'readwrite' });
+    setOutputFolder(handle);
+    setStatus(`Output folder set to "${handle.name}".`);
+  } catch (e) {
+    if (e.name !== 'AbortError') setStatus('Could not access that folder: ' + e.message);
+  }
+});
+
+async function loadFromFileHandle(dirHandle, fileHandle) {
+  const file = await fileHandle.getFile();
+  await loadFile(file);
+  setOutputFolder(dirHandle);
+  $('folderFileList').style.display = 'none';
+  $('folderFileList').innerHTML = '';
+  $('importAllPiecesBtn').style.display = 'none';
+  $('importAllPiecesHint').style.display = 'none';
+}
+
+$('loadFromFolderBtn').addEventListener('click', async () => {
+  let dirHandle;
+  try {
+    dirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
+  } catch (e) {
+    if (e.name !== 'AbortError') setStatus('Could not access that folder: ' + e.message);
+    return;
+  }
+  setStatus(`Scanning "${dirHandle.name}"…`);
+  const modelFiles = [];
+  for await (const [name, handle] of dirHandle.entries()) {
+    if (handle.kind === 'file' && /\.(stl|obj)$/i.test(name)) modelFiles.push({ name, handle });
+  }
+  if (!modelFiles.length) {
+    setStatus(`No STL or OBJ files found directly in "${dirHandle.name}".`);
+    return;
+  }
+  if (modelFiles.length === 1) {
+    setStatus(`Loading "${modelFiles[0].name}" from "${dirHandle.name}"…`);
+    await loadFromFileHandle(dirHandle, modelFiles[0].handle);
+    return;
+  }
+  modelFiles.sort((a, b) => a.name.localeCompare(b.name));
+  const list = $('folderFileList');
+  list.innerHTML = '';
+  for (const { name, handle } of modelFiles) {
+    const row = document.createElement('div');
+    row.className = 'piece-row';
+    row.innerHTML = `<div class="info"><div class="name">${name}</div></div>`;
+    row.addEventListener('click', () => loadFromFileHandle(dirHandle, handle));
+    list.appendChild(row);
+  }
+  list.style.display = '';
+  const importAllBtn = $('importAllPiecesBtn');
+  importAllBtn.style.display = '';
+  importAllBtn.onclick = () => loadPiecesFromFolder(dirHandle, modelFiles);
+  $('importAllPiecesHint').style.display = '';
+  setStatus(`${modelFiles.length} models found in "${dirHandle.name}" — pick one to load, or "Import All as Pieces" to load them together (e.g. to inspect a completed cut).`);
+});
+
+$('exportAllBtn').addEventListener('click', exportAllPieces);
+
+['bedX', 'bedY', 'bedZ'].forEach((id) => $(id).addEventListener('input', renderPieceList));
+
+// -- Cut mode / axis ----------------------------------------------------
+
+function setCutMode(mode) {
+  exitMoveMode(); // don't let the move gizmo and the cut-plane gizmo show at once
+  cutMode = mode;
+  $('cutModeSelect').value = mode;
+  const isPlaneMode = mode === 'straight' || mode === 'angled';
+  $('straightAngledControls').style.display = isPlaneMode ? '' : 'none';
+  $('straightControls').style.display = mode === 'straight' ? '' : 'none';
+  $('angledControls').style.display = mode === 'angled' ? '' : 'none';
+  $('gridControls').style.display = mode === 'grid' ? '' : 'none';
+  $('radialControls').style.display = mode === 'radial' ? '' : 'none';
+  $('modularControls').style.display = mode === 'modular' ? '' : 'none';
+  planeTarget.visible = isPlaneMode;
+  if (mode === 'angled' && selectedId) {
+    gizmo.attach(planeTarget);
+    gizmo.visible = true; gizmo.enabled = true;
+    gizmo.setMode('translate');
+    $('gizmoMove').classList.add('active'); $('gizmoRotate').classList.remove('active');
+  } else {
+    gizmo.detach();
+    gizmo.visible = false; gizmo.enabled = false;
+  }
+  if (mode === 'straight') applyAxisToPlane();
+  else updateClipPreview(); // straight already refreshed visuals via applyAxisToPlane above
+  updateCommitButtonState();
+}
+$('cutModeSelect').addEventListener('change', (e) => setCutMode(e.target.value));
+$('gizmoMove').addEventListener('click', () => { gizmo.setMode('translate'); $('gizmoMove').classList.add('active'); $('gizmoRotate').classList.remove('active'); });
+$('gizmoRotate').addEventListener('click', () => { gizmo.setMode('rotate'); $('gizmoRotate').classList.add('active'); $('gizmoMove').classList.remove('active'); });
+
+for (const axis of ['x', 'y', 'z']) {
+  $(`axis${axis.toUpperCase()}`).addEventListener('click', () => {
+    cutAxis = axis;
+    for (const a of ['x', 'y', 'z']) $(`axis${a.toUpperCase()}`).classList.toggle('active', a === axis);
+    applyAxisToPlane();
+  });
+}
+$('axisSlider').addEventListener('input', applyAxisToPlane);
+for (const axis of ['x', 'y', 'z']) {
+  $(`radialAxis${axis.toUpperCase()}`).addEventListener('click', () => {
+    radialAxis = axis;
+    for (const a of ['x', 'y', 'z']) $(`radialAxis${a.toUpperCase()}`).classList.toggle('active', a === axis);
+    updateRadialVisuals();
+  });
+}
+['radialCount', 'radialStartAngle', 'radialCenterU', 'radialCenterV'].forEach((id) => {
+  $(id).addEventListener('input', updateRadialVisuals);
+});
+$('numPlanes').addEventListener('input', () => {
+  const raw = Number($('numPlanes').value);
+  if (Number.isFinite(raw) && raw > MAX_FLEXI_PLANES) $('numPlanes').value = MAX_FLEXI_PLANES;
+  planeOverrides.clear();
+  updatePlaneVisuals();
+});
+$('startAtPlane').addEventListener('change', () => { planeOverrides.clear(); updatePlaneVisuals(); });
+// Changing a count changes that axis's spacing/plane count, so its own
+// manual overrides no longer line up -- clear just that axis, matching how
+// changing "Number of planes" clears Flexi's overrides.
+['x', 'y', 'z'].forEach((axis) => {
+  $(`grid${axis.toUpperCase()}Count`).addEventListener('input', () => {
+    for (const key of [...gridPlaneOverrides.keys()]) if (key[0] === axis) gridPlaneOverrides.delete(key);
+    loadGridAdjustSliderFromIndex();
+  });
+});
+$('adjustPlaneIndex').addEventListener('input', loadAdjustPlaneSliderFromIndex);
+$('adjustPlaneSlider').addEventListener('input', adjustPlaneSliderChanged);
+$('resetAdjustPlaneBtn').addEventListener('click', () => {
+  const planeCount = getNumPlanes();
+  const idx = Math.min(planeCount, Math.max(1, Math.round(Number($('adjustPlaneIndex').value) || 1)));
+  planeOverrides.delete(idx);
+  loadAdjustPlaneSliderFromIndex();
+});
+$('gridStaggered').addEventListener('change', updateGridVisuals);
+$('gridAdjustAxis').addEventListener('change', loadGridAdjustSliderFromIndex);
+$('gridAdjustIndex').addEventListener('input', loadGridAdjustSliderFromIndex);
+$('gridAdjustSlider').addEventListener('input', gridAdjustSliderChanged);
+$('resetGridAdjustPlaneBtn').addEventListener('click', () => {
+  const axis = $('gridAdjustAxis').value;
+  const count = gridAdjustCount(axis);
+  const idx = Math.min(Math.max(1, count), Math.max(1, Math.round(Number($('gridAdjustIndex').value) || 1)));
+  gridPlaneOverrides.delete(axis + idx);
+  loadGridAdjustSliderFromIndex();
+});
+$('resetPlaneBtn').addEventListener('click', resetPlaneToPiece);
+$('applyFinishBtn').addEventListener('click', () => applyFinishOptions());
+
+// -- Commit cut / undo ----------------------------------------------------
+
+/** Finish a successful cut: splice newPieces in for `piece`, reset selection/gizmo, auto-save. Shared tail for all four cut modes. */
+async function finishCut(piece, newPieces, extraNotes = []) {
+  // A single cutting plane can produce a "half" that's naturally
+  // disconnected for complex organic geometry (e.g. slicing through the
+  // gap between two legs, or a strap sitting close against a body) --
+  // split any such piece into its real separate islands instead of
+  // silently exporting a bundled multi-part mesh as one piece.
+  const expanded = [];
+  let splitCount = 0;
+  for (const np of newPieces) {
+    const islands = splitIntoIslands(np.mesh);
+    if (islands.length > 1) splitCount++;
+    for (const island of islands) expanded.push({ id: `piece-${nextId++}`, mesh: island, openEdgeCount: island.openEdgeCount });
+  }
+  newPieces = expanded;
+
+  undoStack.push(pieces.slice());
+  const idx = pieces.findIndex((p) => p.id === piece.id);
+  pieces.splice(idx, 1, ...newPieces);
+  renumberPieces();
+  selectedId = null;
+  planeOverrides.clear();
+  gridPlaneOverrides.clear();
+  rebuildScene();
+  renderPieceList();
+  gizmo.detach();
+  gizmo.visible = false; gizmo.enabled = false;
+  const openCount = newPieces.filter((p) => p.openEdgeCount > 0).length;
+  const notes = [...extraNotes];
+  if (splitCount) notes.push(`${splitCount} piece${splitCount === 1 ? '' : 's'} split into separate parts (were disconnected fragments bundled together)`);
+  if (openCount) notes.push(`${openCount} came out with open edges — repair in Mesh Prep`);
+  setPiecesOpen(true);
+  const finishNote = await applyFinishOptions({ skipUndo: true, quiet: true });
+  if (finishNote) notes.push(finishNote);
+  const saveResult = await syncOutputFolder();
+  if (saveResult) {
+    notes.push(saveResult.error
+      ? `saved ${saveResult.saved}/${saveResult.total} to ${outputDirHandle.name}/chop/ before failing: ${saveResult.error}`
+      : `saved to ${outputDirHandle.name}/chop/${saveResult.pruned ? ` (removed ${saveResult.pruned} stale file${saveResult.pruned === 1 ? '' : 's'})` : ''}`);
+  }
+  return { note: notes.length ? ` (${notes.join('; ')})` : '', saved: !!saveResult };
+}
+
+async function commitPlaneCut() {
+  const piece = selectedPiece();
+  if (!piece) return;
+  const { point, normal } = currentPlane();
+  const numPlanes = getNumPlanes();
+  setStatus('Cutting…');
+  $('commitCutBtn').disabled = true;
+
+  let newPieces;
+  if (numPlanes <= 1) {
+    let result;
+    try {
+      result = await sliceMeshByPlane(piece.mesh, point, normal);
+    } catch (e) {
+      setStatus('Cut failed: ' + e.message);
+      updateCommitButtonState();
+      return;
+    }
+    if (!result.above || !result.below) {
+      setStatus("Plane doesn't intersect this piece — adjust it and try again.");
+      updateCommitButtonState();
+      return;
+    }
+    newPieces = [result.above, result.below].map((m) => ({ id: `piece-${nextId++}`, mesh: m, openEdgeCount: m.openEdgeCount }));
+  } else {
+    let slices;
+    try {
+      if (planeOverrides.size === 0) {
+        // Pure Planar cut — no manual per-plane adjustments, same path proven all day.
+        slices = await parallelPlaneCut(piece.mesh, point, normal, numPlanes, { startAtPlane: $('startAtPlane').checked });
+      } else {
+        // Flexi cut: same start-at-plane trim, but defaults get merged with
+        // whatever the user moved via Adjust Plane before cutting.
+        let workingMesh = piece.mesh;
+        let prefix = [];
+        if ($('startAtPlane').checked) {
+          const cut0 = await sliceMeshByPlane(piece.mesh, point, normal);
+          if (cut0.below) prefix.push(cut0.below);
+          workingMesh = cut0.above || piece.mesh;
+        }
+        const defaults = computeDefaultFlexiPlanes(workingMesh, point, normal, numPlanes);
+        const finalPlanes = defaults.map((d, i) => planeOverrides.get(i + 1) || d);
+        slices = [...prefix, ...(await flexiCut(workingMesh, finalPlanes))];
+      }
+    } catch (e) {
+      setStatus('Cut failed: ' + e.message);
+      updateCommitButtonState();
+      return;
+    }
+    if (slices.length <= 1) {
+      setStatus("Planes don't intersect this piece — adjust it and try again.");
+      updateCommitButtonState();
+      return;
+    }
+    newPieces = slices.map((m) => ({ id: `piece-${nextId++}`, mesh: m, openEdgeCount: m.openEdgeCount }));
+  }
+
+  const { note, saved } = await finishCut(piece, newPieces);
+  setStatus(`Cut into ${newPieces.length} piece${newPieces.length === 1 ? '' : 's'}${note}.${saved ? '' : ' Select a piece to cut again or export.'}`);
+}
+
+/** Same X→Y→Z sequential-split shape as gridCut() itself, but building each axis's plane list through gridAxisPlanes() so manually-adjusted planes (Adjust Grid Plane) land exactly where previewed, instead of gridCut()'s always-even defaults. */
+async function gridCutWithOverrides(mesh, xCount, yCount, zCount) {
+  let cells = [mesh];
+  for (const [axis, count] of [['x', xCount], ['y', yCount], ['z', zCount]]) {
+    if (count <= 0) continue;
+    const nextCells = [];
+    for (const cell of cells) {
+      nextCells.push(...(await flexiCut(cell, gridAxisPlanes(cell, axis, count))));
+    }
+    cells = nextCells;
+  }
+  return cells;
+}
+
+async function commitGridCut() {
+  const piece = selectedPiece();
+  if (!piece) return;
+  const xCount = Math.max(0, Math.round(Number($('gridXCount').value) || 0));
+  const yCount = Math.max(0, Math.round(Number($('gridYCount').value) || 0));
+  const zCount = Math.max(0, Math.round(Number($('gridZCount').value) || 0));
+  if (xCount === 0 && yCount === 0 && zCount === 0) {
+    setStatus('Set at least one of X/Y/Z divisions above 0 to grid-cut.');
+    return;
+  }
+  setStatus('Grid cutting…');
+  $('commitCutBtn').disabled = true;
+  const staggered = $('gridStaggered').checked;
+  let cells;
+  try {
+    cells = gridPlaneOverrides.size > 0
+      ? await gridCutWithOverrides(piece.mesh, xCount, yCount, zCount)
+      : await gridCut(piece.mesh, xCount, yCount, zCount, { staggered });
+  } catch (e) {
+    setStatus('Grid cut failed: ' + e.message);
+    updateCommitButtonState();
+    return;
+  }
+  if (cells.length <= 1) {
+    setStatus("Grid didn't intersect this piece — adjust divisions and try again.");
+    updateCommitButtonState();
+    return;
+  }
+  const newPieces = cells.map((m) => ({ id: `piece-${nextId++}`, mesh: m, openEdgeCount: m.openEdgeCount }));
+  const { note, saved } = await finishCut(piece, newPieces);
+  setStatus(`Grid-cut into ${newPieces.length} piece${newPieces.length === 1 ? '' : 's'}${note}.${saved ? '' : ' Select a piece to cut again or export.'}`);
+}
+
+async function commitRadialCut() {
+  const piece = selectedPiece();
+  if (!piece) return;
+  const count = Math.max(0, Math.round(Number($('radialCount').value) || 0));
+  if (count < 2) {
+    setStatus('Set Number of cuts to 2 or more to radial-cut.');
+    return;
+  }
+  const startAngleDeg = Number($('radialStartAngle').value) || 0;
+  const centerU = Math.max(-1, Math.min(1, Number($('radialCenterU').value) || 0));
+  const centerV = Math.max(-1, Math.min(1, Number($('radialCenterV').value) || 0));
+  setStatus('Radial cutting…');
+  $('commitCutBtn').disabled = true;
+  let wedges;
+  try {
+    wedges = await radialCut(piece.mesh, { axis: radialAxis, count, startAngleDeg, centerOffset: [centerU, centerV] });
+  } catch (e) {
+    setStatus('Radial cut failed: ' + e.message);
+    updateCommitButtonState();
+    return;
+  }
+  if (wedges.length <= 1) {
+    setStatus("Radial cut didn't intersect this piece — adjust the axis/center and try again.");
+    updateCommitButtonState();
+    return;
+  }
+  const newPieces = wedges.map((m) => ({ id: `piece-${nextId++}`, mesh: m, openEdgeCount: m.openEdgeCount }));
+  const { note, saved } = await finishCut(piece, newPieces);
+  setStatus(`Radial-cut into ${newPieces.length} wedge${newPieces.length === 1 ? '' : 's'}${note}.${saved ? '' : ' Select a piece to cut again or export.'}`);
+}
+
+async function commitModularCut() {
+  const piece = selectedPiece();
+  const bed = bedDims();
+  if (!piece || !bed) return;
+  setStatus('Auto-chopping…');
+  $('commitCutBtn').disabled = true;
+  let result;
+  try {
+    result = await modularCut(piece.mesh, bed);
+  } catch (e) {
+    setStatus('Modular cut failed: ' + e.message);
+    updateCommitButtonState();
+    return;
+  }
+  if (result.pieces.length <= 1) {
+    setStatus('Already fits the bed — nothing to cut.');
+    updateCommitButtonState();
+    return;
+  }
+  const newPieces = result.pieces.map((m) => ({ id: `piece-${nextId++}`, mesh: m, openEdgeCount: m.openEdgeCount }));
+  const extraNotes = result.capped ? ['hit the piece cap — some parts may still be oversized'] : [];
+  const { note, saved } = await finishCut(piece, newPieces, extraNotes);
+  setStatus(`Auto-chopped ${piece.name} into ${newPieces.length} pieces${note}.${saved ? '' : ' Select a piece to cut again or export.'}`);
+}
+
+$('commitCutBtn').addEventListener('click', () => {
+  if (cutMode === 'grid') return commitGridCut();
+  if (cutMode === 'radial') return commitRadialCut();
+  if (cutMode === 'modular') return commitModularCut();
+  return commitPlaneCut();
+});
+
+$('undoBtn').addEventListener('click', () => {
+  if (!undoStack.length) return;
+  popUndo();
+  selectedId = pieces[0]?.id ?? null;
+  rebuildScene();
+  renderPieceList();
+  if (selectedId) { resetPlaneToPiece(); setCutMode(cutMode); }
+  setStatus('Undid last cut.');
+});
+
+// -- Viewport toolbar -------------------------------------------------------
+
+/** Turntable-style left/right rotation around the current target, keeping height (Z) fixed -- an explicit, drag-free alternative to OrbitControls' left-click orbit, since Z is our world "up" rather than the Y OrbitControls assumes internally for its own keyboard/touch defaults. */
+function rotateAroundTarget(deltaRad) {
+  const offset = camera.position.clone().sub(controls.target);
+  const cos = Math.cos(deltaRad), sin = Math.sin(deltaRad);
+  const x = offset.x * cos - offset.y * sin;
+  const y = offset.x * sin + offset.y * cos;
+  offset.x = x; offset.y = y;
+  camera.position.copy(controls.target).add(offset);
+  controls.update();
+}
+$('tbRotateLeft').addEventListener('click', () => rotateAroundTarget(Math.PI / 6));
+$('tbRotateRight').addEventListener('click', () => rotateAroundTarget(-Math.PI / 6));
+
+$('tbFrame').addEventListener('click', frame);
+$('tbWire').addEventListener('click', () => {
+  if (wire) { scene.remove(wire); wire = null; return; }
+  const group = new THREE.Group();
+  for (const m of piecesGroup.children) {
+    group.add(new THREE.LineSegments(new THREE.WireframeGeometry(m.geometry), new THREE.LineBasicMaterial({ color: 0x8be9ff, transparent: true, opacity: 0.28 })));
+  }
+  wire = group;
+  scene.add(wire);
+});
+$('tbExplode').addEventListener('click', () => setExplodeFactor(explodeFactor + 0.2));
+$('tbRestore').addEventListener('click', () => setExplodeFactor(0));
+
+// -- Click-to-pick pieces for merging, directly in the viewport -------------
+// A plain click toggles that piece in/out of mergeSelection (no modifier
+// key needed -- the whole point is to skip hunting through the piece list).
+// Distinguished from an OrbitControls drag/orbit by requiring the pointer to
+// have moved only a few pixels between down and up; suppressed entirely
+// while a gizmo drag is in flight so it never fights Move Model or the
+// Straight/Angled cut-plane gizmo for the same pointer events.
+const mergeRaycaster = new THREE.Raycaster();
+let mergeClickStart = null;
+renderer.domElement.addEventListener('pointerdown', (e) => { mergeClickStart = [e.clientX, e.clientY]; });
+renderer.domElement.addEventListener('pointerup', (e) => {
+  const start = mergeClickStart;
+  mergeClickStart = null;
+  if (!start || pieces.length <= 1 || moveMode || gizmo.dragging || modelGizmo.dragging) return;
+  if (Math.hypot(e.clientX - start[0], e.clientY - start[1]) > 4) return; // was a drag, not a click
+  const rect = renderer.domElement.getBoundingClientRect();
+  const ndc = new THREE.Vector2(
+    ((e.clientX - rect.left) / rect.width) * 2 - 1,
+    -((e.clientY - rect.top) / rect.height) * 2 + 1,
+  );
+  mergeRaycaster.setFromCamera(ndc, camera);
+  const hit = mergeRaycaster.intersectObjects(piecesGroup.children, false)[0];
+  if (!hit) return;
+  const pieceId = hit.object.userData.pieceId;
+  if (mergeSelection.has(pieceId)) mergeSelection.delete(pieceId);
+  else mergeSelection.add(pieceId);
+  renderPieceList();
+  rebuildScene();
+});
+
+renderPieceList(); // correct initial disabled state for Reset Plane / Undo / Auto-Chop / Export All before any model is loaded
+</script>
+</body>
+</html>

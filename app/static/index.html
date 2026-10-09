@@ -10,135 +10,62 @@
   <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
   <link rel="manifest" href="/static/manifest.json">
   <meta name="theme-color" content="#0a0a0f">
-  <link rel="stylesheet" href="/static/style.css?v=368">
+  <link rel="stylesheet" href="/static/style.css?v=519">
+  <link rel="stylesheet" href="/static/storage-drawers.css?v=1">
+  <link rel="stylesheet" href="/static/storage-position-menu.css?v=2">
+  <style>
+    #view-meshprep{overflow:hidden;display:flex;flex-direction:column}
+    #view-meshprep[hidden]{display:none!important}
+    #view-meshprep .meshprep-page{flex:1;min-height:0;display:flex;flex-direction:column;background:#070b12}
+    #meshprep-frame{flex:1;width:100%;height:100%;min-height:0;border:0;background:#070b12;display:block}
+    .fd-storage-checkmark{width:20px;height:20px;flex:0 0 20px;border:1px solid #64748b;border-radius:5px;display:grid;place-items:center;font-size:13px;font-weight:900;color:#86efac;background:#0b111b}.fd-storage-candidate.fd-checkbox-selected .fd-storage-checkmark{border-color:#22c55e;background:rgba(34,197,94,.16)}.fd-storage-candidate.fd-checkbox-selected{border-color:#22c55e!important;background:rgba(34,197,94,.08)!important}.fd-storage-check-tools{display:flex;align-items:center;gap:7px;flex-wrap:wrap;padding:8px 0 10px}.fd-storage-check-tools span{margin-right:auto;font-size:11px;font-weight:800;color:#cbd5e1}.fd-storage-check-tools button{border:1px solid #334155;border-radius:7px;background:#111827;color:#cbd5e1;padding:6px 9px;font:inherit;font-size:10px;font-weight:800;cursor:pointer}.fd-storage-check-tools button:hover:not(:disabled){border-color:#64748b;color:#fff}.fd-storage-check-tools button.primary{border-color:#16a34a;background:#166534;color:#fff}.fd-storage-check-tools button:disabled{opacity:.4;cursor:default}
+    .fd-storage-quick-grid{grid-template-columns:minmax(0,1fr)!important}.fd-storage-quick-info{display:none!important}.fd-storage-candidates{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px!important;align-content:start}.fd-storage-candidate-title,.fd-storage-check-tools{grid-column:1/-1}.fd-storage-candidate{min-height:48px!important;height:auto!important;padding:7px 9px!important;display:grid!important;grid-template-columns:20px 12px minmax(0,1fr) auto!important;align-items:center!important;gap:7px!important;text-align:left!important}.fd-storage-candidate .fd-storage-swatch{width:11px!important;height:11px!important;min-width:11px!important}.fd-storage-candidate-copy{min-width:0!important;display:block!important}.fd-storage-candidate-copy b{display:block!important;font-size:11px!important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.fd-storage-candidate-copy span{display:block!important;font-size:9px!important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#94a3b8}.fd-storage-candidate em{max-width:125px!important;margin:0!important;font-size:8px!important;line-height:1.2!important;text-align:right!important;color:#64748b!important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.fd-storage-candidates .fd-storage-empty-note{grid-column:1/-1}@media(max-width:850px){.fd-storage-candidates{grid-template-columns:1fr}.fd-storage-candidate-title,.fd-storage-check-tools{grid-column:1}}
+  </style>
 </head>
 <body>
   <header>
-    <div class="header-status">
-      <span id="refresh-time"></span>
-      <span id="status-pill" class="status-pill"></span>
-    </div>
+    <div class="header-status"><span id="refresh-time"></span><span id="status-pill" class="status-pill"></span></div>
     <a class="wordmark" href="#/">
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="38" height="38" aria-hidden="true">
-        <path d="M10,52 L42,52 C44,52 46,51 47,49 L55,39 C56,37 56,36 54,36 L22,36 C20,36 18,37 17,39 L11,49 C10,51 10,52 12,52 Z" fill="#EF4444" opacity="0.3"/>
-        <path d="M10,38 L42,38 C44,38 46,37 47,35 L55,25 C56,23 56,22 54,22 L22,22 C20,22 18,23 17,25 L11,35 C10,37 10,38 12,38 Z" fill="#EF4444" opacity="0.6"/>
-        <path d="M10,24 L42,24 C44,24 46,23 47,21 L55,11 C56,9 56,8 54,8 L22,8 C20,8 18,9 17,11 L11,21 C10,23 10,24 12,24 Z" fill="#EF4444" opacity="1.0"/>
-        <line x1="36" y1="2" x2="36" y2="8" stroke="#e0e0e0" stroke-width="2.5" stroke-linecap="round"/>
-        <circle cx="36" cy="2" r="2.5" fill="#e0e0e0"/>
-      </svg>
-      <span class="wordmark-text">
-        <span class="flight-text">FLIGHT</span>
-        <span class="deck-text">DECK</span>
-      </span>
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="38" height="38" aria-hidden="true"><path d="M10,52 L42,52 C44,52 46,51 47,49 L55,39 C56,37 56,36 54,36 L22,36 C20,36 18,37 17,39 L11,49 C10,51 10,52 12,52 Z" fill="#EF4444" opacity="0.3"/><path d="M10,38 L42,38 C44,38 46,37 47,35 L55,25 C56,23 56,22 54,22 L22,22 C20,22 18,23 17,25 L11,35 C10,37 10,38 12,38 Z" fill="#EF4444" opacity="0.6"/><path d="M10,24 L42,24 C44,24 46,23 47,21 L55,11 C56,9 56,8 54,8 L22,8 C20,8 18,9 17,11 L11,21 C10,23 10,24 12,24 Z" fill="#EF4444" opacity="1.0"/><line x1="36" y1="2" x2="36" y2="8" stroke="#e0e0e0" stroke-width="2.5" stroke-linecap="round"/><circle cx="36" cy="2" r="2.5" fill="#e0e0e0"/></svg>
+      <span class="wordmark-text"><span class="flight-text">FLIGHT</span><span class="deck-text">DECK</span></span>
     </a>
     <div class="header-right">
-      <button id="command-btn" class="command-header-btn" type="button" title="Open command palette">
-        <span>Command</span>
-        <kbd>Ctrl K</kbd>
-      </button>
-      <div class="notif-shell">
-        <button id="notif-btn" class="notif-btn notif-text-btn" title="Alerts">
-          <span class="notif-label">Alerts</span>
-          <span id="notif-count" class="notif-count" hidden></span>
-        </button>
-        <div id="notif-panel" class="notif-panel" hidden></div>
-      </div>
-      <div id="live-indicator">
-        <div class="live-radar live-connecting" id="live-dot" aria-hidden="true">
-          <span class="live-radar-sweep"></span>
-          <span class="live-radar-blip live-radar-blip-a"></span>
-          <span class="live-radar-blip live-radar-blip-b"></span>
-        </div>
-        <span id="live-text">Connecting…</span>
-      </div>
+      <button id="command-btn" class="command-header-btn" type="button" title="Open command palette"><span>Command</span><kbd>Ctrl K</kbd></button>
+      <div class="notif-shell"><button id="notif-btn" class="notif-btn notif-text-btn" title="Alerts"><span class="notif-label">Alerts</span><span id="notif-count" class="notif-count" hidden></span></button><div id="notif-panel" class="notif-panel" hidden></div></div>
+      <div id="live-indicator"><div class="live-radar live-connecting" id="live-dot" aria-hidden="true"><span class="live-radar-sweep"></span><span class="live-radar-blip live-radar-blip-a"></span><span class="live-radar-blip live-radar-blip-b"></span></div><span id="live-text">Connecting…</span></div>
     </div>
   </header>
-
   <div class="app-shell">
-    <aside class="app-sidebar">
-      <nav id="tab-strip"></nav>
-      <button class="sidebar-resizer" type="button" aria-label="Resize sidebar" title="Drag to resize sidebar"></button>
-    </aside>
+    <aside class="app-sidebar"><nav id="tab-strip"></nav><button class="sidebar-resizer" type="button" aria-label="Resize sidebar" title="Drag to resize sidebar"></button></aside>
     <div class="app-views">
-      <section id="view-dashboard" class="view">
-        <main id="printer-grid"></main>
-        <footer id="dash-footer"></footer>
-      </section>
-
-      <section id="view-mission" class="view" hidden>
-        <div class="mission-page" id="mission-page">
-          <div class="detail-placeholder">Loading…</div>
-        </div>
-      </section>
-
-      <section id="view-fleet" class="view" hidden>
-        <div class="fleet-wall-page" id="fleet-wall-page">
-          <div class="detail-placeholder">Loading…</div>
-        </div>
-      </section>
-
-      <section id="view-stats" class="view" hidden>
-        <div id="stats-page"></div>
-      </section>
-
-      <section id="view-printer" class="view" hidden>
-        <div id="printer-detail"></div>
-      </section>
-
-      <section id="view-spool" class="view" hidden>
-        <div id="spool-detail"></div>
-      </section>
-
-      <section id="view-cameras" class="view" hidden>
-        <div id="cameras-grid"></div>
-      </section>
-
-      <section id="view-queue" class="view" hidden>
-        <div class="queue-page" id="queue-page">
-          <div class="detail-placeholder">Loading…</div>
-        </div>
-      </section>
-
-      <section id="view-files" class="view" hidden>
-        <div class="filedesk-page" id="filedesk-page">
-          <div class="detail-placeholder">Loading…</div>
-        </div>
-      </section>
-
-      <section id="view-memory" class="view" hidden>
-        <div class="memory-page" id="memory-page">
-          <div class="detail-placeholder">Loading…</div>
-        </div>
-      </section>
-
-      <section id="view-failures" class="view" hidden>
-        <div class="failures-page" id="failures-page">
-          <div class="detail-placeholder">Loading…</div>
-        </div>
-      </section>
-
-      <section id="view-spools" class="view" hidden>
-        <div class="settings-body" id="spools-body">
-          <div class="detail-placeholder">Loading…</div>
-        </div>
-      </section>
-
-      <section id="view-settings" class="view" hidden>
-        <div class="settings-body" id="settings-body">
-          <div class="detail-placeholder">Loading…</div>
-        </div>
-      </section>
-
-      <section id="view-demo" class="view" hidden>
-        <div id="demo-page"></div>
-      </section>
-
-      <section id="view-manual" class="view" hidden>
-        <div id="manual-page"></div>
-      </section>
+      <section id="view-dashboard" class="view"><main id="printer-grid"></main><footer id="dash-footer"></footer></section>
+      <section id="view-mission" class="view" hidden><div class="mission-page" id="mission-page"><div class="detail-placeholder">Loading…</div></div></section>
+      <section id="view-fleet" class="view" hidden><div class="fleet-wall-page" id="fleet-wall-page"><div class="detail-placeholder">Loading…</div></div></section>
+      <section id="view-filament" class="view" hidden><div class="fleet-filament-page" id="fleet-filament-page"><div class="detail-placeholder">Loading…</div></div></section>
+      <section id="view-stats" class="view" hidden><div id="stats-page"></div></section>
+      <section id="view-printer" class="view" hidden><div id="printer-detail"></div></section>
+      <section id="view-spool" class="view" hidden><div id="spool-detail"></div></section>
+      <section id="view-cameras" class="view" hidden><div id="cameras-grid"></div></section>
+      <section id="view-queue" class="view" hidden><div class="queue-page" id="queue-page"><div class="detail-placeholder">Loading…</div></div></section>
+      <section id="view-files" class="view" hidden><div class="filedesk-page" id="filedesk-page"><div class="detail-placeholder">Loading…</div></div></section>
+      <section id="view-projects" class="view" hidden><div class="projects-page" id="projects-page"><div class="detail-placeholder">Loading…</div></div></section>
+      <section id="view-memory" class="view" hidden><div class="memory-page" id="memory-page"><div class="detail-placeholder">Loading…</div></div></section>
+      <section id="view-failures" class="view" hidden><div class="failures-page" id="failures-page"><div class="detail-placeholder">Loading…</div></div></section>
+      <section id="view-spools" class="view" hidden><div class="settings-body" id="spools-body"><div class="detail-placeholder">Loading…</div></div></section>
+      <section id="view-settings" class="view" hidden><div class="settings-body" id="settings-body"><div class="detail-placeholder">Loading…</div></div></section>
+      <section id="view-demo" class="view" hidden><div id="demo-page"></div></section>
+      <section id="view-makerworld" class="view" hidden><div id="makerworld-page"></div></section>
+      <section id="view-makerdeck" class="view" hidden><div class="makerdeck-page"><iframe id="makerdeck-frame" title="MakerDeck — container generator" loading="lazy"></iframe></div></section>
+      <section id="view-meshprep" class="view" hidden><div class="makerdeck-page meshprep-page"><iframe id="meshprep-frame" title="Mesh Prep — inspect and repair STL meshes" loading="lazy"></iframe></div></section>
+      <section id="view-painter" class="view" hidden><div class="painter-page"><iframe id="painter-frame" title="STL Painter — paint and export coloured 3MF" loading="lazy"></iframe></div></section>
+      <section id="view-chop" class="view" hidden><div class="chop-page"><iframe id="chop-frame" title="Chop — slice STLs into printable pieces" loading="lazy"></iframe></div></section>
+      <section id="view-manual" class="view" hidden><div id="manual-page"></div></section>
+      <section id="view-about" class="view" hidden><div id="about-page"></div></section>
     </div>
   </div>
-
-  <script type="module" src="/static/app.js?v=456"></script>
+  <script type="module" src="/static/app.js?v=747"></script>
+  <script type="module" src="/static/storage-drawers.js?v=2"></script>
+  <script type="module" src="/static/storage-position-menu.js?v=3"></script>
+  <script type="module" src="/static/storage-bulk-check.js?v=1"></script>
 </body>
 </html>
